@@ -12,3 +12,19 @@ firebase.initializeApp(FIREBASE_CONFIG);
 
 const db   = firebase.firestore();
 const auth = firebase.auth();
+
+// Initialise le namespace global avant tous les autres scripts
+window.MX = window.MX || {};
+window.MX.state = {
+  adminUser:   null,
+  currentPage: null,
+  weekLabel:   "",
+  weekNum:     1,
+  tasks:       {},
+  checks:      {},
+  assignments: {},
+  teams:       { matin: [], journee: [], soir: [] },
+  products:    [],
+  messages:    [],
+  alerts:      {}
+};

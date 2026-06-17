@@ -1,19 +1,4 @@
 (function () {
-  // ── STATE ──
-  window.MX.state = {
-    adminUser:   null,
-    currentPage: null,
-    weekLabel:   "",
-    weekNum:     1,
-    tasks:       {},   // { "lundi_matin": [{id,text,order}] }
-    checks:      {},   // { "lundi_matin_{taskId}": true }
-    assignments: {},   // { "lundi_matin": "Jordan" }
-    teams:       { matin: [], journee: [], soir: [] },
-    products:    [],
-    messages:    [],
-    alerts:      {}
-  };
-
   const NAV = [
     { id: "msgs",     icon: "fa-comments",     l: "Messages",  badge: true },
     { id: "home",     icon: "fa-house",         l: "Accueil" },
@@ -36,7 +21,7 @@
     document.getElementById("topbar-title").textContent = NAV.find(n => n && n.id === id)?.l || "Maintix";
     document.querySelectorAll(".nav-item[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     document.querySelectorAll(".bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
-    closeSidebar();
+    MX.closeSidebar();
     renderPage(id);
   };
 
