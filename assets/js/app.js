@@ -219,8 +219,8 @@
     buildNav();
     MX.showPage(MX.todayId());
 
-    // Prompt worker identity after data loads
-    setTimeout(() => { MX.Auth.promptWorker && MX.Auth.promptWorker(); }, 600);
+    // Prompt user login after data loads
+    setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});

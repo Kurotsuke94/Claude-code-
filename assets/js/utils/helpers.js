@@ -87,8 +87,20 @@
   }
   function avatarTxt(name) { return (name || "?").substring(0, 2).toUpperCase(); }
 
+  function userColors(name) {
+    // Check for custom color in user profiles
+    const profile = (window.MX && window.MX.state && window.MX.state.users || []).find(u => u.name === name);
+    if (profile && profile.color) return { bg: profile.color, fg: _contrastColor(profile.color) };
+    return TEAM_COLORS[name] || { bg: avatarBg(name), fg: avatarFg(name) };
+  }
+
+  function _contrastColor(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return (r*299 + g*587 + b*114) / 1000 > 128 ? "#0C0C0E" : "#FFFFFF";
+  }
+
   function chipHtml(name) {
-    const nc = TEAM_COLORS[name] || { bg: avatarBg(name), fg: avatarFg(name) };
+    const nc = userColors(name);
     return `<span class="chip" style="background:${nc.bg};color:${nc.fg}">${esc(name)}</span>`;
   }
 
@@ -142,7 +154,7 @@
   Object.assign(window.MX, {
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
-    avatarBg, avatarFg, avatarTxt, chipHtml, progressClass, alertLevel,
+    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, progressClass, alertLevel,
     toast, showModal, closeModal
   });
 })();

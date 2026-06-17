@@ -126,42 +126,57 @@
 
   // ── USERS ──
   function renderUsers() {
-    const { state, esc, avatarBg, avatarFg } = MX;
+    const { state, esc } = MX;
     const users = state.users || [];
-    const roleLabel = { admin: "Admin", responsable: "Responsable", technicien: "Technicien" };
-    const roleColor = { admin: "var(--cyan)", responsable: "var(--orange)", technicien: "var(--text2)" };
-    let h = `<div class="info-note" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> Les utilisateurs sont les profils individuels avec leur rôle. L'équipe par créneau se configure dans l'onglet "Équipe".</div>`;
+    const roleLabel = { responsable: "Responsable", technicien: "Technicien" };
+    const roleColor = { responsable: "var(--orange)", technicien: "var(--text2)" };
+    let h = `<div class="info-note" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> Créez les profils de vos techniciens ici. Chaque utilisateur se connecte avec son PIN depuis l'écran d'accueil.</div>`;
 
     users.forEach(u => {
-      const bg   = avatarBg(u.name || "?");
-      const fg   = avatarFg(u.name || "?");
+      const nc   = MX.userColors(u.name || "?");
+      const bg   = u.color || nc.bg;
+      const fg   = u.color ? MX._contrastColor(u.color) : nc.fg;
       const role = u.role || "technicien";
       h += `<div class="apcard" style="margin-bottom:8px">
         <div class="aphd">
-          <span style="width:34px;height:34px;border-radius:10px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc((u.name||'?').substring(0,2).toUpperCase())}</span>
+          <span style="width:38px;height:38px;border-radius:11px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc((u.name||'?').substring(0,2).toUpperCase())}</span>
           <span style="font-weight:600;font-size:13px;flex:1;margin-left:10px">${esc(u.name||'—')}</span>
           <span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:${roleColor[role]||'var(--text2)'};font-family:var(--ffm)">${roleLabel[role]||role}</span>
           <button class="icon-btn del" style="width:30px;height:30px;margin-left:8px" onclick="MX.Pages.Admin.delUser('${esc(u.id)}')"><i class="fas fa-trash"></i></button>
         </div>
-        <div class="apgrid">
+        <div class="apgrid" style="grid-template-columns:1fr 1fr">
           <div>
             <div class="aplbl">Nom</div>
             <input class="fi fi-sm" value="${esc(u.name||'')}" oninput="MX.Pages.Admin.updUser('${esc(u.id)}','name',this.value)">
           </div>
           <div>
+            <div class="aplbl">Code PIN</div>
+            <input class="fi fi-sm" type="text" inputmode="numeric" maxlength="10" placeholder="ex: 1234" value="${esc(u.pin||'')}"
+              oninput="MX.Pages.Admin.updUser('${esc(u.id)}','pin',this.value)"
+              style="font-family:var(--ffm);letter-spacing:4px">
+          </div>
+          <div>
             <div class="aplbl">Rôle</div>
             <select class="fi fi-sm" onchange="MX.Pages.Admin.updUser('${esc(u.id)}','role',this.value)">
-              <option value="technicien" ${role==='technicien'?'selected':''}>Technicien</option>
-              <option value="responsable" ${role==='responsable'?'selected':''}>Responsable</option>
-              <option value="admin" ${role==='admin'?'selected':''}>Admin</option>
+              <option value="technicien"  ${role==='technicien' ?'selected':''}>Technicien (tâches assignées)</option>
+              <option value="responsable" ${role==='responsable'?'selected':''}>Responsable (voit tout)</option>
             </select>
+          </div>
+          <div>
+            <div class="aplbl">Couleur</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="color" value="${u.color||'#A78BFA'}"
+                oninput="MX.Pages.Admin.updUser('${esc(u.id)}','color',this.value)"
+                style="width:38px;height:34px;border:1px solid var(--border2);border-radius:8px;background:none;cursor:pointer;padding:2px">
+              <span style="font-size:11px;color:var(--text2);font-family:var(--ffm)">${esc(u.color||'auto')}</span>
+            </div>
           </div>
         </div>
       </div>`;
     });
 
     if (!users.length) {
-      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucun utilisateur. Ajoutez des membres de l'équipe.</div>`;
+      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucun profil. Ajoutez vos techniciens.</div>`;
     }
 
     h += `<div style="margin-bottom:8px"><button class="dash-btn" onclick="MX.Pages.Admin.addUser()"><i class="fas fa-plus"></i> Ajouter un utilisateur</button></div>`;
@@ -395,7 +410,12 @@
   async function saveUsers() {
     try {
       for (const u of (MX.state.users || [])) {
-        await MX.DB.updateUser(u.id, { name: u.name || "", role: u.role || "technicien" });
+        await MX.DB.updateUser(u.id, {
+          name:  u.name  || "",
+          role:  u.role  || "technicien",
+          pin:   u.pin   || "",
+          color: u.color || ""
+        });
       }
       MX.toast("Profils enregistrés ✓");
     } catch (e) { MX.toast("Erreur", true); }

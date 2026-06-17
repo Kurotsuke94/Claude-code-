@@ -29,5 +29,5 @@ window.MX.state = {
   alerts:        {},
   users:         [],
   logs:          [],
-  currentWorker: localStorage.getItem("mx_worker") || null
+  currentUser:   JSON.parse(localStorage.getItem("mx_user") || "null")
 };

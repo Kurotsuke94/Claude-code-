@@ -5,7 +5,7 @@
     const { SLOTS, esc, chipHtml, alertLevel, state } = MX;
     const s = SLOTS[slot];
 
-    if (workerFilter && !MX.Auth.isAdmin() && assignment !== workerFilter) return '';
+    if (workerFilter && !MX.Auth.canSeeAll() && assignment !== workerFilter) return '';
 
     let done = 0;
     tasks.forEach(t => { if (checks[`${dayId}_${slot}_${t.id}`]) done++; });

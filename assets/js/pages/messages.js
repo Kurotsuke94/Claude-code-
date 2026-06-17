@@ -17,7 +17,7 @@
             <div class="compose">
               <select class="asel" id="msg-author">
                 <option value="">— Votre nom —</option>
-                ${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+                ${names.map(n => `<option value="${esc(n)}" ${(state.currentUser && state.currentUser.name===n)?'selected':''}>${esc(n)}</option>`).join('')}
               </select>
               <input class="fi" id="msg-title" placeholder="Titre du message…" maxlength="80">
               <textarea class="fi" id="msg-body" placeholder="Votre message…" rows="4"></textarea>
