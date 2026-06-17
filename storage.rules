@@ -1,0 +1,9 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Open access — réseau fermé, pas de règles de sécurité requises
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,62 @@
+:root {
+  /* Backgrounds */
+  --bg:      #0C0C0E;
+  --bg2:     #131316;
+  --bg3:     #1A1A1F;
+  --bg4:     #212128;
+  --bg5:     #2A2A34;
+
+  /* Borders */
+  --border:  #252530;
+  --border2: #303040;
+  --border3: #3A3A50;
+
+  /* Text */
+  --text:    #EEEEF5;
+  --text2:   #8888A8;
+  --text3:   #50506A;
+
+  /* Brand */
+  --cyan:        #00E5CC;
+  --cyan-dim:    #003D38;
+  --cyan-border: #006B60;
+
+  /* Slots */
+  --matin:        #F5A623;
+  --matin-dim:    #1E1400;
+  --matin-border: #3D2A00;
+  --jour:         #4F8EF7;
+  --jour-dim:     #0A1628;
+  --jour-border:  #1A3560;
+  --soir:         #A78BFA;
+  --soir-dim:     #120D1F;
+  --soir-border:  #2A1F50;
+
+  /* State */
+  --green:        #00D68F;
+  --green-dim:    #00200F;
+  --green-border: #005C30;
+  --red:          #FF4F4F;
+  --red-dim:      #200A0A;
+  --red-border:   #5C1A1A;
+  --orange:       #FF8C42;
+  --orange-dim:   #1E1000;
+  --orange-border:#5C2A00;
+
+  /* Radius */
+  --r:  12px;
+  --rs:  8px;
+  --rx: 16px;
+
+  /* Typography */
+  --ffm: 'Space Mono', monospace;
+  --ffs: 'Space Grotesk', sans-serif;
+
+  /* Layout */
+  --sidebar-w: 260px;
+  --topbar-h:  52px;
+  --bottomnav-h: 60px;
+
+  /* Transitions */
+  --t: 0.18s ease;
+}

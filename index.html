@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#00E5CC">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Maintix — Gestion de checklists de maintenance">
+  <title>Maintix</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/assets/icons/icon-192.png">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="/assets/css/variables.css">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+
+  <!-- ── LOADING SCREEN ── -->
+  <div id="app-loading" class="app-loading">
+    <div class="loading-logo">MX</div>
+    <div class="loading-dots"><span></span><span></span><span></span></div>
+  </div>
+
+  <!-- ── APP SHELL ── -->
+  <div id="app-shell" class="app-shell hidden">
+
+    <!-- SIDEBAR (Desktop) -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-mark">MX</div>
+        <div>
+          <div class="logo-text">Maintix</div>
+          <div class="logo-sub">Maintenance</div>
+        </div>
+      </div>
+      <nav id="sidebar-nav" class="sidebar-nav"></nav>
+      <div id="sidebar-footer" class="sidebar-footer"></div>
+    </aside>
+
+    <!-- Mobile sidebar overlay -->
+    <div id="sidebar-overlay" class="sidebar-overlay" onclick="MX.closeSidebar()"></div>
+
+    <!-- MAIN WRAPPER -->
+    <div class="main-wrapper">
+
+      <!-- Top bar (Mobile only) -->
+      <header class="topbar">
+        <button class="hamburger" onclick="MX.toggleSidebar()">
+          <i class="fas fa-bars"></i>
+        </button>
+        <span class="topbar-title" id="topbar-title">Maintix</span>
+        <div class="topbar-actions"></div>
+      </header>
+
+      <!-- Page content -->
+      <main id="main-content" class="main-content"></main>
+    </div>
+
+    <!-- Bottom nav (Mobile) -->
+    <nav id="bottom-nav" class="bottom-nav"></nav>
+  </div>
+
+  <!-- ── LOGIN OVERLAY ── -->
+  <div id="login-overlay" class="login-overlay hidden">
+    <div class="login-card">
+      <div class="logo-mark lg">MX</div>
+      <h1 class="login-title">Administration</h1>
+      <p class="login-sub">Connectez-vous avec votre compte administrateur pour accéder au panneau de configuration.</p>
+      <form id="login-form" onsubmit="MX.Auth.login(event)" style="width:100%">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="login-email" class="fi" placeholder="admin@…" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label>Mot de passe</label>
+          <input type="password" id="login-password" class="fi" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div id="login-error" class="login-error hidden" style="margin-top:4px"></div>
+        <button type="submit" class="primary-btn" id="login-btn" style="margin-top:4px">
+          <i class="fas fa-sign-in-alt"></i> Se connecter
+        </button>
+      </form>
+      <button class="login-back" onclick="MX.Auth.cancelLogin()">
+        <i class="fas fa-arrow-left"></i> Retour à l'application
+      </button>
+    </div>
+  </div>
+
+  <!-- ── TOAST ── -->
+  <div id="toast" class="toast"></div>
+
+  <!-- ── MODAL ── -->
+  <div id="modal-bg" class="modal-bg">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="m-title"></div>
+      <div class="modal-sub" id="m-sub"></div>
+      <div class="modal-actions" id="m-actions"></div>
+    </div>
+  </div>
+
+  <!-- ── IMAGE FULLSCREEN ── -->
+  <div id="img-modal" class="img-modal">
+    <img id="img-modal-img" src="" alt="Image message">
+  </div>
+
+  <!-- ── FIREBASE SDK ── -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- ── APP SCRIPTS ── -->
+  <script src="/assets/js/firebase-config.js"></script>
+  <script src="/assets/js/utils/helpers.js"></script>
+  <script src="/assets/js/utils/uuid.js"></script>
+  <script src="/assets/js/db.js"></script>
+  <script src="/assets/js/auth.js"></script>
+  <script src="/assets/js/pages/home.js"></script>
+  <script src="/assets/js/pages/checklist.js"></script>
+  <script src="/assets/js/pages/messages.js"></script>
+  <script src="/assets/js/pages/orders.js"></script>
+  <script src="/assets/js/pages/admin.js"></script>
+  <script src="/assets/js/app.js"></script>
+
+</body>
+</html>

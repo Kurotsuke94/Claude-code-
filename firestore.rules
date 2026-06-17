@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Open access — réseau fermé, pas de règles de sécurité requises
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
