@@ -10,6 +10,5 @@ const FIREBASE_CONFIG = {
 
 firebase.initializeApp(FIREBASE_CONFIG);
 
-const db      = firebase.firestore();
-const auth    = firebase.auth();
-const storage = firebase.storage();
+const db   = firebase.firestore();
+const auth = firebase.auth();

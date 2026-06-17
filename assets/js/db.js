@@ -140,7 +140,7 @@
   async function deleteProduct(id)    { await R.products().doc(id).delete(); }
 
   // Messages
-  async function sendMessage(data)    { await R.messages().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() }); }
+  async function sendMessage(data)    { await R.messages().add({ author: data.author, title: data.title, body: data.body, ts: firebase.firestore.FieldValue.serverTimestamp() }); }
   async function deleteMessage(id)    { await R.messages().doc(id).delete(); }
 
   // ── EXPORT ──

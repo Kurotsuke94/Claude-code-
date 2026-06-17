@@ -216,11 +216,6 @@
       if (e.target === e.currentTarget) MX.closeModal();
     });
 
-    // Image fullscreen modal
-    document.getElementById("img-modal").addEventListener("click", () => {
-      document.getElementById("img-modal").classList.remove("show");
-    });
-
     // Auth state change
     MX.Auth.onLogin(() => {
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
