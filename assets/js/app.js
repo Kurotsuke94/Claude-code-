@@ -2,16 +2,16 @@
   const NAV = [
     { id: "msgs",     icon: "fa-comments",     l: "Messages",  badge: true },
     { id: "home",     icon: "fa-house",         l: "Accueil" },
-    null, // separator
-    { id: "lundi",    icon: "fa-1",             l: "Lundi",   day: true },
-    { id: "mardi",    icon: "fa-2",             l: "Mardi",   day: true },
-    { id: "mercredi", icon: "fa-3",             l: "Mercredi",day: true },
-    { id: "jeudi",    icon: "fa-4",             l: "Jeudi",   day: true },
-    { id: "vendredi", icon: "fa-5",             l: "Vendredi",day: true },
-    { id: "samedi",   icon: "fa-6",             l: "Sam",     day: true },
-    { id: "dimanche", icon: "fa-7",             l: "Dim",     day: true },
     null,
-    { id: "orders",   icon: "fa-box",           l: "Stock",   badge: false },
+    { id: "lundi",    icon: "fa-1",             l: "Lundi",    day: true },
+    { id: "mardi",    icon: "fa-2",             l: "Mardi",    day: true },
+    { id: "mercredi", icon: "fa-3",             l: "Mercredi", day: true },
+    { id: "jeudi",    icon: "fa-4",             l: "Jeudi",    day: true },
+    { id: "vendredi", icon: "fa-5",             l: "Vendredi", day: true },
+    { id: "samedi",   icon: "fa-6",             l: "Sam",      day: true },
+    { id: "dimanche", icon: "fa-7",             l: "Dim",      day: true },
+    null,
+    { id: "orders",   icon: "fa-box",           l: "Stock",    badge: false },
     { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
   ];
 
@@ -60,9 +60,7 @@
       }
       const isActive = item.id === state.currentPage;
 
-      // Day progress
-      let prog = "";
-      let progCls = "";
+      let prog = "", progCls = "";
       if (item.day) {
         const day = DAYS.find(d => d.id === item.id);
         if (day) {
@@ -79,14 +77,14 @@
         }
       }
 
-      sideHtml += `<button class="nav-item ${isActive ? 'active' : ''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+      sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
         <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
         <span class="nav-label">${item.l}</span>
         ${item.badge ? `<span class="nav-badge" id="nb_${item.id}"></span>` : ''}
         ${prog ? `<span class="nav-prog ${progCls}" id="np_${item.id}">${prog}</span>` : ''}
       </button>`;
 
-      botHtml += `<button class="bn ${isActive ? 'active' : ''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+      botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
         <div class="bn-bar"></div>
         <i class="fas ${item.icon}"></i>
         ${item.badge ? `<span class="nav-badge" id="bnb_${item.id}"></span>` : ''}
@@ -98,7 +96,6 @@
     sideNav.innerHTML = sideHtml;
     botNav.innerHTML  = botHtml;
 
-    // Sidebar footer (auth-aware)
     MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
   }
 
@@ -112,26 +109,20 @@
           if (state.checks[`${day.id}_${sl}_${task.id}`]) d++;
         });
       });
-      const pct    = t ? Math.round(d / t * 100) : 0;
-      const cls    = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
-      const label  = pct + "%";
-      const npEl   = document.getElementById("np_" + day.id);
-      if (npEl) { npEl.textContent = label; npEl.className = "nav-prog " + cls; }
+      const pct   = t ? Math.round(d / t * 100) : 0;
+      const cls   = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
+      const npEl  = document.getElementById("np_" + day.id);
+      if (npEl) { npEl.textContent = pct + "%"; npEl.className = "nav-prog " + cls; }
     });
 
-    // Message badge
-    const cnt   = (state.messages || []).length;
-    const badge = document.getElementById("nb_msgs");
+    const cnt     = (state.messages || []).length;
+    const badge   = document.getElementById("nb_msgs");
     if (badge) { badge.textContent = cnt > 9 ? "9+" : cnt; badge.className = "nav-badge" + (cnt ? " show" : ""); }
     const bnBadge = document.getElementById("bnb_msgs");
     if (bnBadge) { bnBadge.textContent = cnt > 9 ? "9+" : cnt; bnBadge.className = "nav-badge" + (cnt ? " show" : ""); }
-
-    // Stock badge
-    const lows = (state.products || []).filter(p => parseInt(p.qty||0) < parseInt(p.minQty||0)).length;
-    // Could add badge to orders nav item here if needed
   }
 
-  // ── FIRESTORE LISTENERS SETUP ──
+  // ── FIRESTORE LISTENERS ──
   function setupListeners() {
     const { DB, state } = MX;
 
@@ -159,9 +150,7 @@
     DB.listenChecks(data => {
       state.checks = data;
       updateNavProgress();
-      if (MX.DAYS.find(d => d.id === state.currentPage)) {
-        MX.Pages.Checklist.render(state.currentPage);
-      }
+      if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
       if (state.currentPage === "home")   MX.Pages.Home.render();
       if (state.currentPage === "orders") MX.Pages.Orders.render();
     });
@@ -189,19 +178,26 @@
       if (state.currentPage === "home")  MX.Pages.Home.render();
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
+
+    DB.listenUsers(list => {
+      state.users = list;
+      if (state.currentPage === "admin") MX.Pages.Admin.render();
+    });
+
+    DB.listenLogs(list => {
+      state.logs = list;
+      if (state.currentPage === "admin") MX.Pages.Admin.render();
+    });
   }
 
   // ── INIT ──
   async function init() {
-    // Dismiss loading after 4s max as fallback
     const loadingTimeout = setTimeout(hideLoading, 4000);
 
-    // Modal dismiss
     document.getElementById("modal-bg").addEventListener("click", e => {
       if (e.target === e.currentTarget) MX.closeModal();
     });
 
-    // Auth state change
     MX.Auth.onLogin(() => {
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
     });
@@ -212,8 +208,6 @@
     try {
       await MX.DB.initDefaults();
       setupListeners();
-
-      // Wait briefly for first data batch
       await new Promise(r => setTimeout(r, 800));
     } catch (e) {
       console.error("Firebase init error:", e);
@@ -225,7 +219,9 @@
     buildNav();
     MX.showPage(MX.todayId());
 
-    // Register service worker
+    // Prompt worker identity after data loads
+    setTimeout(() => { MX.Auth.promptWorker && MX.Auth.promptWorker(); }, 600);
+
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
@@ -240,7 +236,7 @@
     setTimeout(() => { loading.style.display = "none"; }, 400);
   }
 
-  window.MX.buildNav       = buildNav;
+  window.MX.buildNav          = buildNav;
   window.MX.updateNavProgress = updateNavProgress;
 
   document.addEventListener("DOMContentLoaded", init);

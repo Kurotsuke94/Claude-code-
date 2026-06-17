@@ -1,19 +1,35 @@
 (function () {
   function render(dayId) {
-    const { state, DAYS, SLOTS, getDaySlots, esc, chipHtml, alertLevel, toast } = MX;
-    const day   = DAYS.find(d => d.id === dayId);
-    const slots = getDaySlots(dayId);
-    const el    = document.getElementById("main-content");
+    const { state, DAYS, getDaySlots, esc, Widgets } = MX;
+    const day     = DAYS.find(d => d.id === dayId);
+    const slots   = getDaySlots(dayId);
+    const el      = document.getElementById("main-content");
+    const worker  = state.currentWorker;
+    const isAdmin = MX.Auth.isAdmin();
 
+    // Progress counts: admin or no worker = all tasks, else only assigned slots
     let total = 0, done = 0;
     slots.forEach(sl => {
       const tasks = state.tasks[`${dayId}_${sl}`] || [];
-      tasks.forEach(t => {
-        total++;
-        if (state.checks[`${dayId}_${sl}_${t.id}`]) done++;
-      });
+      const asn   = state.assignments[`${dayId}_${sl}`] || "";
+      if (!worker || isAdmin || asn === worker) {
+        tasks.forEach(t => {
+          total++;
+          if (state.checks[`${dayId}_${sl}_${t.id}`]) done++;
+        });
+      }
     });
     const pct = total ? Math.round(done / total * 100) : 0;
+
+    // Worker identity banner
+    let workerBanner = '';
+    if (worker && !isAdmin) {
+      workerBanner = `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;margin-bottom:14px">
+        ${Widgets.userBadge(worker, { size: 30 })}
+        <span style="font-size:12px;color:var(--text2);flex:1">Vue filtrée · créneaux assignés uniquement</span>
+        <button onclick="MX.Auth.clearWorker()" style="font-size:11px;color:var(--cyan);background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--ffs)">Changer</button>
+      </div>`;
+    }
 
     let h = `
       <div class="ph">
@@ -23,85 +39,44 @@
             <div class="ph-title">${esc(day.l)}</div>
             <div class="ph-sub">${done} / ${total} tâches complétées</div>
           </div>
-          <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)'}">${pct}%</div>
+          <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pct>=80?'var(--green)':pct>=40?'var(--orange)':'var(--red)'}">${pct}%</div>
         </div>
         <div style="margin-top:10px">
           <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
         </div>
       </div>
-      <div class="page-body" style="max-width:760px">`;
+      <div class="page-body" style="max-width:760px">
+        ${workerBanner}
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+          <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Faites</div></div>
+          <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
+          <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
+        </div>`;
 
-    // Stats
-    h += `<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-      <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Faites</div></div>
-      <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
-      <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
-    </div>`;
-
-    // Slots
+    let anyVisible = false;
     slots.forEach(sl => {
-      const s     = SLOTS[sl];
       const tasks = state.tasks[`${dayId}_${sl}`] || [];
       const asn   = state.assignments[`${dayId}_${sl}`] || "";
-      let sDone   = 0;
-      tasks.forEach(t => { if (state.checks[`${dayId}_${sl}_${t.id}`]) sDone++; });
-      const sPct  = tasks.length ? Math.round(sDone / tasks.length * 100) : 0;
-      const level = alertLevel(sl, sPct, state.alerts);
-
-      h += `<div class="slot-card">
-        <div class="slot-head ${s.c}">
-          <div class="ch-ico ${s.c}">${s.e}</div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:700">${s.l}</div>
-            <div class="slot-dl">${sDone}/${tasks.length} tâches</div>
-            <span class="slot-chip ${level}">
-              <i class="fas fa-${level === 'ok' ? 'check' : level === 'warn' ? 'triangle-exclamation' : 'circle-exclamation'}"></i>
-              ${level === 'ok' ? 'En ordre' : level === 'warn' ? 'Attention' : 'Urgent'}
-            </span>
-          </div>
-          <div class="slot-pct ${sPct >= 80 ? 'g' : sPct >= 40 ? 'o' : 'r'}">${sPct}%</div>
-        </div>`;
-
-      // Assignee row
-      const names = allNames();
-      h += `<div class="arow">
-        <span class="arow-lbl">Assigné à</span>
-        <select class="asel" onchange="MX.Pages.Checklist.assign('${dayId}','${sl}',this.value)">
-          <option value="">— Choisir —</option>
-          ${names.map(n => `<option value="${esc(n)}" ${n === asn ? 'selected' : ''}>${esc(n)}</option>`).join('')}
-        </select>
-        ${asn ? chipHtml(asn) : ''}
-      </div>`;
-
-      // Task list
-      tasks.forEach(t => {
-        const key    = `${dayId}_${sl}_${t.id}`;
-        const isChk  = !!state.checks[key];
-        h += `<div class="trow ${isChk ? 'done' : ''}" id="tr_${t.id}" onclick="MX.Pages.Checklist.toggle('${dayId}','${sl}','${t.id}')">
-          <div class="tcb ${isChk ? 'on' : ''}"><i class="fas fa-check"></i></div>
-          <span class="ttext">${esc(t.text)}</span>
-          ${asn ? `<span class="twho" style="background:${MX.avatarBg(asn)};color:${MX.avatarFg(asn)}">${esc(asn)}</span>` : ''}
-        </div>`;
+      const html  = Widgets.slotCard({
+        dayId, slot: sl,
+        tasks, assignment: asn,
+        checks:       state.checks,
+        showAssign:   isAdmin,
+        workerFilter: (!isAdmin && worker) ? worker : null
       });
-
-      if (!tasks.length) {
-        h += `<div style="padding:20px 16px;text-align:center;font-size:13px;color:var(--text3)">Aucune tâche configurée</div>`;
-      }
-
-      h += `</div>`; // slot-card
+      if (html) { anyVisible = true; h += html; }
     });
+
+    if (!anyVisible && worker && !isAdmin) {
+      h += `<div style="text-align:center;padding:60px 20px">
+        <div style="font-size:40px;margin-bottom:16px">✅</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:8px">Aucun créneau assigné</div>
+        <div style="font-size:13px;color:var(--text2)">Aucun créneau n'est assigné à <strong>${esc(worker)}</strong> ce ${esc(day.l)}.</div>
+      </div>`;
+    }
 
     h += `</div>`;
     el.innerHTML = h;
-  }
-
-  function allNames() {
-    const { state } = MX;
-    const set = new Set();
-    ["matin","journee","soir"].forEach(sl => {
-      (state.teams[sl] || []).forEach(n => { if (n.trim()) set.add(n.trim()); });
-    });
-    return Array.from(set).sort();
   }
 
   async function toggle(dayId, slot, taskId) {
@@ -109,7 +84,7 @@
     const state = MX.state;
     const val   = !state.checks[key];
 
-    // Optimistic UI update
+    // Optimistic UI
     state.checks[key] = val;
     const row = document.getElementById("tr_" + taskId);
     if (row) {
@@ -120,8 +95,14 @@
 
     try {
       await MX.DB.setCheck(key, val);
+      const task = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
+      MX.DB.addLog({
+        workerName: state.currentWorker || (state.adminUser ? state.adminUser.email : "inconnu"),
+        action:     val ? "check" : "uncheck",
+        taskText:   task ? task.text : taskId,
+        dayId, slot
+      }).catch(() => {});
     } catch (e) {
-      // Revert on error
       state.checks[key] = !val;
       MX.toast("Erreur de connexion", true);
     }
@@ -131,6 +112,12 @@
     MX.state.assignments[`${dayId}_${slot}`] = name;
     try {
       await MX.DB.setAssignment(dayId, slot, name);
+      MX.DB.addLog({
+        workerName: MX.state.adminUser ? MX.state.adminUser.email : "admin",
+        action:     "assign",
+        taskText:   `${dayId} ${slot} → ${name || "(aucun)"}`,
+        dayId, slot
+      }).catch(() => {});
     } catch (e) {
       MX.toast("Erreur lors de l'assignation", true);
     }

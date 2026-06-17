@@ -8,9 +8,11 @@
     alerts:      () => db.collection("config").doc("alerts"),
     assignments: () => db.collection("config").doc("assignments"),
     checks:      () => db.collection("config").doc("checks"),
-    tasks:  (key) => db.collection("tasks").doc(key),   // key = "lundi_matin"
+    tasks:  (key) => db.collection("tasks").doc(key),
     products:    () => db.collection("products"),
-    messages:    () => db.collection("messages")
+    messages:    () => db.collection("messages"),
+    users:       () => db.collection("users"),
+    logs:        () => db.collection("logs")
   };
 
   // ── LISTENERS (unsubscribe handles) ──
@@ -36,7 +38,6 @@
       batch.set(R.checks(), {});
       await batch.commit();
 
-      // Init default tasks for each day/slot
       const taskBatch = db.batch();
       DAYS.forEach(day => {
         const slots = day.we ? ["soir"] : ["matin", "journee", "soir"];
@@ -46,7 +47,6 @@
         });
       });
 
-      // Default products
       const prods = [
         { name: "Ampoule E27",   ref: "REF-AMP-E27",  qty: 8,  minQty: 10, controller: "" },
         { name: "Gants latex M", ref: "REF-GANT-M",   qty: 25, minQty: 10, controller: "" },
@@ -55,12 +55,11 @@
       ];
       prods.forEach(p => { taskBatch.set(R.products().doc(), p); });
 
-      // Welcome message
       taskBatch.set(R.messages().doc(), {
         author: "Admin",
         title:  "Bienvenue sur Maintix",
         body:   "Plateforme de gestion et maintenance. Consultez les onglets pour vos checklists.",
-        imageUrl: "", ts: firebase.firestore.FieldValue.serverTimestamp()
+        ts: firebase.firestore.FieldValue.serverTimestamp()
       });
 
       await taskBatch.commit();
@@ -69,29 +68,19 @@
 
   // ── REAL-TIME LISTENERS ──
   function listenWeek(cb) {
-    _unsub.week = R.week().onSnapshot(snap => {
-      if (snap.exists) cb(snap.data());
-    });
+    _unsub.week = R.week().onSnapshot(snap => { if (snap.exists) cb(snap.data()); });
   }
   function listenTeams(cb) {
-    _unsub.teams = R.teams().onSnapshot(snap => {
-      if (snap.exists) cb(snap.data());
-    });
+    _unsub.teams = R.teams().onSnapshot(snap => { if (snap.exists) cb(snap.data()); });
   }
   function listenAlerts(cb) {
-    _unsub.alerts = R.alerts().onSnapshot(snap => {
-      if (snap.exists) cb(snap.data());
-    });
+    _unsub.alerts = R.alerts().onSnapshot(snap => { if (snap.exists) cb(snap.data()); });
   }
   function listenAssignments(cb) {
-    _unsub.assignments = R.assignments().onSnapshot(snap => {
-      if (snap.exists) cb(snap.data());
-    });
+    _unsub.assignments = R.assignments().onSnapshot(snap => { if (snap.exists) cb(snap.data()); });
   }
   function listenChecks(cb) {
-    _unsub.checks = R.checks().onSnapshot(snap => {
-      cb(snap.exists ? snap.data() : {});
-    });
+    _unsub.checks = R.checks().onSnapshot(snap => { cb(snap.exists ? snap.data() : {}); });
   }
   function listenTasks(dayId, slot, cb) {
     const key = `${dayId}_${slot}`;
@@ -108,40 +97,58 @@
   }
   function listenProducts(cb) {
     _unsub.products = R.products().onSnapshot(snap => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      cb(list);
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }
   function listenMessages(cb) {
     _unsub.messages = R.messages().orderBy("ts", "desc").limit(50).onSnapshot(snap => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      cb(list);
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenUsers(cb) {
+    _unsub.users = R.users().onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenLogs(cb) {
+    _unsub.logs = R.logs().orderBy("ts", "desc").limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }
 
   // ── WRITES ──
-  async function setCheck(taskKey, done) {
-    await R.checks().update({ [taskKey]: done });
-  }
+  async function setCheck(taskKey, done) { await R.checks().update({ [taskKey]: done }); }
   async function setAssignment(dayId, slot, name) {
     await R.assignments().update({ [`${dayId}_${slot}`]: name });
   }
-  async function setTasks(dayId, slot, items) {
-    await R.tasks(`${dayId}_${slot}`).set({ items });
-  }
+  async function setTasks(dayId, slot, items) { await R.tasks(`${dayId}_${slot}`).set({ items }); }
   async function saveTeams(data)      { await R.teams().set(data); }
   async function saveAlerts(data)     { await R.alerts().set(data); }
   async function resetChecks()        { await R.checks().set({}); }
   async function newWeek(label, num)  { await R.week().set({ label, num }); await resetChecks(); }
 
-  // Products
   async function addProduct(p)        { await R.products().add(p); }
   async function updateProduct(id, p) { await R.products().doc(id).update(p); }
   async function deleteProduct(id)    { await R.products().doc(id).delete(); }
 
-  // Messages
-  async function sendMessage(data)    { await R.messages().add({ author: data.author, title: data.title, body: data.body, ts: firebase.firestore.FieldValue.serverTimestamp() }); }
-  async function deleteMessage(id)    { await R.messages().doc(id).delete(); }
+  async function sendMessage(data) {
+    await R.messages().add({ author: data.author, title: data.title, body: data.body, ts: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+  async function deleteMessage(id) { await R.messages().doc(id).delete(); }
+
+  async function addUser(data)        { await R.users().add(data); }
+  async function updateUser(id, data) { await R.users().doc(id).update(data); }
+  async function deleteUser(id)       { await R.users().doc(id).delete(); }
+
+  async function addLog(data) {
+    await R.logs().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+  async function clearLogs() {
+    const snap  = await R.logs().limit(500).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
 
   // ── EXPORT ──
   window.MX = window.MX || {};
@@ -149,9 +156,12 @@
     initDefaults, unsubAll,
     listenWeek, listenTeams, listenAlerts, listenAssignments,
     listenChecks, listenTasks, listenAllTasks, listenProducts, listenMessages,
+    listenUsers, listenLogs,
     setCheck, setAssignment, setTasks,
     saveTeams, saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
-    sendMessage, deleteMessage
+    sendMessage, deleteMessage,
+    addUser, updateUser, deleteUser,
+    addLog, clearLogs
   };
 })();

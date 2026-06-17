@@ -1,6 +1,6 @@
 (function () {
-  let aTab    = "tasks";
-  let aDay    = "lundi";
+  let aTab = "tasks";
+  let aDay = "lundi";
 
   function render() {
     const el = document.getElementById("main-content");
@@ -21,13 +21,15 @@
     }
 
     const tabs = [
-      { id: "tasks",   label: "📋 Tâches"    },
-      { id: "team",    label: "👥 Équipe"     },
-      { id: "alerts",  label: "🔔 Alertes"    },
-      { id: "orders",  label: "📦 Stock"      },
-      { id: "week",    label: "📅 Semaine"    },
-      { id: "msgs",    label: "💬 Messages"   },
-      { id: "pin",     label: "🔑 Accès"      }
+      { id: "tasks",   label: "📋 Tâches"       },
+      { id: "team",    label: "👥 Équipe"        },
+      { id: "users",   label: "👤 Utilisateurs"  },
+      { id: "alerts",  label: "🔔 Alertes"       },
+      { id: "orders",  label: "📦 Stock"         },
+      { id: "week",    label: "📅 Semaine"       },
+      { id: "msgs",    label: "💬 Messages"      },
+      { id: "logs",    label: "📋 Activité"      },
+      { id: "pin",     label: "🔑 Accès"         }
     ];
 
     let h = `
@@ -40,15 +42,17 @@
       </div>
       <div class="page-body">
         <div class="atabs">
-          ${tabs.map(t => `<button class="atab ${aTab === t.id ? 'on' : ''}" onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`).join('')}
+          ${tabs.map(t => `<button class="atab ${aTab===t.id?'on':''}" onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`).join('')}
         </div>`;
 
     if (aTab === "tasks")   h += renderTasks();
     if (aTab === "team")    h += renderTeam();
+    if (aTab === "users")   h += renderUsers();
     if (aTab === "alerts")  h += renderAlerts();
     if (aTab === "orders")  h += renderOrders();
     if (aTab === "week")    h += renderWeek();
     if (aTab === "msgs")    h += renderMsgs();
+    if (aTab === "logs")    h += renderLogs();
     if (aTab === "pin")     h += renderPin();
 
     h += `</div>`;
@@ -63,17 +67,16 @@
     let h = `<div class="dpills">`;
     DAYS.forEach(d => {
       const cnt = getDaySlots(d.id).reduce((acc, sl) => acc + (state.tasks[`${d.id}_${sl}`] || []).length, 0);
-      h += `<button class="dpill ${aDay === d.id ? 'on' : ''}" onclick="MX.Pages.Admin.setDay('${d.id}')">${esc(d.l)} <span class="pc">${cnt}</span></button>`;
+      h += `<button class="dpill ${aDay===d.id?'on':''}" onclick="MX.Pages.Admin.setDay('${d.id}')">${esc(d.l)} <span class="pc">${cnt}</span></button>`;
     });
-    h += `</div>`;
-
-    h += `<div class="copy-bar">
-      <label>Copier depuis</label>
-      <select class="csel" id="cpfrom">
-        ${DAYS.filter(d => d.id !== aDay).map(d => `<option value="${d.id}">${esc(d.l)}</option>`).join('')}
-      </select>
-      <button class="cbtn" onclick="MX.Pages.Admin.copyTasks()"><i class="fas fa-arrow-right"></i> Copier</button>
-    </div>`;
+    h += `</div>
+      <div class="copy-bar">
+        <label>Copier depuis</label>
+        <select class="csel" id="cpfrom">
+          ${DAYS.filter(d => d.id !== aDay).map(d => `<option value="${d.id}">${esc(d.l)}</option>`).join('')}
+        </select>
+        <button class="cbtn" onclick="MX.Pages.Admin.copyTasks()"><i class="fas fa-arrow-right"></i> Copier</button>
+      </div>`;
 
     slots.forEach(sl => {
       const s     = SLOTS[sl];
@@ -81,9 +84,9 @@
       h += `<div class="tecard">
         <div class="tehd ${s.c}">
           <span class="sbadge ${s.c}">${s.e} ${s.l}</span>
-          <span style="font-size:11px;color:var(--text2);margin-left:auto">${tasks.length} tâche${tasks.length !== 1 ? 's' : ''}</span>
+          <span style="font-size:11px;color:var(--text2);margin-left:auto">${tasks.length} tâche${tasks.length!==1?'s':''}</span>
         </div>`;
-      tasks.forEach((t, i) => {
+      tasks.forEach(t => {
         h += `<div class="terow">
           <input class="fi fi-sm" style="flex:1" value="${esc(t.text)}"
             oninput="MX.Pages.Admin.editTask('${aDay}','${sl}','${t.id}',this.value)">
@@ -108,7 +111,7 @@
       (state.teams[sl] || []).forEach((name, i) => {
         const nc = TEAM_COLORS[name] || { bg: avatarBg(name), fg: avatarFg(name) };
         h += `<div class="terow">
-          ${name ? `<span class="chip" style="background:${nc.bg};color:${nc.fg};min-width:60px;text-align:center">${esc(name) || '?'}</span>` : ''}
+          ${name ? `<span class="chip" style="background:${nc.bg};color:${nc.fg};min-width:60px;text-align:center">${esc(name)||'?'}</span>` : ''}
           <input class="fi fi-sm" style="flex:1" placeholder="Prénom…" value="${esc(name)}"
             oninput="MX.Pages.Admin.editTeam('${sl}',${i},this.value)">
           <button class="icon-btn del" onclick="MX.Pages.Admin.rmTeam('${sl}',${i})"><i class="fas fa-trash"></i></button>
@@ -121,26 +124,70 @@
     return h;
   }
 
+  // ── USERS ──
+  function renderUsers() {
+    const { state, esc, avatarBg, avatarFg } = MX;
+    const users = state.users || [];
+    const roleLabel = { admin: "Admin", responsable: "Responsable", technicien: "Technicien" };
+    const roleColor = { admin: "var(--cyan)", responsable: "var(--orange)", technicien: "var(--text2)" };
+    let h = `<div class="info-note" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> Les utilisateurs sont les profils individuels avec leur rôle. L'équipe par créneau se configure dans l'onglet "Équipe".</div>`;
+
+    users.forEach(u => {
+      const bg   = avatarBg(u.name || "?");
+      const fg   = avatarFg(u.name || "?");
+      const role = u.role || "technicien";
+      h += `<div class="apcard" style="margin-bottom:8px">
+        <div class="aphd">
+          <span style="width:34px;height:34px;border-radius:10px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc((u.name||'?').substring(0,2).toUpperCase())}</span>
+          <span style="font-weight:600;font-size:13px;flex:1;margin-left:10px">${esc(u.name||'—')}</span>
+          <span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:${roleColor[role]||'var(--text2)'};font-family:var(--ffm)">${roleLabel[role]||role}</span>
+          <button class="icon-btn del" style="width:30px;height:30px;margin-left:8px" onclick="MX.Pages.Admin.delUser('${esc(u.id)}')"><i class="fas fa-trash"></i></button>
+        </div>
+        <div class="apgrid">
+          <div>
+            <div class="aplbl">Nom</div>
+            <input class="fi fi-sm" value="${esc(u.name||'')}" oninput="MX.Pages.Admin.updUser('${esc(u.id)}','name',this.value)">
+          </div>
+          <div>
+            <div class="aplbl">Rôle</div>
+            <select class="fi fi-sm" onchange="MX.Pages.Admin.updUser('${esc(u.id)}','role',this.value)">
+              <option value="technicien" ${role==='technicien'?'selected':''}>Technicien</option>
+              <option value="responsable" ${role==='responsable'?'selected':''}>Responsable</option>
+              <option value="admin" ${role==='admin'?'selected':''}>Admin</option>
+            </select>
+          </div>
+        </div>
+      </div>`;
+    });
+
+    if (!users.length) {
+      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucun utilisateur. Ajoutez des membres de l'équipe.</div>`;
+    }
+
+    h += `<div style="margin-bottom:8px"><button class="dash-btn" onclick="MX.Pages.Admin.addUser()"><i class="fas fa-plus"></i> Ajouter un utilisateur</button></div>`;
+    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveUsers()"><i class="fas fa-check"></i> Enregistrer les profils</button>`;
+    return h;
+  }
+
   // ── ALERTS ──
   function renderAlerts() {
     const { state, SLOTS, esc } = MX;
-    const bgMap = { matin: "var(--matin-dim)", journee: "var(--jour-dim)", soir: "var(--soir-dim)" };
     let h = `<div class="info-note" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> Si la checklist n'est pas terminée à la deadline, un email est envoyé via EmailJS.</div>`;
     ["matin","journee","soir"].forEach(sl => {
       const s   = SLOTS[sl];
       const cfg = (state.alerts || {})[sl] || {};
       h += `<div class="acfg">
-        <div class="acfg-hd" style="background:${bgMap[sl]}">
+        <div class="acfg-hd" style="background:var(--${sl==='matin'?'matin':sl==='journee'?'jour':'soir'}-dim)">
           <div class="ch-ico ${s.c}" style="width:32px;height:32px">${s.e}</div>
           <div style="flex:1"><div style="font-size:14px;font-weight:600">${s.l}</div>
-          <div style="font-size:11px;color:var(--text3)">${cfg.active ? 'Alerte active' : 'Alerte inactive'}</div></div>
-          <button class="tog ${cfg.active ? 'on' : 'off'}" onclick="MX.Pages.Admin.togAlert('${sl}')" aria-label="Toggle"></button>
+          <div style="font-size:11px;color:var(--text3)">${cfg.active?'Alerte active':'Alerte inactive'}</div></div>
+          <button class="tog ${cfg.active?'on':'off'}" onclick="MX.Pages.Admin.togAlert('${sl}')" aria-label="Toggle"></button>
         </div>
-        <div class="rfield"><label>Deadline</label><input class="ri" type="time" value="${esc(cfg.deadline || '')}" oninput="MX.Pages.Admin.updAlert('${sl}','deadline',this.value)"></div>
-        <div class="rfield"><label>Email</label><input class="ri" type="email" placeholder="responsable@…" value="${esc(cfg.email || '')}" oninput="MX.Pages.Admin.updAlert('${sl}','email',this.value)"></div>
-        <div class="rfield"><label>EmailJS Key</label><input class="ri" type="text" placeholder="clé publique…" value="${esc(cfg.key || '')}" oninput="MX.Pages.Admin.updAlert('${sl}','key',this.value)"></div>
-        <div class="rfield"><label>Service ID</label><input class="ri" type="text" placeholder="service_xxxxx" value="${esc(cfg.svc || '')}" oninput="MX.Pages.Admin.updAlert('${sl}','svc',this.value)"></div>
-        <div class="rfield"><label>Template ID</label><input class="ri" type="text" placeholder="template_xxxxx" value="${esc(cfg.tpl || '')}" oninput="MX.Pages.Admin.updAlert('${sl}','tpl',this.value)"></div>
+        <div class="rfield"><label>Deadline</label><input class="ri" type="time" value="${esc(cfg.deadline||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','deadline',this.value)"></div>
+        <div class="rfield"><label>Email</label><input class="ri" type="email" placeholder="responsable@…" value="${esc(cfg.email||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','email',this.value)"></div>
+        <div class="rfield"><label>EmailJS Key</label><input class="ri" type="text" placeholder="clé publique…" value="${esc(cfg.key||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','key',this.value)"></div>
+        <div class="rfield"><label>Service ID</label><input class="ri" type="text" placeholder="service_xxxxx" value="${esc(cfg.svc||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','svc',this.value)"></div>
+        <div class="rfield"><label>Template ID</label><input class="ri" type="text" placeholder="template_xxxxx" value="${esc(cfg.tpl||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','tpl',this.value)"></div>
       </div>`;
     });
     h += `<button class="save-btn" onclick="MX.Pages.Admin.saveAlerts()"><i class="fas fa-check"></i> Enregistrer les alertes</button>`;
@@ -151,7 +198,7 @@
   function renderOrders() {
     const { state, esc } = MX;
     const prods = state.products || [];
-    const lows  = prods.filter(p => parseInt(p.qty || 0) < parseInt(p.minQty || 0));
+    const lows  = prods.filter(p => parseInt(p.qty||0) < parseInt(p.minQty||0));
     let h = "";
     if (lows.length) {
       h += `<div class="alert-banner danger" style="margin-bottom:12px">
@@ -161,19 +208,19 @@
       </div>`;
     }
     prods.forEach(p => {
-      const low = parseInt(p.qty || 0) < parseInt(p.minQty || 0);
+      const low = parseInt(p.qty||0) < parseInt(p.minQty||0);
       h += `<div class="apcard">
         <div class="aphd">
-          <div class="dot ${low ? 'red' : 'green'}"></div>
+          <div class="dot ${low?'red':'green'}"></div>
           <span style="font-size:11px;font-family:var(--ffm);color:var(--text3)">${esc(p.id)}</span>
-          <span style="font-size:12px;font-weight:600;flex:1;margin-left:6px">${esc(p.name) || '—'}</span>
-          <span style="font-size:10px;font-weight:700;color:${low ? 'var(--red)' : 'var(--green)'}">${low ? 'CMD' : 'OK'}</span>
+          <span style="font-size:12px;font-weight:600;flex:1;margin-left:6px">${esc(p.name)||'—'}</span>
+          <span style="font-size:10px;font-weight:700;color:${low?'var(--red)':'var(--green)'}">${low?'CMD':'OK'}</span>
           <button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin.delProd('${esc(p.id)}')"><i class="fas fa-trash"></i></button>
         </div>
         <div class="apgrid">
-          <div><div class="aplbl">Nom</div><input class="fi fi-sm" value="${esc(p.name || '')}" oninput="MX.Pages.Admin.updProd('${esc(p.id)}','name',this.value)"></div>
-          <div><div class="aplbl">Référence</div><input class="fi fi-sm" value="${esc(p.ref || '')}" oninput="MX.Pages.Admin.updProd('${esc(p.id)}','ref',this.value)" placeholder="REF-XXX"></div>
-          <div><div class="aplbl">Qté min 🔒</div><input class="fi fi-sm" type="number" min="0" value="${parseInt(p.minQty||0)}" oninput="MX.Pages.Admin.updProdMin('${esc(p.id)}',this.value)" style="color:var(--orange)"></div>
+          <div><div class="aplbl">Nom</div><input class="fi fi-sm" value="${esc(p.name||'')}" oninput="MX.Pages.Admin.updProd('${esc(p.id)}','name',this.value)"></div>
+          <div><div class="aplbl">Référence</div><input class="fi fi-sm" value="${esc(p.ref||'')}" oninput="MX.Pages.Admin.updProd('${esc(p.id)}','ref',this.value)" placeholder="REF-XXX"></div>
+          <div><div class="aplbl">Qté min</div><input class="fi fi-sm" type="number" min="0" value="${parseInt(p.minQty||0)}" oninput="MX.Pages.Admin.updProdMin('${esc(p.id)}',this.value)" style="color:var(--orange)"></div>
           <div><div class="aplbl">Qté stock</div><input class="fi fi-sm" type="number" min="0" value="${parseInt(p.qty||0)}" oninput="MX.Pages.Admin.updProd('${esc(p.id)}','qty',this.value)"></div>
         </div>
       </div>`;
@@ -229,16 +276,53 @@
     return h;
   }
 
+  // ── LOGS ──
+  function renderLogs() {
+    const { state, esc, fmtTime, avatarBg, avatarFg, avatarTxt } = MX;
+    const logs = state.logs || [];
+    const aColor = { check: "var(--green)", uncheck: "var(--red)", assign: "var(--cyan)" };
+    const aLabel = { check: "✓ Validé", uncheck: "✗ Annulé", assign: "→ Assigné" };
+
+    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2);font-family:var(--ffm)">${logs.length} entrées</div>
+      <button class="icon-btn del" onclick="MX.Pages.Admin.confirmClearLogs()" style="width:auto;height:auto;padding:4px 12px;font-size:11px;gap:4px">
+        <i class="fas fa-trash"></i> Vider
+      </button>
+    </div>`;
+
+    if (!logs.length) {
+      return h + `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">Aucune activité enregistrée</div>`;
+    }
+
+    logs.forEach(log => {
+      const bg     = avatarBg(log.workerName || "?");
+      const fg     = avatarFg(log.workerName || "?");
+      const color  = aColor[log.action] || "var(--text2)";
+      const label  = aLabel[log.action] || log.action;
+      h += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px">
+        <div style="width:28px;height:28px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(avatarTxt(log.workerName||'?'))}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600">${esc(log.workerName||'inconnu')}</div>
+          <div style="color:${color};font-family:var(--ffm);font-size:11px">${label}</div>
+          <div style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(log.taskText||'')}</div>
+          <div style="color:var(--text3);font-size:10px;font-family:var(--ffm)">${esc(log.dayId||'')} ${esc(log.slot||'')}</div>
+        </div>
+        <div style="color:var(--text3);font-size:11px;white-space:nowrap;flex-shrink:0">${fmtTime(log.ts)}</div>
+      </div>`;
+    });
+    return h;
+  }
+
   // ── PIN ──
   function renderPin() {
     return `<div class="acfg" style="padding:16px">
       <div style="font-size:14px;font-weight:600;margin-bottom:16px">Changer le mot de passe admin</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5">
-        Pour changer le mot de passe, utilisez la console Firebase Authentication à l'adresse :<br>
+        Pour changer le mot de passe, utilisez la console Firebase Authentication :<br>
         <strong style="color:var(--cyan)">console.firebase.google.com</strong><br>
         → Authentication → Utilisateurs → Modifier l'utilisateur
       </div>
-      <div class="info-note"><i class="fas fa-circle-info"></i> Le mot de passe est géré de façon sécurisée par Firebase Auth. Il n'est jamais stocké dans la base de données.</div>
+      <div class="info-note"><i class="fas fa-circle-info"></i> Le mot de passe est géré de façon sécurisée par Firebase Auth.</div>
     </div>`;
   }
 
@@ -247,8 +331,7 @@
   function setDay(d) { aDay = d; render(); }
 
   function editTask(dayId, sl, taskId, val) {
-    const tasks = MX.state.tasks[`${dayId}_${sl}`] || [];
-    const t = tasks.find(x => x.id === taskId);
+    const t = (MX.state.tasks[`${dayId}_${sl}`] || []).find(x => x.id === taskId);
     if (t) t.text = val;
   }
   function addTask(dayId, sl) {
@@ -258,8 +341,7 @@
     render();
   }
   function rmTask(dayId, sl, taskId) {
-    const tasks = MX.state.tasks[`${dayId}_${sl}`] || [];
-    MX.state.tasks[`${dayId}_${sl}`] = tasks.filter(t => t.id !== taskId);
+    MX.state.tasks[`${dayId}_${sl}`] = (MX.state.tasks[`${dayId}_${sl}`] || []).filter(t => t.id !== taskId);
     render();
   }
   async function saveTasks() {
@@ -275,12 +357,10 @@
     } catch (e) { MX.toast("Erreur de sauvegarde", true); }
   }
   async function copyTasks() {
-    const from  = (document.getElementById("cpfrom") || {}).value;
+    const from = (document.getElementById("cpfrom") || {}).value;
     if (!from) return;
-    const { getDaySlots } = MX;
-    getDaySlots(aDay).forEach(sl => {
-      const src = (MX.state.tasks[`${from}_${sl}`] || []).map(t => ({ ...t, id: MX.uuid() }));
-      MX.state.tasks[`${aDay}_${sl}`] = src;
+    MX.getDaySlots(aDay).forEach(sl => {
+      MX.state.tasks[`${aDay}_${sl}`] = (MX.state.tasks[`${from}_${sl}`] || []).map(t => ({ ...t, id: MX.uuid() }));
     });
     render();
     MX.toast("Copié ✓");
@@ -294,6 +374,33 @@
     catch (e) { MX.toast("Erreur", true); }
   }
 
+  function updUser(id, f, v) {
+    const u = (MX.state.users || []).find(x => x.id === id);
+    if (u) u[f] = v;
+  }
+  function addUser() {
+    MX.DB.addUser({ name: "Nouveau", role: "technicien" })
+      .then(() => MX.toast("Utilisateur ajouté ✓"))
+      .catch(() => MX.toast("Erreur", true));
+  }
+  function delUser(id) {
+    MX.showModal("Supprimer cet utilisateur ?", "Cette action est irréversible.", [
+      { label: "Supprimer", cls: "danger", fn: async () => {
+        try { await MX.DB.deleteUser(id); MX.toast("Supprimé ✓"); }
+        catch (e) { MX.toast("Erreur", true); }
+      }},
+      { label: "Annuler", cls: "cancel" }
+    ]);
+  }
+  async function saveUsers() {
+    try {
+      for (const u of (MX.state.users || [])) {
+        await MX.DB.updateUser(u.id, { name: u.name || "", role: u.role || "technicien" });
+      }
+      MX.toast("Profils enregistrés ✓");
+    } catch (e) { MX.toast("Erreur", true); }
+  }
+
   function togAlert(sl) {
     if (!MX.state.alerts[sl]) MX.state.alerts[sl] = {};
     MX.state.alerts[sl].active = !MX.state.alerts[sl].active;
@@ -305,19 +412,16 @@
     catch (e) { MX.toast("Erreur", true); }
   }
 
-  function updProd(id, f, v)   { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p[f]=v; }
-  function updProdMin(id, v)   { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p.minQty=parseInt(v)||0; }
+  function updProd(id, f, v)  { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p[f]=v; }
+  function updProdMin(id, v)  { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p.minQty=parseInt(v)||0; }
   async function addProd() {
-    try {
-      const id = "P" + String((MX.state.products||[]).length + 1).padStart(3,"0");
-      await MX.DB.addProduct({ name:"", ref:"", qty:0, minQty:0, controller:"" });
-      MX.toast("Produit ajouté ✓");
-    } catch(e) { MX.toast("Erreur",true); }
+    try { await MX.DB.addProduct({ name:"", ref:"", qty:0, minQty:0, controller:"" }); MX.toast("Produit ajouté ✓"); }
+    catch(e) { MX.toast("Erreur",true); }
   }
   async function delProd(id) {
     MX.showModal("Supprimer ce produit ?","Cette action est irréversible.",[
       { label:"Supprimer", cls:"danger", fn: async()=>{ try{ await MX.DB.deleteProduct(id); MX.toast("Supprimé ✓"); }catch(e){ MX.toast("Erreur",true); } } },
-      { label:"Annuler",   cls:"cancel" }
+      { label:"Annuler", cls:"cancel" }
     ]);
   }
   async function saveProd() {
@@ -332,7 +436,17 @@
   async function delMsg(id) {
     MX.showModal("Supprimer ce message ?","", [
       { label:"Supprimer", cls:"danger", fn: async()=>{ try{ await MX.DB.deleteMessage(id); MX.toast("Supprimé ✓"); }catch(e){ MX.toast("Erreur",true); } } },
-      { label:"Annuler",   cls:"cancel" }
+      { label:"Annuler", cls:"cancel" }
+    ]);
+  }
+
+  function confirmClearLogs() {
+    MX.showModal("Vider l'historique ?", "Toutes les entrées d'activité seront supprimées.", [
+      { label:"Vider", cls:"danger", fn: async()=>{
+        try { await MX.DB.clearLogs(); MX.toast("Historique vidé ✓"); }
+        catch(e) { MX.toast("Erreur",true); }
+      }},
+      { label:"Annuler", cls:"cancel" }
     ]);
   }
 
@@ -365,8 +479,10 @@
     render, setTab, setDay,
     editTask, addTask, rmTask, saveTasks, copyTasks,
     editTeam, addTeam, rmTeam, saveTeam,
+    updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
     updProd, updProdMin, addProd, delProd, saveProd,
-    delMsg, confirmReset, confirmNewWeek
+    delMsg,
+    confirmClearLogs, confirmReset, confirmNewWeek
   };
 })();
