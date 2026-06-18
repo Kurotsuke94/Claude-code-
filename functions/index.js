@@ -1,14 +1,18 @@
-const functions = require("firebase-functions");
-const admin     = require("firebase-admin");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onSchedule }        = require("firebase-functions/v2/scheduler");
+const admin                 = require("firebase-admin");
 admin.initializeApp();
 
+const REGION      = "europe-west1";
 const SLOT_LABELS = { matin: "Matin", journee: "Journée", soir: "Soir" };
 const DAY_IDS     = ["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"];
 
 // ── PUSH ON NEW MISSION ──
-exports.onNewMission = functions.region("europe-west1").firestore
-  .document("missions/{missionId}")
-  .onCreate(async snap => {
+exports.onNewMission = onDocumentCreated(
+  { document: "missions/{missionId}", region: REGION },
+  async event => {
+    const snap = event.data;
+    if (!snap) return null;
     const { text, assignedTo, createdBy } = snap.data();
     const db = admin.firestore();
 
@@ -43,19 +47,18 @@ exports.onNewMission = functions.region("europe-west1").firestore
       if (!r.success) {
         const code = r.error && r.error.code;
         if (code === "messaging/invalid-registration-token" || code === "messaging/registration-token-not-registered") {
-          const ref = db.collection("fcmTokens").doc(tokens[i]);
-          batch.delete(ref);
+          batch.delete(db.collection("fcmTokens").doc(tokens[i]));
         }
       }
     });
     return batch.commit();
-  });
+  }
+);
 
 // ── SCHEDULED REMINDERS (every 15 min) ──
-exports.slotReminders = functions.pubsub
-  .schedule("every 15 minutes")
-  .timeZone("Europe/Paris")
-  .onRun(async () => {
+exports.slotReminders = onSchedule(
+  { schedule: "every 15 minutes", timeZone: "Europe/Paris", region: REGION },
+  async () => {
     const db  = admin.firestore();
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Paris" }));
     const hh  = now.getHours().toString().padStart(2,"0");
@@ -95,9 +98,9 @@ exports.slotReminders = functions.pubsub
       const tasksDoc = await db.collection("tasks").doc(`${todayId}_${slot}`).get();
       if (!tasksDoc.exists) continue;
 
-      const items  = tasksDoc.data().items || [];
-      const done   = items.filter(t => checks[`${todayId}_${slot}_${t.id}`]).length;
-      if (done >= items.length && items.length > 0) continue; // all done
+      const items     = tasksDoc.data().items || [];
+      const done      = items.filter(t => checks[`${todayId}_${slot}_${t.id}`]).length;
+      if (done >= items.length && items.length > 0) continue;
 
       const remaining = items.length - done;
       const recipients = new Set([
@@ -123,7 +126,8 @@ exports.slotReminders = functions.pubsub
     }
 
     return Promise.all(sends);
-  });
+  }
+);
 
 function _near(cur, deadline) {
   const toMin = s => { const [h,m] = s.split(":").map(Number); return h * 60 + m; };
