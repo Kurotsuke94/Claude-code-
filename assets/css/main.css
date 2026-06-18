@@ -69,16 +69,16 @@ html, body {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0 !important;
-  height: 110px !important;
-  max-height: 110px !important;
-  min-height: 110px !important;
+  height: 165px !important;
+  max-height: 165px !important;
+  min-height: 165px !important;
   overflow: hidden !important;
 }
 .sidebar-logo {
-  height: 82px !important;
+  height: 138px !important;
   width: auto !important;
-  max-width: 180px !important;
-  max-height: 82px !important;
+  max-width: 220px !important;
+  max-height: 138px !important;
   object-fit: contain !important;
   display: block;
 }
