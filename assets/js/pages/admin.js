@@ -286,25 +286,30 @@
   // ── ALERTS ──
   function renderAlerts() {
     const { state, SLOTS, esc } = MX;
-    let h = `<div class="info-note" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> Si la checklist n'est pas terminée à la deadline, un email est envoyé via EmailJS.</div>`;
+    let h = `<div class="info-note" style="margin-bottom:12px">
+      <i class="fas fa-bell"></i> Les rappels sont envoyés par <strong>notification push</strong> aux techniciens assignés si la checklist n'est pas terminée à la deadline.
+      Les appareils doivent avoir accepté les notifications et être inscrits.
+    </div>`;
     ["matin","journee","soir"].forEach(sl => {
       const s   = SLOTS[sl];
       const cfg = (state.alerts || {})[sl] || {};
+      const dimVar = sl === 'matin' ? 'matin' : sl === 'journee' ? 'jour' : 'soir';
       h += `<div class="acfg">
-        <div class="acfg-hd" style="background:var(--${sl==='matin'?'matin':sl==='journee'?'jour':'soir'}-dim)">
+        <div class="acfg-hd" style="background:var(--${dimVar}-dim)">
           <div class="ch-ico ${s.c}" style="width:32px;height:32px">${s.e}</div>
-          <div style="flex:1"><div style="font-size:14px;font-weight:600">${s.l}</div>
-          <div style="font-size:11px;color:var(--text3)">${cfg.active?'Alerte active':'Alerte inactive'}</div></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:600">${s.l}</div>
+            <div style="font-size:11px;color:var(--text3)">${cfg.active ? '🔔 Rappel push actif' : '🔕 Rappel désactivé'}</div>
+          </div>
           <button class="tog ${cfg.active?'on':'off'}" onclick="MX.Pages.Admin.togAlert('${sl}')" aria-label="Toggle"></button>
         </div>
-        <div class="rfield"><label>Deadline</label><input class="ri" type="time" value="${esc(cfg.deadline||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','deadline',this.value)"></div>
-        <div class="rfield"><label>Email</label><input class="ri" type="email" placeholder="responsable@…" value="${esc(cfg.email||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','email',this.value)"></div>
-        <div class="rfield"><label>EmailJS Key</label><input class="ri" type="text" placeholder="clé publique…" value="${esc(cfg.key||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','key',this.value)"></div>
-        <div class="rfield"><label>Service ID</label><input class="ri" type="text" placeholder="service_xxxxx" value="${esc(cfg.svc||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','svc',this.value)"></div>
-        <div class="rfield"><label>Template ID</label><input class="ri" type="text" placeholder="template_xxxxx" value="${esc(cfg.tpl||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','tpl',this.value)"></div>
+        <div class="rfield">
+          <label>Heure du rappel</label>
+          <input class="ri" type="time" value="${esc(cfg.deadline||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','deadline',this.value)">
+        </div>
       </div>`;
     });
-    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveAlerts()"><i class="fas fa-check"></i> Enregistrer les alertes</button>`;
+    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveAlerts()"><i class="fas fa-check"></i> Enregistrer</button>`;
     return h;
   }
 
