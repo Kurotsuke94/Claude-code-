@@ -44,6 +44,7 @@ html, body {
   width: 100vw;
   height: 100dvh;
   overflow: hidden;
+  position: relative; /* positioning context for absolute sidebar on mobile */
 }
 .hidden { display: none !important; }
 
@@ -422,17 +423,17 @@ html, body {
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .sidebar {
-    position: fixed; top: 0; left: 0;
+    /* Use absolute (not fixed) — position:fixed inside overflow:hidden
+       stays in flex flow on iOS WebKit; absolute correctly exits the flow
+       and is clipped by the shell's overflow:hidden */
+    position: absolute; top: 0; left: 0;
+    height: 100%;
+    width: var(--sidebar-w);
     transform: translateX(-100%);
     z-index: 100;
-    /* iOS fix: position:fixed inside overflow:hidden flex container stays in
-       flex flow on WebKit — force zero flex contribution as fallback */
-    flex: 0 0 0 !important;
-    min-width: 0 !important;
-    width: var(--sidebar-w); /* restored for the fixed overlay itself */
   }
-  .sidebar.open { transform: translateX(0); width: var(--sidebar-w); }
-  .main-wrapper { width: 100%; min-width: 0; }
+  .sidebar.open { transform: translateX(0); }
+  .main-wrapper { width: 100%; min-width: 0; flex: 1; }
   .sidebar-overlay.show { display: block; }
   .topbar { display: flex; }
   .main-content { padding-bottom: var(--bottomnav-h); }
