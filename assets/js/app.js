@@ -235,10 +235,6 @@
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
-    // Notification permission
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
     // PWA install prompt
     window.addEventListener("beforeinstallprompt", e => {
       e.preventDefault();
@@ -283,6 +279,36 @@
       MX._installPrompt.prompt();
       MX._installPrompt.userChoice.then(() => { MX._installPrompt = null; MX._canInstall = false; });
     }
+  };
+
+  // Called from a user gesture (button click) — works on Android PWA + iOS 16.4+ standalone
+  window.MX.enableNotifications = async function() {
+    if (!("Notification" in window)) {
+      MX.toast("Notifications non supportées sur ce navigateur", true); return;
+    }
+    // iOS Safari: only works when installed as PWA (standalone)
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+    if (isIos && !isStandalone) {
+      MX.showModal(
+        "Installer l'app d'abord",
+        "Sur iPhone/iPad, les notifications nécessitent que l'app soit installée. Appuyez sur 📤 puis « Sur l'écran d'accueil ».",
+        [{ label: "OK", cls: "cancel" }]
+      );
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      MX.toast("Notifications activées ✓");
+      // Try to register FCM token now
+      const cu = MX.state.currentUser;
+      const ad = MX.state.adminUser;
+      if (cu) MX.Auth.setCurrentUser(cu);
+      else if (ad) { /* FCM register triggered by auth state */ }
+    } else {
+      MX.toast("Notifications refusées — vérifiez les réglages", true);
+    }
+    MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
   };
 
   window.MX.buildNav          = buildNav;

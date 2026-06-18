@@ -10,9 +10,14 @@ const FIREBASE_CONFIG = {
 
 firebase.initializeApp(FIREBASE_CONFIG);
 
-const db      = firebase.firestore();
-const auth    = firebase.auth();
-const storage = firebase.storage();
+const db   = firebase.firestore();
+const auth = firebase.auth();
+
+// Storage — guarded init (fails silently if SDK not loaded on some iOS/browsers)
+let storage = null;
+try {
+  if (typeof firebase.storage !== 'undefined') storage = firebase.storage();
+} catch(e) { console.warn('Storage init:', e); }
 
 // Initialise le namespace global avant tous les autres scripts
 window.MX = window.MX || {};

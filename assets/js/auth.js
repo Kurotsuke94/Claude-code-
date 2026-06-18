@@ -258,10 +258,17 @@
           </button>
         </div>`;
     }
+    // Notification permission button (visible until granted)
+    if ("Notification" in window && Notification.permission !== "granted") {
+      const notifDiv = document.createElement("div");
+      notifDiv.style.cssText = "padding:2px 8px";
+      notifDiv.innerHTML = `<button onclick="MX.enableNotifications()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text2);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-bell-slash"></i> Activer les notifications</button>`;
+      el.appendChild(notifDiv);
+    }
     // PWA install button
     if (MX._canInstall) {
       const installDiv = document.createElement("div");
-      installDiv.style.cssText = "padding:4px 8px";
+      installDiv.style.cssText = "padding:2px 8px";
       installDiv.innerHTML = `<button onclick="MX.tryInstall()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-download"></i> Installer l'appli</button>`;
       el.appendChild(installDiv);
     }

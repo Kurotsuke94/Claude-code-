@@ -180,6 +180,7 @@ html, body {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.6);
   z-index: 99;
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
 
@@ -239,7 +240,7 @@ html, body {
   padding: 24px 28px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg2);
-  position: sticky; top: 0; z-index: 20;
+  position: -webkit-sticky; position: sticky; top: 0; z-index: 20;
 }
 .ph-eye {
   font-size: 10px; color: var(--cyan);
@@ -283,6 +284,7 @@ html, body {
   position: fixed; bottom: 0; left: 0; right: 0;
   height: var(--bottomnav-h);
   background: rgba(13,13,16,0.96);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--border);
   z-index: 100;
@@ -342,6 +344,7 @@ html, body {
   background: rgba(0,0,0,0.7);
   z-index: 5000;
   display: none; align-items: flex-end; justify-content: center;
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
 .modal-bg.show { display: flex; }

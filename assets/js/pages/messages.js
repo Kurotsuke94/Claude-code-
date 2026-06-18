@@ -119,21 +119,21 @@
   }
 
   async function _compressImage(file, maxPx) {
-    maxPx = maxPx || 1400;
+    maxPx = maxPx || 1000;
     return new Promise(function(resolve) {
       var img = new Image();
       var url = URL.createObjectURL(file);
       img.onload = function() {
         URL.revokeObjectURL(url);
         var w = img.width, h = img.height;
-        if (w <= maxPx && h <= maxPx) { resolve(file); return; }
-        var scale = maxPx / Math.max(w, h);
+        if (w <= maxPx && h <= maxPx && file.size < 400000) { resolve(file); return; }
+        var scale = Math.min(1, maxPx / Math.max(w, h));
         w = Math.round(w * scale);
         h = Math.round(h * scale);
         var canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
         canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        canvas.toBlob(function(blob) { resolve(blob || file); }, "image/jpeg", 0.85);
+        canvas.toBlob(function(blob) { resolve(blob || file); }, "image/jpeg", 0.72);
       };
       img.onerror = function() { resolve(file); };
       img.src = url;
@@ -155,7 +155,6 @@
     try {
       let imageUrl = null;
       if (_pendingFile) {
-        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Upload photo…';
         const compressed = await _compressImage(_pendingFile);
         imageUrl = await MX.DB.uploadMessageImage(compressed);
       }

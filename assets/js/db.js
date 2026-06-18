@@ -145,11 +145,22 @@
   async function deleteProduct(id)    { await R.products().doc(id).delete(); }
 
   async function uploadMessageImage(file) {
+    if (!storage) throw new Error("Firebase Storage non disponible");
     const ext  = (file.name || "photo.jpg").split('.').pop().toLowerCase();
     const path = `messages/${uuid()}.${ext}`;
     const ref  = storage.ref(path);
-    await ref.put(file);
-    return await ref.getDownloadURL();
+    return await new Promise((resolve, reject) => {
+      const task = ref.put(file);
+      task.on('state_changed',
+        snap => {
+          const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100);
+          const btn = document.querySelector(".compose .primary-btn");
+          if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Upload ${pct}%`;
+        },
+        reject,
+        async () => resolve(await task.snapshot.ref.getDownloadURL())
+      );
+    });
   }
 
   async function sendMessage(data) {
@@ -159,7 +170,7 @@
   }
   async function deleteMessage(id) {
     const snap = await R.messages().doc(id).get();
-    if (snap.exists && snap.data().imageUrl) {
+    if (snap.exists && snap.data().imageUrl && storage) {
       try { await storage.refFromURL(snap.data().imageUrl).delete(); } catch(e) {}
     }
     await R.messages().doc(id).delete();
