@@ -1,4 +1,64 @@
 (function () {
+  let _planUploading = false;
+
+  async function _compressImage(file) {
+    const MAX_PX = 1400, QUALITY = 0.80;
+    return new Promise(function(resolve) {
+      var timer = setTimeout(function() { resolve(file); }, 12000);
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function() {
+        URL.revokeObjectURL(url);
+        var w = img.width, h = img.height;
+        if (w <= MAX_PX && h <= MAX_PX && file.size < 400000) { clearTimeout(timer); resolve(file); return; }
+        var scale = Math.min(1, MAX_PX / Math.max(w, h));
+        w = Math.round(w * scale); h = Math.round(h * scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob(function(blob) { clearTimeout(timer); resolve(blob || file); }, "image/jpeg", QUALITY);
+      };
+      img.onerror = function() { clearTimeout(timer); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  async function uploadPlan(input) {
+    if (_planUploading) return;
+    const file = input.files[0];
+    if (!file) return;
+    _planUploading = true;
+    MX.toast("Compression…");
+    try {
+      const compressed = await _compressImage(file);
+      MX.toast("Upload en cours…");
+      const imageUrl = await MX.DB.uploadPlanningImage(compressed);
+      await MX.DB.savePlanning(imageUrl);
+      MX.toast("Planning mis à jour ✓");
+    } catch(e) {
+      console.error(e);
+      MX.toast("Erreur lors de l'upload", true);
+    } finally {
+      _planUploading = false;
+      input.value = "";
+    }
+  }
+
+  function clearPlan() {
+    MX.showModal("Supprimer le planning ?", "L'image sera supprimée pour tous.", [
+      { label: "Supprimer", cls: "danger", fn: async function() {
+        try { await MX.DB.clearPlanning(); MX.toast("Planning supprimé"); }
+        catch(e) { MX.toast("Erreur suppression", true); }
+      }},
+      { label: "Annuler", cls: "cancel" }
+    ]);
+  }
+
+  function openPlan() {
+    const url = MX.state.planningUrl;
+    if (url) window.open(url, "_blank");
+  }
+
   function render() {
     const { state, DAYS, SLOTS, getDaySlots, esc, todayId, progressClass, chipHtml, mkWeekLabel } = MX;
     const el = document.getElementById("main-content");
@@ -114,11 +174,53 @@
         </div>
       </div>`;
 
+    // Planning section
+    const isAdm    = MX.Auth.isAdmin();
+    const planUrl  = state.planningUrl;
+
+    h += `<div class="section-label">Planning</div>`;
+    h += `<div class="day-card" style="margin-bottom:24px">`;
+
+    if (planUrl) {
+      h += `<div style="padding:14px 16px">
+        <img src="${esc(planUrl)}" alt="Planning" loading="lazy"
+          style="width:100%;border-radius:10px;display:block;cursor:pointer;max-height:600px;object-fit:contain;background:var(--bg2)"
+          onclick="MX.Pages.Home.openPlan()">
+        ${isAdm ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <label for="plan-upload" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs)">
+            <i class="fas fa-camera"></i> Changer la photo
+          </label>
+          <button onclick="MX.Pages.Home.clearPlan()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid rgba(255,80,80,.4);border-radius:8px;background:none;color:var(--red);cursor:pointer;font-size:13px;font-family:var(--ffs)">
+            <i class="fas fa-trash"></i> Supprimer
+          </button>
+        </div>` : ''}
+      </div>`;
+    } else {
+      h += `<div style="padding:28px 16px;text-align:center">
+        <div style="font-size:36px;margin-bottom:10px">📅</div>`;
+      if (isAdm) {
+        h += `<div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucun planning affiché</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Ajoutez une photo du planning hebdomadaire</div>
+          <label for="plan-upload" class="primary-btn" style="display:inline-flex;cursor:pointer;width:auto;padding:10px 24px">
+            <i class="fas fa-upload"></i> Ajouter une photo
+          </label>`;
+      } else {
+        h += `<div style="font-size:13px;color:var(--text2)">Aucun planning disponible</div>`;
+      }
+      h += `</div>`;
+    }
+
+    if (isAdm) {
+      h += `<input type="file" id="plan-upload" accept="image/*" style="display:none" onchange="MX.Pages.Home.uploadPlan(this)">`;
+    }
+
+    h += `</div>`;
+
     h += `</div>`;
     el.innerHTML = h;
   }
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Home = { render };
+  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan };
 })();

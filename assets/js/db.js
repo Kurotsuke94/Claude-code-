@@ -214,6 +214,42 @@
     await R.missions().doc(id).delete();
   }
 
+  function listenPlanning(cb) {
+    _unsub.planning = db.collection("config").doc("planning").onSnapshot(snap => {
+      cb(snap.exists ? (snap.data().imageUrl || null) : null);
+    });
+  }
+  async function uploadPlanningImage(file) {
+    if (!storage) throw new Error("Firebase Storage non disponible");
+    const { uuid } = window.MX;
+    const ref = storage.ref(`planning/${uuid()}.jpg`);
+    return await new Promise((resolve, reject) => {
+      var done = false;
+      var timer = setTimeout(function() {
+        if (!done) { done = true; reject(new Error("Upload timeout")); }
+      }, 60000);
+      const task = ref.put(file, { contentType: "image/jpeg" });
+      task.on('state_changed', null,
+        err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
+        async () => { if (!done) { done = true; clearTimeout(timer); resolve(await task.snapshot.ref.getDownloadURL()); } }
+      );
+    });
+  }
+  async function savePlanning(imageUrl) {
+    const snap = await db.collection("config").doc("planning").get();
+    if (snap.exists && snap.data().imageUrl && storage) {
+      try { await storage.refFromURL(snap.data().imageUrl).delete(); } catch(e) {}
+    }
+    await db.collection("config").doc("planning").set({ imageUrl });
+  }
+  async function clearPlanning() {
+    const snap = await db.collection("config").doc("planning").get();
+    if (snap.exists && snap.data().imageUrl && storage) {
+      try { await storage.refFromURL(snap.data().imageUrl).delete(); } catch(e) {}
+    }
+    await db.collection("config").doc("planning").set({ imageUrl: null });
+  }
+
   async function saveFcmToken(token, userName) {
     await db.collection("fcmTokens").doc(token).set({ token, userName: userName || "", ts: firebase.firestore.FieldValue.serverTimestamp() });
   }
@@ -239,6 +275,7 @@
     saveTeams, saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
     uploadMessageImage, sendMessage, deleteMessage,
+    listenPlanning, uploadPlanningImage, savePlanning, clearPlanning,
     addUser, updateUser, deleteUser,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,

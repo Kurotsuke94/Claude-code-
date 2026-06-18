@@ -235,6 +235,11 @@
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
+
+    DB.listenPlanning(url => {
+      state.planningUrl = url;
+      if (state.currentPage === "home") MX.Pages.Home.render();
+    });
   }
 
   // ── INIT ──
