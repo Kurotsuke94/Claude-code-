@@ -15,9 +15,24 @@
     { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
   ];
 
+  // ── UNREAD MESSAGES TRACKING ──
+  function _getMsgsSeen() {
+    return parseInt(localStorage.getItem("mx_msgs_seen") || "0", 10);
+  }
+  function _markMsgsSeen() {
+    localStorage.setItem("mx_msgs_seen", Date.now());
+  }
+  function _tsMs(ts) {
+    if (!ts) return 0;
+    if (ts.toMillis) return ts.toMillis();
+    if (ts.seconds)  return ts.seconds * 1000;
+    return 0;
+  }
+
   // ── PAGE ROUTING ──
   window.MX.showPage = function (id) {
     MX.state.currentPage = id;
+    if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
     document.getElementById("topbar-title").textContent = NAV.find(n => n && n.id === id)?.l || "Maintix";
     document.querySelectorAll(".nav-item[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     document.querySelectorAll(".bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
@@ -115,11 +130,12 @@
       if (npEl) { npEl.textContent = pct + "%"; npEl.className = "nav-prog " + cls; }
     });
 
-    const cnt     = (state.messages || []).length;
-    const badge   = document.getElementById("nb_msgs");
-    if (badge) { badge.textContent = cnt > 9 ? "9+" : cnt; badge.className = "nav-badge" + (cnt ? " show" : ""); }
+    const seen   = _getMsgsSeen();
+    const unread = (state.messages || []).filter(m => _tsMs(m.ts) > seen).length;
+    const badge  = document.getElementById("nb_msgs");
+    if (badge)  { badge.textContent = unread > 9 ? "9+" : unread; badge.className = "nav-badge" + (unread ? " show" : ""); }
     const bnBadge = document.getElementById("bnb_msgs");
-    if (bnBadge) { bnBadge.textContent = cnt > 9 ? "9+" : cnt; bnBadge.className = "nav-badge" + (cnt ? " show" : ""); }
+    if (bnBadge){ bnBadge.textContent = unread > 9 ? "9+" : unread; bnBadge.className = "nav-badge" + (unread ? " show" : ""); }
   }
 
   // ── MISSION NOTIFICATIONS ──
@@ -189,6 +205,7 @@
 
     DB.listenMessages(list => {
       state.messages = list;
+      if (state.currentPage === "msgs") _markMsgsSeen();
       updateNavProgress();
       if (state.currentPage === "msgs")  MX.Pages.Messages.render();
       if (state.currentPage === "home")  MX.Pages.Home.render();
