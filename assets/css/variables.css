@@ -48,9 +48,9 @@
   --rs:  8px;
   --rx: 16px;
 
-  /* Typography */
-  --ffm: 'Space Mono', monospace;
-  --ffs: 'Space Grotesk', sans-serif;
+  /* Typography — fallbacks système si Google Fonts bloqué */
+  --ffm: 'Space Mono', ui-monospace, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  --ffs: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* Layout */
   --sidebar-w: 260px;

@@ -6,6 +6,7 @@ html, body {
   font-family: var(--ffs);
   min-height: 100dvh;
   overflow: hidden;
+  color-scheme: dark;
 }
 
 /* ── LOADING SCREEN ── */

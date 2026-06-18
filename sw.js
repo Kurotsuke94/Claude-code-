@@ -32,7 +32,7 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v8";
+const CACHE  = "maintix-v9";
 const SHELL  = [
   "/",
   "/index.html",
@@ -40,6 +40,11 @@ const SHELL  = [
   "/assets/css/variables.css",
   "/assets/css/main.css",
   "/assets/css/components.css",
+  "/assets/fontawesome/css/all.min.css",
+  "/assets/fontawesome/webfonts/fa-solid-900.woff2",
+  "/assets/fontawesome/webfonts/fa-regular-400.woff2",
+  "/assets/fontawesome/webfonts/fa-brands-400.woff2",
+  "/assets/fontawesome/webfonts/fa-v4compatibility.woff2",
   "/assets/js/firebase-config.js",
   "/assets/js/utils/helpers.js",
   "/assets/js/utils/uuid.js",

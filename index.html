@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#00E5CC">
+  <meta name="color-scheme" content="dark">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,13 +15,13 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/assets/icons/icon-192.png">
 
-  <!-- Fonts -->
+  <!-- Fonts (Google Fonts avec fallback système si bloqué) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 
-  <!-- Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <!-- Icons — auto-hébergé (résistant aux bloqueurs de pub) -->
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
 
   <!-- App CSS -->
   <link rel="stylesheet" href="/assets/css/variables.css">
@@ -131,23 +132,23 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 
   <!-- ── APP SCRIPTS ── -->
-  <script src="/assets/js/firebase-config.js?v=15"></script>
-  <script src="/assets/js/utils/helpers.js?v=15"></script>
-  <script src="/assets/js/utils/uuid.js?v=15"></script>
-  <script src="/assets/js/db.js?v=15"></script>
-  <script src="/assets/js/auth.js?v=15"></script>
+  <script src="/assets/js/firebase-config.js?v=16"></script>
+  <script src="/assets/js/utils/helpers.js?v=16"></script>
+  <script src="/assets/js/utils/uuid.js?v=16"></script>
+  <script src="/assets/js/db.js?v=16"></script>
+  <script src="/assets/js/auth.js?v=16"></script>
   <!-- Widgets -->
-  <script src="/assets/js/widgets/task-row.js?v=15"></script>
-  <script src="/assets/js/widgets/user-badge.js?v=15"></script>
-  <script src="/assets/js/widgets/progress-widget.js?v=15"></script>
-  <script src="/assets/js/widgets/slot-card.js?v=15"></script>
+  <script src="/assets/js/widgets/task-row.js?v=16"></script>
+  <script src="/assets/js/widgets/user-badge.js?v=16"></script>
+  <script src="/assets/js/widgets/progress-widget.js?v=16"></script>
+  <script src="/assets/js/widgets/slot-card.js?v=16"></script>
   <!-- Pages -->
-  <script src="/assets/js/pages/home.js?v=15"></script>
-  <script src="/assets/js/pages/checklist.js?v=15"></script>
-  <script src="/assets/js/pages/messages.js?v=15"></script>
-  <script src="/assets/js/pages/orders.js?v=15"></script>
-  <script src="/assets/js/pages/admin.js?v=15"></script>
-  <script src="/assets/js/app.js?v=15"></script>
+  <script src="/assets/js/pages/home.js?v=16"></script>
+  <script src="/assets/js/pages/checklist.js?v=16"></script>
+  <script src="/assets/js/pages/messages.js?v=16"></script>
+  <script src="/assets/js/pages/orders.js?v=16"></script>
+  <script src="/assets/js/pages/admin.js?v=16"></script>
+  <script src="/assets/js/app.js?v=16"></script>
 
 </body>
 </html>
