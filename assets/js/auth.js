@@ -8,12 +8,28 @@
     if (user) { _onLogin  && _onLogin(user); }
     else       { _onLogout && _onLogout(); }
     updateSidebarFooter();
+    if (user) { _registerFcmToken("admin"); }
   });
 
   function onLogin(cb)  { _onLogin  = cb; }
   function onLogout(cb) { _onLogout = cb; }
   function isAdmin()    { return !!window.MX.state.adminUser; }
   function canSeeAll()  { return isAdmin() || (window.MX.state.currentUser && window.MX.state.currentUser.role === "responsable"); }
+
+  // ── FCM TOKEN REGISTRATION ──
+  async function _registerFcmToken(userName) {
+    const m = window.MX.messaging;
+    const v = window.MX.VAPID_KEY;
+    if (!m || !v || v.startsWith('REMPLACER')) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const token = await m.getToken({ vapidKey: v });
+      if (token) {
+        await MX.DB.saveFcmToken(token, userName);
+        window._fcmToken = token;
+      }
+    } catch(e) { console.warn('FCM token:', e); }
+  }
 
   // ── USER IDENTITY (PIN) ──
   function setCurrentUser(user) {
@@ -25,6 +41,7 @@
     MX.buildNav && MX.buildNav();
     const page = MX.state.currentPage;
     if (page && MX.DAYS && MX.DAYS.find(d => d.id === page)) MX.Pages.Checklist.render(page);
+    if (user) { _registerFcmToken(user.name); }
   }
 
   function clearCurrentUser() {

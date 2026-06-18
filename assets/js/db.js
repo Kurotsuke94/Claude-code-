@@ -14,7 +14,8 @@
     users:       () => db.collection("users"),
     logs:        () => db.collection("logs"),
     transfers:   () => db.collection("transfers"),
-    missions:    () => db.collection("missions")
+    missions:    () => db.collection("missions"),
+    fcmTokens:   () => db.collection("fcmTokens")
   };
 
   // ── LISTENERS (unsubscribe handles) ──
@@ -175,6 +176,13 @@
     await R.missions().doc(id).delete();
   }
 
+  async function saveFcmToken(token, userName) {
+    await db.collection("fcmTokens").doc(token).set({ token, userName: userName || "", ts: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+  async function deleteFcmToken(token) {
+    await db.collection("fcmTokens").doc(token).delete();
+  }
+
   async function clearLogs() {
     const snap  = await R.logs().limit(500).get();
     const batch = db.batch();
@@ -196,6 +204,7 @@
     addUser, updateUser, deleteUser,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
-    addMission, updateMission, deleteMission
+    addMission, updateMission, deleteMission,
+    saveFcmToken, deleteFcmToken
   };
 })();

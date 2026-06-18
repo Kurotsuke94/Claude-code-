@@ -1,4 +1,38 @@
-const CACHE  = "maintix-v1";
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
+
+firebase.initializeApp({
+  apiKey:            "AIzaSyC1GlZHiIpUf8dpWBn3WKFGu59zP11xxq8",
+  authDomain:        "maintix-c9dbd.firebaseapp.com",
+  projectId:         "maintix-c9dbd",
+  storageBucket:     "maintix-c9dbd.firebasestorage.app",
+  messagingSenderId: "98524288307",
+  appId:             "1:98524288307:web:681d2df0c7ac216caf9a46"
+});
+
+const _msg = firebase.messaging();
+
+_msg.onBackgroundMessage(payload => {
+  const notif = payload.notification || {};
+  self.registration.showNotification(notif.title || 'Maintix', {
+    body:  notif.body  || '',
+    icon:  '/assets/icons/icon-192.png',
+    badge: '/assets/icons/icon-192.png',
+    vibrate: [200, 100, 200],
+    data:  { url: (payload.fcmOptions && payload.fcmOptions.link) || '/' }
+  });
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(clients.matchAll({ type: 'window' }).then(list => {
+    for (const c of list) { if (c.url === url && 'focus' in c) return c.focus(); }
+    return clients.openWindow(url);
+  }));
+});
+
+const CACHE  = "maintix-v2";
 const SHELL  = [
   "/",
   "/index.html",
@@ -26,7 +60,8 @@ const BYPASS = [
   "gstatic.com",
   "google.com",
   "emailjs.com",
-  "fonts.gstatic.com"
+  "fonts.gstatic.com",
+  "fcm.googleapis.com"
 ];
 
 self.addEventListener("install", e => {
