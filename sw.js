@@ -81,6 +81,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
 
+  // Skip non-http(s) schemes (chrome-extension://, data:, etc.)
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
   // Skip non-GET and bypass domains
   if (e.request.method !== "GET") return;
   if (BYPASS.some(d => url.hostname.includes(d))) return;
