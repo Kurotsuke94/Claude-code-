@@ -217,9 +217,13 @@ html, body {
   transition: background var(--t);
 }
 .hamburger:hover { background: var(--bg3); color: var(--text); }
+.topbar-logo {
+  height: 36px; width: auto; object-fit: contain;
+}
 .topbar-title {
   font-size: 15px; font-weight: 600;
   flex: 1;
+  display: none; /* logo replaces title on mobile */
 }
 .topbar-actions { display: flex; gap: 6px; }
 
