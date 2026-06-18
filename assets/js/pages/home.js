@@ -175,7 +175,7 @@
       </div>`;
 
     // Planning section
-    const isAdm    = MX.Auth.isAdmin();
+    const canEdit  = MX.Auth.canSeeAll();
     const planUrl  = state.planningUrl;
 
     h += `<div class="section-label">Planning</div>`;
@@ -186,7 +186,7 @@
         <img src="${esc(planUrl)}" alt="Planning" loading="lazy"
           style="width:100%;border-radius:10px;display:block;cursor:pointer;max-height:600px;object-fit:contain;background:var(--bg2)"
           onclick="MX.Pages.Home.openPlan()">
-        ${isAdm ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        ${canEdit ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
           <label for="plan-upload" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs)">
             <i class="fas fa-camera"></i> Changer la photo
           </label>
@@ -198,7 +198,7 @@
     } else {
       h += `<div style="padding:28px 16px;text-align:center">
         <div style="font-size:36px;margin-bottom:10px">📅</div>`;
-      if (isAdm) {
+      if (canEdit) {
         h += `<div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucun planning affiché</div>
           <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Ajoutez une photo du planning hebdomadaire</div>
           <label for="plan-upload" class="primary-btn" style="display:inline-flex;cursor:pointer;width:auto;padding:10px 24px">
@@ -210,7 +210,7 @@
       h += `</div>`;
     }
 
-    if (isAdm) {
+    if (canEdit) {
       h += `<input type="file" id="plan-upload" accept="image/*" style="display:none" onchange="MX.Pages.Home.uploadPlan(this)">`;
     }
 
