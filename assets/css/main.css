@@ -64,17 +64,19 @@ html, body {
 }
 .sidebar-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-start;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  height: 56px;
+  overflow: hidden;
 }
 .sidebar-logo {
-  width: 120px;
-  height: auto;
+  height: 34px;
+  width: auto;
+  max-width: 160px;
   object-fit: contain;
-  border-radius: 8px;
 }
 .logo-mark {
   width: 34px; height: 34px;
@@ -219,7 +221,7 @@ html, body {
 }
 .hamburger:hover { background: var(--bg3); color: var(--text); }
 .topbar-logo {
-  height: 36px; width: auto; object-fit: contain;
+  height: 32px; width: auto; max-width: 120px; object-fit: contain; flex-shrink: 0;
 }
 .topbar-title {
   font-size: 15px; font-weight: 600;
