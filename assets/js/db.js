@@ -214,6 +214,34 @@
     await R.missions().doc(id).delete();
   }
 
+  async function setNote(key, text) {
+    const ref = db.collection("config").doc("notes");
+    if (text) {
+      await ref.set({ [key]: text }, { merge: true });
+    } else {
+      const snap = await ref.get();
+      if (snap.exists) {
+        const u = {};
+        u[key] = firebase.firestore.FieldValue.delete();
+        await ref.update(u);
+      }
+    }
+  }
+  async function archiveWeek(data) {
+    await db.collection("weekHistory").add({ ...data, archivedAt: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+
+  function listenNotes(cb) {
+    _unsub.notes = db.collection("config").doc("notes").onSnapshot(snap => {
+      cb(snap.exists ? snap.data() : {});
+    });
+  }
+  function listenHistory(cb) {
+    _unsub.history = db.collection("weekHistory").orderBy("archivedAt", "desc").limit(20).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
   function listenPlanning(cb) {
     _unsub.planning = db.collection("config").doc("planning").onSnapshot(snap => {
       cb(snap.exists ? (snap.data().imageUrl || null) : null);
@@ -271,6 +299,7 @@
     listenWeek, listenTeams, listenAlerts, listenAssignments,
     listenChecks, listenTasks, listenAllTasks, listenProducts, listenMessages,
     listenUsers, listenLogs, listenTransfers, listenMissions,
+    listenNotes, listenHistory,
     setCheck, setAssignment, setTasks,
     saveTeams, saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
@@ -280,6 +309,7 @@
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,
+    setNote, archiveWeek,
     saveFcmToken, deleteFcmToken
   };
 })();

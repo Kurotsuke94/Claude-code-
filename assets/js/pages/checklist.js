@@ -302,6 +302,42 @@
     }
   }
 
+  function openNote(dayId, slot, taskId) {
+    const key  = `${dayId}_${slot}_${taskId}`;
+    const task = (MX.state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
+    const note = (MX.state.notes || {})[key] || "";
+    const cu   = MX.state.currentUser;
+    const canWrite = !!(cu || MX.Auth.isAdmin());
+
+    document.getElementById("m-title").textContent = task ? task.text : "Note";
+    if (canWrite) {
+      document.getElementById("m-sub").innerHTML =
+        `<textarea id="note-ta" class="fi" style="width:100%;min-height:90px;resize:vertical;font-size:13px;line-height:1.5;margin-top:6px" placeholder="Ajouter une remarque sur cette tâche…" maxlength="500">${MX.esc(note)}</textarea>`;
+      document.getElementById("m-actions").innerHTML = `
+        <button class="modal-btn confirm" onclick="MX.Pages.Checklist.saveNote('${MX.esc(key)}')"><i class="fas fa-check"></i> Enregistrer</button>
+        <button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>`;
+    } else {
+      document.getElementById("m-sub").innerHTML = note
+        ? `<div style="font-size:13px;line-height:1.6;color:var(--text2);padding:6px 0">${MX.esc(note)}</div>`
+        : `<div style="font-size:13px;color:var(--text3);padding:6px 0">Aucune note pour cette tâche.</div>`;
+      document.getElementById("m-actions").innerHTML =
+        `<button class="modal-btn cancel" onclick="MX.closeModal()">Fermer</button>`;
+    }
+    document.getElementById("modal-bg").classList.add("show");
+  }
+
+  async function saveNote(key) {
+    const ta   = document.getElementById("note-ta");
+    const text = ta ? ta.value.trim() : "";
+    MX.closeModal();
+    try {
+      await MX.DB.setNote(key, text);
+      MX.toast(text ? "Note enregistrée ✓" : "Note supprimée");
+    } catch(e) {
+      MX.toast("Erreur", true);
+    }
+  }
+
   async function toggleMission(missionId) {
     const m  = (MX.state.missions || []).find(x => x.id === missionId);
     const cu = MX.state.currentUser;
@@ -320,5 +356,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred };
+  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
 })();

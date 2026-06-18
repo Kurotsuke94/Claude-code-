@@ -240,6 +240,16 @@
       state.planningUrl = url;
       if (state.currentPage === "home") MX.Pages.Home.render();
     });
+
+    DB.listenNotes(data => {
+      state.notes = data;
+      if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
+    });
+
+    DB.listenHistory(list => {
+      state.history = list;
+      if (state.currentPage === "admin") MX.Pages.Admin.render();
+    });
   }
 
   // ── INIT ──

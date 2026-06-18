@@ -34,6 +34,7 @@
       { id: "alerts",   label: "🔔 Alertes"      },
       { id: "orders",   label: "📦 Stock"        },
       { id: "week",     label: "📅 Semaine"      },
+      { id: "history",  label: "📊 Historique"   },
       { id: "msgs",     label: "💬 Messages"     },
       { id: "logs",     label: "📋 Activité"     },
       { id: "users",    label: "👤 Utilisateurs", adminOnly: true },
@@ -69,6 +70,7 @@
     if (aTab === "alerts")            h += renderAlerts();
     if (aTab === "orders")            h += renderOrders();
     if (aTab === "week")              h += renderWeek();
+    if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
     if (aTab === "logs")              h += renderLogs();
     if (aTab === "users" && isAdmin)  h += renderUsers();
@@ -368,6 +370,7 @@
       <div class="prog-track" style="margin-bottom:8px"><div class="prog-fill" style="width:${pct}%"></div></div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:16px;font-family:var(--ffm)">${doneAll}/${totalAll} (${pct}%)</div>
       <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="primary-btn" style="background:var(--bg4);color:var(--text);border:1px solid var(--border2)" onclick="MX.Pages.Admin.generateReport()"><i class="fas fa-print"></i> Rapport semaine (PDF)</button>
         <button class="danger-btn" onclick="MX.Pages.Admin.confirmReset()"><i class="fas fa-rotate-left"></i> Réinitialiser les coches</button>
         <button class="primary-btn" onclick="MX.Pages.Admin.confirmNewWeek()"><i class="fas fa-forward"></i> Lancer une nouvelle semaine</button>
       </div>
@@ -595,11 +598,32 @@
       { label:"Annuler", cls:"cancel" }
     ]);
   }
+  function _buildWeekStats() {
+    const { DAYS, getDaySlots, state } = MX;
+    let totalAll = 0, doneAll = 0;
+    const days = {};
+    DAYS.forEach(d => {
+      let dTotal = 0, dDone = 0;
+      getDaySlots(d.id).forEach(sl => {
+        (state.tasks[`${d.id}_${sl}`] || []).forEach(t => {
+          dTotal++;
+          if (state.checks[`${d.id}_${sl}_${t.id}`]) dDone++;
+        });
+      });
+      totalAll += dTotal;
+      doneAll  += dDone;
+      days[d.id] = { label: d.l, total: dTotal, done: dDone, pct: dTotal ? Math.round(dDone / dTotal * 100) : 0 };
+    });
+    return { totalTasks: totalAll, doneTasks: doneAll, pct: totalAll ? Math.round(doneAll / totalAll * 100) : 0, days };
+  }
+
   function confirmNewWeek() {
     const cur = MX.state.weekNum || 1;
-    MX.showModal("Nouvelle semaine ?","Coches remises à zéro. Tâches et équipe conservées.",[
+    MX.showModal("Nouvelle semaine ?","La semaine courante sera archivée. Coches remises à zéro. Tâches et équipe conservées.",[
       { label:"Lancer", cls:"confirm", fn: async()=>{
         try {
+          const stats = _buildWeekStats();
+          await MX.DB.archiveWeek({ weekLabel: MX.state.weekLabel, weekNum: cur, ...stats });
           const label = MX.mkWeekLabel();
           await MX.DB.newWeek(label, cur + 1);
           MX.state.weekNum   = cur + 1;
@@ -610,6 +634,119 @@
       }},
       { label:"Annuler", cls:"cancel" }
     ]);
+  }
+
+  // ── HISTORY ──
+  function renderHistory() {
+    const { state, esc, fmtTime } = MX;
+    const history = state.history || [];
+    if (!history.length) {
+      return `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
+        <div style="font-size:36px;margin-bottom:12px">📊</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucun historique</div>
+        <div style="font-size:13px;line-height:1.5">L'historique sera créé lors du prochain passage à une nouvelle semaine.</div>
+      </div>`;
+    }
+    let h = '';
+    history.forEach(w => {
+      const pct = w.pct || 0;
+      const pctColor = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
+      const dateStr  = w.archivedAt ? fmtTime(w.archivedAt) : '–';
+      h += `<div class="apcard" style="margin-bottom:10px">
+        <div class="aphd" style="padding:12px 16px">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700">${esc(w.weekLabel || 'Semaine ' + (w.weekNum || '?'))}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Archivé ${esc(dateStr)}</div>
+          </div>
+          <div style="font-size:22px;font-weight:700;font-family:var(--ffm);color:${pctColor}">${pct}%</div>
+        </div>
+        <div style="padding:10px 16px 14px">
+          <div class="prog-track" style="margin-bottom:8px"><div class="prog-fill" style="width:${pct}%"></div></div>
+          <div style="font-size:12px;color:var(--text2);font-family:var(--ffm);margin-bottom:${w.days ? '10px' : '0'}">${w.doneTasks || 0} / ${w.totalTasks || 0} tâches complétées</div>
+          ${w.days ? `<div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${Object.values(w.days).map(d => {
+              const dc = d.pct >= 80 ? 'var(--green)' : d.pct >= 40 ? 'var(--orange)' : 'var(--red)';
+              return `<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:${dc};font-family:var(--ffm)">${esc(d.label)} ${d.pct}%</span>`;
+            }).join('')}
+          </div>` : ''}
+        </div>
+      </div>`;
+    });
+    return h;
+  }
+
+  // ── REPORT ──
+  function generateReport() {
+    const { state, DAYS, SLOTS, getDaySlots, esc } = MX;
+    const date = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    let taskRows = '';
+    DAYS.forEach(d => {
+      getDaySlots(d.id).forEach(sl => {
+        const tasks = state.tasks[`${d.id}_${sl}`] || [];
+        if (!tasks.length) return;
+        const s = SLOTS[sl];
+        tasks.forEach(t => {
+          const checked = !!state.checks[`${d.id}_${sl}_${t.id}`];
+          const note    = (state.notes || {})[`${d.id}_${sl}_${t.id}`] || "";
+          taskRows += `<tr class="${checked ? 'done' : ''}">
+            <td>${d.l}</td><td>${s.l}</td>
+            <td>${t.text}${note ? `<br><small style="color:#888;font-style:italic">${note}</small>` : ''}</td>
+            <td style="text-align:center;color:#00a070;font-weight:700">${checked ? '✓' : ''}</td>
+          </tr>`;
+        });
+      });
+    });
+
+    const missions = state.missions || [];
+    const lowProds = (state.products || []).filter(p => parseInt(p.qty || 0) < parseInt(p.minQty || 0));
+    const msgs     = (state.messages || []).slice(0, 8);
+
+    const html = `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>Rapport Maintix — ${state.weekLabel}</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; padding: 24px; }
+h1 { font-size: 22px; margin-bottom: 4px; }
+h2 { font-size: 14px; margin: 20px 0 8px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 6px; }
+.meta { font-size: 11px; color: #666; margin-bottom: 20px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+th { background: #f5f5f5; text-align: left; padding: 7px 10px; font-size: 11px; font-weight: 700; border-bottom: 2px solid #ddd; }
+td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
+tr.done td { color: #bbb; text-decoration: line-through; }
+.empty { color: #999; font-size: 11px; padding: 10px 0; }
+@media print { body { padding: 0; } }
+</style></head><body>
+<h1>📋 Rapport Maintix</h1>
+<div class="meta">${esc(state.weekLabel)} — Généré le ${date}</div>
+
+<h2>✅ Tâches de la semaine</h2>
+<table><tr><th>Jour</th><th>Créneau</th><th>Tâche</th><th>✓</th></tr>
+${taskRows || '<tr><td colspan="4" class="empty" style="text-align:center">Aucune tâche</td></tr>'}
+</table>
+
+<h2>🚨 Missions</h2>
+${missions.length ? `<table><tr><th>Mission</th><th>Assigné à</th><th>Statut</th></tr>
+${missions.map(m => `<tr><td>${m.text}</td><td>${m.assignedTo === 'all' ? 'Tout le monde' : (m.assignedTo || '–')}</td><td>${m.done ? '✓ Terminé' : 'En cours'}</td></tr>`).join('')}
+</table>` : '<p class="empty">Aucune mission</p>'}
+
+<h2>📦 Stock critique</h2>
+${lowProds.length ? `<table><tr><th>Produit</th><th>Référence</th><th>Stock</th><th>Minimum</th></tr>
+${lowProds.map(p => `<tr><td>${p.name}</td><td style="font-family:monospace">${p.ref||'–'}</td><td style="color:#c00;font-weight:700">${parseInt(p.qty||0)}</td><td>${parseInt(p.minQty||0)}</td></tr>`).join('')}
+</table>` : '<p class="empty">Tout le stock est OK</p>'}
+
+${msgs.length ? `<h2>💬 Messages récents</h2>
+<table><tr><th>Auteur</th><th>Titre</th><th>Contenu</th></tr>
+${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.title||''}</td><td style="color:#555">${m.body||''}</td></tr>`).join('')}
+</table>` : ''}
+
+<script>setTimeout(()=>window.print(),400);</script>
+</body></html>`;
+
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+    else MX.toast("Autorisez les popups pour générer le rapport", true);
   }
 
   window.MX = window.MX || {};
@@ -623,6 +760,7 @@
     togAlert, updAlert, saveAlerts,
     updProd, updProdMin, addProd, delProd, saveProd,
     delMsg,
-    confirmClearLogs, confirmReset, confirmNewWeek
+    confirmClearLogs, confirmReset, confirmNewWeek,
+    generateReport
   };
 })();

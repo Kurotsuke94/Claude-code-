@@ -15,6 +15,20 @@
 
     const click = `onclick="MX.Pages.Checklist.toggle('${esc(dayId)}','${esc(slot)}','${esc(task.id)}')"`;
 
+    // Note button
+    const noteKey = `${dayId}_${slot}_${task.id}`;
+    const hasNote = !!((MX.state.notes || {})[noteKey]);
+    const cu      = MX.state.currentUser;
+    const canNote = !!(cu || MX.Auth.isAdmin());
+    let noteEl = '';
+    if (canNote || hasNote) {
+      noteEl = `<button class="note-btn${hasNote ? ' has-note' : ''}"
+        title="${hasNote ? 'Voir la note' : 'Ajouter une note'}"
+        onclick="event.stopPropagation();MX.Pages.Checklist.openNote('${esc(dayId)}','${esc(slot)}','${esc(task.id)}')">
+        <i class="fas fa-note-sticky"></i>
+      </button>`;
+    }
+
     let transferEl = '';
     if (!isChecked) {
       if (isPending) {
@@ -32,6 +46,7 @@
       <div class="tcb ${isChecked ? 'on' : ''}"><i class="fas fa-check"></i></div>
       <span class="ttext">${esc(task.text)}</span>
       ${assigneeName ? `<span class="twho" style="background:${avatarBg(assigneeName)};color:${avatarFg(assigneeName)}">${esc(assigneeName)}</span>` : ''}
+      ${noteEl}
       ${transferEl}
     </div>`;
   }
