@@ -23,7 +23,8 @@
     if (!m || !v || v.startsWith('REMPLACER')) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     try {
-      const token = await m.getToken({ vapidKey: v });
+      const reg   = await navigator.serviceWorker.getRegistration('/sw.js');
+      const token = await m.getToken({ vapidKey: v, serviceWorkerRegistration: reg });
       if (token) {
         await MX.DB.saveFcmToken(token, userName);
         window._fcmToken = token;
