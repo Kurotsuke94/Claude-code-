@@ -93,9 +93,12 @@
 
   function allNames() {
     const set = new Set();
+    // From team slot assignments
     ["matin","journee","soir"].forEach(sl => {
-      (MX.state.teams[sl] || []).forEach(n => { if (n.trim()) set.add(n.trim()); });
+      (MX.state.teams[sl] || []).forEach(n => { if (n && n.trim()) set.add(n.trim()); });
     });
+    // From user profiles (admin-created users)
+    (MX.state.users || []).forEach(u => { if (u.name && u.name.trim()) set.add(u.name.trim()); });
     return Array.from(set).sort();
   }
 
