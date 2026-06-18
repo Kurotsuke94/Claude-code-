@@ -15,7 +15,7 @@ const auth = firebase.auth();
 
 // FCM Messaging (requires VAPID key from Firebase Console)
 // Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair
-const VAPID_KEY = "REMPLACER_PAR_VOTRE_CLE_VAPID"; // ← Replace this!
+const VAPID_KEY = "BBeBP8S8P2V4TrJmyz2wV1NgYLIW4qj1IQRCHR53NJuObX7FMKzXyjo_1pfLUlRBbF9u1Uh6HycddmgnGHUbudM";
 let messaging = null;
 try {
   if (typeof firebase.messaging !== 'undefined' && firebase.messaging.isSupported && firebase.messaging.isSupported()) {
