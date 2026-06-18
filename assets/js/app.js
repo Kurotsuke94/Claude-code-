@@ -252,9 +252,11 @@
 
     MX.Auth.onLogin(() => {
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
+      if (MX.state.currentPage === "home")  MX.Pages.Home.render();
     });
     MX.Auth.onLogout(() => {
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
+      if (MX.state.currentPage === "home")  MX.Pages.Home.render();
     });
 
     // PWA install prompt

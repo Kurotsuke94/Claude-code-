@@ -181,16 +181,20 @@
     h += `<div class="section-label">Planning</div>`;
     h += `<div class="day-card" style="margin-bottom:24px">`;
 
+    if (canEdit) {
+      h += `<input type="file" id="plan-upload" accept="image/*" style="display:none" onchange="MX.Pages.Home.uploadPlan(this)">`;
+    }
+
     if (planUrl) {
       h += `<div style="padding:14px 16px">
         <img src="${esc(planUrl)}" alt="Planning" loading="lazy"
           style="width:100%;border-radius:10px;display:block;cursor:pointer;max-height:600px;object-fit:contain;background:var(--bg2)"
           onclick="MX.Pages.Home.openPlan()">
         ${canEdit ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-          <label for="plan-upload" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs)">
+          <button type="button" onclick="document.getElementById('plan-upload').click()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs)">
             <i class="fas fa-camera"></i> Changer la photo
-          </label>
-          <button onclick="MX.Pages.Home.clearPlan()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid rgba(255,80,80,.4);border-radius:8px;background:none;color:var(--red);cursor:pointer;font-size:13px;font-family:var(--ffs)">
+          </button>
+          <button type="button" onclick="MX.Pages.Home.clearPlan()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid rgba(255,80,80,.4);border-radius:8px;background:none;color:var(--red);cursor:pointer;font-size:13px;font-family:var(--ffs)">
             <i class="fas fa-trash"></i> Supprimer
           </button>
         </div>` : ''}
@@ -201,17 +205,13 @@
       if (canEdit) {
         h += `<div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucun planning affiché</div>
           <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Ajoutez une photo du planning hebdomadaire</div>
-          <label for="plan-upload" class="primary-btn" style="display:inline-flex;cursor:pointer;width:auto;padding:10px 24px">
+          <button type="button" onclick="document.getElementById('plan-upload').click()" class="primary-btn" style="margin:0 auto;width:auto;padding:10px 24px">
             <i class="fas fa-upload"></i> Ajouter une photo
-          </label>`;
+          </button>`;
       } else {
         h += `<div style="font-size:13px;color:var(--text2)">Aucun planning disponible</div>`;
       }
       h += `</div>`;
-    }
-
-    if (canEdit) {
-      h += `<input type="file" id="plan-upload" accept="image/*" style="display:none" onchange="MX.Pages.Home.uploadPlan(this)">`;
     }
 
     h += `</div>`;
