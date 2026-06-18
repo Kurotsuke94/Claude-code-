@@ -421,3 +421,40 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .r { color: var(--red); }
 .c { color: var(--cyan); }
 .o { color: var(--orange); }
+
+/* ── TRANSFERS ── */
+.transfer-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  border: 1.5px solid var(--border2); background: transparent;
+  color: var(--text3); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 12px;
+  transition: border-color var(--t), color var(--t), background var(--t);
+}
+.transfer-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+
+.transfer-pending-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 500; padding: 4px 9px;
+  border-radius: 8px; border: 1.5px solid var(--orange-border);
+  background: var(--orange-dim); color: var(--orange);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  font-family: var(--ffs); transition: opacity var(--t);
+}
+.transfer-pending-btn:hover { opacity: 0.75; }
+
+.trow.transferred { opacity: 0.4; cursor: default; }
+.trow.transferred:hover { background: transparent; }
+
+.transfer-card {
+  background: var(--bg3); border: 1.5px solid var(--cyan-border);
+  border-radius: var(--rx); padding: 14px 16px; margin-bottom: 10px;
+}
+.transfer-meta {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font-size: 11px; color: var(--text2);
+}
+.transfer-from { font-weight: 600; color: var(--cyan); }
+.transfer-day  { background: var(--bg4); padding: 2px 8px; border-radius: 10px; }
+.transfer-task { font-size: 14px; font-weight: 600; margin-bottom: 12px; line-height: 1.4; }
+.transfer-actions { display: flex; gap: 10px; }

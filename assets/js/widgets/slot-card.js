@@ -1,11 +1,13 @@
 (function () {
-  // Renders a full shift card (slot) with its task rows.
-  // workerFilter: if set and not admin, hides slots not assigned to this worker.
   function slotCard({ dayId, slot, tasks, assignment, checks, showAssign, workerFilter }) {
     const { SLOTS, esc, chipHtml, alertLevel, state } = MX;
-    const s = SLOTS[slot];
+    const s  = SLOTS[slot];
+    const cu = state.currentUser;
 
     if (workerFilter && !MX.Auth.canSeeAll() && assignment !== workerFilter) return '';
+
+    const canTransfer = !!(cu && !MX.Auth.isAdmin());
+    const transfers   = state.transfers || [];
 
     let done = 0;
     tasks.forEach(t => { if (checks[`${dayId}_${slot}_${t.id}`]) done++; });
@@ -41,10 +43,16 @@
     }
 
     tasks.forEach(t => {
+      const tr = transfers.find(x =>
+        x.taskId === t.id && x.dayId === dayId && x.slot === slot &&
+        (x.status === "pending" || x.status === "accepted")
+      );
       h += MX.Widgets.taskRow({
         task: t, dayId, slot,
         isChecked:    !!checks[`${dayId}_${slot}_${t.id}`],
-        assigneeName: assignment
+        assigneeName: assignment,
+        canTransfer,
+        transfer: tr ? { id: tr.id, status: tr.status, toUser: tr.toUser } : null
       });
     });
 

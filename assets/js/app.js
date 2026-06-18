@@ -188,6 +188,12 @@
       state.logs = list;
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
+
+    DB.listenTransfers(list => {
+      state.transfers = list;
+      updateNavProgress();
+      if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
+    });
   }
 
   // ── INIT ──

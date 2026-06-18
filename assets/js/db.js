@@ -12,7 +12,8 @@
     products:    () => db.collection("products"),
     messages:    () => db.collection("messages"),
     users:       () => db.collection("users"),
-    logs:        () => db.collection("logs")
+    logs:        () => db.collection("logs"),
+    transfers:   () => db.collection("transfers")
   };
 
   // ── LISTENERS (unsubscribe handles) ──
@@ -115,6 +116,11 @@
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
   }
+  function listenTransfers(cb) {
+    _unsub.transfers = R.transfers().orderBy("ts", "desc").limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
 
   // ── WRITES ──
   async function setCheck(taskKey, done) { await R.checks().update({ [taskKey]: done }); }
@@ -143,6 +149,16 @@
   async function addLog(data) {
     await R.logs().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
   }
+  async function createTransfer(data) {
+    await R.transfers().add({ ...data, status: "pending", ts: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+  async function updateTransfer(id, status) {
+    await R.transfers().doc(id).update({ status });
+  }
+  async function cancelTransfer(id) {
+    await R.transfers().doc(id).delete();
+  }
+
   async function clearLogs() {
     const snap  = await R.logs().limit(500).get();
     const batch = db.batch();
@@ -156,12 +172,13 @@
     initDefaults, unsubAll,
     listenWeek, listenTeams, listenAlerts, listenAssignments,
     listenChecks, listenTasks, listenAllTasks, listenProducts, listenMessages,
-    listenUsers, listenLogs,
+    listenUsers, listenLogs, listenTransfers,
     setCheck, setAssignment, setTasks,
     saveTeams, saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
     sendMessage, deleteMessage,
     addUser, updateUser, deleteUser,
-    addLog, clearLogs
+    addLog, clearLogs,
+    createTransfer, updateTransfer, cancelTransfer
   };
 })();

@@ -1,14 +1,38 @@
 (function () {
-  function taskRow({ task, dayId, slot, isChecked, assigneeName, canToggle }) {
+  function taskRow({ task, dayId, slot, isChecked, assigneeName, canTransfer, transfer }) {
     const { esc, avatarBg, avatarFg } = MX;
-    const click = canToggle !== false
-      ? `onclick="MX.Pages.Checklist.toggle('${esc(dayId)}','${esc(slot)}','${esc(task.id)}')"` : '';
+    const isPending     = transfer && transfer.status === "pending";
+    const isTransferred = transfer && transfer.status === "accepted";
+
+    if (isTransferred) {
+      const nc = MX.userColors(transfer.toUser);
+      return `<div class="trow transferred" id="tr_${esc(task.id)}">
+        <div class="tcb" style="border-color:var(--border)"><i class="fas fa-share" style="opacity:0.5;font-size:10px"></i></div>
+        <span class="ttext">${esc(task.text)}</span>
+        <span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(transfer.toUser)}</span>
+      </div>`;
+    }
+
+    const click = `onclick="MX.Pages.Checklist.toggle('${esc(dayId)}','${esc(slot)}','${esc(task.id)}')"`;
+
+    let transferEl = '';
+    if (!isChecked) {
+      if (isPending) {
+        transferEl = `<button class="transfer-pending-btn" onclick="event.stopPropagation();MX.Pages.Checklist.cancelTransfer('${esc(transfer.id)}')">
+          <i class="fas fa-clock"></i>${esc(transfer.toUser)}&nbsp;<i class="fas fa-xmark"></i>
+        </button>`;
+      } else if (canTransfer) {
+        transferEl = `<button class="transfer-btn" title="Transférer" onclick="event.stopPropagation();MX.Pages.Checklist.startTransfer('${esc(dayId)}','${esc(slot)}','${esc(task.id)}')">
+          <i class="fas fa-share"></i>
+        </button>`;
+      }
+    }
+
     return `<div class="trow ${isChecked ? 'done' : ''}" id="tr_${esc(task.id)}" ${click}>
       <div class="tcb ${isChecked ? 'on' : ''}"><i class="fas fa-check"></i></div>
       <span class="ttext">${esc(task.text)}</span>
-      ${assigneeName
-        ? `<span class="twho" style="background:${avatarBg(assigneeName)};color:${avatarFg(assigneeName)}">${esc(assigneeName)}</span>`
-        : ''}
+      ${assigneeName ? `<span class="twho" style="background:${avatarBg(assigneeName)};color:${avatarFg(assigneeName)}">${esc(assigneeName)}</span>` : ''}
+      ${transferEl}
     </div>`;
   }
 
