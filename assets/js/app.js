@@ -15,6 +15,8 @@
     { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
   ];
 
+  const SECTION_LABELS = ["PLANNING", "GESTION"];
+
   // ── UNREAD MESSAGES TRACKING ──
   function _getMsgsSeen() {
     return parseInt(localStorage.getItem("mx_msgs_seen") || "0", 10);
@@ -68,9 +70,13 @@
     let sideHtml = "";
     let botHtml  = `<div class="bottom-nav-inner">`;
 
+    sideHtml += `<div class="nav-section-label">PRINCIPAL</div>`;
+    let sepCount = 0;
+
     NAV.forEach(item => {
       if (!item) {
-        sideHtml += `<div style="height:1px;background:var(--border);margin:6px 8px"></div>`;
+        sideHtml += `<div class="nav-section-label">${SECTION_LABELS[sepCount] || ''}</div>`;
+        sepCount++;
         return;
       }
       const isActive = item.id === state.currentPage;
@@ -112,6 +118,60 @@
     botNav.innerHTML  = botHtml;
 
     MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
+    buildDeskHeader();
+  }
+
+  // ── DESK HEADER ──
+  function buildDeskHeader() {
+    const el = document.getElementById("desk-header");
+    if (!el) return;
+    const { state } = MX;
+    const cu    = state.currentUser;
+    const admin = state.adminUser;
+
+    let userHtml = '';
+    if (admin) {
+      const email    = admin.email || '';
+      const initials = email.substring(0, 2).toUpperCase();
+      userHtml = `<div class="dh-user" onclick="MX.Auth.logout()">
+        <div class="dh-avatar" style="background:var(--cyan-dim);color:var(--cyan)">${MX.esc(initials)}</div>
+        <span style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(email.split('@')[0])}</span>
+        <i class="fas fa-sign-out-alt" style="font-size:11px;color:var(--red);margin-left:2px"></i>
+      </div>`;
+    } else if (cu) {
+      const nc  = MX.userColors(cu.name);
+      const bg  = cu.color || nc.bg;
+      const fg  = cu.color ? MX._contrastColor(cu.color) : nc.fg;
+      const lbl = cu.role === 'responsable' ? 'Responsable' : 'Technicien';
+      userHtml = `<div class="dh-user" onclick="MX.Auth.clearCurrentUser()">
+        <div class="dh-avatar" style="background:${bg};color:${fg}">${MX.esc(cu.name.substring(0,2).toUpperCase())}</div>
+        <div>
+          <div style="font-size:12px;font-weight:600;line-height:1.2">${MX.esc(cu.name)}</div>
+          <div style="font-size:10px;color:var(--text3);line-height:1.2">${lbl}</div>
+        </div>
+      </div>`;
+    } else {
+      userHtml = `<div class="dh-user" onclick="MX.Auth.showUserPicker()">
+        <div class="dh-avatar" style="background:var(--bg4);color:var(--text3)"><i class="fas fa-user" style="font-size:10px"></i></div>
+        <span style="font-size:12px;color:var(--text3)">Connexion</span>
+      </div>`;
+    }
+
+    const seen   = _getMsgsSeen();
+    const unread = (state.messages || []).filter(m => _tsMs(m.ts) > seen).length;
+
+    el.innerHTML = `
+      <div class="dh-week" id="dh-week-label">
+        <i class="fas fa-calendar-week" style="font-size:10px"></i>
+        ${MX.esc(state.weekLabel || MX.mkWeekLabel())}
+      </div>
+      <div class="dh-spacer"></div>
+      <button class="dh-btn" onclick="MX.showPage('msgs')" title="Messages">
+        <i class="fas fa-bell"></i>
+        <span class="nav-badge${unread ? ' show' : ''}" id="dh-bell-badge">${unread > 9 ? '9+' : unread || ''}</span>
+      </button>
+      ${userHtml}
+    `;
   }
 
   function updateNavProgress() {
@@ -136,6 +196,8 @@
     if (badge)  { badge.textContent = unread > 9 ? "9+" : unread; badge.className = "nav-badge" + (unread ? " show" : ""); }
     const bnBadge = document.getElementById("bnb_msgs");
     if (bnBadge){ bnBadge.textContent = unread > 9 ? "9+" : unread; bnBadge.className = "nav-badge" + (unread ? " show" : ""); }
+    const dhBadge = document.getElementById("dh-bell-badge");
+    if (dhBadge){ dhBadge.textContent = unread > 9 ? "9+" : (unread || ""); dhBadge.className = "nav-badge" + (unread ? " show" : ""); }
   }
 
   // ── MISSION NOTIFICATIONS ──
@@ -161,6 +223,8 @@
     DB.listenWeek(data => {
       state.weekLabel = data.label || "";
       state.weekNum   = data.num   || 1;
+      const dhWeek = document.getElementById("dh-week-label");
+      if (dhWeek) dhWeek.innerHTML = `<i class="fas fa-calendar-week" style="font-size:10px"></i> ${MX.esc(state.weekLabel)}`;
       if (state.currentPage === "home") MX.Pages.Home.render();
     });
 
@@ -261,15 +325,16 @@
     });
 
     MX.Auth.onLogin(() => {
+      buildDeskHeader();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
     });
     MX.Auth.onLogout(() => {
+      buildDeskHeader();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
     });
 
-    // PWA install prompt
     window.addEventListener("beforeinstallprompt", e => {
       e.preventDefault();
       MX._installPrompt = e;
@@ -291,7 +356,6 @@
     buildNav();
     MX.showPage(MX.todayId());
 
-    // Prompt user login after data loads
     setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
     if ("serviceWorker" in navigator) {
@@ -315,12 +379,10 @@
     }
   };
 
-  // Called from a user gesture (button click) — works on Android PWA + iOS 16.4+ standalone
   window.MX.enableNotifications = async function() {
     if (!("Notification" in window)) {
       MX.toast("Notifications non supportées sur ce navigateur", true); return;
     }
-    // iOS Safari: only works when installed as PWA (standalone)
     const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isStandalone = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
     if (isIos && !isStandalone) {
@@ -334,7 +396,6 @@
     const perm = await Notification.requestPermission();
     if (perm === "granted") {
       MX.toast("Notifications activées ✓");
-      // Try to register FCM token now
       const cu = MX.state.currentUser;
       const ad = MX.state.adminUser;
       if (cu) MX.Auth.setCurrentUser(cu);
@@ -346,6 +407,7 @@
   };
 
   window.MX.buildNav          = buildNav;
+  window.MX.buildDeskHeader   = buildDeskHeader;
   window.MX.updateNavProgress = updateNavProgress;
 
   document.addEventListener("DOMContentLoaded", init);

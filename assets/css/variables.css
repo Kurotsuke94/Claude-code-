@@ -1,61 +1,69 @@
 :root {
-  /* Backgrounds */
-  --bg:      #0C0C0E;
-  --bg2:     #131316;
-  --bg3:     #1A1A1F;
-  --bg4:     #212128;
-  --bg5:     #2A2A34;
+  /* Backgrounds — dark navy SaaS */
+  --bg:   #080B14;
+  --bg2:  #0D1424;
+  --bg3:  #0F172A;
+  --bg4:  #1A2540;
+  --bg5:  #243252;
 
   /* Borders */
-  --border:  #252530;
-  --border2: #303040;
-  --border3: #3A3A50;
+  --border:  #1A2540;
+  --border2: #243252;
+  --border3: #2D3F6E;
 
   /* Text */
-  --text:    #EEEEF5;
-  --text2:   #8888A8;
-  --text3:   #50506A;
+  --text:  #F1F5F9;
+  --text2: #94A3B8;
+  --text3: #475569;
 
   /* Brand */
-  --cyan:        #00E5CC;
-  --cyan-dim:    #003D38;
-  --cyan-border: #006B60;
+  --cyan:        #00F5D4;
+  --cyan-dim:    #003B35;
+  --cyan-border: #007A6E;
 
   /* Slots */
-  --matin:        #F5A623;
-  --matin-dim:    #1E1400;
-  --matin-border: #3D2A00;
-  --jour:         #4F8EF7;
-  --jour-dim:     #0A1628;
-  --jour-border:  #1A3560;
+  --matin:        #F59E0B;
+  --matin-dim:    #1C1400;
+  --matin-border: #451A03;
+  --jour:         #3B82F6;
+  --jour-dim:     #071228;
+  --jour-border:  #1E3A8A;
   --soir:         #A78BFA;
   --soir-dim:     #120D1F;
-  --soir-border:  #2A1F50;
+  --soir-border:  #2E1065;
 
   /* State */
-  --green:        #00D68F;
-  --green-dim:    #00200F;
-  --green-border: #005C30;
-  --red:          #FF4F4F;
-  --red-dim:      #200A0A;
-  --red-border:   #5C1A1A;
-  --orange:       #FF8C42;
-  --orange-dim:   #1E1000;
-  --orange-border:#5C2A00;
+  --green:        #22C55E;
+  --green-dim:    #052E16;
+  --green-border: #166534;
+  --red:          #EF4444;
+  --red-dim:      #1F0707;
+  --red-border:   #7F1D1D;
+  --orange:       #F97316;
+  --orange-dim:   #1C0A00;
+  --orange-border: #7C2D12;
+
+  /* Shadows & glows */
+  --shadow-card:  0 4px 24px rgba(0,0,0,0.4);
+  --shadow-hover: 0 8px 32px rgba(0,0,0,0.5);
+  --glow-cyan:    0 0 24px rgba(0,245,212,0.12);
+  --glow-green:   0 0 24px rgba(34,197,94,0.12);
+  --glow-red:     0 0 24px rgba(239,68,68,0.12);
 
   /* Radius */
   --r:  12px;
   --rs:  8px;
   --rx: 16px;
 
-  /* Typography — fallbacks système si Google Fonts bloqué */
+  /* Typography */
   --ffm: 'Space Mono', ui-monospace, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
   --ffs: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* Layout */
-  --sidebar-w: 260px;
-  --topbar-h:  52px;
-  --bottomnav-h: 60px;
+  --sidebar-w:     260px;
+  --topbar-h:      52px;
+  --bottomnav-h:   60px;
+  --desk-header-h: 60px;
 
   /* Transitions */
   --t: 0.18s ease;
