@@ -13,8 +13,10 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db   = firebase.firestore();
 const auth = firebase.auth();
 
-// FCM Messaging (requires VAPID key from Firebase Console)
-// Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair
+// Initialise le namespace global avant tous les autres scripts
+window.MX = window.MX || {};
+
+// FCM Messaging
 const VAPID_KEY = "BBeBP8S8P2V4TrJmyz2wV1NgYLIW4qj1IQRCHR53NJuObX7FMKzXyjo_1pfLUlRBbF9u1Uh6HycddmgnGHUbudM";
 let messaging = null;
 try {
@@ -22,11 +24,8 @@ try {
     messaging = firebase.messaging();
   }
 } catch(e) { console.warn('FCM not supported:', e); }
-window.MX.VAPID_KEY  = VAPID_KEY;
-window.MX.messaging  = messaging;
-
-// Initialise le namespace global avant tous les autres scripts
-window.MX = window.MX || {};
+window.MX.VAPID_KEY = VAPID_KEY;
+window.MX.messaging = messaging;
 window.MX.state = {
   adminUser:     null,
   currentPage:   null,
