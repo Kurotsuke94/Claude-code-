@@ -70,11 +70,21 @@
 
     // ── Missions section (above everything) ──
     if (dayMissions.length) {
-      h += `<div class="section-label" style="color:var(--red);margin-bottom:8px"><i class="fas fa-circle-exclamation"></i>&nbsp;MISSIONS (${dayMissions.length})</div>`;
+      h += `<div class="slot-card" style="border-color:var(--red-border);margin-bottom:20px">
+        <div class="slot-head" style="background:var(--red-dim);border-bottom-color:var(--red-border)">
+          <div class="ch-ico" style="background:var(--red-border);color:var(--red)"><i class="fas fa-circle-exclamation"></i></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700;color:var(--red)">MISSIONS</div>
+            <div class="slot-dl">${dayMissions.length} mission${dayMissions.length > 1 ? 's' : ''} en cours</div>
+            <span class="slot-chip alert"><i class="fas fa-circle-exclamation"></i> À traiter</span>
+          </div>
+          <div class="slot-pct r">${dayMissions.length}</div>
+        </div>`;
       dayMissions.forEach(m => {
         const isForAll  = m.assignedTo === "all" || !m.assignedTo;
         const canToggle = canAll || (cu && (isForAll || cu.name === m.assignedTo));
         const clickAttr = canToggle ? `onclick="MX.Pages.Checklist.toggleMission('${esc(m.id)}')"` : '';
+        const ptrStyle  = canToggle ? '' : 'cursor:default;pointer-events:none;opacity:0.6';
         let badge = '';
         if (isForAll) {
           badge = `<span class="twho" style="background:var(--red-border);color:var(--red)">Tous</span>`;
@@ -82,14 +92,16 @@
           const nc = MX.userColors(m.assignedTo);
           badge = `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>`;
         }
-        h += `<div class="mission-card ${canToggle ? 'clickable' : ''}" ${clickAttr}>
-          <div class="mission-icon"><i class="fas fa-exclamation"></i></div>
-          <span class="mission-text">${esc(m.text)}</span>
+        h += `<div class="trow" ${clickAttr} style="${ptrStyle}">
+          <div class="tcb" style="border-color:var(--red-border)"><i class="fas fa-check"></i></div>
+          <div style="flex:1;min-width:0">
+            <div class="ttext">${esc(m.text)}</div>
+            ${m.createdBy ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">par ${esc(m.createdBy)}</div>` : ''}
+          </div>
           ${badge}
-          ${m.createdBy ? `<span style="font-size:10px;color:var(--text3);flex-shrink:0">${esc(m.createdBy)}</span>` : ''}
         </div>`;
       });
-      h += `<div style="height:4px"></div>`;
+      h += `</div>`;
     }
 
     // ── Incoming transfers section ──
