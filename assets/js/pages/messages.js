@@ -4,13 +4,13 @@
   function render() {
     const { state, esc, fmtTime, avatarBg, avatarFg, avatarTxt } = MX;
     const el    = document.getElementById("main-content");
-    const names = allNames();
     const isAdm = MX.Auth.isAdmin();
+    const cu    = state.currentUser;
+    const author = isAdm ? (state.adminUser.displayName || "Admin") : (cu ? cu.name : null);
 
     // Preserve compose state across re-renders
-    const savedAuthor = (document.getElementById("msg-author") || {}).value || "";
-    const savedTitle  = ((document.getElementById("msg-title") || {}).value || "");
-    const savedBody   = ((document.getElementById("msg-body")  || {}).value || "");
+    const savedTitle = ((document.getElementById("msg-title") || {}).value || "");
+    const savedBody  = ((document.getElementById("msg-body")  || {}).value || "");
 
     let h = `
       <div class="ph">
@@ -22,31 +22,54 @@
         <div class="page-cols">
           <div>
             <div class="section-label">Nouveau message</div>
-            <div class="compose">
-              <select class="asel" id="msg-author">
-                <option value="">— Votre nom —</option>
-                ${names.map(n => {
-                  const sel = savedAuthor ? (savedAuthor === n) : (state.currentUser && state.currentUser.name === n);
-                  return `<option value="${esc(n)}" ${sel ? 'selected' : ''}>${esc(n)}</option>`;
-                }).join('')}
-              </select>
-              <input class="fi" id="msg-title" placeholder="Titre du message…" maxlength="80" value="${esc(savedTitle)}">
-              <textarea class="fi" id="msg-body" placeholder="Votre message…" rows="4">${esc(savedBody)}</textarea>
-              <div style="display:flex;gap:8px;align-items:center">
-                <button type="button" onclick="document.getElementById('msg-photo-input').click()" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs);flex-shrink:0">
-                  <i class="fas fa-camera"></i> Photo
-                </button>
-                <span id="msg-photo-name" style="font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1"></span>
-                <button id="msg-photo-clear" onclick="MX.Pages.Messages.clearPhoto()" style="display:none;background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:4px"><i class="fas fa-times"></i></button>
-              </div>
-              <input type="file" id="msg-photo-input" accept="image/*" style="display:none" onchange="MX.Pages.Messages.previewPhoto(this)">
-              <div id="msg-photo-preview" style="display:none;position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border2)">
-                <img id="msg-photo-img" style="width:100%;max-height:220px;object-fit:cover;display:block">
-              </div>
-              <button class="primary-btn" onclick="MX.Pages.Messages.send()">
-                <i class="fas fa-paper-plane"></i> Envoyer
-              </button>
-            </div>
+            <div class="compose">`;
+
+    if (!author) {
+      // Not logged in — prompt to connect
+      h += `
+        <div style="text-align:center;padding:24px 16px;background:var(--bg3);border-radius:12px;border:1px solid var(--border2)">
+          <div style="font-size:28px;margin-bottom:10px">💬</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px">Connectez-vous pour écrire</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Sélectionnez votre profil pour envoyer un message</div>
+          <button onclick="MX.Auth.showUserPicker()" class="primary-btn" style="margin:0 auto;width:auto;padding:10px 24px">
+            <i class="fas fa-user-circle"></i> Se connecter
+          </button>
+        </div>`;
+    } else {
+      // Show who is writing (read-only)
+      const bg = isAdm ? "var(--cyan)" : avatarBg(author);
+      const fg = isAdm ? "#0C0C0E" : avatarFg(author);
+      const initials = author.substring(0,2).toUpperCase();
+      const roleLabel = isAdm ? "Administrateur" : (cu.role === "responsable" ? "Responsable" : "Technicien");
+
+      h += `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border-radius:10px;border:1px solid var(--border2);margin-bottom:4px">
+          <div style="width:36px;height:36px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(initials)}</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${esc(author)}</div>
+            <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
+          </div>
+          <span style="font-size:11px;color:var(--cyan)"><i class="fas fa-check-circle"></i></span>
+        </div>
+        <input class="fi" id="msg-title" placeholder="Titre du message…" maxlength="80" value="${esc(savedTitle)}">
+        <textarea class="fi" id="msg-body" placeholder="Votre message…" rows="4">${esc(savedBody)}</textarea>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button type="button" onclick="document.getElementById('msg-photo-input').click()" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs);flex-shrink:0">
+            <i class="fas fa-camera"></i> Photo
+          </button>
+          <span id="msg-photo-name" style="font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1"></span>
+          <button id="msg-photo-clear" onclick="MX.Pages.Messages.clearPhoto()" style="display:none;background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:4px"><i class="fas fa-times"></i></button>
+        </div>
+        <input type="file" id="msg-photo-input" accept="image/*" style="display:none" onchange="MX.Pages.Messages.previewPhoto(this)">
+        <div id="msg-photo-preview" style="display:none;position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border2)">
+          <img id="msg-photo-img" style="width:100%;max-height:220px;object-fit:cover;display:block">
+        </div>
+        <button class="primary-btn" onclick="MX.Pages.Messages.send()">
+          <i class="fas fa-paper-plane"></i> Envoyer
+        </button>`;
+    }
+
+    h += `</div>
           </div>
           <div>
             <div class="section-label">${(state.messages || []).length} message${(state.messages || []).length !== 1 ? 's' : ''}</div>`;
@@ -75,7 +98,6 @@
     h += `</div></div></div>`;
     el.innerHTML = h;
 
-    // Restore pending photo preview after re-render
     if (_pendingFile) _restorePreview();
   }
 
@@ -89,17 +111,6 @@
     preview.style.display = "block";
     if (name)  { name.textContent = _pendingFile.name; }
     if (clear) { clear.style.display = "inline-block"; }
-  }
-
-  function allNames() {
-    const set = new Set();
-    // From team slot assignments
-    ["matin","journee","soir"].forEach(sl => {
-      (MX.state.teams[sl] || []).forEach(n => { if (n && n.trim()) set.add(n.trim()); });
-    });
-    // From user profiles (admin-created users)
-    (MX.state.users || []).forEach(u => { if (u.name && u.name.trim()) set.add(u.name.trim()); });
-    return Array.from(set).sort();
   }
 
   function previewPhoto(input) {
@@ -125,7 +136,6 @@
     const MAX_PX  = 600;
     const QUALITY = 0.65;
     return new Promise(function(resolve) {
-      // Safety timeout: if canvas hangs (common on some iOS), fall back to original
       var timer = setTimeout(function() { resolve(file); }, 10000);
       var img = new Image();
       var url = URL.createObjectURL(file);
@@ -148,12 +158,16 @@
   }
 
   async function send() {
-    const author = (document.getElementById("msg-author") || {}).value || "";
-    const title  = ((document.getElementById("msg-title") || {}).value || "").trim();
-    const body   = ((document.getElementById("msg-body")  || {}).value || "").trim();
+    const isAdm = MX.Auth.isAdmin();
+    const cu    = MX.state.currentUser;
+    const author = isAdm ? (MX.state.adminUser.displayName || "Admin") : (cu ? cu.name : null);
 
-    if (!author) return MX.toast("Sélectionnez votre nom", true);
-    if (!title)  return MX.toast("Ajoutez un titre", true);
+    if (!author) return MX.toast("Connectez-vous pour envoyer un message", true);
+
+    const title = ((document.getElementById("msg-title") || {}).value || "").trim();
+    const body  = ((document.getElementById("msg-body")  || {}).value || "").trim();
+
+    if (!title) return MX.toast("Ajoutez un titre", true);
     if (!body && !_pendingFile) return MX.toast("Écrivez un message ou ajoutez une photo", true);
 
     const btn = document.querySelector(".compose .primary-btn");
