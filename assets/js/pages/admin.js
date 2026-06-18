@@ -167,6 +167,7 @@
           </select>
           <select class="fi fi-sm" id="ms-user" style="flex:1;min-width:130px">
             <option value="">— Assigner à —</option>
+            <option value="all">🌍 Tout le monde</option>
             ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
           </select>
         </div>
@@ -194,7 +195,7 @@
               <div style="font-size:13px;font-weight:600">${esc(m.text)}</div>
               <div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
                 <span style="color:var(--red)"><i class="fas fa-calendar-day"></i> ${esc(day)}</span>
-                ${nc ? `<span style="background:${nc.bg};color:${nc.fg};padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">${esc(m.assignedTo)}</span>` : `<span style="color:var(--text3)">Non assigné</span>`}
+                ${m.assignedTo === "all" ? `<span style="background:var(--red-border);color:var(--red);padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">Tout le monde</span>` : nc ? `<span style="background:${nc.bg};color:${nc.fg};padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">${esc(m.assignedTo)}</span>` : `<span style="color:var(--text3)">Non assigné</span>`}
                 ${m.createdBy ? `<span style="color:var(--text3)">par ${esc(m.createdBy)}</span>` : ''}
               </div>
             </div>

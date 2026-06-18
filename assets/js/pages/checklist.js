@@ -70,20 +70,26 @@
 
     // ── Missions section (above everything) ──
     if (dayMissions.length) {
-      h += `<div class="mission-section">
-        <div class="mission-header"><i class="fas fa-circle-exclamation"></i>&nbsp;MISSIONS (${dayMissions.length})</div>`;
+      h += `<div class="section-label" style="color:var(--red);margin-bottom:8px"><i class="fas fa-circle-exclamation"></i>&nbsp;MISSIONS (${dayMissions.length})</div>`;
       dayMissions.forEach(m => {
-        const canToggle = canAll || (cu && cu.name === m.assignedTo);
-        const nc        = m.assignedTo ? MX.userColors(m.assignedTo) : null;
+        const isForAll  = m.assignedTo === "all" || !m.assignedTo;
+        const canToggle = canAll || (cu && (isForAll || cu.name === m.assignedTo));
         const clickAttr = canToggle ? `onclick="MX.Pages.Checklist.toggleMission('${esc(m.id)}')"` : '';
-        h += `<div class="mission-row ${canToggle ? 'clickable' : ''}" ${clickAttr}>
+        let badge = '';
+        if (isForAll) {
+          badge = `<span class="twho" style="background:var(--red-border);color:var(--red)">Tous</span>`;
+        } else {
+          const nc = MX.userColors(m.assignedTo);
+          badge = `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>`;
+        }
+        h += `<div class="mission-card ${canToggle ? 'clickable' : ''}" ${clickAttr}>
           <div class="mission-icon"><i class="fas fa-exclamation"></i></div>
           <span class="mission-text">${esc(m.text)}</span>
-          ${nc ? `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>` : ''}
+          ${badge}
           ${m.createdBy ? `<span style="font-size:10px;color:var(--text3);flex-shrink:0">${esc(m.createdBy)}</span>` : ''}
         </div>`;
       });
-      h += `</div><div style="height:4px"></div>`;
+      h += `<div style="height:4px"></div>`;
     }
 
     // ── Incoming transfers section ──
@@ -288,7 +294,8 @@
     const m  = (MX.state.missions || []).find(x => x.id === missionId);
     const cu = MX.state.currentUser;
     if (!m) return;
-    if (!MX.Auth.canSeeAll() && cu?.name !== m.assignedTo) return MX.toast("Non autorisé", true);
+    const isForAll = m.assignedTo === "all" || !m.assignedTo;
+    if (!MX.Auth.canSeeAll() && !isForAll && cu?.name !== m.assignedTo) return MX.toast("Non autorisé", true);
     try {
       await MX.DB.updateMission(missionId, { done: true });
       const actorName = cu?.name || (MX.state.adminUser?.email || "inconnu");
