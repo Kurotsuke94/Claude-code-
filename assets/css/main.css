@@ -63,20 +63,24 @@ html, body {
   z-index: 100;
 }
 .sidebar-header {
-  display: flex;
-  align-items: center;
+  display: flex !important;
+  align-items: center !important;
   justify-content: flex-start;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  height: 56px;
-  overflow: hidden;
+  flex-shrink: 0 !important;
+  height: 56px !important;
+  max-height: 56px !important;
+  min-height: 56px !important;
+  overflow: hidden !important;
 }
 .sidebar-logo {
-  height: 34px;
-  width: auto;
-  max-width: 160px;
-  object-fit: contain;
+  height: 34px !important;
+  width: auto !important;
+  max-width: 150px !important;
+  max-height: 34px !important;
+  object-fit: contain !important;
+  display: block;
 }
 .logo-mark {
   width: 34px; height: 34px;
