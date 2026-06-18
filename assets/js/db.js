@@ -144,10 +144,26 @@
   async function updateProduct(id, p) { await R.products().doc(id).update(p); }
   async function deleteProduct(id)    { await R.products().doc(id).delete(); }
 
-  async function sendMessage(data) {
-    await R.messages().add({ author: data.author, title: data.title, body: data.body, ts: firebase.firestore.FieldValue.serverTimestamp() });
+  async function uploadMessageImage(file) {
+    const ext  = (file.name || "photo.jpg").split('.').pop().toLowerCase();
+    const path = `messages/${uuid()}.${ext}`;
+    const ref  = storage.ref(path);
+    await ref.put(file);
+    return await ref.getDownloadURL();
   }
-  async function deleteMessage(id) { await R.messages().doc(id).delete(); }
+
+  async function sendMessage(data) {
+    const doc = { author: data.author, title: data.title, body: data.body || "", ts: firebase.firestore.FieldValue.serverTimestamp() };
+    if (data.imageUrl) doc.imageUrl = data.imageUrl;
+    await R.messages().add(doc);
+  }
+  async function deleteMessage(id) {
+    const snap = await R.messages().doc(id).get();
+    if (snap.exists && snap.data().imageUrl) {
+      try { await storage.refFromURL(snap.data().imageUrl).delete(); } catch(e) {}
+    }
+    await R.messages().doc(id).delete();
+  }
 
   async function addUser(data)        { await R.users().add(data); }
   async function updateUser(id, data) { await R.users().doc(id).update(data); }
@@ -200,7 +216,7 @@
     setCheck, setAssignment, setTasks,
     saveTeams, saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
-    sendMessage, deleteMessage,
+    uploadMessageImage, sendMessage, deleteMessage,
     addUser, updateUser, deleteUser,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
