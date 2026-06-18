@@ -29,7 +29,7 @@
     {
       "source": "functions",
       "codebase": "default",
-      "runtime": "nodejs18"
+      "runtime": "nodejs22"
     }
   ]
 }
