@@ -6,7 +6,7 @@ const SLOT_LABELS = { matin: "Matin", journee: "Journée", soir: "Soir" };
 const DAY_IDS     = ["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"];
 
 // ── PUSH ON NEW MISSION ──
-exports.onNewMission = functions.firestore
+exports.onNewMission = functions.region("europe-west1").firestore
   .document("missions/{missionId}")
   .onCreate(async snap => {
     const { text, assignedTo, createdBy } = snap.data();
