@@ -122,6 +122,22 @@
     if (bnBadge) { bnBadge.textContent = cnt > 9 ? "9+" : cnt; bnBadge.className = "nav-badge" + (cnt ? " show" : ""); }
   }
 
+  // ── MISSION NOTIFICATIONS ──
+  const _notifiedMissions = new Set();
+  function _notifyNewMissions(prev, next) {
+    const cu = MX.state.currentUser;
+    if (!cu) return;
+    const prevIds = new Set(prev.map(m => m.id));
+    next.forEach(m => {
+      if (!prevIds.has(m.id) && m.assignedTo === cu.name && !m.done && !_notifiedMissions.has(m.id)) {
+        _notifiedMissions.add(m.id);
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Nouvelle mission", { body: m.text + (m.createdBy ? " — de " + m.createdBy : ""), icon: "/assets/icons/icon-192.png" });
+        }
+      }
+    });
+  }
+
   // ── FIRESTORE LISTENERS ──
   function setupListeners() {
     const { DB, state } = MX;
@@ -194,6 +210,14 @@
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
     });
+
+    DB.listenMissions(list => {
+      _notifyNewMissions(MX.state.missions || [], list);
+      state.missions = list;
+      updateNavProgress();
+      if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
+      if (state.currentPage === "admin") MX.Pages.Admin.render();
+    });
   }
 
   // ── INIT ──
@@ -210,6 +234,18 @@
     MX.Auth.onLogout(() => {
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
     });
+
+    // Notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    // PWA install prompt
+    window.addEventListener("beforeinstallprompt", e => {
+      e.preventDefault();
+      MX._installPrompt = e;
+      MX._canInstall = true;
+    });
+    window.addEventListener("appinstalled", () => { MX._canInstall = false; MX._installPrompt = null; });
 
     try {
       await MX.DB.initDefaults();
@@ -241,6 +277,13 @@
     shell.classList.remove("hidden");
     setTimeout(() => { loading.style.display = "none"; }, 400);
   }
+
+  window.MX.tryInstall = function() {
+    if (MX._installPrompt) {
+      MX._installPrompt.prompt();
+      MX._installPrompt.userChoice.then(() => { MX._installPrompt = null; MX._canInstall = false; });
+    }
+  };
 
   window.MX.buildNav          = buildNav;
   window.MX.updateNavProgress = updateNavProgress;

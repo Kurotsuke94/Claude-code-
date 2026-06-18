@@ -3,41 +3,59 @@
   let aDay = "lundi";
 
   function render() {
-    const el = document.getElementById("main-content");
-    if (!MX.Auth.isAdmin()) {
+    const el      = document.getElementById("main-content");
+    const isAdmin = MX.Auth.isAdmin();
+    const isResp  = MX.Auth.canSeeAll() && !isAdmin;
+
+    if (!isAdmin && !isResp) {
+      const hasUsers = (MX.state.users || []).length > 0;
       el.innerHTML = `
         <div class="ph"><div class="ph-eye">ADMIN</div><div class="ph-title">Administration</div></div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:50vh;gap:20px;padding:40px">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:50vh;gap:16px;padding:40px">
           <div style="width:76px;height:76px;border-radius:22px;background:var(--bg3);border:1px solid var(--border3);display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--text3)">
             <i class="fas fa-lock"></i>
           </div>
           <div style="font-size:20px;font-weight:700">Accès restreint</div>
-          <div style="font-size:13px;color:var(--text2);text-align:center;line-height:1.6;max-width:300px">Connectez-vous avec votre compte administrateur pour accéder à ce panneau.</div>
+          <div style="font-size:13px;color:var(--text2);text-align:center;line-height:1.6;max-width:300px">Connectez-vous pour accéder à ce panneau.</div>
           <button class="primary-btn" style="max-width:280px" onclick="MX.Auth.showLogin(()=>MX.showPage('admin'))">
-            <i class="fas fa-sign-in-alt"></i> Se connecter
+            <i class="fas fa-sign-in-alt"></i> Connexion Admin
           </button>
+          ${hasUsers ? `<button class="primary-btn" style="max-width:280px;background:var(--bg4);color:var(--cyan);border:1px solid var(--cyan-border)" onclick="MX.Auth.showUserPicker()">
+            <i class="fas fa-user"></i> Connexion Responsable
+          </button>` : ''}
         </div>`;
       return;
     }
 
-    const tabs = [
-      { id: "tasks",   label: "📋 Tâches"       },
-      { id: "team",    label: "👥 Équipe"        },
-      { id: "users",   label: "👤 Utilisateurs"  },
-      { id: "alerts",  label: "🔔 Alertes"       },
-      { id: "orders",  label: "📦 Stock"         },
-      { id: "week",    label: "📅 Semaine"       },
-      { id: "msgs",    label: "💬 Messages"      },
-      { id: "logs",    label: "📋 Activité"      },
-      { id: "pin",     label: "🔑 Accès"         }
+    const allTabs = [
+      { id: "tasks",    label: "📋 Tâches"      },
+      { id: "team",     label: "👥 Équipe"       },
+      { id: "missions", label: "🚨 Missions"     },
+      { id: "alerts",   label: "🔔 Alertes"      },
+      { id: "orders",   label: "📦 Stock"        },
+      { id: "week",     label: "📅 Semaine"      },
+      { id: "msgs",     label: "💬 Messages"     },
+      { id: "logs",     label: "📋 Activité"     },
+      { id: "users",    label: "👤 Utilisateurs", adminOnly: true },
+      { id: "pin",      label: "🔑 Accès",        adminOnly: true }
     ];
+    const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
+
+    if (isResp && (aTab === "users" || aTab === "pin")) aTab = "missions";
+
+    const actionBtn = isAdmin
+      ? `<button class="logout-btn" onclick="MX.Auth.logout()"><i class="fas fa-lock"></i> Verrouiller</button>`
+      : `<button class="logout-btn" onclick="MX.Auth.clearCurrentUser()"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>`;
 
     let h = `
       <div class="ph">
-        <div class="ph-eye">ADMINISTRATION</div>
+        <div class="ph-eye">${isAdmin ? 'ADMINISTRATION' : 'RESPONSABLE'}</div>
         <div class="ph-row">
-          <div><div class="ph-title">Panneau Admin</div><div class="ph-sub">Configuration et gestion</div></div>
-          <button class="logout-btn" onclick="MX.Auth.logout()"><i class="fas fa-lock"></i> Verrouiller</button>
+          <div>
+            <div class="ph-title">Panneau ${isAdmin ? 'Admin' : 'Responsable'}</div>
+            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Missions et gestion des tâches'}</div>
+          </div>
+          ${actionBtn}
         </div>
       </div>
       <div class="page-body">
@@ -45,15 +63,16 @@
           ${tabs.map(t => `<button class="atab ${aTab===t.id?'on':''}" onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`).join('')}
         </div>`;
 
-    if (aTab === "tasks")   h += renderTasks();
-    if (aTab === "team")    h += renderTeam();
-    if (aTab === "users")   h += renderUsers();
-    if (aTab === "alerts")  h += renderAlerts();
-    if (aTab === "orders")  h += renderOrders();
-    if (aTab === "week")    h += renderWeek();
-    if (aTab === "msgs")    h += renderMsgs();
-    if (aTab === "logs")    h += renderLogs();
-    if (aTab === "pin")     h += renderPin();
+    if (aTab === "tasks")             h += renderTasks();
+    if (aTab === "team")              h += renderTeam();
+    if (aTab === "missions")          h += renderMissions();
+    if (aTab === "alerts")            h += renderAlerts();
+    if (aTab === "orders")            h += renderOrders();
+    if (aTab === "week")              h += renderWeek();
+    if (aTab === "msgs")              h += renderMsgs();
+    if (aTab === "logs")              h += renderLogs();
+    if (aTab === "users" && isAdmin)  h += renderUsers();
+    if (aTab === "pin"   && isAdmin)  h += renderPin();
 
     h += `</div>`;
     el.innerHTML = h;
@@ -124,6 +143,86 @@
     return h;
   }
 
+  // ── MISSIONS ──
+  function renderMissions() {
+    const { state, DAYS, esc } = MX;
+    const missions = state.missions || [];
+    const users    = state.users    || [];
+    const cu       = state.currentUser;
+    const createdBy = MX.Auth.isAdmin()
+      ? (state.adminUser ? state.adminUser.email : "Admin")
+      : (cu ? cu.name : "Responsable");
+
+    let h = `<div class="info-note" style="margin-bottom:12px;background:var(--red-dim);border-color:var(--red-border);color:var(--red)">
+      <i class="fas fa-circle-exclamation"></i> Les missions apparaissent en rouge en haut des checklists du jour concerné, visibles par toute l'équipe.
+    </div>
+    <div class="tecard" style="margin-bottom:16px;padding:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--red)"><i class="fas fa-plus"></i> Nouvelle mission</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input class="fi fi-sm" id="ms-text" placeholder="Description de la mission…" maxlength="120">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select class="fi fi-sm" id="ms-day" style="flex:1;min-width:130px">
+            <option value="all">Tous les jours</option>
+            ${DAYS.map(d => `<option value="${d.id}">${esc(d.l)}</option>`).join('')}
+          </select>
+          <select class="fi fi-sm" id="ms-user" style="flex:1;min-width:130px">
+            <option value="">— Assigner à —</option>
+            ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="save-btn" style="margin-top:0" onclick="MX.Pages.Admin.addMission('${esc(createdBy)}')">
+          <i class="fas fa-paper-plane"></i> Créer la mission
+        </button>
+      </div>
+    </div>`;
+
+    const active = missions.filter(m => !m.done);
+    const done   = missions.filter(m =>  m.done);
+
+    if (!missions.length) {
+      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucune mission en cours</div>`;
+    }
+
+    if (active.length) {
+      h += `<div class="section-label" style="margin-bottom:8px">En cours (${active.length})</div>`;
+      active.forEach(m => {
+        const day = m.dayId === "all" ? "Tous les jours" : (DAYS.find(d => d.id === m.dayId)?.l || m.dayId);
+        const nc  = m.assignedTo ? MX.userColors(m.assignedTo) : null;
+        h += `<div class="mission-adm-card">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:600">${esc(m.text)}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                <span style="color:var(--red)"><i class="fas fa-calendar-day"></i> ${esc(day)}</span>
+                ${nc ? `<span style="background:${nc.bg};color:${nc.fg};padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">${esc(m.assignedTo)}</span>` : `<span style="color:var(--text3)">Non assigné</span>`}
+                ${m.createdBy ? `<span style="color:var(--text3)">par ${esc(m.createdBy)}</span>` : ''}
+              </div>
+            </div>
+            <button class="icon-btn del" style="width:30px;height:30px;flex-shrink:0" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>`;
+      });
+    }
+
+    if (done.length) {
+      h += `<div class="section-label" style="margin-bottom:8px;margin-top:16px;color:var(--text3)">Terminées (${done.length})</div>`;
+      done.forEach(m => {
+        const day = m.dayId === "all" ? "Tous les jours" : (DAYS.find(d => d.id === m.dayId)?.l || m.dayId);
+        h += `<div class="mission-adm-card" style="opacity:0.5">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:600;text-decoration:line-through">${esc(m.text)}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(day)} · ✓ Terminé</div>
+            </div>
+            <button class="cbtn" onclick="MX.Pages.Admin.undoMission('${esc(m.id)}')"><i class="fas fa-rotate-left"></i></button>
+            <button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>`;
+      });
+    }
+    return h;
+  }
+
   // ── USERS ──
   function renderUsers() {
     const { state, esc } = MX;
@@ -178,7 +277,6 @@
     if (!users.length) {
       h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucun profil. Ajoutez vos techniciens.</div>`;
     }
-
     h += `<div style="margin-bottom:8px"><button class="dash-btn" onclick="MX.Pages.Admin.addUser()"><i class="fas fa-plus"></i> Ajouter un utilisateur</button></div>`;
     h += `<button class="save-btn" onclick="MX.Pages.Admin.saveUsers()"><i class="fas fa-check"></i> Enregistrer les profils</button>`;
     return h;
@@ -209,7 +307,7 @@
     return h;
   }
 
-  // ── ORDERS (ADMIN) ──
+  // ── ORDERS ──
   function renderOrders() {
     const { state, esc } = MX;
     const prods = state.products || [];
@@ -270,7 +368,7 @@
     </div>`;
   }
 
-  // ── MESSAGES (ADMIN) ──
+  // ── MESSAGES ──
   function renderMsgs() {
     const { state, esc, fmtTime, avatarBg, avatarFg, avatarTxt } = MX;
     const msgs = state.messages || [];
@@ -304,16 +402,12 @@
         <i class="fas fa-trash"></i> Vider
       </button>
     </div>`;
-
-    if (!logs.length) {
-      return h + `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">Aucune activité enregistrée</div>`;
-    }
-
+    if (!logs.length) return h + `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">Aucune activité enregistrée</div>`;
     logs.forEach(log => {
-      const bg     = avatarBg(log.workerName || "?");
-      const fg     = avatarFg(log.workerName || "?");
-      const color  = aColor[log.action] || "var(--text2)";
-      const label  = aLabel[log.action] || log.action;
+      const bg    = avatarBg(log.workerName || "?");
+      const fg    = avatarFg(log.workerName || "?");
+      const color = aColor[log.action] || "var(--text2)";
+      const label = aLabel[log.action] || log.action;
       h += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px">
         <div style="width:28px;height:28px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(avatarTxt(log.workerName||'?'))}</div>
         <div style="flex:1;min-width:0">
@@ -389,6 +483,30 @@
     catch (e) { MX.toast("Erreur", true); }
   }
 
+  async function addMission(createdBy) {
+    const text       = (document.getElementById("ms-text") || {}).value?.trim() || "";
+    const dayId      = (document.getElementById("ms-day")  || {}).value || "all";
+    const assignedTo = (document.getElementById("ms-user") || {}).value || "";
+    if (!text) return MX.toast("Entrez une description de mission", true);
+    try {
+      await MX.DB.addMission({ text, dayId, assignedTo, createdBy: createdBy || "Responsable" });
+      MX.toast("Mission créée ✓");
+    } catch(e) { MX.toast("Erreur", true); }
+  }
+  async function delMission(id) {
+    MX.showModal("Supprimer cette mission ?", "La mission disparaîtra de tous les panneaux.", [
+      { label: "Supprimer", cls: "danger", fn: async () => {
+        try { await MX.DB.deleteMission(id); MX.toast("Mission supprimée ✓"); }
+        catch(e) { MX.toast("Erreur", true); }
+      }},
+      { label: "Annuler", cls: "cancel" }
+    ]);
+  }
+  async function undoMission(id) {
+    try { await MX.DB.updateMission(id, { done: false }); MX.toast("Mission réactivée ✓"); }
+    catch(e) { MX.toast("Erreur", true); }
+  }
+
   function updUser(id, f, v) {
     const u = (MX.state.users || []).find(x => x.id === id);
     if (u) u[f] = v;
@@ -410,12 +528,7 @@
   async function saveUsers() {
     try {
       for (const u of (MX.state.users || [])) {
-        await MX.DB.updateUser(u.id, {
-          name:  u.name  || "",
-          role:  u.role  || "technicien",
-          pin:   u.pin   || "",
-          color: u.color || ""
-        });
+        await MX.DB.updateUser(u.id, { name: u.name||"", role: u.role||"technicien", pin: u.pin||"", color: u.color||"" });
       }
       MX.toast("Profils enregistrés ✓");
     } catch (e) { MX.toast("Erreur", true); }
@@ -499,6 +612,7 @@
     render, setTab, setDay,
     editTask, addTask, rmTask, saveTasks, copyTasks,
     editTeam, addTeam, rmTeam, saveTeam,
+    addMission, delMission, undoMission,
     updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
     updProd, updProdMin, addProd, delProd, saveProd,

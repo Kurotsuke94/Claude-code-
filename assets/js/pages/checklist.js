@@ -21,6 +21,11 @@
     });
     const pct = total ? Math.round(done / total * 100) : 0;
 
+    // Active missions for this day
+    const dayMissions = (state.missions || []).filter(m =>
+      !m.done && (m.dayId === dayId || m.dayId === "all")
+    );
+
     let banner = '';
     if (cu && !MX.Auth.isAdmin()) {
       const nc  = MX.userColors(cu.name);
@@ -62,6 +67,24 @@
           <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
           <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
         </div>`;
+
+    // ── Missions section (above everything) ──
+    if (dayMissions.length) {
+      h += `<div class="mission-section">
+        <div class="mission-header"><i class="fas fa-circle-exclamation"></i>&nbsp;MISSIONS (${dayMissions.length})</div>`;
+      dayMissions.forEach(m => {
+        const canToggle = canAll || (cu && cu.name === m.assignedTo);
+        const nc        = m.assignedTo ? MX.userColors(m.assignedTo) : null;
+        const clickAttr = canToggle ? `onclick="MX.Pages.Checklist.toggleMission('${esc(m.id)}')"` : '';
+        h += `<div class="mission-row ${canToggle ? 'clickable' : ''}" ${clickAttr}>
+          <div class="mission-icon"><i class="fas fa-exclamation"></i></div>
+          <span class="mission-text">${esc(m.text)}</span>
+          ${nc ? `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>` : ''}
+          ${m.createdBy ? `<span style="font-size:10px;color:var(--text3);flex-shrink:0">${esc(m.createdBy)}</span>` : ''}
+        </div>`;
+      });
+      h += `</div><div style="height:4px"></div>`;
+    }
 
     // ── Incoming transfers section ──
     if (pendingIn.length || acceptedIn.length) {
@@ -261,7 +284,22 @@
     }
   }
 
+  async function toggleMission(missionId) {
+    const m  = (MX.state.missions || []).find(x => x.id === missionId);
+    const cu = MX.state.currentUser;
+    if (!m) return;
+    if (!MX.Auth.canSeeAll() && cu?.name !== m.assignedTo) return MX.toast("Non autorisé", true);
+    try {
+      await MX.DB.updateMission(missionId, { done: true });
+      const actorName = cu?.name || (MX.state.adminUser?.email || "inconnu");
+      MX.DB.addLog({ workerName: actorName, action: "check", taskText: "[Mission] " + m.text, dayId: m.dayId, slot: "mission" }).catch(() => {});
+      MX.toast("Mission complétée ✓");
+    } catch(e) {
+      MX.toast("Erreur", true);
+    }
+  }
+
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred };
+  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred };
 })();

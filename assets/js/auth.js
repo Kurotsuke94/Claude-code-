@@ -240,6 +240,13 @@
           </button>
         </div>`;
     }
+    // PWA install button
+    if (MX._canInstall) {
+      const installDiv = document.createElement("div");
+      installDiv.style.cssText = "padding:4px 8px";
+      installDiv.innerHTML = `<button onclick="MX.tryInstall()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-download"></i> Installer l'appli</button>`;
+      el.appendChild(installDiv);
+    }
   }
 
   window.MX = window.MX || {};

@@ -30,5 +30,6 @@ window.MX.state = {
   users:         [],
   logs:          [],
   transfers:     [],
+  missions:      [],
   currentUser:   JSON.parse(localStorage.getItem("mx_user") || "null")
 };
