@@ -121,24 +121,28 @@
     if (clear)   clear.style.display = "none";
   }
 
-  async function _compressImage(file, maxPx) {
-    maxPx = maxPx || 1000;
+  async function _compressImage(file) {
+    const MAX_PX  = 600;
+    const QUALITY = 0.65;
     return new Promise(function(resolve) {
+      // Safety timeout: if canvas hangs (common on some iOS), fall back to original
+      var timer = setTimeout(function() { resolve(file); }, 10000);
       var img = new Image();
       var url = URL.createObjectURL(file);
       img.onload = function() {
         URL.revokeObjectURL(url);
         var w = img.width, h = img.height;
-        if (w <= maxPx && h <= maxPx && file.size < 400000) { resolve(file); return; }
-        var scale = Math.min(1, maxPx / Math.max(w, h));
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
+        if (w <= MAX_PX && h <= MAX_PX && file.size < 150000) {
+          clearTimeout(timer); resolve(file); return;
+        }
+        var scale = Math.min(1, MAX_PX / Math.max(w, h));
+        w = Math.round(w * scale); h = Math.round(h * scale);
         var canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
         canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        canvas.toBlob(function(blob) { resolve(blob || file); }, "image/jpeg", 0.72);
+        canvas.toBlob(function(blob) { clearTimeout(timer); resolve(blob || file); }, "image/jpeg", QUALITY);
       };
-      img.onerror = function() { resolve(file); };
+      img.onerror = function() { clearTimeout(timer); resolve(file); };
       img.src = url;
     });
   }
@@ -158,7 +162,9 @@
     try {
       let imageUrl = null;
       if (_pendingFile) {
+        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Compression…';
         const compressed = await _compressImage(_pendingFile);
+        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Upload 0%';
         imageUrl = await MX.DB.uploadMessageImage(compressed);
       }
       await MX.DB.sendMessage({ author, title, body, imageUrl });

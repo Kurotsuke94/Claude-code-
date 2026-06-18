@@ -146,19 +146,30 @@
 
   async function uploadMessageImage(file) {
     if (!storage) throw new Error("Firebase Storage non disponible");
-    const ext  = (file.name || "photo.jpg").split('.').pop().toLowerCase();
-    const path = `messages/${uuid()}.${ext}`;
+    const ext  = (file.name || "photo.jpg").split('.').pop().replace(/[^a-z0-9]/g, '') || "jpg";
+    const path = `messages/${uuid()}.jpg`;
     const ref  = storage.ref(path);
     return await new Promise((resolve, reject) => {
-      const task = ref.put(file);
+      var done = false;
+      var timer = setTimeout(function() {
+        if (!done) { done = true; reject(new Error("Upload timeout — connexion trop lente")); }
+      }, 30000);
+
+      const task = ref.put(file, { contentType: "image/jpeg" });
       task.on('state_changed',
         snap => {
-          const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100);
+          const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100) || 0;
           const btn = document.querySelector(".compose .primary-btn");
           if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Upload ${pct}%`;
         },
-        reject,
-        async () => resolve(await task.snapshot.ref.getDownloadURL())
+        err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
+        async () => {
+          if (!done) {
+            done = true;
+            clearTimeout(timer);
+            resolve(await task.snapshot.ref.getDownloadURL());
+          }
+        }
       );
     });
   }
