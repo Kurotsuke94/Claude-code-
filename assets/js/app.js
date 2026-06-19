@@ -547,6 +547,11 @@
       state.history = list;
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
+
+    DB.listenOrders(list => {
+      state.orders = list;
+      if (state.currentPage === "orders") MX.Pages.Orders.render();
+    });
   }
 
   // ── INIT ──

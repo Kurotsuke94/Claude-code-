@@ -396,6 +396,19 @@
     _unsub.presence = () => { _fn(); clearInterval(_iv); };
   }
 
+  // ── ORDERS ──
+  function listenOrders(cb) {
+    _unsub.orders = db.collection("orders").orderBy("createdAt", "desc").limit(50).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addOrder(data) {
+    return await db.collection("orders").add({ ...data, createdAt: FV.serverTimestamp() });
+  }
+  async function updateOrderStatus(id, status) {
+    await db.collection("orders").doc(id).update({ status });
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -419,6 +432,7 @@
     listenReplies, sendReply, deleteReply,
     setNote, archiveWeek,
     saveFcmToken, deleteFcmToken,
-    updatePresence, listenPresence
+    updatePresence, listenPresence,
+    listenOrders, addOrder, updateOrderStatus
   };
 })();

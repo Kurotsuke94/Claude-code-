@@ -50,6 +50,7 @@ window.MX.state = {
   missions:      [],
   respTasks:     [],
   announcements: [],
+  orders:        [],
   planningUrl:   null,
   notes:         {},
   history:       [],
