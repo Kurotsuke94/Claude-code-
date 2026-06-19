@@ -553,7 +553,7 @@
     hideLoading();
 
     buildNav();
-    MX.showPage(MX.todayId());
+    MX.showPage("home");
 
     setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
