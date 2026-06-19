@@ -10,9 +10,9 @@
     { id: "vendredi", icon: "fa-5",             l: "Vendredi", day: true },
     { id: "samedi",   icon: "fa-6",             l: "Sam",      day: true },
     { id: "dimanche", icon: "fa-7",             l: "Dim",      day: true },
+    { id: "resp-plan",icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
     null,
     { id: "orders",   icon: "fa-box",           l: "Stock",    badge: false },
-    { id: "resp-plan",icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
     { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
   ];
 
