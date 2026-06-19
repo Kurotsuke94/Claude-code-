@@ -398,6 +398,8 @@
           const key       = "resp_" + t.id;
           const isChecked = !!state.checks[key];
           const bg        = t.color || "#003B35";
+          const comment   = state.checks["resp_comment_" + t.id] || "";
+          const byWho     = state.checks["resp_by_" + t.id] || "";
           h += `<div class="trow" onclick="MX.Pages.Home.toggleRespTask('${esc(t.id)}')"
               style="border-left:3px solid ${respBorder(bg)};cursor:pointer">
             <div class="tcb ${isChecked ? "done" : ""}">
@@ -405,6 +407,7 @@
             </div>
             <div style="flex:1;min-width:0">
               <div class="ttext${isChecked ? ' ttext-done' : ''}">${esc(t.text)}</div>
+              ${isChecked && comment ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
             </div>
             ${t.person ? `<span class="twho" style="background:${bg};border:1px solid ${respBorder(bg)};color:#F1F5F9">${esc(t.person)}</span>` : ''}
           </div>`;
@@ -460,12 +463,69 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  async function toggleRespTask(taskId) {
+
+  function toggleRespTask(taskId) {
     const key     = "resp_" + taskId;
     const current = !!MX.state.checks[key];
-    try { await MX.DB.setCheck(key, !current); }
-    catch(e) { MX.toast("Erreur", true); }
+
+    if (current) {
+      // Already checked — uncheck and clear validation data
+      Promise.all([
+        MX.DB.setCheck(key, false),
+        MX.DB.setCheck("resp_comment_" + taskId, false),
+        MX.DB.setCheck("resp_by_" + taskId, false)
+      ]).catch(() => MX.toast("Erreur", true));
+      return;
+    }
+
+    // Not yet checked — show validation modal
+    const t = (MX.state.respTasks || []).find(x => x.id === taskId);
+    const label = t ? t.text : "tâche";
+
+    document.getElementById("m-title").textContent = "Valider la tâche";
+    document.getElementById("m-sub").innerHTML = `
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px">${esc(label)}</div>
+      <textarea id="resp-task-comment"
+        placeholder="Commentaire obligatoire…"
+        style="width:100%;min-height:90px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-family:var(--ffs);resize:vertical;box-sizing:border-box;outline:none"
+      ></textarea>
+      <div id="resp-task-err" style="color:var(--red);font-size:12px;margin-top:6px;display:none">Un commentaire est requis.</div>`;
+    document.getElementById("m-actions").innerHTML = `
+      <button class="modal-btn cancel"
+        onclick="document.getElementById('modal-bg').classList.remove('show')">
+        Annuler
+      </button>
+      <button class="modal-btn confirm"
+        onclick="MX.Pages.Home._confirmRespTask('${esc(taskId)}')">
+        <i class="fas fa-check"></i> Valider
+      </button>`;
+    document.getElementById("modal-bg").classList.add("show");
+    setTimeout(() => {
+      const ta = document.getElementById("resp-task-comment");
+      if (ta) ta.focus();
+    }, 150);
   }
 
-  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan, toggleRespTask };
+  async function _confirmRespTask(taskId) {
+    const ta      = document.getElementById("resp-task-comment");
+    const errEl   = document.getElementById("resp-task-err");
+    const comment = ta ? ta.value.trim() : "";
+    if (!comment) {
+      if (errEl) errEl.style.display = "block";
+      if (ta)    ta.focus();
+      return;
+    }
+    document.getElementById("modal-bg").classList.remove("show");
+    const u = MX.state.currentUser || MX.state.adminUser;
+    const actorName = u ? (u.name || u.email || "Responsable") : "Responsable";
+    try {
+      await Promise.all([
+        MX.DB.setCheck("resp_" + taskId, true),
+        MX.DB.setCheck("resp_comment_" + taskId, comment),
+        MX.DB.setCheck("resp_by_" + taskId, actorName)
+      ]);
+    } catch(e) { MX.toast("Erreur", true); }
+  }
+
+  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan, toggleRespTask, _confirmRespTask };
 })();
