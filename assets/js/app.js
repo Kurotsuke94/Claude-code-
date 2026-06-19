@@ -1,19 +1,20 @@
 (function () {
   const NAV = [
-    { id: "msgs",     icon: "fa-comments",     l: "Messages",  badge: true },
-    { id: "home",     icon: "fa-house",         l: "Accueil" },
+    { id: "msgs",      icon: "fa-comments",      l: "Messages",       badge: true },
+    { id: "home",      icon: "fa-house",          l: "Accueil" },
     null,
-    { id: "lundi",    icon: "fa-1",             l: "Lundi",    day: true },
-    { id: "mardi",    icon: "fa-2",             l: "Mardi",    day: true },
-    { id: "mercredi", icon: "fa-3",             l: "Mercredi", day: true },
-    { id: "jeudi",    icon: "fa-4",             l: "Jeudi",    day: true },
-    { id: "vendredi", icon: "fa-5",             l: "Vendredi", day: true },
-    { id: "samedi",   icon: "fa-6",             l: "Sam",      day: true },
-    { id: "dimanche", icon: "fa-7",             l: "Dim",      day: true },
-    { id: "resp-plan",icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
+    { id: "lundi",     icon: "fa-1",              l: "Lundi",          day: true },
+    { id: "mardi",     icon: "fa-2",              l: "Mardi",          day: true },
+    { id: "mercredi",  icon: "fa-3",              l: "Mercredi",       day: true },
+    { id: "jeudi",     icon: "fa-4",              l: "Jeudi",          day: true },
+    { id: "vendredi",  icon: "fa-5",              l: "Vendredi",       day: true },
+    { id: "samedi",    icon: "fa-6",              l: "Sam",            day: true },
+    { id: "dimanche",  icon: "fa-7",              l: "Dim",            day: true },
+    { id: "today-cl",  icon: "fa-list-check",     l: "Checklist Jour", todayShortcut: true },
     null,
-    { id: "orders",   icon: "fa-box",           l: "Stock",    badge: false },
-    { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
+    { id: "orders",    icon: "fa-box",            l: "Stock",          badge: false },
+    { id: "resp-plan", icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
+    { id: "admin",     icon: "fa-shield-halved",  l: "Admin" }
   ];
 
   const SECTION_LABELS = ["PLANNING", "GESTION"];
@@ -36,7 +37,11 @@
   window.MX.showPage = function (id) {
     MX.state.currentPage = id;
     if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
-    document.getElementById("topbar-title").textContent = NAV.find(n => n && n.id === id)?.l || "Maintix";
+    const navItem = NAV.find(n => n && n.id === id);
+    const title   = id === "today-cl"
+      ? (MX.DAYS.find(d => d.id === MX.todayId())?.l || "Aujourd'hui")
+      : (navItem?.l || "Maintix");
+    document.getElementById("topbar-title").textContent = title;
     document.querySelectorAll(".nav-item[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     document.querySelectorAll(".bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     MX.closeSidebar();
@@ -45,11 +50,12 @@
 
   function renderPage(id) {
     const { Pages, DAYS } = MX;
-    if (id === "home")   return Pages.Home.render();
-    if (id === "msgs")   return Pages.Messages.render();
-    if (id === "orders") return Pages.Orders.render();
+    if (id === "home")      return Pages.Home.render();
+    if (id === "msgs")      return Pages.Messages.render();
+    if (id === "orders")    return Pages.Orders.render();
     if (id === "admin")     return Pages.Admin.render();
     if (id === "resp-plan") return Pages.RespPlan.render();
+    if (id === "today-cl")  return Pages.Checklist.render(MX.todayId());
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -85,8 +91,9 @@
       const isActive = item.id === state.currentPage;
 
       let prog = "", progCls = "";
-      if (item.day) {
-        const day = DAYS.find(d => d.id === item.id);
+      if (item.day || item.todayShortcut) {
+        const dayId = item.todayShortcut ? MX.todayId() : item.id;
+        const day   = DAYS.find(d => d.id === dayId);
         if (day) {
           let t = 0, d = 0;
           getDaySlots(day.id).forEach(sl => {
