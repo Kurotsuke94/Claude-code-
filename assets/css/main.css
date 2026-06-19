@@ -262,10 +262,13 @@ html, body {
   align-items: center;
   gap: 12px;
   height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  max-height: var(--topbar-h);
   padding: 0 16px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
   z-index: 50;
 }
 .hamburger {
@@ -280,7 +283,13 @@ html, body {
 }
 .hamburger:hover { background: var(--bg3); color: var(--text); }
 .topbar-logo {
-  height: 32px; width: auto; max-width: 120px; object-fit: contain; flex-shrink: 0;
+  height: 32px !important;
+  max-height: 32px !important;
+  width: auto !important;
+  max-width: 120px !important;
+  object-fit: contain !important;
+  flex-shrink: 0;
+  display: block;
 }
 .topbar-title {
   font-size: 15px; font-weight: 600;
