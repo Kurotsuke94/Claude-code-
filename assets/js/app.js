@@ -317,6 +317,7 @@
     DB.listenRespTasks(list => {
       state.respTasks = list;
       if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
+      if (state.currentPage === "home") MX.Pages.Home.render();
     });
 
     DB.listenPlanning(url => {
