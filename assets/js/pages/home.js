@@ -303,12 +303,12 @@
             <div class="donut-legend">
               <div class="donut-leg-item">
                 <div class="donut-dot" style="background:var(--cyan)"></div>
-                <span style="color:var(--text2)">Faites</span>
+                <span style="color:var(--text2)">Tâches terminées</span>
                 <span style="margin-left:auto;font-family:var(--ffm);font-weight:700;color:var(--cyan)">${doneAll}</span>
               </div>
               <div class="donut-leg-item">
                 <div class="donut-dot" style="background:var(--bg4)"></div>
-                <span style="color:var(--text2)">Restantes</span>
+                <span style="color:var(--text2)">Tâches restantes</span>
                 <span style="margin-left:auto;font-family:var(--ffm);color:var(--text3)">${totalAll - doneAll}</span>
               </div>
               <div class="donut-leg-item" style="padding-top:4px;border-top:1px solid var(--border);margin-top:4px">
