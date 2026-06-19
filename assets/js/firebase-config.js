@@ -48,6 +48,7 @@ window.MX.state = {
   logs:          [],
   transfers:     [],
   missions:      [],
+  respTasks:     [],
   planningUrl:   null,
   notes:         {},
   history:       [],

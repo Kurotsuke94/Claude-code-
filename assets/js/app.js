@@ -12,6 +12,7 @@
     { id: "dimanche", icon: "fa-7",             l: "Dim",      day: true },
     null,
     { id: "orders",   icon: "fa-box",           l: "Stock",    badge: false },
+    { id: "resp-plan",icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
     { id: "admin",    icon: "fa-shield-halved", l: "Admin" }
   ];
 
@@ -47,7 +48,8 @@
     if (id === "home")   return Pages.Home.render();
     if (id === "msgs")   return Pages.Messages.render();
     if (id === "orders") return Pages.Orders.render();
-    if (id === "admin")  return Pages.Admin.render();
+    if (id === "admin")     return Pages.Admin.render();
+    if (id === "resp-plan") return Pages.RespPlan.render();
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -79,6 +81,7 @@
         sepCount++;
         return;
       }
+      if (item.respOnly && !MX.Auth.canSeeAll()) return;
       const isActive = item.id === state.currentPage;
 
       let prog = "", progCls = "";
@@ -309,6 +312,11 @@
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
       if (state.currentPage === "admin") MX.Pages.Admin.render();
+    });
+
+    DB.listenRespTasks(list => {
+      state.respTasks = list;
+      if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
     });
 
     DB.listenPlanning(url => {

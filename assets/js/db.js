@@ -15,6 +15,7 @@
     logs:        () => db.collection("logs"),
     transfers:   () => db.collection("transfers"),
     missions:    () => db.collection("missions"),
+    resp_tasks:  () => db.collection("resp_tasks"),
     fcmTokens:   () => db.collection("fcmTokens")
   };
 
@@ -292,6 +293,22 @@
     await batch.commit();
   }
 
+  // ── RESP PLANNING ──
+  function listenRespTasks(cb) {
+    _unsub.resp_tasks = R.resp_tasks().orderBy("order").onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addRespTask(data) {
+    await R.resp_tasks().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
+  }
+  async function updateRespTask(id, data) {
+    await R.resp_tasks().doc(id).update(data);
+  }
+  async function deleteRespTask(id) {
+    await R.resp_tasks().doc(id).delete();
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -309,6 +326,7 @@
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,
+    listenRespTasks, addRespTask, updateRespTask, deleteRespTask,
     setNote, archiveWeek,
     saveFcmToken, deleteFcmToken
   };
