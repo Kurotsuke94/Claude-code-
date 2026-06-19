@@ -231,7 +231,7 @@
     }
 
     const seen   = _getMsgsSeen();
-    const unread = (state.messages || []).filter(m => _tsMs(m.ts) > seen).length;
+    const unread = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
 
     el.innerHTML = `
       <div class="dh-week" id="dh-week-label">
@@ -273,7 +273,7 @@
     });
 
     const seen   = _getMsgsSeen();
-    const unread = (state.messages || []).filter(m => _tsMs(m.ts) > seen).length;
+    const unread = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
     const badge  = document.getElementById("nb_msgs");
     if (badge)  { badge.textContent = unread > 9 ? "9+" : unread; badge.className = "nav-badge" + (unread ? " show" : ""); }
     const bnBadge = document.getElementById("bnb_msgs");
@@ -402,6 +402,14 @@
       if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
       if (state.currentPage && state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
         MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
+    });
+
+    DB.listenAnnouncements(list => {
+      state.announcements = list;
+      if (state.currentPage === "msgs") _markMsgsSeen();
+      updateNavProgress();
+      if (state.currentPage === "msgs") MX.Pages.Messages.render();
+      if (state.currentPage === "home") MX.Pages.Home.render();
     });
 
     DB.listenPlanning(url => {

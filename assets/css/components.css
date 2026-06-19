@@ -649,3 +649,282 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   transition: background var(--t);
 }
 .nof-btn-cancel:hover { background: var(--bg4); }
+
+/* ── ANNOUNCEMENTS ── */
+.ann-compose {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--rx);
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ann-compose-locked {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--rx);
+  padding: 28px 20px;
+  text-align: center;
+  margin-bottom: 16px;
+  color: var(--text2);
+}
+.ann-compose-who {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ann-type-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.ann-type-pill {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--pill-cb, var(--border2));
+  background: transparent;
+  color: var(--text3);
+  font-size: 12px; font-weight: 500;
+  font-family: var(--ffs);
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+  white-space: nowrap;
+}
+.ann-type-pill:hover { background: var(--bg4); color: var(--text); }
+.ann-type-pill.active {
+  background: var(--pill-cd, var(--bg4));
+  color: var(--pill-c, var(--text));
+  border-color: var(--pill-cb, var(--border2));
+  font-weight: 600;
+}
+.ann-ta {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.6;
+}
+.ann-compose-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.ann-char { font-size: 11px; color: var(--text3); }
+
+/* Filters */
+.ann-filters {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 16px;
+}
+.ann-filter-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 12px; font-weight: 500;
+  font-family: var(--ffs);
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+  white-space: nowrap;
+}
+.ann-filter-btn:hover { background: var(--bg4); color: var(--text); }
+.ann-filter-btn.active {
+  background: rgba(0,245,212,0.08);
+  color: var(--cyan);
+  border-color: var(--cyan-border);
+  font-weight: 600;
+}
+.ann-filter-count {
+  background: var(--bg5);
+  color: var(--text2);
+  font-size: 10px; font-weight: 700;
+  font-family: var(--ffm);
+  padding: 1px 5px; border-radius: 8px;
+  min-width: 16px; text-align: center;
+}
+.ann-filter-btn.active .ann-filter-count {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+}
+
+/* Card */
+.ann-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--rx);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.ann-card:hover { border-color: var(--border2); }
+.ann-card.pinned {
+  border-color: var(--border2);
+  box-shadow: 0 0 0 1px rgba(0,245,212,0.08);
+}
+.ann-card.unread { border-left: 3px solid var(--cyan); }
+.ann-pin-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 14px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid;
+}
+.ann-card-top {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px 0;
+}
+.ann-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px; border: 1px solid;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.ann-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px rgba(0,245,212,0.6);
+  flex-shrink: 0;
+}
+.ann-ts { font-size: 11px; color: var(--text3); font-family: var(--ffm); }
+.ann-card-mid {
+  padding: 10px 14px 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.ann-av-wrap { display: flex; align-items: center; gap: 8px; }
+.ann-av {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  font-family: var(--ffm);
+  flex-shrink: 0;
+}
+.ann-av.sm { width: 28px; height: 28px; font-size: 10px; border-radius: 8px; }
+.ann-role {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 6px; border: 1px solid;
+  font-size: 10px; font-weight: 600;
+  font-family: var(--ffm);
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+.ann-body {
+  font-size: 14px; line-height: 1.65;
+  color: var(--text);
+  word-break: break-word;
+}
+.ann-mention {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.92em;
+}
+.ann-card-bot {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.12);
+}
+.ann-rxns { display: flex; gap: 4px; flex-wrap: wrap; }
+.ann-rxn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px; border: 1px solid var(--border2);
+  background: var(--bg4);
+  font-size: 13px;
+  cursor: pointer; transition: background var(--t), border-color var(--t);
+  font-family: var(--ffs);
+}
+.ann-rxn span { font-size: 11px; color: var(--text3); font-family: var(--ffm); }
+.ann-rxn:hover { background: var(--bg5); border-color: var(--border3); }
+.ann-rxn.active {
+  background: var(--cyan-dim);
+  border-color: var(--cyan-border);
+}
+.ann-rxn.active span { color: var(--cyan); }
+.ann-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.ann-act {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px; border: none;
+  background: transparent; color: var(--text3);
+  font-size: 12px; font-family: var(--ffs);
+  cursor: pointer; transition: background var(--t), color var(--t);
+  white-space: nowrap;
+}
+.ann-act:hover { background: var(--bg4); color: var(--text2); }
+.ann-act--on { color: var(--cyan) !important; }
+.ann-act--del:hover { background: var(--red-dim); color: var(--red); }
+
+/* Replies section */
+.ann-replies-wrap { background: rgba(0,0,0,0.15); }
+.ann-replies-box {
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid var(--border);
+}
+.ann-replies-empty {
+  font-size: 12px; color: var(--text3); text-align: center; padding: 8px 0;
+}
+.ann-reply {
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.ann-reply-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+  margin-bottom: 3px;
+}
+.ann-reply-author { font-size: 12px; font-weight: 600; }
+.ann-reply-role   { font-size: 10px; color: var(--text3); }
+.ann-reply-ts     { font-size: 10px; color: var(--text3); margin-left: auto; }
+.ann-reply-del {
+  background: none; border: none;
+  color: var(--text3); cursor: pointer;
+  font-size: 11px; padding: 0 2px;
+  transition: color var(--t);
+}
+.ann-reply-del:hover { color: var(--red); }
+.ann-reply-body {
+  font-size: 13px; line-height: 1.55; color: var(--text2);
+  word-break: break-word;
+}
+.ann-reply-compose {
+  display: flex; flex-direction: column; gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* Empty state */
+.ann-empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text3);
+  font-size: 13px;
+}
+
+/* Home page communication banner */
+.ann-home-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: var(--r);
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: opacity var(--t);
+}
+.ann-home-card:hover { opacity: 0.85; }
+.ann-home-ico { font-size: 20px; flex-shrink: 0; }
+.ann-home-lbl {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  margin-bottom: 2px;
+}
+.ann-home-txt {
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ann-home-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }

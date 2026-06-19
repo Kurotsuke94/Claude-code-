@@ -205,6 +205,40 @@
       </div>
       <div class="page-body">`;
 
+    // ── Urgent / Pinned banner ──
+    const urgentAnns = (state.announcements || [])
+      .filter(a => a.pinned || a.type === 'urgent' || a.type === 'important')
+      .sort((a, b) => {
+        const w = x => (x.type === 'urgent' ? 3 : x.pinned ? 2 : 1);
+        return w(b) - w(a);
+      })
+      .slice(0, 2);
+
+    if (urgentAnns.length) {
+      const _TB = {
+        urgent:    { icon: '🚨', l: 'Urgent',     c: 'var(--red)',    cd: 'var(--red-dim)',    cb: 'var(--red-border)' },
+        important: { icon: '⚠️', l: 'Important',  c: 'var(--orange)', cd: 'var(--orange-dim)', cb: 'var(--orange-border)' },
+        info:      { icon: '📢', l: 'Information', c: 'var(--cyan)',   cd: 'var(--cyan-dim)',   cb: 'var(--cyan-border)' },
+        suggestion:{ icon: '💡', l: 'Suggestion',  c: 'var(--jour)',   cd: 'var(--jour-dim)',   cb: 'var(--jour-border)' },
+        technique: { icon: '🔧', l: 'Technique',   c: 'var(--green)',  cd: 'var(--green-dim)',  cb: 'var(--green-border)' }
+      };
+      h += `<div class="section-label" style="display:flex;align-items:center;gap:6px">
+        <i class="fas fa-bullhorn" style="color:var(--cyan)"></i> Communications internes
+      </div>`;
+      urgentAnns.forEach(a => {
+        const tb = _TB[a.type] || _TB.info;
+        h += `<div class="ann-home-card" style="border-color:${tb.cb};background:${tb.cd}" onclick="MX.showPage('msgs')">
+          <span class="ann-home-ico">${tb.icon}</span>
+          <div style="flex:1;min-width:0">
+            <div class="ann-home-lbl" style="color:${tb.c}">${a.pinned ? '📌 Épinglé · ' : ''}${tb.l}</div>
+            <div class="ann-home-txt">${esc(a.content || '')}</div>
+            <div class="ann-home-meta">${esc(a.authorName || '')} · ${MX.fmtTime(a.createdAt)}</div>
+          </div>
+          <i class="fas fa-chevron-right" style="color:var(--text3);font-size:11px;flex-shrink:0"></i>
+        </div>`;
+      });
+    }
+
     // ── KPI Cards ──
     h += `<div class="stats-grid">
       <div class="stat-card">

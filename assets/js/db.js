@@ -309,6 +309,66 @@
     await R.resp_tasks().doc(id).delete();
   }
 
+  // ── ANNOUNCEMENTS ──
+  const R_ANN = () => db.collection('announcements');
+  const FV    = firebase.firestore.FieldValue;
+
+  function listenAnnouncements(cb) {
+    _unsub.announcements = R_ANN()
+      .orderBy('createdAt', 'desc')
+      .limit(100)
+      .onSnapshot(snap => {
+        cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+  }
+  async function sendAnnouncement({ type, content, authorName, authorRole }) {
+    await R_ANN().add({
+      type, content, authorName, authorRole,
+      createdAt: FV.serverTimestamp(),
+      pinned: false,
+      reactions: { '👍': [], '✅': [], '⚠️': [] },
+      readBy: [authorName],
+      replyCount: 0
+    });
+  }
+  async function deleteAnnouncement(id) {
+    const batch = db.batch();
+    const replies = await R_ANN().doc(id).collection('replies').get();
+    replies.docs.forEach(d => batch.delete(d.ref));
+    batch.delete(R_ANN().doc(id));
+    await batch.commit();
+  }
+  async function togglePin(id, currentlyPinned) {
+    await R_ANN().doc(id).update({ pinned: !currentlyPinned });
+  }
+  async function toggleReaction(annId, emoji, userName, isActive) {
+    const field = 'reactions.' + emoji;
+    await R_ANN().doc(annId).update({
+      [field]: isActive ? FV.arrayRemove(userName) : FV.arrayUnion(userName)
+    });
+  }
+  async function markReadAnnouncement(annId, userName) {
+    await R_ANN().doc(annId).update({ readBy: FV.arrayUnion(userName) });
+  }
+  function listenReplies(annId, cb) {
+    return R_ANN().doc(annId).collection('replies')
+      .orderBy('createdAt', 'asc')
+      .onSnapshot(snap => {
+        cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+  }
+  async function sendReply({ annId, content, authorName, authorRole }) {
+    await R_ANN().doc(annId).collection('replies').add({
+      content, authorName, authorRole,
+      createdAt: FV.serverTimestamp()
+    });
+    await R_ANN().doc(annId).update({ replyCount: FV.increment(1) });
+  }
+  async function deleteReply(annId, replyId) {
+    await R_ANN().doc(annId).collection('replies').doc(replyId).delete();
+    await R_ANN().doc(annId).update({ replyCount: FV.increment(-1) });
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -327,6 +387,9 @@
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,
     listenRespTasks, addRespTask, updateRespTask, deleteRespTask,
+    listenAnnouncements, sendAnnouncement, deleteAnnouncement,
+    togglePin, toggleReaction, markReadAnnouncement,
+    listenReplies, sendReply, deleteReply,
     setNote, archiveWeek,
     saveFcmToken, deleteFcmToken
   };

@@ -1,216 +1,464 @@
 (function () {
-  let _pendingFile = null;
+  // ── Local state ──
+  let _filter        = 'all';
+  let _selectedType  = 'info';
+  let _expandedSet   = new Set();
+  let _replyListeners = {};
+  let _replies       = {};
 
+  const T = {
+    info:       { icon: '📢', label: 'Information', c: 'var(--cyan)',   cd: 'var(--cyan-dim)',   cb: 'var(--cyan-border)' },
+    important:  { icon: '⚠️', label: 'Important',   c: 'var(--orange)', cd: 'var(--orange-dim)', cb: 'var(--orange-border)' },
+    urgent:     { icon: '🚨', label: 'Urgent',      c: 'var(--red)',    cd: 'var(--red-dim)',    cb: 'var(--red-border)' },
+    suggestion: { icon: '💡', label: 'Suggestion',  c: 'var(--jour)',   cd: 'var(--jour-dim)',   cb: 'var(--jour-border)' },
+    technique:  { icon: '🔧', label: 'Technique',   c: 'var(--green)',  cd: 'var(--green-dim)',  cb: 'var(--green-border)' }
+  };
+  const EMOJIS = ['👍', '✅', '⚠️'];
+
+  // ── Permissions ──
+  function _author() {
+    if (MX.Auth.isAdmin()) return MX.state.adminUser?.displayName || 'Admin';
+    return MX.state.currentUser?.name || null;
+  }
+  function _role() {
+    if (MX.Auth.isAdmin()) return 'admin';
+    return MX.state.currentUser?.role || null;
+  }
+  function _allowedTypes() {
+    const r = _role();
+    if (!r) return [];
+    if (r === 'admin' || r === 'responsable') return Object.keys(T);
+    if (r === 'technicien') return ['info', 'suggestion'];
+    return [];
+  }
+  function _canPin()     { return MX.Auth.isAdmin() || MX.state.currentUser?.role === 'responsable'; }
+  function _canDel(ann) {
+    if (MX.Auth.isAdmin()) return true;
+    const cu = MX.state.currentUser;
+    if (!cu) return false;
+    if (cu.role === 'responsable') return true;
+    return ann.authorName === cu.name;
+  }
+  function _canDelReply(r) {
+    if (MX.Auth.isAdmin()) return true;
+    const cu = MX.state.currentUser;
+    if (!cu) return false;
+    if (cu.role === 'responsable') return true;
+    return r.authorName === cu.name;
+  }
+
+  // ── Helpers ──
+  function _tsMs(ts) {
+    if (!ts) return 0;
+    if (ts.toMillis) return ts.toMillis();
+    if (ts.seconds)  return ts.seconds * 1000;
+    return 0;
+  }
+  function _relTime(ts) { return MX.fmtTime(ts) || ''; }
+
+  function _renderContent(text) {
+    return MX.esc(text || '').replace(/@([\wÀ-ž]+)/g,
+      '<span class="ann-mention">@$1</span>');
+  }
+
+  function _sorted(list) {
+    return [...list].sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return _tsMs(b.createdAt) - _tsMs(a.createdAt);
+    });
+  }
+
+  function _filtered(list) {
+    const author = _author();
+    const seen   = parseInt(localStorage.getItem('mx_msgs_seen') || '0', 10);
+    const sorted = _sorted(list);
+    if (_filter === 'important') return sorted.filter(a => a.type === 'important');
+    if (_filter === 'urgent')    return sorted.filter(a => a.type === 'urgent');
+    if (_filter === 'pinned')    return sorted.filter(a => a.pinned);
+    if (_filter === 'unread')    return sorted.filter(a => {
+      if (author && (a.readBy || []).includes(author)) return false;
+      return _tsMs(a.createdAt) > seen;
+    });
+    return sorted;
+  }
+
+  // ── Render ──
   function render() {
-    const { state, esc, fmtTime, avatarBg, avatarFg, avatarTxt } = MX;
-    const el    = document.getElementById("main-content");
-    const isAdm = MX.Auth.isAdmin();
-    const cu    = state.currentUser;
-    const author = isAdm ? (state.adminUser.displayName || "Admin") : (cu ? cu.name : null);
+    const el     = document.getElementById('main-content');
+    const author = _author();
+    const anns   = MX.state.announcements || [];
 
-    // Preserve compose state across re-renders
-    const savedTitle = ((document.getElementById("msg-title") || {}).value || "");
-    const savedBody  = ((document.getElementById("msg-body")  || {}).value || "");
+    // Ensure selected type is allowed
+    const allowed = _allowedTypes();
+    if (allowed.length && !allowed.includes(_selectedType)) _selectedType = allowed[0];
+
+    // Mark visible as read
+    if (author) {
+      anns.forEach(a => {
+        if (!(a.readBy || []).includes(author)) {
+          MX.DB.markReadAnnouncement(a.id, author).catch(() => {});
+        }
+      });
+    }
+
+    const filtered = _filtered(anns);
+    const seen     = parseInt(localStorage.getItem('mx_msgs_seen') || '0', 10);
+    const unreadN  = anns.filter(a => {
+      if (author && (a.readBy || []).includes(author)) return false;
+      return _tsMs(a.createdAt) > seen;
+    }).length;
 
     let h = `
       <div class="ph">
         <div class="ph-eye">COMMUNICATIONS</div>
-        <div class="ph-title">Messages</div>
-        <div class="ph-sub">Tableau d'affichage équipe</div>
-      </div>
-      <div class="page-body">
-        <div class="page-cols">
+        <div class="ph-row">
           <div>
-            <div class="section-label">Nouveau message</div>
-            <div class="compose">`;
-
-    if (!author) {
-      // Not logged in — prompt to connect
-      h += `
-        <div style="text-align:center;padding:24px 16px;background:var(--bg3);border-radius:12px;border:1px solid var(--border2)">
-          <div style="font-size:28px;margin-bottom:10px">💬</div>
-          <div style="font-size:14px;font-weight:600;margin-bottom:6px">Connectez-vous pour écrire</div>
-          <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Sélectionnez votre profil pour envoyer un message</div>
-          <button onclick="MX.Auth.showUserPicker()" class="primary-btn" style="margin:0 auto;width:auto;padding:10px 24px">
-            <i class="fas fa-user-circle"></i> Se connecter
-          </button>
-        </div>`;
-    } else {
-      // Show who is writing (read-only)
-      const bg = isAdm ? "var(--cyan)" : avatarBg(author);
-      const fg = isAdm ? "#0C0C0E" : avatarFg(author);
-      const initials = author.substring(0,2).toUpperCase();
-      const roleLabel = isAdm ? "Administrateur" : (cu.role === "responsable" ? "Responsable" : "Technicien");
-
-      h += `
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border-radius:10px;border:1px solid var(--border2);margin-bottom:4px">
-          <div style="width:36px;height:36px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(initials)}</div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600">${esc(author)}</div>
-            <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
+            <div class="ph-title">Messages</div>
+            <div class="ph-sub">Espace de communication d'équipe</div>
           </div>
-          <span style="font-size:11px;color:var(--cyan)"><i class="fas fa-check-circle"></i></span>
         </div>
-        <input class="fi" id="msg-title" placeholder="Titre du message…" maxlength="80" value="${esc(savedTitle)}">
-        <textarea class="fi" id="msg-body" placeholder="Votre message…" rows="4">${esc(savedBody)}</textarea>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button type="button" onclick="document.getElementById('msg-photo-input').click()" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text1);cursor:pointer;font-size:13px;font-family:var(--ffs);flex-shrink:0">
-            <i class="fas fa-camera"></i> Photo
-          </button>
-          <span id="msg-photo-name" style="font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1"></span>
-          <button id="msg-photo-clear" onclick="MX.Pages.Messages.clearPhoto()" style="display:none;background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:4px"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="page-body">`;
+
+    // Compose
+    h += _composeHtml(author, allowed);
+
+    // Filters
+    h += `<div class="ann-filters">`;
+    [
+      { id: 'all',       l: 'Tout',          n: anns.length },
+      { id: 'important', l: '⚠️ Important',   n: null },
+      { id: 'urgent',    l: '🚨 Urgent',      n: null },
+      { id: 'unread',    l: 'Non lus',        n: unreadN || null },
+      { id: 'pinned',    l: '📌 Épinglé',     n: null }
+    ].forEach(f => {
+      h += `<button class="ann-filter-btn${_filter === f.id ? ' active' : ''}" onclick="MX.Pages.Messages._setFilter('${f.id}')">
+        ${MX.esc(f.l)}${f.n ? `<span class="ann-filter-count">${f.n}</span>` : ''}
+      </button>`;
+    });
+    h += `</div>`;
+
+    // Cards
+    if (!filtered.length) {
+      h += `<div class="ann-empty">
+        <div style="font-size:36px;margin-bottom:12px">💬</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:6px">Aucune publication</div>
+        <div style="font-size:13px;color:var(--text2)">
+          ${_filter !== 'all' ? 'Aucun message dans ce filtre' : 'Soyez le premier à partager une information'}
         </div>
-        <input type="file" id="msg-photo-input" accept="image/*" style="display:none" onchange="MX.Pages.Messages.previewPhoto(this)">
-        <div id="msg-photo-preview" style="display:none;position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border2)">
-          <img id="msg-photo-img" style="width:100%;max-height:220px;object-fit:cover;display:block">
-        </div>
-        <button class="primary-btn" onclick="MX.Pages.Messages.send()">
-          <i class="fas fa-paper-plane"></i> Envoyer
-        </button>`;
+      </div>`;
+    } else {
+      filtered.forEach(a => { h += _cardHtml(a, author); });
     }
 
-    h += `</div>
-          </div>
-          <div>
-            <div class="section-label">${(state.messages || []).length} message${(state.messages || []).length !== 1 ? 's' : ''}</div>`;
+    h += `</div>`;
+    el.innerHTML = h;
 
-    if (!(state.messages || []).length) {
-      h += `<div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">Aucun message pour l'instant</div>`;
-    } else {
-      (state.messages || []).forEach(m => {
-        const bg = avatarBg(m.author), fg = avatarFg(m.author);
-        h += `<div class="msg-card">
-          <div class="msg-hd">
-            <div class="msg-av" style="background:${bg};color:${fg}">${esc(avatarTxt(m.author))}</div>
-            <div style="flex:1">
-              <div class="msg-author">${esc(m.author)}</div>
-              <div class="msg-time">${fmtTime(m.ts)}</div>
-            </div>
-            ${isAdm ? `<button onclick="MX.Pages.Messages.deleteMsg('${m.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:4px 8px;font-size:13px;border-radius:6px" title="Supprimer"><i class="fas fa-trash"></i></button>` : ''}
+    // Restore expanded replies
+    _expandedSet.forEach(id => _renderRepliesEl(id));
+
+    // Set active type pill
+    _highlightTypePill(_selectedType);
+  }
+
+  function _composeHtml(author, allowed) {
+    if (!author || !allowed.length) {
+      return `<div class="ann-compose-locked">
+        <div style="font-size:28px;margin-bottom:10px">🔒</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">Connexion requise</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px">Connectez-vous pour publier une annonce</div>
+        <button onclick="MX.Auth.showUserPicker()" class="primary-btn" style="margin:0 auto;width:auto;padding:10px 24px">
+          <i class="fas fa-user-circle"></i> Se connecter
+        </button>
+      </div>`;
+    }
+    const { esc, avatarBg, avatarFg } = MX;
+    const isAdm    = MX.Auth.isAdmin();
+    const bg       = isAdm ? 'var(--cyan)'   : avatarBg(author);
+    const fg       = isAdm ? '#0C0C0E'       : avatarFg(author);
+    const roleMap  = { admin: 'Administrateur', responsable: 'Responsable', technicien: 'Technicien' };
+    const roleLabel = roleMap[_role()] || 'Utilisateur';
+
+    let pills = '';
+    Object.entries(T).forEach(([key, t]) => {
+      if (!allowed.includes(key)) return;
+      pills += `<button type="button" class="ann-type-pill" id="atp_${key}" onclick="MX.Pages.Messages._setType('${key}')"
+        style="--pill-c:${t.c};--pill-cd:${t.cd};--pill-cb:${t.cb}">
+        ${t.icon} ${t.label}
+      </button>`;
+    });
+
+    return `<div class="ann-compose">
+      <div class="ann-compose-who">
+        <div class="ann-av" style="background:${bg};color:${fg}">${esc(author.substring(0,2).toUpperCase())}</div>
+        <div>
+          <div style="font-size:13px;font-weight:600">${esc(author)}</div>
+          <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
+        </div>
+        <span style="margin-left:auto;color:var(--cyan);font-size:12px"><i class="fas fa-check-circle"></i> Connecté</span>
+      </div>
+      <div class="ann-type-row" id="ann-type-row">${pills}</div>
+      <textarea class="fi ann-ta" id="ann-content"
+        placeholder="Quoi de neuf ? Utilisez @nom pour mentionner quelqu'un…"
+        rows="3" maxlength="500"
+        oninput="MX.Pages.Messages._onInput(this)"></textarea>
+      <div class="ann-compose-foot">
+        <span class="ann-char" id="ann-char">0 / 500</span>
+        <button class="primary-btn" onclick="MX.Pages.Messages.send()" style="width:auto;padding:10px 22px">
+          <i class="fas fa-paper-plane"></i> Publier
+        </button>
+      </div>
+    </div>`;
+  }
+
+  function _cardHtml(ann, author) {
+    const { esc, avatarBg, avatarFg } = MX;
+    const t       = T[ann.type] || T.info;
+    const isAdm   = ann.authorRole === 'admin';
+    const bg      = isAdm ? 'var(--cyan)' : avatarBg(ann.authorName || '');
+    const fg      = isAdm ? '#0C0C0E'     : avatarFg(ann.authorName || '');
+    const rLabel  = { admin: 'Admin', responsable: 'Resp.', technicien: 'Tech.' }[ann.authorRole] || '';
+    const reads   = (ann.readBy || []).length;
+    const replies = ann.replyCount || 0;
+    const isUnread = author ? !(ann.readBy || []).includes(author) : false;
+    const isExpanded = _expandedSet.has(ann.id);
+    const canPin = _canPin();
+    const canDel = _canDel(ann);
+
+    const reactionBtns = EMOJIS.map(e => {
+      const users  = ann.reactions?.[e] || [];
+      const active = author && users.includes(author);
+      return `<button class="ann-rxn${active ? ' active' : ''}"
+        onclick="MX.Pages.Messages._react('${ann.id}','${e}',${active})" title="${users.slice(0,5).join(', ')}">
+        ${e}<span>${users.length || ''}</span>
+      </button>`;
+    }).join('');
+
+    return `<div class="ann-card${ann.pinned ? ' pinned' : ''}${isUnread ? ' unread' : ''}" id="ann_${ann.id}">
+      ${ann.pinned ? `<div class="ann-pin-bar" style="background:${t.cd};border-color:${t.cb};color:${t.c}">
+        <i class="fas fa-thumbtack"></i> Épinglé
+      </div>` : ''}
+      <div class="ann-card-top">
+        <div class="ann-badge" style="background:${t.cd};color:${t.c};border-color:${t.cb}">${t.icon} ${t.label}</div>
+        <span style="flex:1"></span>
+        ${isUnread ? '<div class="ann-dot"></div>' : ''}
+        <span class="ann-ts">${_relTime(ann.createdAt)}</span>
+      </div>
+      <div class="ann-card-mid">
+        <div class="ann-av-wrap">
+          <div class="ann-av" style="background:${bg};color:${fg}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>
+          <div>
+            <div style="font-size:13px;font-weight:600">${esc(ann.authorName || '?')}</div>
+            <div class="ann-role" style="color:${t.c};background:${t.cd};border-color:${t.cb}">${rLabel}</div>
           </div>
-          ${m.imageUrl ? `<img class="msg-img" src="${esc(m.imageUrl)}" onclick="MX.Pages.Messages.openImg('${esc(m.imageUrl)}')" loading="lazy" alt="photo">` : ''}
-          <div class="msg-ttl">${esc(m.title)}</div>
-          ${m.body ? `<div class="msg-bdy">${esc(m.body)}</div>` : ''}
+        </div>
+        <div class="ann-body">${_renderContent(ann.content || '')}</div>
+      </div>
+      <div class="ann-card-bot">
+        <div class="ann-rxns">${reactionBtns}</div>
+        <div class="ann-actions">
+          <button class="ann-act" onclick="MX.Pages.Messages._toggleReplies('${ann.id}')">
+            <i class="fas fa-comment-dots"></i>
+            ${replies ? replies + (replies === 1 ? ' réponse' : ' réponses') : 'Répondre'}
+          </button>
+          <button class="ann-act" onclick="MX.Pages.Messages._readers('${ann.id}')" title="Lecteurs">
+            <i class="fas fa-eye"></i> ${reads}
+          </button>
+          ${canPin ? `<button class="ann-act${ann.pinned ? ' ann-act--on' : ''}" onclick="MX.Pages.Messages._pin('${ann.id}',${ann.pinned})" title="${ann.pinned ? 'Désépingler' : 'Épingler'}">
+            <i class="fas fa-thumbtack"></i>
+          </button>` : ''}
+          ${canDel ? `<button class="ann-act ann-act--del" onclick="MX.Pages.Messages._del('${ann.id}')">
+            <i class="fas fa-trash"></i>
+          </button>` : ''}
+        </div>
+      </div>
+      <div class="ann-replies-wrap" id="rpl_${ann.id}" style="display:${isExpanded ? 'block' : 'none'}"></div>
+    </div>`;
+  }
+
+  function _renderRepliesEl(annId) {
+    const wrap = document.getElementById('rpl_' + annId);
+    if (!wrap) return;
+    const { esc, avatarBg, avatarFg } = MX;
+    const list   = _replies[annId] || [];
+    const author = _author();
+
+    let h = `<div class="ann-replies-box">`;
+
+    if (!list.length) {
+      h += `<div class="ann-replies-empty">Aucune réponse pour l'instant</div>`;
+    } else {
+      list.forEach(r => {
+        const isAdm = r.authorRole === 'admin';
+        const bg = isAdm ? 'var(--cyan)' : avatarBg(r.authorName || '');
+        const fg = isAdm ? '#0C0C0E'     : avatarFg(r.authorName || '');
+        const rLbl = { admin: 'Admin', responsable: 'Resp.', technicien: 'Tech.' }[r.authorRole] || '';
+        const canDel = _canDelReply(r);
+        h += `<div class="ann-reply">
+          <div class="ann-av sm" style="background:${bg};color:${fg}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>
+          <div style="flex:1;min-width:0">
+            <div class="ann-reply-meta">
+              <span class="ann-reply-author">${esc(r.authorName||'?')}</span>
+              <span class="ann-reply-role">${rLbl}</span>
+              <span class="ann-reply-ts">${_relTime(r.createdAt)}</span>
+              ${canDel ? `<button onclick="MX.Pages.Messages._delReply('${annId}','${r.id}')" class="ann-reply-del"><i class="fas fa-times"></i></button>` : ''}
+            </div>
+            <div class="ann-reply-body">${_renderContent(r.content || '')}</div>
+          </div>
         </div>`;
       });
     }
 
-    h += `</div></div></div>`;
-    el.innerHTML = h;
+    if (author) {
+      h += `<div class="ann-reply-compose">
+        <textarea class="fi" id="rpl_ta_${annId}" placeholder="Votre réponse…" rows="2" style="font-size:13px;resize:none"></textarea>
+        <button class="primary-btn" onclick="MX.Pages.Messages._sendReply('${annId}')" style="width:auto;padding:8px 16px;font-size:13px;margin-top:6px;align-self:flex-end">
+          <i class="fas fa-paper-plane"></i> Répondre
+        </button>
+      </div>`;
+    }
 
-    if (_pendingFile) _restorePreview();
+    h += `</div>`;
+    wrap.innerHTML = h;
   }
 
-  function _restorePreview() {
-    const preview = document.getElementById("msg-photo-preview");
-    const img     = document.getElementById("msg-photo-img");
-    const name    = document.getElementById("msg-photo-name");
-    const clear   = document.getElementById("msg-photo-clear");
-    if (!preview || !img) return;
-    img.src = URL.createObjectURL(_pendingFile);
-    preview.style.display = "block";
-    if (name)  { name.textContent = _pendingFile.name; }
-    if (clear) { clear.style.display = "inline-block"; }
+  // ── Actions ──
+  function _setType(type) {
+    _selectedType = type;
+    _highlightTypePill(type);
   }
 
-  function previewPhoto(input) {
-    const file = input.files[0];
-    if (!file) return;
-    _pendingFile = file;
-    _restorePreview();
-  }
-
-  function clearPhoto() {
-    _pendingFile = null;
-    const input   = document.getElementById("msg-photo-input");
-    const preview = document.getElementById("msg-photo-preview");
-    const name    = document.getElementById("msg-photo-name");
-    const clear   = document.getElementById("msg-photo-clear");
-    if (input)   input.value = "";
-    if (preview) preview.style.display = "none";
-    if (name)    name.textContent = "";
-    if (clear)   clear.style.display = "none";
-  }
-
-  async function _compressImage(file) {
-    const MAX_PX  = 600;
-    const QUALITY = 0.65;
-    return new Promise(function(resolve) {
-      var timer = setTimeout(function() { resolve(file); }, 10000);
-      var img = new Image();
-      var url = URL.createObjectURL(file);
-      img.onload = function() {
-        URL.revokeObjectURL(url);
-        var w = img.width, h = img.height;
-        if (w <= MAX_PX && h <= MAX_PX && file.size < 150000) {
-          clearTimeout(timer); resolve(file); return;
-        }
-        var scale = Math.min(1, MAX_PX / Math.max(w, h));
-        w = Math.round(w * scale); h = Math.round(h * scale);
-        var canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        canvas.toBlob(function(blob) { clearTimeout(timer); resolve(blob || file); }, "image/jpeg", QUALITY);
-      };
-      img.onerror = function() { clearTimeout(timer); resolve(file); };
-      img.src = url;
+  function _highlightTypePill(type) {
+    Object.keys(T).forEach(k => {
+      const el = document.getElementById('atp_' + k);
+      if (el) el.classList.toggle('active', k === type);
     });
   }
 
+  function _onInput(ta) {
+    const n = (ta.value || '').length;
+    const el = document.getElementById('ann-char');
+    if (el) { el.textContent = n + ' / 500'; el.style.color = n > 450 ? 'var(--orange)' : 'var(--text3)'; }
+  }
+
+  function _setFilter(f) {
+    _filter = f;
+    render();
+  }
+
   async function send() {
-    const isAdm = MX.Auth.isAdmin();
-    const cu    = MX.state.currentUser;
-    const author = isAdm ? (MX.state.adminUser.displayName || "Admin") : (cu ? cu.name : null);
+    const author  = _author();
+    if (!author) return MX.toast('Connectez-vous pour publier', true);
+    const content = ((document.getElementById('ann-content') || {}).value || '').trim();
+    if (!content) return MX.toast('Écrivez quelque chose', true);
+    if (content.length > 500) return MX.toast('Maximum 500 caractères', true);
+    const allowed = _allowedTypes();
+    if (!allowed.includes(_selectedType)) return MX.toast('Type non autorisé pour votre rôle', true);
 
-    if (!author) return MX.toast("Connectez-vous pour envoyer un message", true);
-
-    const title = ((document.getElementById("msg-title") || {}).value || "").trim();
-    const body  = ((document.getElementById("msg-body")  || {}).value || "").trim();
-
-    if (!title) return MX.toast("Ajoutez un titre", true);
-    if (!body && !_pendingFile) return MX.toast("Écrivez un message ou ajoutez une photo", true);
-
-    const btn = document.querySelector(".compose .primary-btn");
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi…'; }
-
+    const btn = document.querySelector('.ann-compose .primary-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
     try {
-      let imageUrl = null;
-      if (_pendingFile) {
-        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Compression…';
-        const compressed = await _compressImage(_pendingFile);
-        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Upload 0%';
-        imageUrl = await MX.DB.uploadMessageImage(compressed);
-      }
-      await MX.DB.sendMessage({ author, title, body, imageUrl });
-      MX.toast("Message envoyé ✓");
-      clearPhoto();
-      const t = document.getElementById("msg-title"); if (t) t.value = "";
-      const b = document.getElementById("msg-body");  if (b) b.value = "";
+      await MX.DB.sendAnnouncement({ type: _selectedType, content, authorName: author, authorRole: _role() });
+      MX.toast('Annonce publiée ✓');
+      const ta = document.getElementById('ann-content');
+      if (ta) ta.value = '';
+      const ch = document.getElementById('ann-char');
+      if (ch) ch.textContent = '0 / 500';
     } catch (e) {
       console.error(e);
-      MX.toast("Erreur lors de l'envoi", true);
+      MX.toast('Erreur lors de la publication', true);
     } finally {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Envoyer'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Publier'; }
     }
   }
 
-  function deleteMsg(id) {
-    MX.showModal("Supprimer ce message ?", "Cette action est irréversible.", [
-      { label: "Supprimer", cls: "danger", fn: async function() {
-        try {
-          await MX.DB.deleteMessage(id);
-          MX.toast("Message supprimé");
-        } catch(e) { MX.toast("Erreur suppression", true); }
+  function _toggleReplies(annId) {
+    if (_expandedSet.has(annId)) {
+      _expandedSet.delete(annId);
+      if (_replyListeners[annId]) { _replyListeners[annId](); delete _replyListeners[annId]; }
+      const w = document.getElementById('rpl_' + annId);
+      if (w) w.style.display = 'none';
+    } else {
+      _expandedSet.add(annId);
+      const w = document.getElementById('rpl_' + annId);
+      if (w) {
+        w.style.display = 'block';
+        w.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3)"><i class="fas fa-spinner fa-spin"></i></div>';
+      }
+      _replyListeners[annId] = MX.DB.listenReplies(annId, list => {
+        _replies[annId] = list;
+        _renderRepliesEl(annId);
+      });
+    }
+  }
+
+  async function _react(annId, emoji, isActive) {
+    const author = _author();
+    if (!author) return MX.toast('Connectez-vous pour réagir', true);
+    try { await MX.DB.toggleReaction(annId, emoji, author, isActive); }
+    catch (e) { console.error(e); }
+  }
+
+  async function _pin(annId, currentlyPinned) {
+    try {
+      await MX.DB.togglePin(annId, currentlyPinned);
+      MX.toast(currentlyPinned ? 'Désépinglé' : 'Épinglé 📌');
+    } catch (e) { MX.toast('Erreur', true); }
+  }
+
+  function _del(annId) {
+    MX.showModal('Supprimer cette annonce ?', 'Cette action est irréversible.', [
+      { label: 'Supprimer', cls: 'danger', fn: async () => {
+        try { await MX.DB.deleteAnnouncement(annId); MX.toast('Annonce supprimée'); }
+        catch (e) { MX.toast('Erreur suppression', true); }
       }},
-      { label: "Annuler", cls: "cancel" }
+      { label: 'Annuler', cls: 'cancel' }
     ]);
   }
 
-  function openImg(url) {
-    window.open(url, "_blank");
+  async function _sendReply(annId) {
+    const author = _author();
+    if (!author) return MX.toast('Connectez-vous pour répondre', true);
+    const ta = document.getElementById('rpl_ta_' + annId);
+    const content = (ta?.value || '').trim();
+    if (!content) return MX.toast('Écrivez quelque chose', true);
+    try {
+      await MX.DB.sendReply({ annId, content, authorName: author, authorRole: _role() });
+      if (ta) ta.value = '';
+      MX.toast('Réponse envoyée ✓');
+    } catch (e) { MX.toast('Erreur lors de la réponse', true); }
+  }
+
+  function _delReply(annId, replyId) {
+    MX.showModal('Supprimer cette réponse ?', '', [
+      { label: 'Supprimer', cls: 'danger', fn: async () => {
+        try { await MX.DB.deleteReply(annId, replyId); MX.toast('Réponse supprimée'); }
+        catch (e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  function _readers(annId) {
+    const ann = (MX.state.announcements || []).find(a => a.id === annId);
+    if (!ann) return;
+    const r = ann.readBy || [];
+    if (!r.length) return MX.toast('Personne n\'a encore lu ce message');
+    MX.showModal(
+      `Lu par ${r.length} personne${r.length > 1 ? 's' : ''}`,
+      r.join(', '),
+      [{ label: 'Fermer', cls: 'cancel' }]
+    );
   }
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Messages = { render, send, previewPhoto, clearPhoto, deleteMsg, openImg };
+  window.MX.Pages.Messages = {
+    render, send,
+    _setType, _setFilter, _onInput,
+    _react, _pin, _del,
+    _toggleReplies, _sendReply, _delReply,
+    _readers
+  };
 })();
