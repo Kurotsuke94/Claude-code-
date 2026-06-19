@@ -42,7 +42,10 @@
     MX.buildNav && MX.buildNav();
     const page = MX.state.currentPage;
     if (page && MX.DAYS && MX.DAYS.find(d => d.id === page)) MX.Pages.Checklist.render(page);
-    if (user) { _registerFcmToken(user.name); }
+    if (user) {
+      _registerFcmToken(user.name);
+      setTimeout(() => MX.showNotifOnboarding && MX.showNotifOnboarding(), 1500);
+    }
   }
 
   function clearCurrentUser() {

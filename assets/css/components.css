@@ -583,3 +583,69 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   50%       { opacity: 0.5; }
 }
 .deadline-overdue { animation: pulse-red 1.2s ease-in-out infinite; }
+
+/* ── NOTIFICATION ONBOARDING SHEET ── */
+@keyframes nof-slideup {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.nof-sheet {
+  background: var(--bg3);
+  border: 1px solid var(--border3);
+  border-bottom: none;
+  border-radius: 24px 24px 0 0;
+  padding: 24px 20px 44px;
+  width: 100%;
+  max-width: 480px;
+  animation: nof-slideup 0.32s cubic-bezier(0.22,1,0.36,1);
+}
+.nof-handle {
+  width: 40px; height: 4px;
+  border-radius: 2px;
+  background: var(--border3);
+  margin: 0 auto 24px;
+}
+.nof-icon {
+  width: 72px; height: 72px;
+  border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px;
+  margin: 0 auto 16px;
+}
+.nof-step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg4);
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+  font-size: 13px; line-height: 1.4;
+}
+.nof-step-n {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: var(--bg5);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px; font-weight: 700;
+  font-family: var(--ffm);
+  color: var(--cyan);
+}
+.nof-btn-primary {
+  width: 100%; padding: 14px;
+  border-radius: 12px; border: none;
+  background: var(--cyan); color: #080B14;
+  font-size: 14px; font-weight: 700;
+  font-family: var(--ffs); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: opacity var(--t);
+}
+.nof-btn-primary:hover { opacity: 0.88; }
+.nof-btn-cancel {
+  width: 100%; padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+  background: transparent; color: var(--text2);
+  font-size: 13px; font-family: var(--ffs); cursor: pointer;
+  transition: background var(--t);
+}
+.nof-btn-cancel:hover { background: var(--bg4); }

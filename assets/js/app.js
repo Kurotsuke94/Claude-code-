@@ -339,6 +339,7 @@
       buildDeskHeader();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
+      setTimeout(() => MX.showNotifOnboarding && MX.showNotifOnboarding(), 1500);
     });
     MX.Auth.onLogout(() => {
       buildDeskHeader();
@@ -415,6 +416,84 @@
       MX.toast("Notifications refusées — vérifiez les réglages", true);
     }
     MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
+  };
+
+  // ── NOTIFICATION ONBOARDING ──
+  window.MX.showNotifOnboarding = function() {
+    if (localStorage.getItem("mx_notif_prompted")) return;
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "default") {
+      localStorage.setItem("mx_notif_prompted", "1");
+      return;
+    }
+    localStorage.setItem("mx_notif_prompted", "1");
+
+    const isIos        = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true ||
+                         window.matchMedia("(display-mode: standalone)").matches;
+
+    const existing = document.getElementById("notif-onboard");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "notif-onboard";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(8,11,20,0.85);z-index:600;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)";
+
+    overlay.innerHTML = (isIos && !isStandalone)
+      ? `<div class="nof-sheet">
+          <div class="nof-handle"></div>
+          <div style="text-align:center;margin-bottom:20px">
+            <div class="nof-icon" style="background:var(--bg4);border:1px solid var(--border3);color:var(--text2)">
+              <i class="fas fa-mobile-screen"></i>
+            </div>
+            <div style="font-size:19px;font-weight:700;margin-bottom:8px">Installer Maintix</div>
+            <div style="font-size:13px;color:var(--text2);line-height:1.6">
+              Sur iPhone/iPad, les notifications nécessitent que l'app soit installée sur votre écran d'accueil.
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+            <div class="nof-step"><div class="nof-step-n">1</div><div>Appuyez sur <i class="fas fa-arrow-up-from-bracket" style="color:var(--cyan)"></i> <strong>Partager</strong> en bas de Safari</div></div>
+            <div class="nof-step"><div class="nof-step-n">2</div><div>Choisissez <strong>"Sur l'écran d'accueil"</strong></div></div>
+            <div class="nof-step"><div class="nof-step-n">3</div><div>Ouvrez Maintix depuis l'icône installée</div></div>
+          </div>
+          <button class="nof-btn-cancel" onclick="MX._closeNotifOnboard()">
+            <i class="fas fa-check"></i> Compris, j'installe !
+          </button>
+        </div>`
+      : `<div class="nof-sheet">
+          <div class="nof-handle"></div>
+          <div style="text-align:center;margin-bottom:24px">
+            <div class="nof-icon" style="background:var(--cyan-dim);border:1px solid var(--cyan-border);color:var(--cyan)">
+              <i class="fas fa-bell"></i>
+            </div>
+            <div style="font-size:19px;font-weight:700;margin-bottom:8px">Activer les notifications</div>
+            <div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:320px;margin:0 auto">
+              Soyez alerté en temps réel des nouvelles interventions et tâches qui vous sont assignées.
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <button class="nof-btn-primary" onclick="MX._doNotifPermission()">
+              <i class="fas fa-bell"></i> Activer les notifications
+            </button>
+            <button class="nof-btn-cancel" onclick="MX._closeNotifOnboard()">Plus tard</button>
+          </div>
+        </div>`;
+
+    overlay.addEventListener("click", e => { if (e.target === overlay) MX._closeNotifOnboard(); });
+    document.body.appendChild(overlay);
+  };
+
+  window.MX._closeNotifOnboard = function() {
+    const el = document.getElementById("notif-onboard");
+    if (!el) return;
+    el.style.transition = "opacity 0.2s";
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 200);
+  };
+
+  window.MX._doNotifPermission = async function() {
+    MX._closeNotifOnboard();
+    await MX.enableNotifications();
   };
 
   window.MX.buildNav          = buildNav;
