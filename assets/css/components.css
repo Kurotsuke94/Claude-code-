@@ -931,31 +931,34 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* ── GLOBAL ANN BANNER ── */
 .ann-banner {
-  background: var(--bg2);
-  border-bottom: 2px solid var(--banner-color, var(--cyan));
-  padding: 0;
-  width: 100%;
-  position: sticky;
-  top: 0;
+  margin: 10px 16px 4px;
+  background: rgba(0, 245, 212, 0.035);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 245, 212, 0.12);
+  border-left: 3px solid var(--banner-color, var(--cyan));
+  border-radius: 16px;
+  overflow: hidden;
+  animation: bannerIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   z-index: 90;
-  animation: bannerIn 0.25s ease;
+  flex-shrink: 0;
 }
 .ann-banner.hidden { display: none; }
 @keyframes bannerIn {
-  from { opacity: 0; transform: translateY(-8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .ann-banner-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
-  max-width: 100%;
-  min-height: 44px;
+  gap: 12px;
+  padding: 12px 16px 12px 14px;
+  min-height: 48px;
 }
 .ann-banner-icon {
-  font-size: 17px;
+  font-size: 20px;
   flex-shrink: 0;
+  filter: drop-shadow(0 0 8px var(--banner-color, var(--cyan)));
 }
 .ann-banner-body {
   flex: 1;
@@ -963,13 +966,13 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 5px 8px;
+  gap: 4px 10px;
   overflow: hidden;
 }
 .ann-banner-label {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   flex-shrink: 0;
   line-height: 1.4;
@@ -980,8 +983,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 420px;
+  max-width: 440px;
   line-height: 1.4;
+  font-weight: 500;
 }
 .ann-banner-author {
   font-size: 11px;
@@ -992,16 +996,16 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ann-banner-nav {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
 }
 .ann-banner-nav-btn {
-  background: none;
+  background: rgba(255,255,255,0.06);
   border: 1px solid var(--border2);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--text2);
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1009,35 +1013,38 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   font-size: 10px;
   transition: background var(--t), color var(--t);
 }
-.ann-banner-nav-btn:hover { background: var(--bg4); color: var(--text1); }
+.ann-banner-nav-btn:hover { background: rgba(255,255,255,0.12); color: var(--text1); }
 .ann-banner-counter {
   font-size: 11px;
-  color: var(--text3);
-  min-width: 28px;
+  color: var(--text2);
+  min-width: 30px;
   text-align: center;
   font-family: var(--ffm);
+  font-weight: 600;
 }
 .ann-banner-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 .ann-banner-read {
-  background: none;
-  border: 1px solid;
-  border-radius: 6px;
-  padding: 4px 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 5px 12px;
   font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   white-space: nowrap;
-  opacity: 0.85;
-  transition: opacity var(--t);
+  opacity: 0.8;
+  transition: opacity var(--t), background var(--t);
+  font-family: var(--ffs);
 }
-.ann-banner-read:hover { opacity: 1; }
+.ann-banner-read:hover { opacity: 1; background: rgba(255,255,255,0.1); }
 .ann-banner-close {
   background: none;
   border: none;
@@ -1048,14 +1055,80 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 8px;
   font-size: 13px;
   transition: color var(--t), background var(--t);
   flex-shrink: 0;
 }
-.ann-banner-close:hover { color: var(--text1); background: var(--bg4); }
+.ann-banner-close:hover { color: var(--text1); background: rgba(255,255,255,0.08); }
 @media (max-width: 600px) {
-  .ann-banner-text { max-width: 160px; }
+  .ann-banner { margin: 8px 10px 2px; }
+  .ann-banner-text { max-width: 180px; }
   .ann-banner-read span { display: none; }
   .ann-banner-author { display: none; }
+}
+
+/* ── STATUS BAR ── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 20px;
+  background: var(--bg1);
+  border-top: 1px solid rgba(0,245,212,0.08);
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+  font-family: var(--ffm);
+  gap: 0;
+}
+.sb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+}
+.sb-item:first-child { padding-left: 0; }
+.sb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34,197,94,0.6);
+  flex-shrink: 0;
+  animation: sbPulse 3s ease-in-out infinite;
+}
+@keyframes sbPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+  50%       { opacity: 0.75; box-shadow: 0 0 10px rgba(34,197,94,0.8); }
+}
+.sb-sep {
+  color: rgba(0,245,212,0.15);
+  font-size: 16px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.sb-ver { margin-left: auto; }
+@media (max-width: 768px) {
+  .status-bar { display: none; }
+}
+
+/* ── SIDEBAR USER ONLINE DOT ── */
+.user-online {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #22c55e;
+  margin-top: 1px;
+}
+.user-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 5px rgba(34,197,94,0.6);
+  animation: sbPulse 3s ease-in-out infinite;
 }

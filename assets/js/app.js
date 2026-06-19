@@ -248,6 +248,8 @@
   }
 
   function updateNavProgress() {
+    _lastSyncTime = new Date();
+    renderStatusBar();
     const { DAYS, state, getDaySlots } = MX;
     DAYS.forEach(day => {
       let t = 0, d = 0;
@@ -280,6 +282,34 @@
     if (bnBadge){ bnBadge.textContent = unread > 9 ? "9+" : unread; bnBadge.className = "nav-badge" + (unread ? " show" : ""); }
     const dhBadge = document.getElementById("dh-bell-badge");
     if (dhBadge){ dhBadge.textContent = unread > 9 ? "9+" : (unread || ""); dhBadge.className = "nav-badge" + (unread ? " show" : ""); }
+  }
+
+  // ── STATUS BAR ──
+  const _APP_VER = "1.0.16";
+  let _lastSyncTime = null;
+  let _presenceCount = 0;
+
+  function _fmtTime(d) {
+    if (!d) return "--:--";
+    return d.getHours().toString().padStart(2, "0") + ":" + d.getMinutes().toString().padStart(2, "0");
+  }
+
+  function renderStatusBar() {
+    const el = document.getElementById("status-bar");
+    if (!el) return;
+    const t = _fmtTime(_lastSyncTime);
+    const n = _presenceCount;
+    const usersLabel = n + " utilisateur" + (n !== 1 ? "s" : "") + " connecté" + (n !== 1 ? "s" : "");
+    el.innerHTML =
+      `<span class="sb-item"><span class="sb-dot"></span>Serveur opérationnel</span>` +
+      `<span class="sb-sep">│</span>` +
+      `<span class="sb-item"><i class="fas fa-cloud"></i> Synchronisé à ${t}</span>` +
+      `<span class="sb-sep">│</span>` +
+      `<span class="sb-item"><i class="fas fa-floppy-disk"></i> Sauvegarde à ${t}</span>` +
+      `<span class="sb-sep">│</span>` +
+      `<span class="sb-item" id="sb-users"><i class="fas fa-users"></i> ${usersLabel}</span>` +
+      `<span class="sb-sep">│</span>` +
+      `<span class="sb-item sb-ver"><i class="fas fa-rocket"></i> Maintix v${_APP_VER}</span>`;
   }
 
   // ── ANN BANNER ──
@@ -498,6 +528,11 @@
       if (state.currentPage === "home") MX.Pages.Home.render();
     });
 
+    DB.listenPresence(count => {
+      _presenceCount = count;
+      renderStatusBar();
+    });
+
     DB.listenPlanning(url => {
       state.planningUrl = url;
       if (state.currentPage === "home") MX.Pages.Home.render();
@@ -552,8 +587,18 @@
     clearTimeout(loadingTimeout);
     hideLoading();
 
+    _lastSyncTime = new Date();
+    renderStatusBar();
     buildNav();
     MX.showPage("home");
+
+    // Presence heartbeat every 2 minutes
+    setInterval(() => {
+      const cu = MX.state.currentUser;
+      const ad = MX.state.adminUser;
+      const name = cu ? cu.name : (ad ? (ad.email || "admin").split("@")[0] : null);
+      if (name) MX.DB.updatePresence(name);
+    }, 120000);
 
     setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
@@ -687,6 +732,7 @@
   window.MX.buildDeskHeader   = buildDeskHeader;
   window.MX.updateNavProgress = updateNavProgress;
   window.MX.updateAnnBanner   = updateAnnBanner;
+  window.MX.renderStatusBar   = renderStatusBar;
 
   document.addEventListener("DOMContentLoaded", init);
 })();

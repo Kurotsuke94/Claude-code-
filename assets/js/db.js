@@ -369,6 +369,33 @@
     await R_ANN().doc(annId).update({ replyCount: FV.increment(-1) });
   }
 
+  // ── PRESENCE ──
+  function _presenceKey(name) { return (name || "anon").replace(/\s+/g, "_"); }
+  function _countActive(snap) {
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    return snap.docs.filter(d => {
+      const ts = d.data().updatedAt;
+      if (!ts) return false;
+      const ms = ts.toMillis ? ts.toMillis() : ts.seconds * 1000;
+      return ms > cutoff;
+    }).length;
+  }
+  async function updatePresence(name) {
+    await db.collection("presence").doc(_presenceKey(name)).set(
+      { name: name || "Anonyme", updatedAt: FV.serverTimestamp() },
+      { merge: true }
+    );
+  }
+  function listenPresence(cb) {
+    let _snap = null;
+    const _iv = setInterval(() => { if (_snap) cb(_countActive(_snap)); }, 60000);
+    const _fn = db.collection("presence").onSnapshot(snap => {
+      _snap = snap;
+      cb(_countActive(snap));
+    });
+    _unsub.presence = () => { _fn(); clearInterval(_iv); };
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -391,6 +418,7 @@
     togglePin, toggleReaction, markReadAnnouncement,
     listenReplies, sendReply, deleteReply,
     setNote, archiveWeek,
-    saveFcmToken, deleteFcmToken
+    saveFcmToken, deleteFcmToken,
+    updatePresence, listenPresence
   };
 })();

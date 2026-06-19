@@ -8,7 +8,10 @@
     if (user) { _onLogin  && _onLogin(user); }
     else       { _onLogout && _onLogout(); }
     updateSidebarFooter();
-    if (user) { _registerFcmToken("admin"); }
+    if (user) {
+      _registerFcmToken("admin");
+      MX.DB && MX.DB.updatePresence && MX.DB.updatePresence(user.email ? user.email.split("@")[0] : "admin");
+    }
   });
 
   function onLogin(cb)  { _onLogin  = cb; }
@@ -44,6 +47,7 @@
     if (page && MX.DAYS && MX.DAYS.find(d => d.id === page)) MX.Pages.Checklist.render(page);
     if (user) {
       _registerFcmToken(user.name);
+      MX.DB && MX.DB.updatePresence && MX.DB.updatePresence(user.name);
       setTimeout(() => MX.showNotifOnboarding && MX.showNotifOnboarding(), 1500);
     }
   }
@@ -245,6 +249,7 @@
           <div style="flex:1;min-width:0">
             <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(cu.name)}</div>
             <div style="font-size:10px;color:var(--text2)">${lbl}</div>
+            <div class="user-online"><span class="user-online-dot"></span>En ligne</div>
           </div>
           <span style="font-size:10px;color:var(--cyan)"><i class="fas fa-exchange-alt"></i></span>
         </button>`;
