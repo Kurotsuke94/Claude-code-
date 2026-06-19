@@ -365,52 +365,73 @@
 
     // ── Responsable planning widget (visible only to responsable/admin) ──
     if (MX.Auth.canSeeAll()) {
-      const todayId   = MX.todayId();
+      const todayCurrent = MX.todayId();
       const RESP_BORDERS = {
         "#003B35":"#00F5D4","#052E16":"#22C55E","#071228":"#3B82F6",
         "#1C0A00":"#F97316","#120D1F":"#A78BFA","#1F0707":"#EF4444",
         "#1A2540":"#6B88CC","#0A1E1E":"#2DD4BF"
       };
       const respBorder = bg => RESP_BORDERS[bg] || "#00F5D4";
-      const respTasks  = (state.respTasks || [])
-        .filter(t => t.dayId === todayId)
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
+      const allRespTasks = state.respTasks || [];
 
-      if (respTasks.length) {
-        const doneCount = respTasks.filter(t => !!state.checks["resp_" + t.id]).length;
-        const pct       = Math.round(doneCount / respTasks.length * 100);
-        const progCls   = MX.progressClass(pct);
+      // Only show section if there's at least one task across all days
+      const totalTasks = allRespTasks.length;
+      if (totalTasks > 0) {
+        const totalDone = allRespTasks.filter(t => !!state.checks["resp_" + t.id]).length;
+        const totalPct  = Math.round(totalDone / totalTasks * 100);
+        const totalCls  = MX.progressClass(totalPct);
 
-        h += `<div class="section-label" style="margin-bottom:10px">Planning Responsable — Aujourd'hui</div>
+        h += `<div class="section-label" style="margin-bottom:10px">Planning Responsable</div>
         <div class="slot-card" style="margin-bottom:24px;border-color:var(--cyan-border)">
           <div class="slot-head" style="background:var(--cyan-dim);border-bottom-color:var(--cyan-border)">
             <div class="ch-ico" style="background:rgba(0,245,212,0.12);color:var(--cyan)">
               <i class="fas fa-clipboard-check"></i>
             </div>
             <div style="flex:1">
-              <div style="font-size:14px;font-weight:700">Tâches du jour</div>
-              <span class="slot-chip ${progCls}">${doneCount} / ${respTasks.length} réalisées</span>
+              <div style="font-size:14px;font-weight:700">Tâches de la semaine</div>
+              <span class="slot-chip ${totalCls}">${totalDone} / ${totalTasks} réalisées</span>
             </div>
-            <div class="slot-pct ${progCls}">${pct}%</div>
+            <div class="slot-pct ${totalCls}">${totalPct}%</div>
           </div>`;
 
-        respTasks.forEach(t => {
-          const key       = "resp_" + t.id;
-          const isChecked = !!state.checks[key];
-          const bg        = t.color || "#003B35";
-          const comment   = state.checks["resp_comment_" + t.id] || "";
-          const byWho     = state.checks["resp_by_" + t.id] || "";
-          h += `<div class="trow" onclick="MX.Pages.Home.toggleRespTask('${esc(t.id)}')"
-              style="border-left:3px solid ${respBorder(bg)};cursor:pointer">
-            <div class="tcb ${isChecked ? "done" : ""}">
-              ${isChecked ? '<i class="fas fa-check"></i>' : ''}
-            </div>
-            <div style="flex:1;min-width:0">
-              <div class="ttext${isChecked ? ' ttext-done' : ''}">${esc(t.text)}</div>
-              ${isChecked && comment ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
-            </div>
-            ${t.person ? `<span class="twho" style="background:${bg};border:1px solid ${respBorder(bg)};color:#F1F5F9">${esc(t.person)}</span>` : ''}
-          </div>`;
+        MX.DAYS.forEach(day => {
+          const dayTasks = allRespTasks
+            .filter(t => t.dayId === day.id)
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+          if (!dayTasks.length) return;
+
+          const dayDone = dayTasks.filter(t => !!state.checks["resp_" + t.id]).length;
+          const dayPct  = Math.round(dayDone / dayTasks.length * 100);
+          const dayCls  = MX.progressClass(dayPct);
+          const isToday = day.id === todayCurrent;
+
+          h += `<div style="border-bottom:1px solid var(--border2);padding:10px 14px 4px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${isToday ? 'var(--cyan)' : 'var(--text3)'}">${esc(day.l)}</span>
+              ${isToday ? `<span style="font-size:10px;background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan-border);border-radius:10px;padding:1px 7px">Aujourd'hui</span>` : ''}
+              <span class="slot-chip ${dayCls}" style="margin-left:auto">${dayDone}/${dayTasks.length}</span>
+            </div>`;
+
+          dayTasks.forEach(t => {
+            const key       = "resp_" + t.id;
+            const isChecked = !!state.checks[key];
+            const bg        = t.color || "#003B35";
+            const comment   = state.checks["resp_comment_" + t.id] || "";
+            const byWho     = state.checks["resp_by_" + t.id] || "";
+            h += `<div class="trow" onclick="MX.Pages.Home.toggleRespTask('${esc(t.id)}')"
+                style="border-left:3px solid ${respBorder(bg)};cursor:pointer;margin-bottom:6px">
+              <div class="tcb ${isChecked ? "done" : ""}">
+                ${isChecked ? '<i class="fas fa-check"></i>' : ''}
+              </div>
+              <div style="flex:1;min-width:0">
+                <div class="ttext${isChecked ? ' ttext-done' : ''}">${esc(t.text)}</div>
+                ${isChecked && comment ? `<div style="font-size:11px;color:var(--text2);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
+              </div>
+              ${t.person ? `<span class="twho" style="background:${bg};border:1px solid ${respBorder(bg)};color:#F1F5F9">${esc(t.person)}</span>` : ''}
+            </div>`;
+          });
+
+          h += `</div>`;
         });
 
         h += `</div>`;
