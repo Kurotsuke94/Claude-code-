@@ -332,7 +332,7 @@
       if (state.currentPage === "home")      MX.Pages.Home.render();
       if (state.currentPage === "orders")    MX.Pages.Orders.render();
       if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
-      if (state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
+      if (state.currentPage && state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
         MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
     });
 
@@ -400,7 +400,7 @@
       state.respTasks = list;
       updateNavProgress();
       if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
-      if (state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
+      if (state.currentPage && state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
         MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
     });
 
