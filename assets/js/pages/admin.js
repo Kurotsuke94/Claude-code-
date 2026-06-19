@@ -30,7 +30,7 @@
     const allTabs = [
       { id: "tasks",    label: "📋 Tâches"      },
       { id: "team",     label: "👥 Équipe"       },
-      { id: "missions", label: "🚨 Missions"     },
+      { id: "missions", label: "🚨 Interventions" },
       { id: "alerts",   label: "🔔 Alertes"      },
       { id: "orders",   label: "📦 Stock"        },
       { id: "week",     label: "📅 Semaine"      },
@@ -54,7 +54,7 @@
         <div class="ph-row">
           <div>
             <div class="ph-title">Panneau ${isAdmin ? 'Admin' : 'Responsable'}</div>
-            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Missions et gestion des tâches'}</div>
+            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Interventions et gestion des tâches'}</div>
           </div>
           ${actionBtn}
         </div>
@@ -156,12 +156,12 @@
       : (cu ? cu.name : "Responsable");
 
     let h = `<div class="info-note" style="margin-bottom:12px;background:var(--red-dim);border-color:var(--red-border);color:var(--red)">
-      <i class="fas fa-circle-exclamation"></i> Les missions apparaissent en rouge en haut des checklists du jour concerné, visibles par toute l'équipe.
+      <i class="fas fa-circle-exclamation"></i> Les interventions apparaissent en rouge en haut des checklists du jour concerné, visibles par toute l'équipe.
     </div>
     <div class="tecard" style="margin-bottom:16px;padding:14px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--red)"><i class="fas fa-plus"></i> Nouvelle mission</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--red)"><i class="fas fa-plus"></i> Nouvelle intervention</div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <input class="fi fi-sm" id="ms-text" placeholder="Description de la mission…" maxlength="120">
+        <input class="fi fi-sm" id="ms-text" placeholder="Description de l'intervention…" maxlength="120">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select class="fi fi-sm" id="ms-day" style="flex:1;min-width:130px">
             <option value="all">Tous les jours</option>
@@ -174,7 +174,7 @@
           </select>
         </div>
         <button class="save-btn" style="margin-top:0" onclick="MX.Pages.Admin.addMission('${esc(createdBy)}')">
-          <i class="fas fa-paper-plane"></i> Créer la mission
+          <i class="fas fa-paper-plane"></i> Créer l'intervention
         </button>
       </div>
     </div>`;
@@ -183,7 +183,7 @@
     const done   = missions.filter(m =>  m.done);
 
     if (!missions.length) {
-      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucune mission en cours</div>`;
+      h += `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Aucune intervention en cours</div>`;
     }
 
     if (active.length) {
@@ -496,23 +496,23 @@
     const text       = (document.getElementById("ms-text") || {}).value?.trim() || "";
     const dayId      = (document.getElementById("ms-day")  || {}).value || "all";
     const assignedTo = (document.getElementById("ms-user") || {}).value || "";
-    if (!text) return MX.toast("Entrez une description de mission", true);
+    if (!text) return MX.toast("Entrez une description d'intervention", true);
     try {
       await MX.DB.addMission({ text, dayId, assignedTo, createdBy: createdBy || "Responsable" });
-      MX.toast("Mission créée ✓");
+      MX.toast("Intervention créée ✓");
     } catch(e) { MX.toast("Erreur", true); }
   }
   async function delMission(id) {
-    MX.showModal("Supprimer cette mission ?", "La mission disparaîtra de tous les panneaux.", [
+    MX.showModal("Supprimer cette intervention ?", "L'intervention disparaîtra de tous les panneaux.", [
       { label: "Supprimer", cls: "danger", fn: async () => {
-        try { await MX.DB.deleteMission(id); MX.toast("Mission supprimée ✓"); }
+        try { await MX.DB.deleteMission(id); MX.toast("Intervention supprimée ✓"); }
         catch(e) { MX.toast("Erreur", true); }
       }},
       { label: "Annuler", cls: "cancel" }
     ]);
   }
   async function undoMission(id) {
-    try { await MX.DB.updateMission(id, { done: false }); MX.toast("Mission réactivée ✓"); }
+    try { await MX.DB.updateMission(id, { done: false }); MX.toast("Intervention réactivée ✓"); }
     catch(e) { MX.toast("Erreur", true); }
   }
 
@@ -726,10 +726,10 @@ tr.done td { color: #bbb; text-decoration: line-through; }
 ${taskRows || '<tr><td colspan="4" class="empty" style="text-align:center">Aucune tâche</td></tr>'}
 </table>
 
-<h2>🚨 Missions</h2>
-${missions.length ? `<table><tr><th>Mission</th><th>Assigné à</th><th>Statut</th></tr>
+<h2>🚨 Interventions</h2>
+${missions.length ? `<table><tr><th>Intervention</th><th>Assigné à</th><th>Statut</th></tr>
 ${missions.map(m => `<tr><td>${m.text}</td><td>${m.assignedTo === 'all' ? 'Tout le monde' : (m.assignedTo || '–')}</td><td>${m.done ? '✓ Terminé' : 'En cours'}</td></tr>`).join('')}
-</table>` : '<p class="empty">Aucune mission</p>'}
+</table>` : '<p class="empty">Aucune intervention</p>'}
 
 <h2>📦 Stock critique</h2>
 ${lowProds.length ? `<table><tr><th>Produit</th><th>Référence</th><th>Stock</th><th>Minimum</th></tr>

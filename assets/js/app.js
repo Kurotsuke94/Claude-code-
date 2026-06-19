@@ -210,7 +210,7 @@
       if (!prevIds.has(m.id) && m.assignedTo === cu.name && !m.done && !_notifiedMissions.has(m.id)) {
         _notifiedMissions.add(m.id);
         if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("Nouvelle mission", { body: m.text + (m.createdBy ? " — de " + m.createdBy : ""), icon: "/assets/icons/icon-192.png" });
+          new Notification("Nouvelle intervention", { body: m.text + (m.createdBy ? " — de " + m.createdBy : ""), icon: "/assets/icons/icon-192.png" });
         }
       }
     });

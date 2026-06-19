@@ -74,8 +74,8 @@
         <div class="slot-head" style="background:var(--red-dim);border-bottom-color:var(--red-border)">
           <div class="ch-ico" style="background:var(--red-border);color:var(--red)"><i class="fas fa-circle-exclamation"></i></div>
           <div style="flex:1">
-            <div style="font-size:14px;font-weight:700;color:var(--red)">MISSIONS</div>
-            <div class="slot-dl">${dayMissions.length} mission${dayMissions.length > 1 ? 's' : ''} en cours</div>
+            <div style="font-size:14px;font-weight:700;color:var(--red)">INTERVENTIONS</div>
+            <div class="slot-dl">${dayMissions.length} intervention${dayMissions.length > 1 ? 's' : ''} en cours</div>
             <span class="slot-chip alert"><i class="fas fa-circle-exclamation"></i> À traiter</span>
           </div>
           <div class="slot-pct r">${dayMissions.length}</div>
@@ -347,8 +347,8 @@
     try {
       await MX.DB.updateMission(missionId, { done: true });
       const actorName = cu?.name || (MX.state.adminUser?.email || "inconnu");
-      MX.DB.addLog({ workerName: actorName, action: "check", taskText: "[Mission] " + m.text, dayId: m.dayId, slot: "mission" }).catch(() => {});
-      MX.toast("Mission complétée ✓");
+      MX.DB.addLog({ workerName: actorName, action: "check", taskText: "[Intervention] " + m.text, dayId: m.dayId, slot: "intervention" }).catch(() => {});
+      MX.toast("Intervention complétée ✓");
     } catch(e) {
       MX.toast("Erreur", true);
     }
