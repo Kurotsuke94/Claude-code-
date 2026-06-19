@@ -1,6 +1,20 @@
 (function () {
   let aTab = "tasks";
   let aDay = "lundi";
+  let _editMissionId = null;
+
+  const PRIO = {
+    urgent: { l:"Urgent", ico:"fa-fire",               c:"var(--red)",    bg:"var(--red-dim)",    border:"var(--red-border)"   },
+    normal: { l:"Normal", ico:"fa-circle-exclamation", c:"var(--orange)", bg:"var(--orange-dim)", border:"var(--orange-border)" },
+    low:    { l:"Basse",  ico:"fa-circle-dot",         c:"var(--text3)",  bg:"var(--bg4)",        border:"var(--border2)"      }
+  };
+  const CAT = {
+    panne:    { l:"Panne",    ico:"fa-wrench"        },
+    securite: { l:"Sécurité", ico:"fa-shield-halved" },
+    livraison:{ l:"Livraison",ico:"fa-truck"          },
+    nettoyage:{ l:"Nettoyage",ico:"fa-broom"          },
+    autre:    { l:"Autre",    ico:"fa-ellipsis"       }
+  };
 
   function render() {
     const el      = document.getElementById("main-content");
@@ -146,6 +160,17 @@
   }
 
   // ── MISSIONS ──
+  function _deadlineStatusAdmin(dl) {
+    if (!dl) return null;
+    const [h, min] = dl.split(':').map(Number);
+    const now  = new Date();
+    const dlMs = new Date(now); dlMs.setHours(h, min, 0, 0);
+    const diff = dlMs - now;
+    if (diff < 0)          return { label: "DÉPASSÉ",            c: "var(--red)",    pulse: true  };
+    if (diff < 60*60*1000) return { label: `Dans ${Math.round(diff/60000)}min`, c: "var(--orange)", pulse: false };
+    return { label: dl, c: "var(--text3)", pulse: false };
+  }
+
   function renderMissions() {
     const { state, DAYS, esc } = MX;
     const missions = state.missions || [];
@@ -155,6 +180,13 @@
       ? (state.adminUser ? state.adminUser.email : "Admin")
       : (cu ? cu.name : "Responsable");
 
+    // Priorité button helper
+    function prioBtnStyle(key, active) {
+      const p = PRIO[key];
+      if (active) return `background:${p.bg};color:${p.c};border:1.5px solid ${p.border};border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+      return `background:var(--bg4);color:var(--text3);border:1.5px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+    }
+
     let h = `<div class="info-note" style="margin-bottom:12px;background:var(--red-dim);border-color:var(--red-border);color:var(--red)">
       <i class="fas fa-circle-exclamation"></i> Les interventions apparaissent en rouge en haut des checklists du jour concerné, visibles par toute l'équipe.
     </div>
@@ -162,6 +194,22 @@
       <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--red)"><i class="fas fa-plus"></i> Nouvelle intervention</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <input class="fi fi-sm" id="ms-text" placeholder="Description de l'intervention…" maxlength="120">
+        <div style="display:flex;gap:6px;flex-wrap:wrap" id="ms-prio-wrap">
+          <button type="button" id="ms-prio-btn-urgent" onclick="MX.Pages.Admin._setPrio('urgent')" style="${prioBtnStyle('urgent', false)}"><i class="fas fa-fire"></i> Urgent</button>
+          <button type="button" id="ms-prio-btn-normal" onclick="MX.Pages.Admin._setPrio('normal')" style="${prioBtnStyle('normal', true)}"><i class="fas fa-circle-exclamation"></i> Normal</button>
+          <button type="button" id="ms-prio-btn-low"    onclick="MX.Pages.Admin._setPrio('low')"    style="${prioBtnStyle('low', false)}"><i class="fas fa-circle-dot"></i> Basse</button>
+        </div>
+        <input type="hidden" id="ms-prio" value="normal">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select class="fi fi-sm" id="ms-cat" style="flex:1;min-width:130px">
+            <option value="autre"><i class="fas fa-ellipsis"></i> Autre</option>
+            <option value="panne">Panne</option>
+            <option value="securite">Sécurité</option>
+            <option value="livraison">Livraison</option>
+            <option value="nettoyage">Nettoyage</option>
+          </select>
+          <input type="time" class="fi fi-sm" id="ms-deadline" placeholder="Heure limite (optionnel)" style="flex:1;min-width:130px">
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select class="fi fi-sm" id="ms-day" style="flex:1;min-width:130px">
             <option value="all">Tous les jours</option>
@@ -169,7 +217,7 @@
           </select>
           <select class="fi fi-sm" id="ms-user" style="flex:1;min-width:130px">
             <option value="">— Assigner à —</option>
-            <option value="all">🌍 Tout le monde</option>
+            <option value="all">Tout le monde</option>
             ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
           </select>
         </div>
@@ -189,21 +237,81 @@
     if (active.length) {
       h += `<div class="section-label" style="margin-bottom:8px">En cours (${active.length})</div>`;
       active.forEach(m => {
-        const day = m.dayId === "all" ? "Tous les jours" : (DAYS.find(d => d.id === m.dayId)?.l || m.dayId);
-        const nc  = m.assignedTo ? MX.userColors(m.assignedTo) : null;
-        h += `<div class="mission-adm-card">
-          <div style="display:flex;align-items:flex-start;gap:10px">
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:600">${esc(m.text)}</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-                <span style="color:var(--red)"><i class="fas fa-calendar-day"></i> ${esc(day)}</span>
-                ${m.assignedTo === "all" ? `<span style="background:var(--red-border);color:var(--red);padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">Tout le monde</span>` : nc ? `<span style="background:${nc.bg};color:${nc.fg};padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">${esc(m.assignedTo)}</span>` : `<span style="color:var(--text3)">Non assigné</span>`}
-                ${m.createdBy ? `<span style="color:var(--text3)">par ${esc(m.createdBy)}</span>` : ''}
+        const day  = m.dayId === "all" ? "Tous les jours" : (DAYS.find(d => d.id === m.dayId)?.l || m.dayId);
+        const nc   = m.assignedTo ? MX.userColors(m.assignedTo) : null;
+        const prio = PRIO[m.priority] || PRIO.normal;
+        const cat  = CAT[m.category]  || CAT.autre;
+        const dlSt = _deadlineStatusAdmin(m.deadline || null);
+
+        if (_editMissionId === m.id) {
+          // ── Mode édition inline ──
+          const eprioBtnStyle = (key, active2) => {
+            const p2 = PRIO[key];
+            if (active2) return `background:${p2.bg};color:${p2.c};border:1.5px solid ${p2.border};border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+            return `background:var(--bg4);color:var(--text3);border:1.5px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+          };
+          const curPrio = m.priority || 'normal';
+          h += `<div class="mission-adm-card" style="border-left:3px solid ${prio.c};padding:14px">
+            <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--cyan)"><i class="fas fa-pen"></i> Modifier l'intervention</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <input class="fi fi-sm" id="edit-ms-text-${esc(m.id)}" value="${esc(m.text)}" maxlength="120">
+              <div style="display:flex;gap:6px;flex-wrap:wrap" id="edit-ms-prio-wrap-${esc(m.id)}">
+                <button type="button" id="edit-ms-prio-btn-urgent-${esc(m.id)}" onclick="MX.Pages.Admin._setEditPrio('${esc(m.id)}','urgent')" style="${eprioBtnStyle('urgent', curPrio==='urgent')}"><i class="fas fa-fire"></i> Urgent</button>
+                <button type="button" id="edit-ms-prio-btn-normal-${esc(m.id)}" onclick="MX.Pages.Admin._setEditPrio('${esc(m.id)}','normal')" style="${eprioBtnStyle('normal', curPrio==='normal')}"><i class="fas fa-circle-exclamation"></i> Normal</button>
+                <button type="button" id="edit-ms-prio-btn-low-${esc(m.id)}"    onclick="MX.Pages.Admin._setEditPrio('${esc(m.id)}','low')"    style="${eprioBtnStyle('low',    curPrio==='low'   )}"><i class="fas fa-circle-dot"></i> Basse</button>
+              </div>
+              <input type="hidden" id="edit-ms-prio-${esc(m.id)}" value="${esc(curPrio)}">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <select class="fi fi-sm" id="edit-ms-cat-${esc(m.id)}" style="flex:1;min-width:130px">
+                  <option value="autre"     ${(m.category||'autre')==='autre'     ?'selected':''}>Autre</option>
+                  <option value="panne"     ${(m.category||'')==='panne'     ?'selected':''}>Panne</option>
+                  <option value="securite"  ${(m.category||'')==='securite'  ?'selected':''}>Sécurité</option>
+                  <option value="livraison" ${(m.category||'')==='livraison' ?'selected':''}>Livraison</option>
+                  <option value="nettoyage" ${(m.category||'')==='nettoyage' ?'selected':''}>Nettoyage</option>
+                </select>
+                <input type="time" class="fi fi-sm" id="edit-ms-deadline-${esc(m.id)}" value="${esc(m.deadline||'')}" style="flex:1;min-width:130px">
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <select class="fi fi-sm" id="edit-ms-day-${esc(m.id)}" style="flex:1;min-width:130px">
+                  <option value="all" ${m.dayId==='all'?'selected':''}>Tous les jours</option>
+                  ${DAYS.map(d => `<option value="${d.id}" ${m.dayId===d.id?'selected':''}>${esc(d.l)}</option>`).join('')}
+                </select>
+                <select class="fi fi-sm" id="edit-ms-user-${esc(m.id)}" style="flex:1;min-width:130px">
+                  <option value="">— Assigner à —</option>
+                  <option value="all" ${m.assignedTo==='all'?'selected':''}>Tout le monde</option>
+                  ${users.map(u => `<option value="${esc(u.name)}" ${m.assignedTo===u.name?'selected':''}>${esc(u.name)}</option>`).join('')}
+                </select>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:4px">
+                <button class="save-btn" style="margin-top:0;flex:1" onclick="MX.Pages.Admin.editMission('${esc(m.id)}')"><i class="fas fa-floppy-disk"></i> Sauvegarder</button>
+                <button class="cbtn" style="flex-shrink:0" onclick="MX.Pages.Admin.cancelEditMission()"><i class="fas fa-xmark"></i> Annuler</button>
               </div>
             </div>
-            <button class="icon-btn del" style="width:30px;height:30px;flex-shrink:0" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
-          </div>
-        </div>`;
+          </div>`;
+        } else {
+          // ── Mode affichage normal ──
+          h += `<div class="mission-adm-card" style="border-left:3px solid ${prio.c}">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+                  <span style="background:${prio.bg};color:${prio.c};border:1px solid ${prio.border};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:4px"><i class="fas ${prio.ico}"></i> ${prio.l}</span>
+                  <span style="background:var(--bg4);color:var(--text2);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:4px"><i class="fas ${cat.ico}"></i> ${cat.l}</span>
+                  ${dlSt ? `<span style="color:${dlSt.c};font-size:10px;font-weight:600;font-family:var(--ffm)${dlSt.pulse?' animation:pulse-red 1.2s ease-in-out infinite':''}"><i class="fas fa-clock"></i> ${esc(dlSt.label)}</span>` : ''}
+                </div>
+                <div style="font-size:13px;font-weight:600">${esc(m.text)}</div>
+                <div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                  <span style="color:var(--red)"><i class="fas fa-calendar-day"></i> ${esc(day)}</span>
+                  ${m.assignedTo === "all" ? `<span style="background:var(--red-border);color:var(--red);padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">Tout le monde</span>` : nc ? `<span style="background:${nc.bg};color:${nc.fg};padding:1px 7px;border-radius:4px;font-size:10px;font-family:var(--ffm)">${esc(m.assignedTo)}</span>` : `<span style="color:var(--text3)">Non assigné</span>`}
+                  ${m.createdBy ? `<span style="color:var(--text3)">par ${esc(m.createdBy)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;gap:4px;flex-shrink:0">
+                <button class="icon-btn" style="width:30px;height:30px" onclick="MX.Pages.Admin.startEditMission('${esc(m.id)}')"><i class="fas fa-pen"></i></button>
+                <button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
+              </div>
+            </div>
+          </div>`;
+        }
       });
     }
 
@@ -215,7 +323,7 @@
           <div style="display:flex;align-items:center;gap:10px">
             <div style="flex:1">
               <div style="font-size:13px;font-weight:600;text-decoration:line-through">${esc(m.text)}</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(day)} · ✓ Terminé</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(day)} · <i class="fas fa-check"></i> Terminé</div>
             </div>
             <button class="cbtn" onclick="MX.Pages.Admin.undoMission('${esc(m.id)}')"><i class="fas fa-rotate-left"></i></button>
             <button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
@@ -493,14 +601,72 @@
   }
 
   async function addMission(createdBy) {
-    const text       = (document.getElementById("ms-text") || {}).value?.trim() || "";
-    const dayId      = (document.getElementById("ms-day")  || {}).value || "all";
-    const assignedTo = (document.getElementById("ms-user") || {}).value || "";
+    const text       = (document.getElementById("ms-text")     || {}).value?.trim() || "";
+    const dayId      = (document.getElementById("ms-day")      || {}).value || "all";
+    const assignedTo = (document.getElementById("ms-user")     || {}).value || "";
+    const priority   = (document.getElementById("ms-prio")     || {}).value || "normal";
+    const category   = (document.getElementById("ms-cat")      || {}).value || "autre";
+    const deadline   = (document.getElementById("ms-deadline") || {}).value || null;
     if (!text) return MX.toast("Entrez une description d'intervention", true);
     try {
-      await MX.DB.addMission({ text, dayId, assignedTo, createdBy: createdBy || "Responsable" });
+      await MX.DB.addMission({ text, dayId, assignedTo, priority, category, deadline: deadline || null, createdBy: createdBy || "Responsable" });
       MX.toast("Intervention créée ✓");
     } catch(e) { MX.toast("Erreur", true); }
+  }
+
+  async function editMission(id) {
+    const text       = (document.getElementById(`edit-ms-text-${id}`)     || {}).value?.trim() || "";
+    const dayId      = (document.getElementById(`edit-ms-day-${id}`)      || {}).value || "all";
+    const assignedTo = (document.getElementById(`edit-ms-user-${id}`)     || {}).value || "";
+    const priority   = (document.getElementById(`edit-ms-prio-${id}`)     || {}).value || "normal";
+    const category   = (document.getElementById(`edit-ms-cat-${id}`)      || {}).value || "autre";
+    const deadline   = (document.getElementById(`edit-ms-deadline-${id}`) || {}).value || null;
+    if (!text) return MX.toast("Entrez une description d'intervention", true);
+    try {
+      await MX.DB.updateMission(id, { text, dayId, assignedTo, priority, category, deadline: deadline || null });
+      _editMissionId = null;
+      MX.toast("Intervention modifiée ✓");
+    } catch(e) { MX.toast("Erreur", true); }
+  }
+
+  function startEditMission(id) {
+    _editMissionId = id;
+    MX.Pages.Admin.setTab('missions');
+  }
+
+  function cancelEditMission() {
+    _editMissionId = null;
+    MX.Pages.Admin.setTab('missions');
+  }
+
+  function _setPrio(val) {
+    const hidden = document.getElementById("ms-prio");
+    if (hidden) hidden.value = val;
+    ['urgent','normal','low'].forEach(key => {
+      const btn = document.getElementById(`ms-prio-btn-${key}`);
+      if (!btn) return;
+      const p = PRIO[key];
+      if (key === val) {
+        btn.style.cssText = `background:${p.bg};color:${p.c};border:1.5px solid ${p.border};border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+      } else {
+        btn.style.cssText = `background:var(--bg4);color:var(--text3);border:1.5px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+      }
+    });
+  }
+
+  function _setEditPrio(missionId, val) {
+    const hidden = document.getElementById(`edit-ms-prio-${missionId}`);
+    if (hidden) hidden.value = val;
+    ['urgent','normal','low'].forEach(key => {
+      const btn = document.getElementById(`edit-ms-prio-btn-${key}-${missionId}`);
+      if (!btn) return;
+      const p = PRIO[key];
+      if (key === val) {
+        btn.style.cssText = `background:${p.bg};color:${p.c};border:1.5px solid ${p.border};border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+      } else {
+        btn.style.cssText = `background:var(--bg4);color:var(--text3);border:1.5px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--ffs);display:inline-flex;align-items:center;gap:5px`;
+      }
+    });
   }
   async function delMission(id) {
     MX.showModal("Supprimer cette intervention ?", "L'intervention disparaîtra de tous les panneaux.", [
@@ -755,7 +921,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     render, setTab, setDay,
     editTask, addTask, rmTask, saveTasks, copyTasks,
     editTeam, addTeam, rmTeam, saveTeam,
-    addMission, delMission, undoMission,
+    addMission, delMission, undoMission, editMission, startEditMission, cancelEditMission,
+    _setPrio, _setEditPrio,
     updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
     updProd, updProdMin, addProd, delProd, saveProd,

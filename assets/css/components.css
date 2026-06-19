@@ -576,3 +576,10 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .note-btn:hover { background: var(--bg4); color: var(--text2); }
 .note-btn.has-note { color: var(--cyan); }
 .note-btn.has-note:hover { background: var(--cyan-dim); color: var(--cyan); }
+
+/* ── DEADLINE OVERDUE ── */
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.deadline-overdue { animation: pulse-red 1.2s ease-in-out infinite; }

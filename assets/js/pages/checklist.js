@@ -69,6 +69,29 @@
         </div>`;
 
     // ── Missions section (above everything) ──
+    const _CL_PRIO = {
+      urgent: { l:"Urgent", ico:"fa-fire",               c:"var(--red)",    bg:"var(--red-dim)",    border:"var(--red-border)"   },
+      normal: { l:"Normal", ico:"fa-circle-exclamation", c:"var(--orange)", bg:"var(--orange-dim)", border:"var(--orange-border)" },
+      low:    { l:"Basse",  ico:"fa-circle-dot",         c:"var(--text3)",  bg:"var(--bg4)",        border:"var(--border2)"      }
+    };
+    const _CL_CAT = {
+      panne:    { l:"Panne",    ico:"fa-wrench"        },
+      securite: { l:"Sécurité", ico:"fa-shield-halved" },
+      livraison:{ l:"Livraison",ico:"fa-truck"          },
+      nettoyage:{ l:"Nettoyage",ico:"fa-broom"          },
+      autre:    { l:"Autre",    ico:"fa-ellipsis"       }
+    };
+    function _deadlineStatus(dl) {
+      if (!dl) return null;
+      const [dh, dmin] = dl.split(':').map(Number);
+      const now  = new Date();
+      const dlMs = new Date(now); dlMs.setHours(dh, dmin, 0, 0);
+      const diff = dlMs - now;
+      if (diff < 0)          return { label: "DÉPASSÉ",                             c: "var(--red)",    pulse: true  };
+      if (diff < 60*60*1000) return { label: `Dans ${Math.round(diff/60000)}min`,   c: "var(--orange)", pulse: false };
+      return { label: dl, c: "var(--text3)", pulse: false };
+    }
+
     if (dayMissions.length) {
       h += `<div class="slot-card" style="border-color:var(--red-border);margin-bottom:20px">
         <div class="slot-head" style="background:var(--red-dim);border-bottom-color:var(--red-border)">
@@ -85,6 +108,9 @@
         const canToggle = canAll || (cu && (isForAll || cu.name === m.assignedTo));
         const clickAttr = canToggle ? `onclick="MX.Pages.Checklist.toggleMission('${esc(m.id)}')"` : '';
         const ptrStyle  = canToggle ? '' : 'cursor:default;pointer-events:none;opacity:0.6';
+        const prio = _CL_PRIO[m.priority] || _CL_PRIO.normal;
+        const cat  = _CL_CAT[m.category]  || _CL_CAT.autre;
+        const dlSt = _deadlineStatus(m.deadline || null);
         let badge = '';
         if (isForAll) {
           badge = `<span class="twho" style="background:var(--red-border);color:var(--red)">Tous</span>`;
@@ -92,9 +118,14 @@
           const nc = MX.userColors(m.assignedTo);
           badge = `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>`;
         }
-        h += `<div class="trow" ${clickAttr} style="${ptrStyle}">
+        h += `<div class="trow" ${clickAttr} style="border-left:3px solid ${prio.c};${ptrStyle}">
           <div class="tcb" style="border-color:var(--red-border)"><i class="fas fa-check"></i></div>
           <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:3px">
+              <span style="background:${prio.bg};color:${prio.c};border:1px solid ${prio.border};padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas ${prio.ico}"></i> ${prio.l}</span>
+              <span style="background:var(--bg4);color:var(--text2);border:1px solid var(--border2);padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas ${cat.ico}"></i> ${cat.l}</span>
+              ${dlSt ? `<span class="${dlSt.pulse?'deadline-overdue':''}" style="color:${dlSt.c};font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas fa-clock"></i> ${esc(dlSt.label)}</span>` : ''}
+            </div>
             <div class="ttext">${esc(m.text)}</div>
             ${m.createdBy ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">par ${esc(m.createdBy)}</div>` : ''}
           </div>
