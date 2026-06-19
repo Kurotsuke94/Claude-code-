@@ -77,11 +77,26 @@
     document.getElementById("sidebar-overlay").classList.remove("show");
   };
 
+  // ── NAV SECTION COLLAPSE ──
+  let _planOpen = localStorage.getItem("mx_nav_plan") !== "0";
+  let _respOpen = localStorage.getItem("mx_nav_resp") === "1";
+  window.MX.toggleNavPlan = function () {
+    _planOpen = !_planOpen;
+    localStorage.setItem("mx_nav_plan", _planOpen ? "1" : "0");
+    buildNav();
+  };
+  window.MX.toggleNavResp = function (e) {
+    if (e) e.stopPropagation();
+    _respOpen = !_respOpen;
+    localStorage.setItem("mx_nav_resp", _respOpen ? "1" : "0");
+    buildNav();
+  };
+
   // ── BUILD NAVIGATION ──
   function buildNav() {
     const sideNav  = document.getElementById("sidebar-nav");
     const botNav   = document.getElementById("bottom-nav");
-    const { DAYS, SLOTS, getDaySlots, state } = MX;
+    const { DAYS, getDaySlots, state } = MX;
 
     let sideHtml = "";
     let botHtml  = `<div class="bottom-nav-inner">`;
@@ -91,11 +106,23 @@
 
     NAV.forEach(item => {
       if (!item) {
-        sideHtml += `<div class="nav-section-label">${SECTION_LABELS[sepCount] || ''}</div>`;
+        const label = SECTION_LABELS[sepCount] || "";
+        if (label === "PLANNING") {
+          sideHtml += `<div class="nav-section-label" onclick="MX.toggleNavPlan()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none">
+            <span>${label}</span>
+            <i class="fas fa-chevron-${_planOpen?'up':'down'}" style="font-size:9px;color:var(--text3);margin-right:8px;transition:transform 0.2s"></i>
+          </div>`;
+        } else {
+          sideHtml += `<div class="nav-section-label">${label}</div>`;
+        }
         sepCount++;
         return;
       }
+
       if (item.respOnly && !MX.Auth.canSeeAll()) return;
+      if ((item.day || item.todayShortcut) && !_planOpen) return;
+      if (item.respDay && !_respOpen) return;
+
       const isActive = item.id === state.currentPage;
 
       let prog = "", progCls = "";
@@ -124,6 +151,23 @@
         progCls = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
       }
 
+      // Planning Resp. — with collapse chevron on right
+      if (item.id === "resp-plan" && MX.Auth.canSeeAll()) {
+        sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+          <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
+          <span class="nav-label">${item.l}</span>
+          <span onclick="MX.toggleNavResp(event)" style="padding:4px 2px;cursor:pointer;color:var(--text3);font-size:9px;flex-shrink:0" title="${_respOpen?'Réduire':'Déplier'}">
+            <i class="fas fa-chevron-${_respOpen?'up':'down'}"></i>
+          </span>
+        </button>`;
+        botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+          <div class="bn-bar"></div>
+          <i class="fas ${item.icon}"></i>
+          <span>${item.l}</span>
+        </button>`;
+        return;
+      }
+
       const subStyle = item.respDay ? 'style="padding-left:30px;font-size:12px"' : '';
       sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')" ${subStyle}>
         <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
@@ -132,12 +176,14 @@
         ${prog ? `<span class="nav-prog ${progCls}" id="np_${item.id}">${prog}</span>` : ''}
       </button>`;
 
-      botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
-        <div class="bn-bar"></div>
-        <i class="fas ${item.icon}"></i>
-        ${item.badge ? `<span class="nav-badge" id="bnb_${item.id}"></span>` : ''}
-        <span>${item.l}</span>
-      </button>`;
+      if (!item.day && !item.todayShortcut && !item.respDay) {
+        botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+          <div class="bn-bar"></div>
+          <i class="fas ${item.icon}"></i>
+          ${item.badge ? `<span class="nav-badge" id="bnb_${item.id}"></span>` : ''}
+          <span>${item.l}</span>
+        </button>`;
+      }
     });
 
     botHtml += `</div>`;
