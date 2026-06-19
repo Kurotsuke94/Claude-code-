@@ -278,6 +278,17 @@
 
     DB.listenUsers(list => {
       state.users = list;
+      // Auto-restore session from localStorage after PC restart
+      if (!state.currentUser && !state.adminUser) {
+        try {
+          const saved = localStorage.getItem("mx_user");
+          if (saved) {
+            const u = JSON.parse(saved);
+            const found = list.find(lu => lu.id === u.id);
+            if (found) MX.Auth.setCurrentUser(found);
+          }
+        } catch(e) {}
+      }
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
