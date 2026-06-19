@@ -296,7 +296,7 @@
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
                   <span style="background:${prio.bg};color:${prio.c};border:1px solid ${prio.border};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:4px"><i class="fas ${prio.ico}"></i> ${prio.l}</span>
                   <span style="background:var(--bg4);color:var(--text2);border:1px solid var(--border2);padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:4px"><i class="fas ${cat.ico}"></i> ${cat.l}</span>
-                  ${dlSt ? `<span style="color:${dlSt.c};font-size:10px;font-weight:600;font-family:var(--ffm)${dlSt.pulse?' animation:pulse-red 1.2s ease-in-out infinite':''}"><i class="fas fa-clock"></i> ${esc(dlSt.label)}</span>` : ''}
+                  ${dlSt ? `<span class="${dlSt.pulse?'deadline-overdue':''}" style="color:${dlSt.c};font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas fa-clock"></i> ${esc(dlSt.label)}</span>` : ''}
                 </div>
                 <div style="font-size:13px;font-weight:600">${esc(m.text)}</div>
                 <div style="font-size:11px;color:var(--text2);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
