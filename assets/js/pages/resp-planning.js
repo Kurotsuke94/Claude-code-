@@ -247,7 +247,13 @@
     _selColor = COLORS[0].bg;
     render();
   }
-  function cancelAdd() { _addDay = null; render(); }
+  function cancelAdd() {
+    const day = _addDay;
+    _addDay = null;
+    const cp = MX.state.currentPage;
+    if (cp && cp.startsWith("resp-") && cp !== "resp-plan") renderDay(day || cp.slice(5));
+    else render();
+  }
 
   function startEdit(id) {
     const t  = (MX.state.respTasks || []).find(x => x.id === id);
@@ -256,7 +262,12 @@
     _selColor = t?.color || COLORS[0].bg;
     render();
   }
-  function cancelEdit() { _editId = null; render(); }
+  function cancelEdit() {
+    const cp = MX.state.currentPage;
+    _editId = null;
+    if (cp && cp.startsWith("resp-") && cp !== "resp-plan") renderDay(cp.slice(5));
+    else render();
+  }
 
   function _setColor(prefix, color) {
     _selColor = color;
@@ -325,8 +336,98 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
+  function renderDay(dayId) {
+    const el       = document.getElementById("main-content");
+    const { state, DAYS, esc, Auth } = MX;
+    const canEdit  = Auth.canSeeAll();
+    const day      = DAYS.find(d => d.id === dayId);
+    const todayId  = MX.todayId();
+    const isToday  = dayId === todayId;
+
+    const tasks = ((state.respTasks || [])
+      .filter(t => t.dayId === dayId)
+      .sort((a, b) => (a.order || 0) - (b.order || 0)));
+
+    const total  = tasks.length;
+    const done   = tasks.filter(t => !!state.checks["resp_" + t.id]).length;
+    const pct    = total ? Math.round(done / total * 100) : 0;
+    const cls    = MX.progressClass(pct);
+
+    let h = `
+      <div class="ph">
+        <div class="ph-eye">RESPONSABLE</div>
+        <div class="ph-row">
+          <div style="flex:1">
+            <div class="ph-title">${esc(day?.l || dayId)}</div>
+            <div class="ph-sub">${isToday ? "Aujourd'hui" : 'Planning responsable'}</div>
+          </div>
+          ${total ? `<div style="text-align:right">
+            <div style="font-size:22px;font-weight:700;color:var(--cyan)">${pct}%</div>
+            <div style="font-size:11px;color:var(--text3)">${done}/${total} réalisées</div>
+          </div>` : ''}
+        </div>
+      </div>
+      <div class="page-body" style="max-width:760px">`;
+
+    if (_addDay === dayId) h += _addForm(dayId);
+
+    if (!tasks.length && _addDay !== dayId) {
+      h += `<div style="padding:32px 16px;text-align:center;background:var(--bg3);border-radius:12px;border:1px dashed var(--border2)">
+        <div style="font-size:13px;color:var(--text3);margin-bottom:${canEdit?'16px':'0'}">Aucune tâche planifiée pour ce jour</div>
+        ${canEdit ? `<button class="primary-btn" style="margin:0 auto;width:auto;padding:8px 20px" onclick="MX.Pages.RespPlan.startAddDay('${dayId}')">
+          <i class="fas fa-plus"></i> Ajouter une tâche
+        </button>` : ''}
+      </div>`;
+    }
+
+    tasks.forEach((t, i) => {
+      if (_editId === t.id) { h += _editForm(t); return; }
+      const bg        = t.color || COLORS[0].bg;
+      const border    = _borderFor(bg);
+      const isChecked = !!state.checks["resp_" + t.id];
+      const comment   = state.checks["resp_comment_" + t.id] || "";
+      const byWho     = state.checks["resp_by_" + t.id] || "";
+
+      h += `<div style="background:${bg};border-left:3px solid ${border};border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px">
+        <div class="tcb ${isChecked ? 'done' : ''}" onclick="MX.Pages.RespPlan.toggleRespTask('${esc(t.id)}')" style="cursor:pointer;margin-top:2px;flex-shrink:0">
+          ${isChecked ? '<i class="fas fa-check"></i>' : ''}
+        </div>
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="MX.Pages.RespPlan.toggleRespTask('${esc(t.id)}')">
+          <div style="font-size:13px;font-weight:600;color:#F1F5F9${isChecked ? ';text-decoration:line-through;opacity:0.6' : ''}">${esc(t.text)}</div>
+          ${isChecked && comment ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
+        </div>
+        ${t.person ? `<span style="background:rgba(255,255,255,0.12);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${esc(t.person)}</span>` : ''}
+        ${canEdit ? `
+          <button title="Monter" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',-1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===0?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-up"></i></button>
+          <button title="Descendre" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===tasks.length-1?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-down"></i></button>
+          <button title="Modifier" onclick="MX.Pages.RespPlan.startEdit('${esc(t.id)}')" style="background:rgba(255,255,255,0.08);border:none;color:#fff;width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px"><i class="fas fa-pen"></i></button>
+          <button title="Supprimer" onclick="MX.Pages.RespPlan.delTask('${esc(t.id)}')" style="background:rgba(239,68,68,0.15);border:none;color:var(--red);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px"><i class="fas fa-trash"></i></button>
+        ` : ''}
+      </div>`;
+    });
+
+    if (tasks.length && canEdit) {
+      h += `<div style="margin-top:12px">
+        <button class="dash-btn" onclick="MX.Pages.RespPlan.startAddDay('${dayId}')">
+          <i class="fas fa-plus"></i> Ajouter une tâche
+        </button>
+      </div>`;
+    }
+
+    h += `</div>`;
+    el.innerHTML = h;
+  }
+
+  function startAddDay(dayId) {
+    _addDay  = dayId;
+    _editId  = null;
+    _selColor = COLORS[0].bg;
+    renderDay(dayId);
+  }
+
   window.MX.Pages.RespPlan = {
-    render, startAdd, cancelAdd, saveAdd,
+    render, renderDay,
+    startAdd, startAddDay, cancelAdd, saveAdd,
     startEdit, cancelEdit, saveEdit,
     delTask, moveTask, _setColor,
     toggleRespTask, _confirmRespTask

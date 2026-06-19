@@ -1,20 +1,27 @@
 (function () {
   const NAV = [
-    { id: "msgs",      icon: "fa-comments",      l: "Messages",       badge: true },
-    { id: "home",      icon: "fa-house",          l: "Accueil" },
+    { id: "msgs",          icon: "fa-comments",      l: "Messages",       badge: true },
+    { id: "home",          icon: "fa-house",          l: "Accueil" },
     null,
-    { id: "lundi",     icon: "fa-1",              l: "Lundi",          day: true },
-    { id: "mardi",     icon: "fa-2",              l: "Mardi",          day: true },
-    { id: "mercredi",  icon: "fa-3",              l: "Mercredi",       day: true },
-    { id: "jeudi",     icon: "fa-4",              l: "Jeudi",          day: true },
-    { id: "vendredi",  icon: "fa-5",              l: "Vendredi",       day: true },
-    { id: "samedi",    icon: "fa-6",              l: "Sam",            day: true },
-    { id: "dimanche",  icon: "fa-7",              l: "Dim",            day: true },
-    { id: "today-cl",  icon: "fa-list-check",     l: "Checklist Jour", todayShortcut: true },
+    { id: "lundi",         icon: "fa-1",              l: "Lundi",          day: true },
+    { id: "mardi",         icon: "fa-2",              l: "Mardi",          day: true },
+    { id: "mercredi",      icon: "fa-3",              l: "Mercredi",       day: true },
+    { id: "jeudi",         icon: "fa-4",              l: "Jeudi",          day: true },
+    { id: "vendredi",      icon: "fa-5",              l: "Vendredi",       day: true },
+    { id: "samedi",        icon: "fa-6",              l: "Sam",            day: true },
+    { id: "dimanche",      icon: "fa-7",              l: "Dim",            day: true },
+    { id: "today-cl",      icon: "fa-list-check",     l: "Checklist Jour", todayShortcut: true },
     null,
-    { id: "orders",    icon: "fa-box",            l: "Stock",          badge: false },
-    { id: "resp-plan", icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
-    { id: "admin",     icon: "fa-shield-halved",  l: "Admin" }
+    { id: "orders",        icon: "fa-box",            l: "Stock" },
+    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
+    { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",          respOnly: true, respDay: "lundi" },
+    { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",          respOnly: true, respDay: "mardi" },
+    { id: "resp-mercredi", icon: "fa-circle-dot",     l: "Mercredi",       respOnly: true, respDay: "mercredi" },
+    { id: "resp-jeudi",    icon: "fa-circle-dot",     l: "Jeudi",          respOnly: true, respDay: "jeudi" },
+    { id: "resp-vendredi", icon: "fa-circle-dot",     l: "Vendredi",       respOnly: true, respDay: "vendredi" },
+    { id: "resp-samedi",   icon: "fa-circle-dot",     l: "Sam",            respOnly: true, respDay: "samedi" },
+    { id: "resp-dimanche", icon: "fa-circle-dot",     l: "Dim",            respOnly: true, respDay: "dimanche" },
+    { id: "admin",         icon: "fa-shield-halved",  l: "Admin" }
   ];
 
   const SECTION_LABELS = ["PLANNING", "GESTION"];
@@ -56,6 +63,7 @@
     if (id === "admin")     return Pages.Admin.render();
     if (id === "resp-plan") return Pages.RespPlan.render();
     if (id === "today-cl")  return Pages.Checklist.render(MX.todayId());
+    if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -107,8 +115,17 @@
           progCls = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
         }
       }
+      if (item.respDay) {
+        const dayTasks = (state.respTasks || []).filter(t => t.dayId === item.respDay);
+        const total    = dayTasks.length;
+        const done     = dayTasks.filter(t => !!state.checks["resp_" + t.id]).length;
+        const pct      = total ? Math.round(done / total * 100) : 0;
+        prog    = pct + "%";
+        progCls = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
+      }
 
-      sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
+      const subStyle = item.respDay ? 'style="padding-left:30px;font-size:12px"' : '';
+      sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')" ${subStyle}>
         <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
         <span class="nav-label">${item.l}</span>
         ${item.badge ? `<span class="nav-badge" id="nb_${item.id}"></span>` : ''}
@@ -198,6 +215,15 @@
       const cls   = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
       const npEl  = document.getElementById("np_" + day.id);
       if (npEl) { npEl.textContent = pct + "%"; npEl.className = "nav-prog " + cls; }
+
+      // Resp planning day progress
+      const dayTasks = (state.respTasks || []).filter(t => t.dayId === day.id);
+      const rt = dayTasks.length;
+      const rd = dayTasks.filter(t => !!state.checks["resp_" + t.id]).length;
+      const rpct = rt ? Math.round(rd / rt * 100) : 0;
+      const rcls = rpct >= 80 ? "done" : rpct >= 40 ? "warn" : "alert";
+      const rnpEl = document.getElementById("np_resp-" + day.id);
+      if (rnpEl) { rnpEl.textContent = rpct + "%"; rnpEl.className = "nav-prog " + rcls; }
     });
 
     const seen   = _getMsgsSeen();
@@ -257,8 +283,11 @@
       state.checks = data;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
-      if (state.currentPage === "home")   MX.Pages.Home.render();
-      if (state.currentPage === "orders") MX.Pages.Orders.render();
+      if (state.currentPage === "home")      MX.Pages.Home.render();
+      if (state.currentPage === "orders")    MX.Pages.Orders.render();
+      if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
+      if (state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
+        MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
     });
 
     DB.listenAllTasks((dayId, sl, items) => {
@@ -323,8 +352,10 @@
 
     DB.listenRespTasks(list => {
       state.respTasks = list;
+      updateNavProgress();
       if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
-      if (state.currentPage === "home") MX.Pages.Home.render();
+      if (state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
+        MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
     });
 
     DB.listenPlanning(url => {
