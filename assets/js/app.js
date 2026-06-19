@@ -282,6 +282,91 @@
     if (dhBadge){ dhBadge.textContent = unread > 9 ? "9+" : (unread || ""); dhBadge.className = "nav-badge" + (unread ? " show" : ""); }
   }
 
+  // ── ANN BANNER ──
+  let _bannerIdx = 0;
+  const _bannerDismissed = new Set(
+    JSON.parse(sessionStorage.getItem("mx_ann_dismissed") || "[]")
+  );
+
+  function _getBannerAnns() {
+    const cu = MX.state.currentUser || MX.state.adminUser;
+    const userName = cu
+      ? (cu.name || (cu.email ? cu.email.split("@")[0] : null))
+      : null;
+    return (MX.state.announcements || [])
+      .filter(a => a.pinned || a.type === "urgent" || a.type === "important")
+      .filter(a => !_bannerDismissed.has(a.id))
+      .filter(a => !userName || !(a.readBy || []).includes(userName))
+      .sort((a, b) => {
+        const w = x => x.type === "urgent" ? 3 : x.pinned ? 2 : 1;
+        return w(b) - w(a);
+      });
+  }
+
+  function updateAnnBanner() {
+    const el = document.getElementById("ann-banner");
+    if (!el) return;
+    const list = _getBannerAnns();
+    if (!list.length) { el.classList.add("hidden"); return; }
+    if (_bannerIdx >= list.length) _bannerIdx = 0;
+    const ann   = list[_bannerIdx];
+    const total = list.length;
+    const LABELS = { urgent: "MESSAGE URGENT", important: "MESSAGE IMPORTANT", info: "INFORMATION", suggestion: "SUGGESTION", technique: "TECHNIQUE" };
+    const COLORS = { urgent: "var(--red)", important: "var(--orange)", info: "var(--cyan)", suggestion: "var(--jour)", technique: "var(--green)" };
+    const label = LABELS[ann.type] || "MESSAGE";
+    const color = COLORS[ann.type] || "var(--cyan)";
+    el.style.setProperty("--banner-color", color);
+    el.innerHTML = `
+      <div class="ann-banner-inner">
+        <span class="ann-banner-icon" style="color:${color}"><i class="fas fa-megaphone"></i></span>
+        <div class="ann-banner-body">
+          <span class="ann-banner-label" style="color:${color}">${label}</span>
+          <span class="ann-banner-text">${MX.esc(ann.content)}</span>
+          ${ann.authorName ? `<span class="ann-banner-author">— ${MX.esc(ann.authorName)}</span>` : ""}
+        </div>
+        ${total > 1 ? `
+          <div class="ann-banner-nav">
+            <button onclick="MX.bannerPrev()" class="ann-banner-nav-btn"><i class="fas fa-chevron-left"></i></button>
+            <span class="ann-banner-counter">${_bannerIdx + 1}/${total}</span>
+            <button onclick="MX.bannerNext()" class="ann-banner-nav-btn"><i class="fas fa-chevron-right"></i></button>
+          </div>
+        ` : ""}
+        <div class="ann-banner-actions">
+          <button onclick="MX.bannerMarkRead('${ann.id}')" class="ann-banner-read" style="border-color:${color};color:${color}"><i class="fas fa-check"></i> <span>Marquer comme lu</span></button>
+          <button onclick="MX.bannerClose('${ann.id}')" class="ann-banner-close" title="Fermer"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+    `;
+    el.classList.remove("hidden");
+  }
+
+  window.MX.bannerNext = function () {
+    const list = _getBannerAnns();
+    if (!list.length) return;
+    _bannerIdx = (_bannerIdx + 1) % list.length;
+    updateAnnBanner();
+  };
+  window.MX.bannerPrev = function () {
+    const list = _getBannerAnns();
+    if (!list.length) return;
+    _bannerIdx = (_bannerIdx - 1 + list.length) % list.length;
+    updateAnnBanner();
+  };
+  window.MX.bannerClose = function (id) {
+    _bannerDismissed.add(id);
+    sessionStorage.setItem("mx_ann_dismissed", JSON.stringify([..._bannerDismissed]));
+    _bannerIdx = 0;
+    updateAnnBanner();
+  };
+  window.MX.bannerMarkRead = async function (id) {
+    const cu = MX.state.currentUser || MX.state.adminUser;
+    const userName = cu
+      ? (cu.name || (cu.email ? cu.email.split("@")[0] : "Admin"))
+      : null;
+    if (userName) await MX.DB.markReadAnnouncement(id, userName);
+    MX.bannerClose(id);
+  };
+
   // ── MISSION NOTIFICATIONS ──
   const _notifiedMissions = new Set();
   function _notifyNewMissions(prev, next) {
@@ -408,6 +493,7 @@
       state.announcements = list;
       if (state.currentPage === "msgs") _markMsgsSeen();
       updateNavProgress();
+      updateAnnBanner();
       if (state.currentPage === "msgs") MX.Pages.Messages.render();
       if (state.currentPage === "home") MX.Pages.Home.render();
     });
@@ -600,6 +686,7 @@
   window.MX.buildNav          = buildNav;
   window.MX.buildDeskHeader   = buildDeskHeader;
   window.MX.updateNavProgress = updateNavProgress;
+  window.MX.updateAnnBanner   = updateAnnBanner;
 
   document.addEventListener("DOMContentLoaded", init);
 })();
