@@ -369,23 +369,65 @@
     }
   }
 
-  async function toggleMission(missionId) {
+  function toggleMission(missionId) {
     const m  = (MX.state.missions || []).find(x => x.id === missionId);
     const cu = MX.state.currentUser;
     if (!m) return;
     const isForAll = m.assignedTo === "all" || !m.assignedTo;
     if (!MX.Auth.canSeeAll() && !isForAll && cu?.name !== m.assignedTo) return MX.toast("Non autorisé", true);
-    try {
-      await MX.DB.updateMission(missionId, { done: true });
-      const actorName = cu?.name || (MX.state.adminUser?.email || "inconnu");
-      MX.DB.addLog({ workerName: actorName, action: "check", taskText: "[Intervention] " + m.text, dayId: m.dayId, slot: "intervention" }).catch(() => {});
-      MX.toast("Intervention complétée ✓");
-    } catch(e) {
-      MX.toast("Erreur", true);
+
+    document.getElementById("m-title").textContent = "Clôturer l'intervention";
+    document.getElementById("m-sub").innerHTML = `
+      <div style="margin:6px 0">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--red)">
+          <i class="fas fa-circle-exclamation"></i> ${MX.esc(m.text)}
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">
+          Un commentaire est requis pour valider la clôture :
+        </div>
+        <textarea id="mission-comment" class="fi"
+          style="width:100%;min-height:80px;resize:vertical;font-size:13px;line-height:1.5"
+          placeholder="Ex : Carnet vérifié, aucune anomalie…" maxlength="300"></textarea>
+        <div id="mission-comment-err" style="color:var(--red);font-size:11px;min-height:16px;margin-top:4px"></div>
+      </div>`;
+    document.getElementById("m-actions").innerHTML = `
+      <button class="modal-btn confirm" onclick="MX.Pages.Checklist._confirmMissionClose('${MX.esc(missionId)}')">
+        <i class="fas fa-check"></i> Valider la clôture
+      </button>
+      <button class="modal-btn cancel" onclick="MX.closeModal()">
+        <i class="fas fa-times"></i> Annuler
+      </button>`;
+    document.getElementById("modal-bg").classList.add("show");
+    setTimeout(() => document.getElementById("mission-comment")?.focus(), 80);
+  }
+
+  async function _confirmMissionClose(missionId) {
+    const comment  = (document.getElementById("mission-comment") || {}).value?.trim() || "";
+    const errEl    = document.getElementById("mission-comment-err");
+    if (!comment) {
+      if (errEl) errEl.textContent = "Un commentaire est obligatoire pour clôturer.";
+      return;
     }
+    MX.closeModal();
+    const m         = (MX.state.missions || []).find(x => x.id === missionId);
+    const cu        = MX.state.currentUser;
+    const actorName = cu?.name || (MX.state.adminUser?.email || "inconnu");
+    try {
+      await MX.DB.updateMission(missionId, {
+        done: true,
+        completionComment: comment,
+        completedBy: actorName
+      });
+      MX.DB.addLog({
+        workerName: actorName, action: "check",
+        taskText: "[Intervention] " + (m?.text || "") + " — " + comment,
+        dayId: m?.dayId || "all", slot: "intervention"
+      }).catch(() => {});
+      MX.toast("Intervention clôturée ✓");
+    } catch(e) { MX.toast("Erreur", true); }
   }
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
+  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
 })();

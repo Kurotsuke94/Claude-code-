@@ -319,11 +319,14 @@
       h += `<div class="section-label" style="margin-bottom:8px;margin-top:16px;color:var(--text3)">Terminées (${done.length})</div>`;
       done.forEach(m => {
         const day = m.dayId === "all" ? "Tous les jours" : (DAYS.find(d => d.id === m.dayId)?.l || m.dayId);
-        h += `<div class="mission-adm-card" style="opacity:0.5">
-          <div style="display:flex;align-items:center;gap:10px">
+        h += `<div class="mission-adm-card" style="opacity:0.6">
+          <div style="display:flex;align-items:flex-start;gap:10px">
             <div style="flex:1">
               <div style="font-size:13px;font-weight:600;text-decoration:line-through">${esc(m.text)}</div>
-              <div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(day)} · <i class="fas fa-check"></i> Terminé</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">
+                ${esc(day)} · <i class="fas fa-check" style="color:var(--green)"></i> Terminé${m.completedBy ? ` par <strong>${esc(m.completedBy)}</strong>` : ''}
+              </div>
+              ${m.completionComment ? `<div style="font-size:11px;color:var(--text2);margin-top:5px;padding:6px 10px;background:var(--bg4);border-radius:6px;border-left:2px solid var(--green-border);font-style:italic">"${esc(m.completionComment)}"</div>` : ''}
             </div>
             <button class="cbtn" onclick="MX.Pages.Admin.undoMission('${esc(m.id)}')"><i class="fas fa-rotate-left"></i></button>
             <button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin.delMission('${esc(m.id)}')"><i class="fas fa-trash"></i></button>

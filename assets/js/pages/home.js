@@ -363,6 +363,57 @@
       </div>
     </div>`;
 
+    // ── Responsable planning widget (visible only to responsable/admin) ──
+    if (MX.Auth.canSeeAll()) {
+      const todayId   = MX.todayId();
+      const RESP_BORDERS = {
+        "#003B35":"#00F5D4","#052E16":"#22C55E","#071228":"#3B82F6",
+        "#1C0A00":"#F97316","#120D1F":"#A78BFA","#1F0707":"#EF4444",
+        "#1A2540":"#6B88CC","#0A1E1E":"#2DD4BF"
+      };
+      const respBorder = bg => RESP_BORDERS[bg] || "#00F5D4";
+      const respTasks  = (state.respTasks || [])
+        .filter(t => t.dayId === todayId)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      if (respTasks.length) {
+        const doneCount = respTasks.filter(t => !!state.checks["resp_" + t.id]).length;
+        const pct       = Math.round(doneCount / respTasks.length * 100);
+        const progCls   = MX.progressClass(pct);
+
+        h += `<div class="section-label" style="margin-bottom:10px">Planning Responsable — Aujourd'hui</div>
+        <div class="slot-card" style="margin-bottom:24px;border-color:var(--cyan-border)">
+          <div class="slot-head" style="background:var(--cyan-dim);border-bottom-color:var(--cyan-border)">
+            <div class="ch-ico" style="background:rgba(0,245,212,0.12);color:var(--cyan)">
+              <i class="fas fa-clipboard-check"></i>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700">Tâches du jour</div>
+              <span class="slot-chip ${progCls}">${doneCount} / ${respTasks.length} réalisées</span>
+            </div>
+            <div class="slot-pct ${progCls}">${pct}%</div>
+          </div>`;
+
+        respTasks.forEach(t => {
+          const key       = "resp_" + t.id;
+          const isChecked = !!state.checks[key];
+          const bg        = t.color || "#003B35";
+          h += `<div class="trow" onclick="MX.Pages.Home.toggleRespTask('${esc(t.id)}')"
+              style="border-left:3px solid ${respBorder(bg)};cursor:pointer">
+            <div class="tcb ${isChecked ? "done" : ""}">
+              ${isChecked ? '<i class="fas fa-check"></i>' : ''}
+            </div>
+            <div style="flex:1;min-width:0">
+              <div class="ttext${isChecked ? ' ttext-done' : ''}">${esc(t.text)}</div>
+            </div>
+            ${t.person ? `<span class="twho" style="background:${bg};border:1px solid ${respBorder(bg)};color:#F1F5F9">${esc(t.person)}</span>` : ''}
+          </div>`;
+        });
+
+        h += `</div>`;
+      }
+    }
+
     // ── Planning section ──
     const canEdit = MX.Auth.canSeeAll();
     const planUrl = state.planningUrl;
@@ -409,5 +460,12 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan };
+  async function toggleRespTask(taskId) {
+    const key     = "resp_" + taskId;
+    const current = !!MX.state.checks[key];
+    try { await MX.DB.setCheck(key, !current); }
+    catch(e) { MX.toast("Erreur", true); }
+  }
+
+  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan, toggleRespTask };
 })();
