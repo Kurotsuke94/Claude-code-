@@ -2,6 +2,11 @@
   let aTab = "tasks";
   let aDay = "lundi";
   let _editMissionId = null;
+  const _saveTimers = {};
+  function _sched(key, fn, delay) {
+    clearTimeout(_saveTimers[key]);
+    _saveTimers[key] = setTimeout(fn, delay !== undefined ? delay : 700);
+  }
 
   const PRIO = {
     urgent: { l:"Urgent", ico:"fa-fire",               c:"var(--red)",    bg:"var(--red-dim)",    border:"var(--red-border)"   },
@@ -133,7 +138,6 @@
       h += `<div style="padding:8px 14px"><button class="dash-btn" onclick="MX.Pages.Admin.addTask('${aDay}','${sl}')"><i class="fas fa-plus"></i> Ajouter</button></div>
       </div>`;
     });
-    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveTasks()"><i class="fas fa-check"></i> Enregistrer ${esc(day.l)}</button>`;
     return h;
   }
 
@@ -157,7 +161,6 @@
       h += `<div style="padding:8px 14px"><button class="dash-btn" onclick="MX.Pages.Admin.addTeam('${sl}')"><i class="fas fa-plus"></i> Ajouter</button></div>
       </div>`;
     });
-    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveTeam()"><i class="fas fa-check"></i> Enregistrer</button>`;
     return h;
   }
 
@@ -426,7 +429,6 @@
         </div>
       </div>`;
     });
-    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveAlerts()"><i class="fas fa-check"></i> Enregistrer</button>`;
     return h;
   }
 
@@ -462,7 +464,6 @@
       </div>`;
     });
     h += `<div style="margin-bottom:8px"><button class="dash-btn" onclick="MX.Pages.Admin.addProd()"><i class="fas fa-plus"></i> Ajouter un produit</button></div>`;
-    h += `<button class="save-btn" onclick="MX.Pages.Admin.saveProd()"><i class="fas fa-check"></i> Enregistrer</button>`;
     return h;
   }
 
@@ -566,6 +567,7 @@
   function editTask(dayId, sl, taskId, val) {
     const t = (MX.state.tasks[`${dayId}_${sl}`] || []).find(x => x.id === taskId);
     if (t) t.text = val;
+    _sched(`tasks_${dayId}_${sl}`, () => _autoSaveSlot(dayId, sl));
   }
   function addTask(dayId, sl) {
     const tasks = MX.state.tasks[`${dayId}_${sl}`] || [];
@@ -576,18 +578,20 @@
   function rmTask(dayId, sl, taskId) {
     MX.state.tasks[`${dayId}_${sl}`] = (MX.state.tasks[`${dayId}_${sl}`] || []).filter(t => t.id !== taskId);
     render();
+    _autoSaveSlot(dayId, sl);
+  }
+  async function _autoSaveSlot(dayId, sl) {
+    MX.syncStart && MX.syncStart();
+    try {
+      const items = MX.state.tasks[`${dayId}_${sl}`] || [];
+      await MX.DB.setTasks(dayId, sl, items.map((t, i) => ({ ...t, order: i })));
+      MX.syncEnd && MX.syncEnd();
+    } catch(e) { MX.syncFail && MX.syncFail(); }
   }
   async function saveTasks() {
     const { DAYS, getDaySlots } = MX;
-    const day   = DAYS.find(d => d.id === aDay);
     const slots = getDaySlots(aDay);
-    try {
-      for (const sl of slots) {
-        const items = MX.state.tasks[`${aDay}_${sl}`] || [];
-        await MX.DB.setTasks(aDay, sl, items.map((t, i) => ({ ...t, order: i })));
-      }
-      MX.toast(day.l + " enregistré ✓");
-    } catch (e) { MX.toast("Erreur de sauvegarde", true); }
+    for (const sl of slots) { await _autoSaveSlot(aDay, sl); }
   }
   async function copyTasks() {
     const from = (document.getElementById("cpfrom") || {}).value;
@@ -599,13 +603,18 @@
     MX.toast("Copié ✓");
   }
 
-  function editTeam(sl, i, val) { (MX.state.teams[sl] || [])[i] = val; }
-  function addTeam(sl)          { (MX.state.teams[sl] = MX.state.teams[sl] || []).push(""); render(); }
-  function rmTeam(sl, i)        { (MX.state.teams[sl] || []).splice(i, 1); render(); }
-  async function saveTeam() {
-    try { await MX.DB.saveTeams(MX.state.teams); MX.toast("Équipe enregistrée ✓"); }
-    catch (e) { MX.toast("Erreur", true); }
+  function editTeam(sl, i, val) {
+    (MX.state.teams[sl] || [])[i] = val;
+    _sched('team', _autoSaveTeam);
   }
+  function addTeam(sl) { (MX.state.teams[sl] = MX.state.teams[sl] || []).push(""); render(); }
+  function rmTeam(sl, i) { (MX.state.teams[sl] || []).splice(i, 1); render(); _autoSaveTeam(); }
+  async function _autoSaveTeam() {
+    MX.syncStart && MX.syncStart();
+    try { await MX.DB.saveTeams(MX.state.teams); MX.syncEnd && MX.syncEnd(); }
+    catch(e) { MX.syncFail && MX.syncFail(); }
+  }
+  async function saveTeam() { await _autoSaveTeam(); }
 
   async function addMission(createdBy) {
     const text       = (document.getElementById("ms-text")     || {}).value?.trim() || "";
@@ -727,15 +736,37 @@
     if (!MX.state.alerts[sl]) MX.state.alerts[sl] = {};
     MX.state.alerts[sl].active = !MX.state.alerts[sl].active;
     render();
+    _autoSaveAlerts();
   }
-  function updAlert(sl, f, v) { if (!MX.state.alerts[sl]) MX.state.alerts[sl] = {}; MX.state.alerts[sl][f] = v; }
-  async function saveAlerts() {
-    try { await MX.DB.saveAlerts(MX.state.alerts); MX.toast("Alertes enregistrées ✓"); }
-    catch (e) { MX.toast("Erreur", true); }
+  function updAlert(sl, f, v) {
+    if (!MX.state.alerts[sl]) MX.state.alerts[sl] = {};
+    MX.state.alerts[sl][f] = v;
+    _sched('alerts', _autoSaveAlerts);
   }
+  async function _autoSaveAlerts() {
+    MX.syncStart && MX.syncStart();
+    try { await MX.DB.saveAlerts(MX.state.alerts); MX.syncEnd && MX.syncEnd(); }
+    catch(e) { MX.syncFail && MX.syncFail(); }
+  }
+  async function saveAlerts() { await _autoSaveAlerts(); }
 
-  function updProd(id, f, v)  { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p[f]=v; }
-  function updProdMin(id, v)  { const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p.minQty=parseInt(v)||0; }
+  function updProd(id, f, v) {
+    const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p[f]=v;
+    _sched('prod_' + id, () => _autoSaveProd(id));
+  }
+  function updProdMin(id, v) {
+    const p = (MX.state.products||[]).find(x=>x.id===id); if(p) p.minQty=parseInt(v)||0;
+    _sched('prod_' + id, () => _autoSaveProd(id));
+  }
+  async function _autoSaveProd(id) {
+    const p = (MX.state.products||[]).find(x=>x.id===id);
+    if (!p) return;
+    MX.syncStart && MX.syncStart();
+    try {
+      await MX.DB.updateProduct(p.id, { name:p.name,ref:p.ref,qty:parseInt(p.qty||0),minQty:parseInt(p.minQty||0),controller:p.controller||"" });
+      MX.syncEnd && MX.syncEnd();
+    } catch(e) { MX.syncFail && MX.syncFail(); }
+  }
   async function addProd() {
     try { await MX.DB.addProduct({ name:"", ref:"", qty:0, minQty:0, controller:"" }); MX.toast("Produit ajouté ✓"); }
     catch(e) { MX.toast("Erreur",true); }
@@ -747,12 +778,7 @@
     ]);
   }
   async function saveProd() {
-    try {
-      for (const p of (MX.state.products||[])) {
-        await MX.DB.updateProduct(p.id, { name:p.name,ref:p.ref,qty:parseInt(p.qty||0),minQty:parseInt(p.minQty||0),controller:p.controller||"" });
-      }
-      MX.toast("Catalogue enregistré ✓");
-    } catch(e) { MX.toast("Erreur",true); }
+    for (const p of (MX.state.products||[])) { await _autoSaveProd(p.id); }
   }
 
   async function delMsg(id) {

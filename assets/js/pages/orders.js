@@ -718,7 +718,10 @@
     var qty = parseInt(val, 10);
     if (isNaN(qty)) return;
     if (MX.DB && MX.DB.updateProduct) {
-      MX.DB.updateProduct(id, { qty: qty }).catch(function (e) { console.error(e); });
+      MX.syncStart && MX.syncStart();
+      MX.DB.updateProduct(id, { qty: qty })
+        .then(function () { MX.syncEnd && MX.syncEnd(); })
+        .catch(function (e) { MX.syncFail && MX.syncFail(); console.error(e); });
     }
   }
 

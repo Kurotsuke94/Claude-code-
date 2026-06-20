@@ -315,6 +315,25 @@
   const _APP_VER = "1.0.18";
   let _lastSyncTime = null;
   let _presenceCount = 0;
+  let _pendingSaves  = 0;
+  let _isOffline     = !navigator.onLine;
+
+  window.addEventListener('online',  () => { _isOffline = false; renderStatusBar(); MX.toast('🟢 Connexion rétablie — données synchronisées'); });
+  window.addEventListener('offline', () => { _isOffline = true;  renderStatusBar(); MX.toast('⚠️ Mode hors ligne', true); });
+
+  window.MX.syncStart = function () { _pendingSaves++; renderStatusBar(); };
+  window.MX.syncEnd   = function () {
+    _pendingSaves = Math.max(0, _pendingSaves - 1);
+    _lastSyncTime = new Date();
+    renderStatusBar();
+  };
+  window.MX.syncFail  = function (retryFn) {
+    _pendingSaves = Math.max(0, _pendingSaves - 1);
+    renderStatusBar();
+    if (retryFn) {
+      MX.toast('🔴 Échec de synchronisation', true);
+    }
+  };
 
   function _fmtTime(d) {
     if (!d) return "--:--";
@@ -327,12 +346,20 @@
     const t = _fmtTime(_lastSyncTime);
     const n = _presenceCount;
     const usersLabel = n + " utilisateur" + (n !== 1 ? "s" : "") + " connecté" + (n !== 1 ? "s" : "");
+
+    let syncItem;
+    if (_isOffline) {
+      syncItem = `<span class="sb-item sb-offline"><i class="fas fa-wifi-slash"></i> Hors ligne</span>`;
+    } else if (_pendingSaves > 0) {
+      syncItem = `<span class="sb-item sb-syncing"><i class="fas fa-rotate fa-spin"></i> Synchronisation…</span>`;
+    } else {
+      syncItem = `<span class="sb-item"><i class="fas fa-cloud-arrow-up" style="color:var(--green)"></i> Synchronisé à ${t}</span>`;
+    }
+
     el.innerHTML =
-      `<span class="sb-item"><span class="sb-dot"></span>Serveur opérationnel</span>` +
+      `<span class="sb-item"><span class="sb-dot${_isOffline ? ' sb-dot-red' : ''}"></span>${_isOffline ? 'Hors ligne' : 'Serveur opérationnel'}</span>` +
       `<span class="sb-sep">│</span>` +
-      `<span class="sb-item"><i class="fas fa-cloud"></i> Synchronisé à ${t}</span>` +
-      `<span class="sb-sep">│</span>` +
-      `<span class="sb-item"><i class="fas fa-floppy-disk"></i> Sauvegarde à ${t}</span>` +
+      syncItem +
       `<span class="sb-sep">│</span>` +
       `<span class="sb-item" id="sb-users"><i class="fas fa-users"></i> ${usersLabel}</span>` +
       `<span class="sb-sep">│</span>` +
