@@ -32,11 +32,23 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v40";
+const CACHE  = "maintix-v41";
 const SHELL  = [
   "/",
   "/index.html",
   "/manifest.json",
+  "/favicon.ico",
+  "/assets/icons/maintix-logo.png",
+  "/assets/icons/icon-192.png",
+  "/assets/icons/icon-192-maskable.png",
+  "/assets/icons/icon-256.png",
+  "/assets/icons/icon-384.png",
+  "/assets/icons/icon-512.png",
+  "/assets/icons/icon-512-maskable.png",
+  "/assets/icons/apple-touch-icon.png",
+  "/assets/icons/favicon-16.png",
+  "/assets/icons/favicon-32.png",
+  "/assets/icons/favicon-48.png",
   "/assets/css/variables.css",
   "/assets/css/main.css",
   "/assets/css/components.css",
