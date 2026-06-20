@@ -409,6 +409,88 @@
     await db.collection("orders").doc(id).update({ status });
   }
 
+  // ── REWARDS ──
+  const R_RULES  = () => db.collection('rewards_rules');
+  const R_GRADES = () => db.collection('rewards_grades');
+  const R_ITEMS  = () => db.collection('rewards_items');
+  const R_RHIST  = () => db.collection('rewards_history');
+  const R_RUSERS = () => db.collection('rewards_users');
+
+  function listenRewardsRules(cb) {
+    _unsub.rewards_rules = R_RULES().orderBy('points').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenRewardsGrades(cb) {
+    _unsub.rewards_grades = R_GRADES().orderBy('minPoints').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenRewardsItems(cb) {
+    _unsub.rewards_items = R_ITEMS().orderBy('cost').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenRewardsHistory(cb) {
+    _unsub.rewards_history = R_RHIST().orderBy('ts', 'desc').limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenRewardsUsers(cb) {
+    _unsub.rewards_users = R_RUSERS().onSnapshot(snap => {
+      const map = {};
+      snap.docs.forEach(d => { map[d.id] = d.data(); });
+      cb(map);
+    });
+  }
+
+  async function addRewardsRule(data)        { await R_RULES().add(data); }
+  async function updateRewardsRule(id, data) { await R_RULES().doc(id).update(data); }
+  async function deleteRewardsRule(id)       { await R_RULES().doc(id).delete(); }
+
+  async function addRewardsGrade(data)        { await R_GRADES().add(data); }
+  async function updateRewardsGrade(id, data) { await R_GRADES().doc(id).update(data); }
+  async function deleteRewardsGrade(id)       { await R_GRADES().doc(id).delete(); }
+
+  async function addRewardsItem(data)        { await R_ITEMS().add(data); }
+  async function updateRewardsItem(id, data) { await R_ITEMS().doc(id).update(data); }
+  async function deleteRewardsItem(id)       { await R_ITEMS().doc(id).delete(); }
+
+  async function awardPoints(userId, userName, event, points, description) {
+    const batch = db.batch();
+    batch.set(R_RHIST().doc(), { userId, userName, event, points, description, ts: FV.serverTimestamp() });
+    batch.set(R_RUSERS().doc(userId), { points: FV.increment(points), lastActivity: FV.serverTimestamp() }, { merge: true });
+    await batch.commit();
+  }
+
+  async function spendPoints(userId, points) {
+    const snap = await R_RUSERS().doc(userId).get();
+    const current = snap.exists ? (snap.data().points || 0) : 0;
+    if (current < points) throw new Error('not_enough');
+    await R_RUSERS().doc(userId).set({ points: FV.increment(-points), lastActivity: FV.serverTimestamp() }, { merge: true });
+  }
+
+  async function initRewardsDefaults() {
+    const snap = await R_GRADES().limit(1).get();
+    if (!snap.empty) return;
+    const batch = db.batch();
+    [
+      { name: 'Recrue',         minPoints: 0,    icon: '🔩', color: '#6B7280' },
+      { name: 'Technicien',     minPoints: 100,  icon: '🔧', color: '#3B82F6' },
+      { name: 'Spécialiste',    minPoints: 500,  icon: '⚙️',  color: '#8B5CF6' },
+      { name: 'Expert',         minPoints: 1500, icon: '🛡️', color: '#F59E0B' },
+      { name: 'Maître Maintix', minPoints: 5000, icon: '🏆', color: '#EF4444' }
+    ].forEach(g => batch.set(R_GRADES().doc(), g));
+    [
+      { label: 'Tâche terminée',            event: 'task_done',      points: 1, icon: 'fa-check',          active: true },
+      { label: 'Intervention terminée',     event: 'mission_done',   points: 2, icon: 'fa-flag-checkered', active: true },
+      { label: 'Intervention urgente',      event: 'mission_urgent', points: 5, icon: 'fa-bolt',           active: true },
+      { label: 'Toutes les tâches du jour', event: 'day_complete',   points: 3, icon: 'fa-star',           active: true },
+      { label: 'Stock mis à jour',          event: 'stock_update',   points: 1, icon: 'fa-box',            active: true }
+    ].forEach(r => batch.set(R_RULES().doc(), r));
+    await batch.commit();
+  }
+
   // ── ABSENCES ──
   const R_ABS = () => db.collection('absences');
 
@@ -452,6 +534,11 @@
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
     listenOrders, addOrder, updateOrderStatus,
-    listenAbsences, addAbsence, validateAbsence, deleteAbsence
+    listenAbsences, addAbsence, validateAbsence, deleteAbsence,
+    listenRewardsRules, listenRewardsGrades, listenRewardsItems, listenRewardsHistory, listenRewardsUsers,
+    addRewardsRule, updateRewardsRule, deleteRewardsRule,
+    addRewardsGrade, updateRewardsGrade, deleteRewardsGrade,
+    addRewardsItem, updateRewardsItem, deleteRewardsItem,
+    awardPoints, spendPoints, initRewardsDefaults
   };
 })();

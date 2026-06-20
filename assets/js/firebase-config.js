@@ -55,5 +55,10 @@ window.MX.state = {
   planningUrl:   null,
   notes:         {},
   history:       [],
-  currentUser:   JSON.parse(localStorage.getItem("mx_user") || "null")
+  currentUser:   JSON.parse(localStorage.getItem("mx_user") || "null"),
+  rewardsRules:  [],
+  rewardsGrades: [],
+  rewardsItems:  [],
+  rewardsHistory:[],
+  rewardsUsers:  {}
 };

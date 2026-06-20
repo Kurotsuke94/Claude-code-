@@ -18,6 +18,7 @@
     null,
     { id: "utilisateurs",  icon: "fa-users",          l: "Utilisateurs" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
+    { id: "rewards",       icon: "fa-trophy",         l: "Récompenses" },
     { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.",  respOnly: true },
     { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
     { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",           respOnly: true, respDay: "mardi" },
@@ -67,6 +68,7 @@
     if (id === "utilisateurs") return Pages.Admin.render();
     if (id === "parametres")   return Pages.Admin.render();
     if (id === "admin")        return Pages.Admin.render();
+    if (id === "rewards")      return Pages.Rewards.render();
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
@@ -310,7 +312,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.17";
+  const _APP_VER = "1.0.18";
   let _lastSyncTime = null;
   let _presenceCount = 0;
 
@@ -465,7 +467,33 @@
       }
     });
 
+    let _prevChecks = {};
     DB.listenChecks(data => {
+      // Detect newly checked tasks → award points
+      if (Pages.Rewards && MX.state.currentUser) {
+        Object.keys(data).forEach(k => {
+          if (data[k] && !_prevChecks[k] && k.split('_').length >= 3) {
+            Pages.Rewards.awardForEvent('task_done', 'Tâche terminée');
+            // Check if whole day is now complete
+            const parts = k.split('_');
+            const dayId = parts[0];
+            const day   = MX.DAYS.find(d => d.id === dayId);
+            if (day) {
+              let tot = 0, dn = 0;
+              MX.getDaySlots(dayId).forEach(sl => {
+                (state.tasks[`${dayId}_${sl}`] || []).forEach(t => {
+                  tot++;
+                  if (data[`${dayId}_${sl}_${t.id}`]) dn++;
+                });
+              });
+              if (tot > 0 && dn === tot) {
+                Pages.Rewards.awardForEvent('day_complete', 'Toutes les tâches du jour terminées');
+              }
+            }
+          }
+        });
+      }
+      _prevChecks = Object.assign({}, data);
       state.checks = data;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
@@ -528,8 +556,20 @@
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
     });
 
+    let _prevMissions = {};
     DB.listenMissions(list => {
       _notifyNewMissions(MX.state.missions || [], list);
+      if (Pages.Rewards && MX.state.currentUser) {
+        list.forEach(m => {
+          const prev = _prevMissions[m.id];
+          if (m.done && prev && !prev.done) {
+            const event = (m.priority === 'urgent') ? 'mission_urgent' : 'mission_done';
+            Pages.Rewards.awardForEvent(event, 'Intervention terminée : ' + (m.text || ''));
+          }
+        });
+      }
+      _prevMissions = {};
+      list.forEach(m => { _prevMissions[m.id] = m; });
       state.missions = list;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
@@ -556,6 +596,27 @@
     DB.listenAbsences(list => {
       state.absences = list;
       if (state.currentPage === 'utilisateurs') MX.Pages.Admin.render();
+    });
+
+    DB.listenRewardsRules(list => {
+      state.rewardsRules = list;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+    DB.listenRewardsGrades(list => {
+      state.rewardsGrades = list;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+    DB.listenRewardsItems(list => {
+      state.rewardsItems = list;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+    DB.listenRewardsHistory(list => {
+      state.rewardsHistory = list;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+    DB.listenRewardsUsers(map => {
+      state.rewardsUsers = map;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
     });
 
     DB.listenPresence(count => {
@@ -613,6 +674,7 @@
 
     try {
       await MX.DB.initDefaults();
+      await MX.DB.initRewardsDefaults();
       setupListeners();
       await new Promise(r => setTimeout(r, 800));
     } catch (e) {
