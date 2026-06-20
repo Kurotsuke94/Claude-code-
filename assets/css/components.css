@@ -1254,3 +1254,107 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ord-hist-upd:hover { border-color: var(--cyan); color: var(--cyan); }
 .ord-hist-more { width: 100%; background: none; border: 1px solid var(--border2); border-radius: 6px; color: var(--text2); padding: 7px; font-size: 11px; cursor: pointer; margin-top: 4px; font-family: var(--ffs); transition: all var(--t); }
 .ord-hist-more:hover { border-color: var(--cyan); color: var(--cyan); }
+
+/* ── GLOBAL SEARCH ── */
+.gs-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9998;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 80px; padding-bottom: 20px;
+}
+.gs-box {
+  width: 100%; max-width: 600px; margin: 0 16px;
+  background: var(--bg2); border: 1px solid var(--border3);
+  border-radius: 16px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; max-height: 80vh;
+}
+.gs-search {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gs-search-ico { color: var(--cyan); font-size: 16px; flex-shrink: 0; }
+.gs-input {
+  flex: 1; background: none; border: none; outline: none;
+  font-size: 16px; font-family: var(--ffs); color: var(--text1);
+}
+.gs-input::placeholder { color: var(--text3); }
+.gs-close {
+  background: var(--bg4); border: 1px solid var(--border2);
+  border-radius: 6px; color: var(--text3); font-size: 11px;
+  font-family: var(--ffm); padding: 3px 8px; cursor: pointer;
+}
+.gs-body { flex: 1; overflow-y: auto; padding: 6px 0; }
+.gs-section {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--text3); padding: 10px 16px 4px; text-transform: uppercase;
+}
+.gs-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 16px; background: none; border: none;
+  width: 100%; text-align: left; cursor: pointer;
+  transition: background 0.1s; color: var(--text1);
+}
+.gs-item:hover, .gs-item.gs-sel { background: var(--bg3); }
+.gs-ico {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--bg4); display: flex; align-items: center;
+  justify-content: center; color: var(--cyan);
+  font-size: 12px; flex-shrink: 0;
+}
+.gs-txt { flex: 1; min-width: 0; }
+.gs-lbl { display: block; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-sub { display: block; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-arrow { color: var(--text3); font-size: 10px; flex-shrink: 0; }
+.gs-empty {
+  padding: 36px 16px; text-align: center; color: var(--text3);
+  font-size: 13px; display: flex; flex-direction: column;
+  align-items: center; gap: 8px;
+}
+.gs-empty i { font-size: 24px; opacity: 0.4; }
+.gs-footer {
+  display: flex; gap: 16px; padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text3); font-size: 11px; flex-shrink: 0;
+}
+.gs-footer kbd {
+  background: var(--bg4); border: 1px solid var(--border2);
+  border-radius: 4px; padding: 1px 5px;
+  font-family: var(--ffm); font-size: 10px; color: var(--text2);
+}
+.gs-trigger {
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 8px; color: var(--text2); font-size: 14px;
+  width: 34px; height: 34px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; transition: var(--t);
+  flex-shrink: 0;
+}
+.gs-trigger:hover { border-color: var(--cyan); color: var(--cyan); }
+@media (max-width: 900px) { .gs-overlay { padding-top: 60px; } }
+
+/* ── ABSENCES ── */
+.abs-card {
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 12px;
+}
+.abs-avatar {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; font-family: var(--ffm);
+  flex-shrink: 0;
+}
+.abs-info { flex: 1; min-width: 0; }
+.abs-name { font-size: 13px; font-weight: 600; }
+.abs-dates { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.abs-badge {
+  font-size: 10px; font-weight: 600; padding: 2px 8px;
+  border-radius: 20px; border: 1px solid; white-space: nowrap;
+}
+.abs-badge-ok   { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+.abs-badge-pend { background: #EAB30820; color: #EAB308; border-color: #EAB30880; }
+.abs-actions { display: flex; gap: 6px; flex-shrink: 0; }

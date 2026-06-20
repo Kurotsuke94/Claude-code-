@@ -51,6 +51,7 @@ window.MX.state = {
   respTasks:     [],
   announcements: [],
   orders:        [],
+  absences:      [],
   planningUrl:   null,
   notes:         {},
   history:       [],

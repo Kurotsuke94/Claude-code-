@@ -409,6 +409,24 @@
     await db.collection("orders").doc(id).update({ status });
   }
 
+  // ── ABSENCES ──
+  const R_ABS = () => db.collection('absences');
+
+  function listenAbsences(cb) {
+    _unsub.absences = R_ABS().orderBy('from', 'asc').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addAbsence(data) {
+    await R_ABS().add({ ...data, validated: false, createdAt: FV.serverTimestamp() });
+  }
+  async function validateAbsence(id) {
+    await R_ABS().doc(id).update({ validated: true });
+  }
+  async function deleteAbsence(id) {
+    await R_ABS().doc(id).delete();
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -433,6 +451,7 @@
     setNote, archiveWeek,
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
-    listenOrders, addOrder, updateOrderStatus
+    listenOrders, addOrder, updateOrderStatus,
+    listenAbsences, addAbsence, validateAbsence, deleteAbsence
   };
 })();

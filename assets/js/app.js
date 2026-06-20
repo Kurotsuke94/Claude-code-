@@ -553,6 +553,11 @@
       if (state.currentPage === "home") MX.Pages.Home.render();
     });
 
+    DB.listenAbsences(list => {
+      state.absences = list;
+      if (state.currentPage === 'utilisateurs') MX.Pages.Admin.render();
+    });
+
     DB.listenPresence(count => {
       _presenceCount = count;
       renderStatusBar();

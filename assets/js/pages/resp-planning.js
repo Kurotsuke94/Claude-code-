@@ -18,6 +18,14 @@
     return (COLORS.find(c => c.bg === bg) || COLORS[0]).border;
   }
 
+  function _isAbsent(name) {
+    if (!name) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return (MX.state.absences || []).some(function(a) {
+      return a.userName === name && a.validated && a.from <= today && a.to >= today;
+    });
+  }
+
   function _colorPicker(prefix, selected) {
     return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px">
       ${COLORS.map(c => `
@@ -168,7 +176,7 @@
             <div style="font-size:13px;font-weight:600;color:#F1F5F9${isChecked ? ';text-decoration:line-through;opacity:0.6' : ''}">${esc(t.text)}</div>
             ${isChecked && comment ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
           </div>
-          ${t.person ? `<span style="background:rgba(255,255,255,0.12);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${esc(t.person)}</span>` : ''}
+          ${t.person ? `<span style="background:rgba(255,255,255,0.12);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${esc(t.person)}${_isAbsent(t.person) ? '<span style="font-size:10px;background:rgba(239,68,68,0.15);color:var(--red);border:1px solid rgba(239,68,68,0.3);border-radius:4px;padding:1px 6px;margin-left:4px">⚠️ Absent</span>' : ''}</span>` : ''}
           ${canEdit ? `
             <button data-move title="Monter" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',-1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===0?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-up"></i></button>
             <button data-move title="Descendre" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===tasks.length-1?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-down"></i></button>
@@ -396,7 +404,7 @@
           <div style="font-size:13px;font-weight:600;color:#F1F5F9${isChecked ? ';text-decoration:line-through;opacity:0.6' : ''}">${esc(t.text)}</div>
           ${isChecked && comment ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-style:italic">"${esc(comment)}"${byWho ? ` <span style="color:var(--cyan);font-style:normal;font-weight:600">— ${esc(byWho)}</span>` : ''}</div>` : ''}
         </div>
-        ${t.person ? `<span style="background:rgba(255,255,255,0.12);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${esc(t.person)}</span>` : ''}
+        ${t.person ? `<span style="background:rgba(255,255,255,0.12);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">${esc(t.person)}${_isAbsent(t.person) ? '<span style="font-size:10px;background:rgba(239,68,68,0.15);color:var(--red);border:1px solid rgba(239,68,68,0.3);border-radius:4px;padding:1px 6px;margin-left:4px">⚠️ Absent</span>' : ''}</span>` : ''}
         ${canEdit ? `
           <button title="Monter" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',-1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===0?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-up"></i></button>
           <button title="Descendre" onclick="MX.Pages.RespPlan.moveTask('${esc(t.id)}',1)" style="background:rgba(255,255,255,0.06);border:none;color:rgba(255,255,255,0.5);width:26px;height:26px;border-radius:6px;cursor:pointer;flex-shrink:0;font-size:10px${i===tasks.length-1?';opacity:0.2;pointer-events:none':''}"><i class="fas fa-chevron-down"></i></button>

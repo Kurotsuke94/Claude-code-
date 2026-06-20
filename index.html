@@ -67,7 +67,11 @@
         </button>
         <img src="/assets/icons/maintix-logo.png" alt="Maintix" class="topbar-logo">
         <span class="topbar-title" id="topbar-title"></span>
-        <div class="topbar-actions"></div>
+        <div class="topbar-actions">
+          <button class="gs-trigger" aria-label="Recherche (Ctrl+K)" onclick="MX.GlobalSearch.open()">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+          </button>
+        </div>
       </header>
 
       <!-- Announcement banner -->
@@ -145,24 +149,25 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 
   <!-- ── APP SCRIPTS ── -->
-  <script src="/assets/js/firebase-config.js?v=41"></script>
-  <script src="/assets/js/utils/helpers.js?v=41"></script>
-  <script src="/assets/js/utils/uuid.js?v=41"></script>
-  <script src="/assets/js/db.js?v=41"></script>
-  <script src="/assets/js/auth.js?v=41"></script>
+  <script src="/assets/js/firebase-config.js?v=42"></script>
+  <script src="/assets/js/utils/helpers.js?v=42"></script>
+  <script src="/assets/js/utils/uuid.js?v=42"></script>
+  <script src="/assets/js/db.js?v=42"></script>
+  <script src="/assets/js/auth.js?v=42"></script>
   <!-- Widgets -->
-  <script src="/assets/js/widgets/task-row.js?v=41"></script>
-  <script src="/assets/js/widgets/user-badge.js?v=41"></script>
-  <script src="/assets/js/widgets/progress-widget.js?v=41"></script>
-  <script src="/assets/js/widgets/slot-card.js?v=41"></script>
+  <script src="/assets/js/widgets/task-row.js?v=42"></script>
+  <script src="/assets/js/widgets/user-badge.js?v=42"></script>
+  <script src="/assets/js/widgets/progress-widget.js?v=42"></script>
+  <script src="/assets/js/widgets/slot-card.js?v=42"></script>
+  <script src="/assets/js/widgets/global-search.js?v=42"></script>
   <!-- Pages -->
-  <script src="/assets/js/pages/home.js?v=41"></script>
-  <script src="/assets/js/pages/checklist.js?v=41"></script>
-  <script src="/assets/js/pages/messages.js?v=41"></script>
-  <script src="/assets/js/pages/orders.js?v=41"></script>
-  <script src="/assets/js/pages/admin.js?v=41"></script>
-  <script src="/assets/js/pages/resp-planning.js?v=41"></script>
-  <script src="/assets/js/app.js?v=41"></script>
+  <script src="/assets/js/pages/home.js?v=42"></script>
+  <script src="/assets/js/pages/checklist.js?v=42"></script>
+  <script src="/assets/js/pages/messages.js?v=42"></script>
+  <script src="/assets/js/pages/orders.js?v=42"></script>
+  <script src="/assets/js/pages/admin.js?v=42"></script>
+  <script src="/assets/js/pages/resp-planning.js?v=42"></script>
+  <script src="/assets/js/app.js?v=42"></script>
 
 </body>
 </html>

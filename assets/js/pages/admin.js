@@ -52,11 +52,12 @@
       { id: "msgs",     label: "💬 Messages"     },
       { id: "logs",     label: "📋 Activité"     },
       { id: "users",    label: "👤 Utilisateurs", adminOnly: true },
+      { id: "absences", label: "🏖 Absences",      adminOnly: true },
       { id: "pin",      label: "🔑 Accès",        adminOnly: true }
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
-    if (isResp && (aTab === "users" || aTab === "pin")) aTab = "missions";
+    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences")) aTab = "missions";
 
     const actionBtn = isAdmin
       ? `<button class="logout-btn" onclick="MX.Auth.logout()"><i class="fas fa-lock"></i> Verrouiller</button>`
@@ -87,8 +88,9 @@
     if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
     if (aTab === "logs")              h += renderLogs();
-    if (aTab === "users" && isAdmin)  h += renderUsers();
-    if (aTab === "pin"   && isAdmin)  h += renderPin();
+    if (aTab === "users"    && isAdmin)  h += renderUsers();
+    if (aTab === "absences" && isAdmin)  h += renderAbsences();
+    if (aTab === "pin"      && isAdmin)  h += renderPin();
 
     h += `</div>`;
     el.innerHTML = h;
@@ -927,6 +929,104 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     else MX.toast("Autorisez les popups pour générer le rapport", true);
   }
 
+  // ── ABSENCES ──
+  const ABS_TYPES = { cp: 'Congés payés', maladie: 'Maladie', rtt: 'RTT', autre: 'Autre' };
+
+  function renderAbsences() {
+    const { state, esc } = MX;
+    const users    = state.users || [];
+    const absences = state.absences || [];
+    const isAdmin  = MX.Auth.isAdmin();
+
+    let h = `<div style="padding:0 0 16px">`;
+
+    // Add form
+    h += `<div class="apcard" style="margin-bottom:12px">
+      <div class="aphd"><div class="aph-title">Déclarer une absence</div></div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:10px">
+        <select id="abs-user" class="fi fi-sm">
+          <option value="">— Sélectionner un utilisateur —</option>
+          ${users.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}
+        </select>
+        <select id="abs-type" class="fi fi-sm">
+          ${Object.entries(ABS_TYPES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
+        </select>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Du</label>
+            <input id="abs-from" type="date" class="fi fi-sm">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px">Au</label>
+            <input id="abs-to" type="date" class="fi fi-sm">
+          </div>
+        </div>
+        <textarea id="abs-note" class="fi fi-sm" rows="2" placeholder="Note (optionnel)…" style="resize:vertical"></textarea>
+        <button class="save-btn" onclick="MX.Pages.Admin.addAbsence()">
+          <i class="fas fa-plus"></i> Enregistrer l'absence
+        </button>
+      </div>
+    </div>`;
+
+    // List
+    if (!absences.length) {
+      h += `<div style="text-align:center;padding:32px 16px;color:var(--text3);font-size:13px">Aucune absence enregistrée</div>`;
+    } else {
+      absences.forEach(a => {
+        const typeLabel = ABS_TYPES[a.type] || a.type || '';
+        const initials  = (a.userName || '?').slice(0, 2).toUpperCase();
+        const validated = !!a.validated;
+        h += `<div class="abs-card">
+          <div class="abs-avatar" style="background:var(--bg4);color:var(--cyan)">${esc(initials)}</div>
+          <div class="abs-info">
+            <div class="abs-name">${esc(a.userName || '–')} <span style="font-size:11px;color:var(--text2);font-weight:400">${esc(typeLabel)}</span></div>
+            <div class="abs-dates">${esc(a.from || '')} → ${esc(a.to || '')}${a.note ? ' · ' + esc(a.note) : ''}</div>
+          </div>
+          <span class="abs-badge ${validated ? 'abs-badge-ok' : 'abs-badge-pend'}">${validated ? 'Validée' : 'En attente'}</span>
+          <div class="abs-actions">
+            ${isAdmin && !validated ? `<button class="icon-btn" title="Valider" onclick="MX.Pages.Admin.validateAbsence('${esc(a.id)}')"><i class="fas fa-check" style="color:var(--green)"></i></button>` : ''}
+            ${isAdmin ? `<button class="icon-btn" title="Supprimer" onclick="MX.Pages.Admin.deleteAbsence('${esc(a.id)}')"><i class="fas fa-trash" style="color:var(--red)"></i></button>` : ''}
+          </div>
+        </div>`;
+      });
+    }
+
+    h += `</div>`;
+    return h;
+  }
+
+  async function addAbsence() {
+    const userId   = (document.getElementById('abs-user')||{}).value || '';
+    const type     = (document.getElementById('abs-type')||{}).value || 'cp';
+    const from     = (document.getElementById('abs-from')||{}).value || '';
+    const to       = (document.getElementById('abs-to')  ||{}).value || '';
+    const note     = (document.getElementById('abs-note')||{}).value || '';
+    if (!userId || !from || !to) return MX.toast('Remplissez utilisateur, début et fin', true);
+    if (from > to)               return MX.toast('La date de fin doit être après la date de début', true);
+    const user     = (MX.state.users||[]).find(u => u.id === userId);
+    const userName = user ? user.name : userId;
+    try {
+      await MX.DB.addAbsence({ userId, userName, type, from, to, note });
+      MX.toast('Absence enregistrée ✓');
+      render();
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function validateAbsence(id) {
+    try { await MX.DB.validateAbsence(id); MX.toast('Absence validée ✓'); }
+    catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function deleteAbsence(id) {
+    MX.showModal('Supprimer cette absence ?', 'Cette action est irréversible.', [
+      { label: 'Supprimer', cls: 'danger', fn: async () => {
+        try { await MX.DB.deleteAbsence(id); MX.toast('Supprimé ✓'); }
+        catch(e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.Admin = {
@@ -940,6 +1040,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     updProd, updProdMin, addProd, delProd, saveProd,
     delMsg,
     confirmClearLogs, confirmReset, confirmNewWeek,
-    generateReport
+    generateReport,
+    addAbsence, validateAbsence, deleteAbsence
   };
 })();
