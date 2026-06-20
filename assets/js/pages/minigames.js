@@ -6,19 +6,20 @@
 
   // ── GAME METADATA ──
   const META = [
-    { id: 'puzzle', icon: '🧩', name: 'Puzzle Maintix',     desc: 'Reconstituez le schéma contre la montre.', unlockPts: 100,  dailyMp: 5  },
-    { id: 'memory', icon: '🧠', name: 'Memory Maintenance',  desc: 'Retrouvez les paires équipements.',         unlockPts: 250,  dailyMp: 10 },
-    { id: 'quiz',   icon: '📚', name: 'Quiz Technique',      desc: 'Testez vos connaissances en maintenance.',  unlockPts: 500,  dailyMp: 10 },
-    { id: 'snake',  icon: '🐍', name: 'Snake Industriel',    desc: 'Collectez les outils, évitez les alarmes.', unlockPts: 1000, dailyMp: 15 },
-    { id: 'stock',  icon: '🏭', name: 'Gestion du Stock',    desc: 'Empilez les caisses, videz le dépôt.',      unlockPts: 2000, dailyMp: 20 }
+    { id: 'puzzle', icon: '⚡', name: 'Puzzle Électrique',  desc: 'Reconstituez le schéma contre la montre.', unlockPts: 100,  dailyMp: 5,  diff: 2 },
+    { id: 'memory', icon: '🃏', name: 'Memory Maintenance',  desc: 'Retrouvez les paires équipements.',         unlockPts: 250,  dailyMp: 10, diff: 2 },
+    { id: 'quiz',   icon: '📡', name: 'Quiz Technique',      desc: 'Questions sur la maintenance industrielle.', unlockPts: 500,  dailyMp: 10, diff: 3 },
+    { id: 'snake',  icon: '🔌', name: 'Snake Industriel',    desc: 'Collectez les outils, évitez les alarmes.', unlockPts: 1000, dailyMp: 15, diff: 3 },
+    { id: 'stock',  icon: '📦', name: 'Gestion du Stock',    desc: 'Empilez les caisses, videz le dépôt.',      unlockPts: 2000, dailyMp: 20, diff: 4 }
   ];
 
   const ACHIEVEMENTS_DEF = [
-    { id: 'first_puzzle',  gameId: 'puzzle', icon: '🧩', name: 'Premier Puzzle',     desc: 'Terminez votre premier puzzle.' },
-    { id: 'memory_10',     gameId: 'memory', icon: '🧠', name: 'Expert Mémoire',     desc: 'Gagnez 10 parties de Memory Maintenance.', count: 10 },
-    { id: 'quiz_perfect',  gameId: 'quiz',   icon: '📚', name: 'Quiz Parfait',       desc: 'Score parfait au Quiz Technique (10/10).' },
-    { id: 'snake_100',     gameId: 'snake',  icon: '🐍', name: 'Serpentaire Élite',  desc: 'Atteignez 100 points au Snake Industriel.' },
-    { id: 'stock_lines10', gameId: 'stock',  icon: '🏭', name: 'Gestionnaire Stock', desc: 'Effacez 10 lignes en Gestion du Stock.' }
+    { id: 'first_puzzle',  gameId: 'puzzle', icon: '⚡', name: 'Premier Câblage',    desc: 'Terminez votre premier Puzzle Électrique.' },
+    { id: 'memory_10',     gameId: 'memory', icon: '🃏', name: 'Expert Mémoire',     desc: 'Gagnez 10 parties de Memory.', count: 10 },
+    { id: 'quiz_perfect',  gameId: 'quiz',   icon: '📡', name: 'Quiz Parfait',       desc: 'Score parfait au Quiz Technique (10/10).' },
+    { id: 'snake_100',     gameId: 'snake',  icon: '🔌', name: 'Câbleur Élite',      desc: 'Atteignez 100 points au Snake Industriel.' },
+    { id: 'stock_lines10', gameId: 'stock',  icon: '📦', name: 'Gestionnaire Stock', desc: 'Effacez 10 lignes en Gestion du Stock.' },
+    { id: 'arcade_all',    gameId: 'puzzle', icon: '🏆', name: 'Maître Arcade',      desc: 'Jouez à tous les jeux de l\'Arcade.' }
   ];
 
   // ── HELPERS ──
@@ -39,7 +40,7 @@
     const give = Math.min(mp, cap - _dailyEarned(uid, gid));
     if (give <= 0) return 0;
     try {
-      await MX.DB.awardPoints(uid, un, 'game_' + gid, give, desc || 'Mini-jeu : ' + (m ? m.name : gid));
+      await MX.DB.awardPoints(uid, un, 'game_' + gid, give, desc || 'Arcade : ' + (m ? m.name : gid));
       _addDaily(uid, gid, give);
       return give;
     } catch(e) { return 0; }
@@ -101,7 +102,7 @@
   }
 
   // ─────────────────────────────────────────────
-  //  HUB RENDER
+  //  HUB — ARCADE RENDER
   // ─────────────────────────────────────────────
   function render() {
     _destroy();
@@ -112,88 +113,225 @@
   function _renderHub() {
     const el = document.getElementById('main-content');
     if (!el) return;
-    const uid = _uid();
-    const pts = uid ? ((MX.state.rewardsUsers||{})[uid]||{}).points||0 : 0;
+    const uid      = _uid();
+    const pts      = uid ? ((MX.state.rewardsUsers||{})[uid]||{}).points||0 : 0;
     const canAdmin = MX.Auth.canSeeAll();
     const isAdmin  = MX.Auth.isAdmin();
+    const unlocked = META.filter(g => pts >= g.unlockPts).length;
+    const scores   = MX.state.gameScores || [];
+    const myScores = uid ? scores.filter(s => s.userId === uid) : [];
+    const gamesPlayed = new Set(myScores.map(s => s.gameId)).size;
 
     const TABS = [
       { id:'hub',          l:'🎮 Jeux' },
       { id:'leaderboard',  l:'🏆 Classement' },
-      { id:'achievements', l:'🎖️ Succès' },
+      { id:'achievements', l:'🥇 Succès' },
       ...(canAdmin ? [{ id:'admin', l:'⚙️ Admin' }] : [])
     ];
 
-    let h = `<div class="ph">
-      <div class="ph-eye">MINI-JEUX</div>
-      <div class="ph-row">
+    let h = `
+    <div class="arc-header">
+      <div class="arc-header-top">
         <div>
-          <div class="ph-title">🎮 Mini-jeux Maintix</div>
-          <div class="ph-sub">Débloqués avec vos MP — gagnez des points en jouant</div>
+          <div class="arc-header-title">🎮 Arcade Maintix</div>
+          <div class="arc-header-sub">Débloque des jeux avec tes MP · gagne des récompenses</div>
         </div>
-        <button class="icon-btn" onclick="MX.showPage('rewards')" style="color:var(--text2);white-space:nowrap;font-size:12px">
-          <i class="fas fa-arrow-left"></i> Récompenses
+        <button class="arc-back-btn" onclick="MX.showPage('rewards')" title="Récompenses">
+          <i class="fas fa-arrow-left"></i>
         </button>
       </div>
+      <div class="arc-kpis">
+        <div class="arc-kpi">
+          <div class="arc-kpi-val">${unlocked}<span class="arc-kpi-tot">/${META.length}</span></div>
+          <div class="arc-kpi-lbl">Débloqués</div>
+        </div>
+        <div class="arc-kpi-div"></div>
+        <div class="arc-kpi">
+          <div class="arc-kpi-val arc-kpi-mp">${pts}</div>
+          <div class="arc-kpi-lbl">MP disponibles</div>
+        </div>
+        <div class="arc-kpi-div"></div>
+        <div class="arc-kpi">
+          <div class="arc-kpi-val">${gamesPlayed}</div>
+          <div class="arc-kpi-lbl">Joués</div>
+        </div>
+      </div>
     </div>
-    <div class="page-body">
-      <div class="rw-tabs">`;
-    TABS.forEach(t => { h += `<button class="rw-tab${_scene===t.id?' active':''}" onclick="MX.Pages.MiniGames._scn('${t.id}')">${t.l}</button>`; });
-    h += `</div>`;
+    <div class="arc-tabs-wrap">
+      <div class="arc-tabs">`;
+
+    TABS.forEach(t => {
+      h += `<button class="arc-tab${_scene===t.id?' active':''}" onclick="MX.Pages.MiniGames._scn('${t.id}')">${t.l}</button>`;
+    });
+    h += `</div></div><div class="arc-body">`;
 
     if (_scene === 'hub')          h += _renderGrid(uid, pts);
     if (_scene === 'leaderboard')  h += _renderLB();
-    if (_scene === 'achievements') h += _renderAch(uid);
+    if (_scene === 'achievements') h += _renderAch(uid, pts);
     if (_scene === 'admin')        h += _renderAdmin(isAdmin);
+
     h += `</div>`;
     el.innerHTML = h;
   }
 
+  // ── SVG ILLUSTRATIONS ──
+  function _artSvg(id) {
+    const C = '#00C2D1', C2 = 'rgba(0,194,209,0.15)', BG = '#080f1a', BG2 = '#0d1e2e', G = '#10B981', O = '#F59E0B', R = '#EF4444', P = '#8B5CF6';
+    const svgs = {
+      puzzle: `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="64" fill="${BG}"/>
+        <rect x="6" y="5" width="26" height="26" rx="4" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <rect x="37" y="5" width="26" height="26" rx="4" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <rect x="68" y="5" width="26" height="26" rx="4" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <rect x="6" y="36" width="26" height="26" rx="4" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <rect x="37" y="36" width="26" height="26" rx="4" fill="${BG2}" stroke="rgba(0,194,209,0.25)" stroke-width="1" stroke-dasharray="3,2"/>
+        <rect x="68" y="36" width="26" height="26" rx="4" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <path d="M52 10 L47 24 L51 24 L46 42 L55 26 L51 26 Z" fill="${C}" opacity="0.9"/>
+        <path d="M16 40 L20 44 L24 40" stroke="${G}" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M10 48 L28 48" stroke="${G}" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+        <circle cx="19" cy="14" r="5" fill="none" stroke="${O}" stroke-width="1.5" opacity="0.7"/>
+        <path d="M79 14 L81 18 L83 14 L85 18" stroke="${C}" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      </svg>`,
+
+      memory: `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="64" fill="${BG}"/>
+        <rect x="5" y="6" width="26" height="36" rx="4" fill="${C2}" stroke="${C}" stroke-width="1.5"/>
+        <text x="18" y="30" font-size="16" text-anchor="middle" fill="${C}">🔧</text>
+        <rect x="37" y="6" width="26" height="36" rx="4" fill="${BG2}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        <path d="M43 18 L63 18 M43 24 L57 24 M43 30 L60 30" stroke="rgba(255,255,255,0.15)" stroke-width="2" stroke-linecap="round"/>
+        <rect x="69" y="6" width="26" height="36" rx="4" fill="rgba(245,158,11,0.12)" stroke="${O}" stroke-width="1.5"/>
+        <text x="82" y="30" font-size="16" text-anchor="middle" fill="${O}">⚡</text>
+        <rect x="5" y="48" width="26" height="14" rx="3" fill="${BG2}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+        <rect x="37" y="48" width="26" height="14" rx="3" fill="rgba(245,158,11,0.12)" stroke="${O}" stroke-width="1.5"/>
+        <text x="50" y="58" font-size="8" text-anchor="middle" fill="${O}">⚡</text>
+        <rect x="69" y="48" width="26" height="14" rx="3" fill="${BG2}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+      </svg>`,
+
+      quiz: `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="64" fill="${BG}"/>
+        <rect x="5" y="5" width="90" height="54" rx="6" fill="${BG2}" stroke="${C}" stroke-width="1.2"/>
+        <rect x="5" y="5" width="90" height="54" rx="6" fill="none" stroke="${C}" stroke-width="0.5" opacity="0.3"/>
+        <rect x="5" y="22" width="90" height="1" fill="${C}" opacity="0.15"/>
+        <rect x="5" y="43" width="90" height="1" fill="${C}" opacity="0.15"/>
+        <text x="26" y="38" font-size="22" font-weight="bold" fill="${C}" opacity="0.95" font-family="monospace">Q?</text>
+        <rect x="50" y="12" width="38" height="5" rx="2" fill="rgba(0,194,209,0.1)" stroke="${C}" stroke-width="0.8"/>
+        <rect x="50" y="26" width="30" height="5" rx="2" fill="rgba(16,185,129,0.15)" stroke="${G}" stroke-width="0.8"/>
+        <rect x="50" y="33" width="34" height="5" rx="2" fill="rgba(0,194,209,0.06)"/>
+        <text x="53" y="30" font-size="5" fill="${G}" font-family="monospace">✓ Ampère</text>
+        <circle cx="92" cy="9" r="2.5" fill="${C}" opacity="0.6"/>
+        <path d="M8 52 L16 52" stroke="${C}" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+        <path d="M20 52 L28 52" stroke="${C}" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+      </svg>`,
+
+      snake: `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="64" fill="${BG}"/>
+        ${Array.from({length:45},(_,i)=>`<circle cx="${(i%9)*11+7}" cy="${Math.floor(i/9)*14+7}" r="1.2" fill="rgba(0,194,209,0.12)"/>`).join('')}
+        <circle cx="18" cy="7" r="6" fill="${C}"/>
+        <circle cx="15" cy="5" r="1.8" fill="${BG}"/>
+        <circle cx="21" cy="5" r="1.8" fill="${BG}"/>
+        <circle cx="29" cy="7" r="5.5" fill="${C}" opacity="0.85"/>
+        <circle cx="40" cy="7" r="5.5" fill="${C}" opacity="0.75"/>
+        <circle cx="51" cy="7" r="5.5" fill="${C}" opacity="0.65"/>
+        <circle cx="51" cy="21" r="5.5" fill="${C}" opacity="0.55"/>
+        <circle cx="40" cy="21" r="5.5" fill="${C}" opacity="0.45"/>
+        <circle cx="29" cy="21" r="5.5" fill="${C}" opacity="0.35"/>
+        <text x="73" y="19" font-size="14" text-anchor="middle" fill="${O}">🔧</text>
+        <text x="18" y="52" font-size="12" text-anchor="middle" fill="${R}">🚨</text>
+        <text x="73" y="52" font-size="12" text-anchor="middle" fill="${C}">💡</text>
+      </svg>`,
+
+      stock: `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100" height="64" fill="${BG}"/>
+        <rect x="4" y="5" width="3" height="57" rx="1" fill="${BG2}" stroke="rgba(0,194,209,0.2)" stroke-width="0.5"/>
+        <rect x="93" y="5" width="3" height="57" rx="1" fill="${BG2}" stroke="rgba(0,194,209,0.2)" stroke-width="0.5"/>
+        <rect x="4" y="19" width="92" height="2" rx="1" fill="rgba(0,194,209,0.25)"/>
+        <rect x="4" y="38" width="92" height="2" rx="1" fill="rgba(0,194,209,0.25)"/>
+        <rect x="4" y="57" width="92" height="2" rx="1" fill="rgba(0,194,209,0.25)"/>
+        <rect x="10" y="40" width="14" height="17" rx="2" fill="${C}" opacity="0.8"/>
+        <rect x="26" y="40" width="14" height="17" rx="2" fill="${O}" opacity="0.8"/>
+        <rect x="42" y="40" width="14" height="17" rx="2" fill="${G}" opacity="0.8"/>
+        <rect x="58" y="40" width="14" height="17" rx="2" fill="${C}" opacity="0.7"/>
+        <rect x="74" y="44" width="14" height="13" rx="2" fill="${O}" opacity="0.7"/>
+        <rect x="10" y="21" width="14" height="17" rx="2" fill="${O}" opacity="0.7"/>
+        <rect x="26" y="21" width="14" height="17" rx="2" fill="${C}" opacity="0.7"/>
+        <rect x="42" y="25" width="14" height="13" rx="2" fill="${R}" opacity="0.7"/>
+        <rect x="58" y="28" width="14" height="10" rx="2" fill="${P}" opacity="0.7"/>
+        <rect x="65" y="6" width="14" height="12" rx="2" fill="${P}" opacity="0.85" stroke="${P}" stroke-width="0.8"/>
+        <path d="M65 14 L79 14" stroke="${P}" stroke-width="1" stroke-dasharray="2,1" opacity="0.6"/>
+      </svg>`
+    };
+    return svgs[id] || `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:32px">${META.find(m=>m.id===id)?.icon||'🎮'}</div>`;
+  }
+
+  // ── GAME GRID ──
   function _renderGrid(uid, pts) {
     const scores = MX.state.gameScores || [];
-    let h = `<div class="mg-grid">`;
-    META.forEach(g => {
-      const locked  = pts < g.unlockPts;
-      const myScores = scores.filter(s => s.userId === uid && s.gameId === g.id);
-      const best    = myScores.reduce((b,s) => s.score > b ? s.score : b, 0);
-      const plays   = myScores.length;
-      const earned  = uid ? _dailyEarned(uid, g.id) : 0;
-      const left    = Math.max(0, g.dailyMp - earned);
+    let h = `<div class="arc-grid">`;
 
-      h += `<div class="mg-card${locked?' mg-locked':''}">
-        <div class="mg-icon" style="${locked?'filter:grayscale(1);opacity:0.4':''}">${g.icon}</div>
-        <div class="mg-name">${MX.esc(g.name)}</div>
-        <div class="mg-desc">${MX.esc(g.desc)}</div>`;
+    META.forEach(g => {
+      const locked   = pts < g.unlockPts;
+      const myScores = uid ? scores.filter(s => s.userId === uid && s.gameId === g.id) : [];
+      const best     = myScores.reduce((b,s) => Math.max(b, s.score), 0);
+      const plays    = myScores.length;
+      const earned   = uid ? _dailyEarned(uid, g.id) : 0;
+      const left     = Math.max(0, g.dailyMp - earned);
+      const stars    = '★'.repeat(g.diff) + '☆'.repeat(5 - g.diff);
+
+      h += `<div class="arc-card${locked?' arc-locked':''}">
+        <div class="arc-art arc-art-${g.id}">
+          ${_artSvg(g.id)}
+          <div class="arc-art-overlay">
+            ${locked
+              ? `<span class="arc-badge-pill arc-badge-lock"><i class="fas fa-lock"></i> ${g.unlockPts} MP</span>`
+              : `<span class="arc-badge-pill arc-badge-ok"><i class="fas fa-circle" style="font-size:5px"></i> Dispo</span>`
+            }
+          </div>
+          ${!locked && best > 0 ? `<div class="arc-art-best"><i class="fas fa-trophy"></i> ${best}</div>` : ''}
+        </div>
+        <div class="arc-card-body">
+          <div class="arc-card-row">
+            <span class="arc-card-name">${MX.esc(g.name)}</span>
+            <span class="arc-card-mp">+${g.dailyMp}<span>MP</span></span>
+          </div>
+          <div class="arc-card-desc">${MX.esc(g.desc)}</div>
+          <div class="arc-card-meta">
+            <span class="arc-diff" title="Difficulté">${stars}</span>
+            ${!locked && plays > 0 ? `<span class="arc-plays">${plays}<i class="fas fa-gamepad"></i></span>` : ''}
+          </div>`;
 
       if (locked) {
-        const pct = Math.round(pts / g.unlockPts * 100);
-        h += `<div class="rw-lock-bar" style="margin-top:8px">
-          <div class="rw-prog-track"><div class="rw-prog-fill" style="width:${pct}%;background:var(--text3)"></div></div>
-          <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px"><i class="fas fa-lock"></i> Encore <b>${g.unlockPts - pts} MP</b></div>
+        const pct = Math.min(100, Math.round(pts / g.unlockPts * 100));
+        h += `<div class="arc-lock-bar">
+          <div class="arc-lock-track"><div class="arc-lock-fill" style="width:${pct}%"></div></div>
+          <div class="arc-lock-txt">${pts} / ${g.unlockPts} MP</div>
         </div>`;
       } else {
-        h += `<div class="mg-stats">`;
-        if (best > 0)  h += `<span><i class="fas fa-star" style="color:var(--jour)"></i> Best: ${best}</span>`;
-        if (plays > 0) h += `<span><i class="fas fa-gamepad" style="color:var(--cyan)"></i> ${plays} partie${plays>1?'s':''}</span>`;
-        h += `</div>
-        <div class="mg-footer">
-          <span style="font-size:11px;color:var(--text3)"><i class="fas fa-coins" style="color:var(--jour)"></i> ${left}/${g.dailyMp} MP dispo</span>
-          ${uid ? `<button class="primary-btn mg-play-btn" onclick="MX.Pages.MiniGames._go('${g.id}')"><i class="fas fa-play"></i> Jouer</button>` : ''}
+        h += `<div class="arc-card-footer">
+          <span class="arc-mp-left${left <= 0 ? ' exhausted' : ''}">
+            ${left > 0 ? `<i class="fas fa-coins"></i> ${left}/${g.dailyMp}` : `<i class="fas fa-check-circle"></i> Max`}
+          </span>
+          ${uid ? `<button class="arc-play-btn" onclick="MX.Pages.MiniGames._go('${g.id}')"><i class="fas fa-play"></i> Jouer</button>` : ''}
         </div>`;
       }
-      h += `</div>`;
+
+      h += `</div></div>`;
     });
+
     h += `</div>`;
     return h;
   }
 
+  // ── LEADERBOARD ──
   function _renderLB() {
     const scores = MX.state.gameScores || [];
     const uid    = _uid();
-    const games  = [['all','Tous les jeux'], ...META.map(m => [m.id, m.icon+' '+m.name])];
+    const games  = [['all','🎮 Tous'], ...META.map(m => [m.id, m.icon + ' ' + m.name])];
+    const MEDALS = ['🥇','🥈','🥉'];
 
-    let h = `<div class="rw-lb-filters">`;
-    games.forEach(([id,l]) => { h += `<button class="rw-tab${_lbGame===id?' active':''} rw-lb-btn" onclick="MX.Pages.MiniGames._lb('${id}')">${l}</button>`; });
+    let h = `<div class="arc-lb-filter">`;
+    games.forEach(([id,l]) => {
+      h += `<button class="arc-lb-pill${_lbGame===id?' active':''}" onclick="MX.Pages.MiniGames._lb('${id}')">${l}</button>`;
+    });
     h += `</div>`;
 
     const pool = _lbGame === 'all' ? scores : scores.filter(s => s.gameId === _lbGame);
@@ -202,24 +340,24 @@
       const k = s.userId + '_' + s.gameId;
       if (!byKey[k] || s.score > byKey[k].score) byKey[k] = s;
     });
-    const ranked = Object.values(byKey).sort((a,b) => b.score - a.score).slice(0,50);
-    const medals = ['🥇','🥈','🥉'];
+    const ranked = Object.values(byKey).sort((a,b) => b.score - a.score).slice(0, 50);
 
     if (!ranked.length) {
-      h += `<div class="rw-empty"><i class="fas fa-trophy"></i><p>Aucun score enregistré</p></div>`;
+      h += `<div class="arc-empty"><i class="fas fa-trophy"></i><p>Aucun score enregistré</p></div>`;
     } else {
-      h += `<div class="rw-lb-list">`;
+      h += `<div class="arc-lb-list">`;
       ranked.forEach((s, i) => {
         const isMe = s.userId === uid;
+        const nc   = MX.userColors ? MX.userColors(s.userName||'?') : { bg: '#1a2a3a', fg: '#00C2D1' };
         const meta = META.find(m => m.id === s.gameId);
-        h += `<div class="rw-lb-row${isMe?' rw-lb-me':''}">
-          <div class="rw-lb-rank">${medals[i]||'#'+(i+1)}</div>
-          <div class="rw-lb-avatar" style="background:var(--bg4);color:var(--text2)">${MX.esc((s.userName||'?').substring(0,2).toUpperCase())}</div>
-          <div class="rw-lb-info">
-            <div class="rw-lb-name">${MX.esc(s.userName||s.userId)}${isMe?' <span class="rw-me-tag">Moi</span>':''}</div>
-            <div class="rw-lb-grade" style="color:var(--text3)">${meta?meta.icon+' '+meta.name:s.gameId}</div>
+        h += `<div class="arc-lb-row${isMe?' arc-lb-me':''}">
+          <div class="arc-lb-rank">${MEDALS[i] || '#'+(i+1)}</div>
+          <div class="arc-lb-avatar" style="background:${nc.bg};color:${nc.fg}">${MX.esc((s.userName||'?').substring(0,2).toUpperCase())}</div>
+          <div class="arc-lb-info">
+            <div class="arc-lb-name">${MX.esc(s.userName||s.userId)}${isMe ? ' <span class="arc-me-tag">Moi</span>' : ''}</div>
+            <div class="arc-lb-game">${meta ? meta.icon+' '+meta.name : s.gameId}</div>
           </div>
-          <div class="rw-lb-pts">${s.score} <span>pts</span></div>
+          <div class="arc-lb-score">${s.score}<span>pts</span></div>
         </div>`;
       });
       h += `</div>`;
@@ -227,22 +365,31 @@
     return h;
   }
 
-  function _renderAch(uid) {
+  // ── ACHIEVEMENTS ──
+  function _renderAch(uid, pts) {
     const userAch = uid ? ((MX.state.gameAchievements||{})[uid]||{}) : {};
-    let h = `<div class="mg-ach-grid">`;
+    const unlockedCount = ACHIEVEMENTS_DEF.filter(a => userAch[a.id]).length;
+    let h = `<div class="arc-ach-header">
+      <span class="arc-ach-progress">${unlockedCount} / ${ACHIEVEMENTS_DEF.length} succès débloqués</span>
+      <div class="arc-ach-progbar"><div class="arc-ach-progfill" style="width:${Math.round(unlockedCount/ACHIEVEMENTS_DEF.length*100)}%"></div></div>
+    </div>
+    <div class="arc-badge-grid">`;
+
     ACHIEVEMENTS_DEF.forEach(a => {
       const ok = !!userAch[a.id];
-      h += `<div class="mg-ach${ok?' mg-ach-ok':''}">
-        <div class="mg-ach-icon" style="${ok?'':'filter:grayscale(1);opacity:0.4'}">${a.icon}</div>
-        <div class="mg-ach-name">${MX.esc(a.name)}</div>
-        <div class="mg-ach-desc">${MX.esc(a.desc)}</div>
-        ${ok ? `<div class="mg-ach-badge"><i class="fas fa-check-circle"></i> Débloqué</div>` : `<div style="font-size:11px;color:var(--text3);margin-top:4px"><i class="fas fa-lock"></i></div>`}
+      const locked = !ok && (META.find(m => m.id === a.gameId)?.unlockPts||0) > pts;
+      h += `<div class="arc-badge${ok ? ' arc-badge-ok' : locked ? ' arc-badge-hidden' : ''}">
+        <div class="arc-badge-icon">${a.icon}</div>
+        <div class="arc-badge-name">${MX.esc(a.name)}</div>
+        <div class="arc-badge-desc">${MX.esc(a.desc)}</div>
+        <div class="arc-badge-status">${ok ? '<i class="fas fa-check-circle"></i> Débloqué' : locked ? '<i class="fas fa-lock"></i> Verrouillé' : '<i class="fas fa-circle-dot"></i> En cours'}</div>
       </div>`;
     });
     h += `</div>`;
     return h;
   }
 
+  // ── ADMIN ──
   function _renderAdmin(isAdmin) {
     const questions = MX.state.gameQuestions || [];
     let h = ``;
@@ -259,9 +406,8 @@
         </div>
       </div>`;
     }
-
     if (!questions.length) {
-      h += `<div class="rw-empty"><i class="fas fa-question-circle"></i><p>Aucune question personnalisée. Les questions par défaut sont utilisées.</p></div>`;
+      h += `<div class="arc-empty"><i class="fas fa-question-circle"></i><p>Aucune question personnalisée. Les questions par défaut sont utilisées.</p></div>`;
     } else {
       h += `<div class="rw-list">`;
       questions.forEach(q => {
@@ -340,16 +486,15 @@
     const m = META.find(x => x.id === gameId);
     if (!m) return;
 
-    el.innerHTML = `<div class="ph">
-      <div class="ph-row" style="padding-bottom:0">
-        <button class="icon-btn" onclick="MX.Pages.MiniGames._back()" style="color:var(--text2);flex-shrink:0;font-size:12px;white-space:nowrap">
-          <i class="fas fa-arrow-left"></i> Jeux
-        </button>
-        <div>
-          <div class="ph-title">${m.icon} ${MX.esc(m.name)}</div>
-          <div class="ph-sub">${MX.esc(m.desc)}</div>
-        </div>
+    el.innerHTML = `<div class="arc-game-header">
+      <button class="arc-back-btn" onclick="MX.Pages.MiniGames._back()">
+        <i class="fas fa-arrow-left"></i>
+      </button>
+      <div class="arc-game-title">
+        <div class="arc-game-name">${m.icon} ${MX.esc(m.name)}</div>
+        <div class="arc-game-sub">${MX.esc(m.desc)}</div>
       </div>
+      <div class="arc-game-mp">+${m.dailyMp}<span>MP</span></div>
     </div>
     <div class="page-body"><div id="mg-area"></div></div>`;
 

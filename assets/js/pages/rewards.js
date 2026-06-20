@@ -423,7 +423,7 @@
     // ── Arcade mini-games (from minigames.js) ──
     const MG = window.MX.Pages && window.MX.Pages.MiniGames ? window.MX.Pages.MiniGames.META : [];
     if (MG.length) {
-      h += `<div class="section-label" style="margin-top:20px">Jeux d'arcade <button class="icon-btn" style="font-size:11px;color:var(--text2);margin-left:8px" onclick="MX.Pages.MiniGames.render()"><i class="fas fa-arrow-up-right-from-square"></i> Ouvrir le hub</button></div>
+      h += `<div class="section-label" style="margin-top:20px">🎮 Arcade Maintix <button class="icon-btn" style="font-size:11px;color:var(--text2);margin-left:8px" onclick="MX.Pages.MiniGames.render()"><i class="fas fa-arrow-up-right-from-square"></i> Ouvrir le hub</button></div>
       <div class="mg-grid">`;
       MG.forEach(g => {
         const locked   = pts < g.unlockPts;
