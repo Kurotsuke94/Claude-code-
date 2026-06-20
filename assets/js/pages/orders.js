@@ -278,9 +278,9 @@
     h += '<thead><tr>';
     h += '<th class="ord-th ord-th-check"><input type="checkbox" class="ord-chk" onchange="MX.Pages.Orders._selAllVis(this.checked)"></th>';
     h += '<th class="ord-th">Produit</th>';
-    h += '<th class="ord-th">Référence</th>';
-    h += '<th class="ord-th">Catégorie</th>';
-    h += '<th class="ord-th">Emplacement</th>';
+    h += '<th class="ord-th ord-th-ref">Référence</th>';
+    h += '<th class="ord-th ord-th-cat">Catégorie</th>';
+    h += '<th class="ord-th ord-th-loc">Emplacement</th>';
     h += '<th class="ord-th ord-th-num">Stock</th>';
     h += '<th class="ord-th ord-th-num">Seuil</th>';
     h += '<th class="ord-th ord-th-num">À commander</th>';
@@ -306,8 +306,8 @@
         h += '<td class="ord-td ord-td-check"><input type="checkbox" class="ord-chk"' + (sel ? ' checked' : '') + ' onchange="MX.Pages.Orders._toggleSel(\'' + esc(p.id) + '\',this.checked)"></td>';
         h += '<td class="ord-td"><div class="ord-prod-name">' + esc(p.name || '—') + '</div></td>';
         h += '<td class="ord-td ord-td-ref">' + (p.ref ? esc(p.ref) : '<span class="ord-na">—</span>') + '</td>';
-        h += '<td class="ord-td">' + (p.category ? '<span style="font-size:12px;color:var(--text2)">' + esc(p.category) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
-        h += '<td class="ord-td">' + (p.location ? '<span class="ord-loc">' + esc(p.location) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
+        h += '<td class="ord-td ord-td-cat">' + (p.category ? '<span style="font-size:12px;color:var(--text2)">' + esc(p.category) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
+        h += '<td class="ord-td ord-td-loc">' + (p.location ? '<span class="ord-loc">' + esc(p.location) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
         h += '<td class="ord-td ord-td-num" style="' + qtyColor + '">' + qty + '</td>';
         h += '<td class="ord-td ord-td-num" style="color:var(--text2)">' + min + '</td>';
         h += '<td class="ord-td ord-td-num">' + (need > 0 ? '<span style="color:var(--red);font-weight:700">' + need + '</span>' : '<span class="ord-na">—</span>') + '</td>';
