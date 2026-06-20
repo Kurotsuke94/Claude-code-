@@ -1138,19 +1138,26 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* layout */
 .ord-page { display: grid; grid-template-columns: 1fr 290px; gap: 16px; padding: 0 16px 80px; align-items: start; }
+/* Empêche les colonnes grid de déborder (min-width: auto par défaut en grid) */
+.ord-main, .ord-side { min-width: 0; }
+.ord-table-wrap { width: 100%; }
 @media (max-width: 1100px) { .ord-page { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .ord-page { padding: 0 10px 80px; gap: 12px; }
   .ord-th-ref, .ord-td-ref,
   .ord-th-cat, .ord-td-cat,
   .ord-th-loc, .ord-td-loc { display: none; }
-  .ord-table { min-width: 380px; }
+  .ord-table { min-width: 340px; }
   .ord-search-wrap { width: 100%; }
   .ord-toolbar { gap: 6px; }
   .ord-filters { gap: 3px; }
   .ord-fb { padding: 4px 9px; font-size: 11px; }
   .ord-hdr-btns { flex-wrap: wrap; }
   .ord-btn-ghost { padding: 7px 10px; font-size: 11px; }
+  .ord-kpis { gap: 8px; }
+  .ord-kpi { padding: 10px 12px; }
+  .ord-kpi-ico { width: 34px; height: 34px; font-size: 14px; }
+  .ord-kpi-val { font-size: 18px; }
 }
 
 /* header */
