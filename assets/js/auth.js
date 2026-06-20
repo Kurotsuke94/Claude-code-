@@ -253,12 +253,13 @@
       const bg  = cu.color || nc.bg;
       const fg  = cu.color ? _contrastColor(cu.color) : nc.fg;
       const lbl = cu.role === "responsable" ? "Responsable" : "Technicien";
+      const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : '';
       el.innerHTML = `
         <button class="nav-item" onclick="MX.Auth.clearCurrentUser()">
           <span class="nav-icon" style="background:${bg};color:${fg};border-radius:8px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;font-family:var(--ffm)">${MX.esc(cu.name.substring(0,2).toUpperCase())}</span>
           <div style="flex:1;min-width:0">
             <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(cu.name)}</div>
-            <div style="font-size:10px;color:var(--text2)">${lbl}</div>
+            <div style="font-size:10px;color:var(--text2);display:flex;align-items:center;gap:4px;flex-wrap:wrap">${lbl}${gradeBadge ? ' · ' + gradeBadge : ''}</div>
             <div class="user-online"><span class="user-online-dot"></span>En ligne</div>
           </div>
           <span style="font-size:10px;color:var(--cyan)"><i class="fas fa-exchange-alt"></i></span>

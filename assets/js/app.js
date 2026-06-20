@@ -512,7 +512,18 @@
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
+    let _prevProducts = {};
     DB.listenProducts(list => {
+      if (Pages.Rewards && MX.state.currentUser) {
+        list.forEach(p => {
+          const prev = _prevProducts[p.id];
+          if (prev && prev.qty !== p.qty) {
+            Pages.Rewards.awardForEvent('stock_update', 'Stock mis à jour : ' + (p.name || p.id));
+          }
+        });
+      }
+      _prevProducts = {};
+      list.forEach(p => { _prevProducts[p.id] = p; });
       state.products = list;
       updateNavProgress();
       if (state.currentPage === "orders") MX.Pages.Orders.render();
@@ -604,6 +615,7 @@
     });
     DB.listenRewardsGrades(list => {
       state.rewardsGrades = list;
+      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
       if (state.currentPage === 'rewards') Pages.Rewards.render();
     });
     DB.listenRewardsItems(list => {
@@ -616,6 +628,7 @@
     });
     DB.listenRewardsUsers(map => {
       state.rewardsUsers = map;
+      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
       if (state.currentPage === 'rewards') Pages.Rewards.render();
     });
 

@@ -463,31 +463,53 @@
     await batch.commit();
   }
 
-  async function spendPoints(userId, points) {
+  async function spendPoints(userId, userName, event, points, description) {
     const snap = await R_RUSERS().doc(userId).get();
     const current = snap.exists ? (snap.data().points || 0) : 0;
     if (current < points) throw new Error('not_enough');
-    await R_RUSERS().doc(userId).set({ points: FV.increment(-points), lastActivity: FV.serverTimestamp() }, { merge: true });
+    const batch = db.batch();
+    batch.set(R_RHIST().doc(), { userId, userName, event, points: -points, description, ts: FV.serverTimestamp() });
+    batch.set(R_RUSERS().doc(userId), { points: FV.increment(-points), lastActivity: FV.serverTimestamp() }, { merge: true });
+    await batch.commit();
   }
+
+  const _DEFAULT_GRADES = [
+    { name: 'Recrue',         minPoints: 0,    icon: '🔩', color: '#6B7280' },
+    { name: 'Opérateur',      minPoints: 50,   icon: '🔧', color: '#3B82F6' },
+    { name: 'Bronze',         minPoints: 100,  icon: '🥉', color: '#92400E' },
+    { name: 'Argent',         minPoints: 250,  icon: '🥈', color: '#9CA3AF' },
+    { name: 'Or',             minPoints: 500,  icon: '🥇', color: '#D97706' },
+    { name: 'Platine',        minPoints: 1000, icon: '💎', color: '#8B5CF6' },
+    { name: 'Expert',         minPoints: 2000, icon: '🛡️', color: '#EC4899' },
+    { name: 'Maître Maintix', minPoints: 5000, icon: '🏆', color: '#EF4444' }
+  ];
+  const _DEFAULT_RULES = [
+    { label: 'Prendre la permanence',         event: 'permanence',       points: 1,  icon: 'fa-shield',           active: true },
+    { label: 'Tâche terminée',                event: 'task_done',        points: 1,  icon: 'fa-check',            active: true },
+    { label: 'Intervention terminée',         event: 'mission_done',     points: 3,  icon: 'fa-flag-checkered',   active: true },
+    { label: 'Intervention urgente',          event: 'mission_urgent',   points: 5,  icon: 'fa-bolt',             active: true },
+    { label: 'Zéro tâche en retard semaine',  event: 'no_late',          points: 10, icon: 'fa-calendar-check',   active: true },
+    { label: 'Stock mis à jour',              event: 'stock_update',     points: 2,  icon: 'fa-box',              active: true },
+    { label: 'Proposition d\'amélioration',   event: 'suggestion',       points: 5,  icon: 'fa-lightbulb',        active: true },
+    { label: 'Mission bloquée résolue',       event: 'mission_resolved', points: 3,  icon: 'fa-check-double',     active: true }
+  ];
 
   async function initRewardsDefaults() {
     const snap = await R_GRADES().limit(1).get();
     if (!snap.empty) return;
     const batch = db.batch();
-    [
-      { name: 'Recrue',         minPoints: 0,    icon: '🔩', color: '#6B7280' },
-      { name: 'Technicien',     minPoints: 100,  icon: '🔧', color: '#3B82F6' },
-      { name: 'Spécialiste',    minPoints: 500,  icon: '⚙️',  color: '#8B5CF6' },
-      { name: 'Expert',         minPoints: 1500, icon: '🛡️', color: '#F59E0B' },
-      { name: 'Maître Maintix', minPoints: 5000, icon: '🏆', color: '#EF4444' }
-    ].forEach(g => batch.set(R_GRADES().doc(), g));
-    [
-      { label: 'Tâche terminée',            event: 'task_done',      points: 1, icon: 'fa-check',          active: true },
-      { label: 'Intervention terminée',     event: 'mission_done',   points: 2, icon: 'fa-flag-checkered', active: true },
-      { label: 'Intervention urgente',      event: 'mission_urgent', points: 5, icon: 'fa-bolt',           active: true },
-      { label: 'Toutes les tâches du jour', event: 'day_complete',   points: 3, icon: 'fa-star',           active: true },
-      { label: 'Stock mis à jour',          event: 'stock_update',   points: 1, icon: 'fa-box',            active: true }
-    ].forEach(r => batch.set(R_RULES().doc(), r));
+    _DEFAULT_GRADES.forEach(g => batch.set(R_GRADES().doc(), g));
+    _DEFAULT_RULES.forEach(r => batch.set(R_RULES().doc(), r));
+    await batch.commit();
+  }
+
+  async function resetRewardsDefaults() {
+    const [gradesSnap, rulesSnap] = await Promise.all([R_GRADES().get(), R_RULES().get()]);
+    const batch = db.batch();
+    gradesSnap.docs.forEach(d => batch.delete(d.ref));
+    rulesSnap.docs.forEach(d => batch.delete(d.ref));
+    _DEFAULT_GRADES.forEach(g => batch.set(R_GRADES().doc(), g));
+    _DEFAULT_RULES.forEach(r => batch.set(R_RULES().doc(), r));
     await batch.commit();
   }
 
@@ -539,6 +561,6 @@
     addRewardsRule, updateRewardsRule, deleteRewardsRule,
     addRewardsGrade, updateRewardsGrade, deleteRewardsGrade,
     addRewardsItem, updateRewardsItem, deleteRewardsItem,
-    awardPoints, spendPoints, initRewardsDefaults
+    awardPoints, spendPoints, initRewardsDefaults, resetRewardsDefaults
   };
 })();

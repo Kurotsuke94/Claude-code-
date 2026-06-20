@@ -1622,6 +1622,19 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .rw-hist-time { font-size: 10px; color: var(--text3); margin-top: 2px; }
 .rw-hist-pts { font-size: 13px; font-weight: 700; font-family: var(--ffm); white-space: nowrap; flex-shrink: 0; }
 
+/* ── Manual award panel ── */
+.rw-manual-award {
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 12px; padding: 14px; margin-bottom: 16px;
+}
+.rw-manual-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.rw-manual-row .fi { min-width: 0; }
+
+/* ── Lock progress bar ── */
+.rw-lock-bar { margin-top: 10px; }
+
 /* ── Empty state ── */
 .rw-empty {
   display: flex; flex-direction: column; align-items: center;
