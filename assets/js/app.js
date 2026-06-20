@@ -312,7 +312,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.19";
+  const _APP_VER = "1.0.20";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -469,7 +469,7 @@
 
   // ── FIRESTORE LISTENERS ──
   function setupListeners() {
-    const { DB, state } = MX;
+    const { DB, state, Pages } = MX;
 
     DB.listenWeek(data => {
       state.weekLabel = data.label || "";
@@ -494,10 +494,10 @@
       }
     });
 
-    let _prevChecks = {};
+    let _prevChecks = null; // null = first call, skip awards to avoid re-awarding on reload
     DB.listenChecks(data => {
-      // Detect newly checked tasks → award points
-      if (Pages.Rewards && MX.state.currentUser) {
+      // Detect newly checked tasks → award points (skip on first snapshot)
+      if (_prevChecks !== null && Pages.Rewards && MX.state.currentUser) {
         Object.keys(data).forEach(k => {
           if (data[k] && !_prevChecks[k] && k.split('_').length >= 3) {
             Pages.Rewards.awardForEvent('task_done', 'Tâche terminée');
@@ -520,7 +520,7 @@
           }
         });
       }
-      _prevChecks = Object.assign({}, data);
+      _prevChecks = { ...data };
       state.checks = data;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
