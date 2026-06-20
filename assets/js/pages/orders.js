@@ -192,7 +192,7 @@
 
   function render() {
     var esc = MX.esc;
-    var canEdit = MX.Auth && MX.Auth.isAdmin ? MX.Auth.isAdmin() : true;
+    var canEdit = MX.Auth && MX.Auth.canSeeAll ? MX.Auth.canSeeAll() : true;
     var el = document.getElementById('main-content');
     if (!el) return;
 
