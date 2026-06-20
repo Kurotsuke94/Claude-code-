@@ -323,6 +323,49 @@
     }
 
     h += '</tbody></table></div>';
+
+    // Mobile card view (hidden on desktop via CSS)
+    h += '<div class="ord-mobile-cards">';
+    if (vis.length === 0) {
+      h += '<div class="ord-empty"><span style="font-size:28px">&#128230;</span><span>Aucun produit trouvé</span></div>';
+    } else {
+      vis.forEach(function (p) {
+        var st   = _status(p);
+        var sc   = SC[st];
+        var qty  = _qty(p);
+        var min  = _min(p);
+        var need = _need(p);
+        var qtyCol = st === 'rupture' ? 'var(--red)' : st === 'seuil' ? 'var(--orange)' : 'var(--text1)';
+        h += '<div class="ord-mobile-card">';
+        h += '<div class="ord-mc-top">';
+        h += '<div class="ord-mc-name">' + esc(p.name || '—') + '</div>';
+        h += '<span class="ord-badge" style="color:' + sc.col + ';background:' + sc.dim + ';border-color:' + sc.brd + '">' + sc.label + '</span>';
+        h += '</div>';
+        var tags = [];
+        if (p.ref)      tags.push(esc(p.ref));
+        if (p.location) tags.push(esc(p.location));
+        if (p.category) tags.push(esc(p.category));
+        if (tags.length) {
+          h += '<div class="ord-mc-meta">';
+          tags.forEach(function (t) { h += '<span class="ord-mc-tag">' + t + '</span>'; });
+          h += '</div>';
+        }
+        h += '<div class="ord-mc-nums">';
+        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">Stock</div><div class="ord-mc-nval" style="color:' + qtyCol + '">' + qty + '</div></div>';
+        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">Seuil</div><div class="ord-mc-nval" style="color:var(--text2)">' + min + '</div></div>';
+        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">À commander</div><div class="ord-mc-nval" style="color:' + (need > 0 ? 'var(--red)' : 'var(--text3)') + '">' + (need > 0 ? need : '—') + '</div></div>';
+        h += '</div>';
+        if (canEdit) {
+          h += '<div class="ord-mc-actions">';
+          h += '<button class="ord-mc-btn" onclick="MX.Pages.Orders._openProdModal(\'' + esc(p.id) + '\')"><i class="fas fa-pen" aria-hidden="true"></i> Modifier</button>';
+          h += '<button class="ord-mc-btn ord-mc-btn-menu" onclick="MX.Pages.Orders._prodMenu(event,\'' + esc(p.id) + '\')"><i class="fas fa-ellipsis-v" aria-hidden="true"></i> Actions</button>';
+          h += '</div>';
+        }
+        h += '</div>';
+      });
+    }
+    h += '</div>';
+
     h += '</div>'; // ord-main
 
     // Side panel

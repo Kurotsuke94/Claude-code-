@@ -608,14 +608,25 @@ html, body {
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .page-cols { grid-template-columns: 1fr; }
   .toast { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 10px); }
+  .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar {
     padding-top: env(safe-area-inset-top);
   }
+  /* C3 — pied de sidebar ne passe pas sous la barre de gestes iOS */
+  .sidebar-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
 @media (max-width: 600px) {
   .page-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .ann-banner { margin: 6px 10px 2px; }
   .modal { max-height: calc(92dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
+}
+/* C2 — modale utilisable en mode paysage (hauteur viewport réduite) */
+@media (max-height: 500px) {
+  .modal {
+    max-height: calc(95dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  .modal-body { max-height: 40dvh; overflow-y: auto; }
 }

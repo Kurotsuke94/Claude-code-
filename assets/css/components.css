@@ -594,7 +594,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   border: 1px solid var(--border3);
   border-bottom: none;
   border-radius: 24px 24px 0 0;
-  padding: 24px 20px 44px;
+  padding: 24px 20px calc(44px + env(safe-area-inset-bottom));
   width: 100%;
   max-width: 480px;
   animation: nof-slideup 0.32s cubic-bezier(0.22,1,0.36,1);
@@ -1334,7 +1334,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   flex-shrink: 0;
 }
 .gs-trigger:hover { border-color: var(--cyan); color: var(--cyan); }
-@media (max-width: 900px) { .gs-overlay { padding-top: 60px; } }
+@media (max-width: 900px) { .gs-overlay { padding-top: 60px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); } }
 
 /* ── ABSENCES ── */
 .abs-card {
@@ -1358,3 +1358,56 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .abs-badge-ok   { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
 .abs-badge-pend { background: #EAB30820; color: #EAB308; border-color: #EAB30880; }
 .abs-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ── TOUCH TARGETS 44px MIN (C1) ── */
+@media (max-width: 900px) {
+  .icon-btn     { min-width: 44px; min-height: 44px; }
+  .transfer-btn { min-width: 44px; min-height: 44px; }
+  .note-btn     { min-width: 44px; min-height: 44px; }
+  .gs-trigger   { min-width: 44px; min-height: 44px; }
+  .ord-act-btn  { min-width: 44px; min-height: 44px; }
+  .atab         { min-height: 44px; }
+  .cbtn         { min-height: 44px; }
+}
+
+/* ── MOBILE STOCK CARDS (C4) ── */
+.ord-mobile-cards { display: none; }
+
+@media (max-width: 600px) {
+  .ord-table-wrap   { display: none; }
+  .ord-mobile-cards { display: block; }
+  .ord-mobile-card {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; margin-bottom: 10px;
+  }
+  .ord-mc-top {
+    display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; margin-bottom: 8px;
+  }
+  .ord-mc-name { font-size: 14px; font-weight: 600; color: var(--text1); flex: 1; min-width: 0; }
+  .ord-mc-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .ord-mc-tag {
+    font-size: 11px; color: var(--text2);
+    background: var(--bg4); border: 1px solid var(--border);
+    border-radius: 5px; padding: 2px 7px; font-family: var(--ffm);
+  }
+  .ord-mc-nums {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; margin-bottom: 10px;
+  }
+  .ord-mc-num { background: var(--bg4); border-radius: 8px; padding: 8px; text-align: center; }
+  .ord-mc-nlbl {
+    font-size: 10px; color: var(--text3); text-transform: uppercase;
+    letter-spacing: 0.06em; font-family: var(--ffm); margin-bottom: 3px;
+  }
+  .ord-mc-nval { font-size: 18px; font-weight: 700; font-family: var(--ffm); line-height: 1.1; }
+  .ord-mc-actions { display: flex; gap: 8px; }
+  .ord-mc-btn {
+    flex: 1; min-height: 44px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--bg4); border: 1px solid var(--border2); color: var(--text2);
+    cursor: pointer; font-family: var(--ffs); transition: all var(--t);
+  }
+  .ord-mc-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .ord-mc-btn-menu { background: var(--bg3); }
+}
