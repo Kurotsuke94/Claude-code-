@@ -513,6 +513,50 @@
     await batch.commit();
   }
 
+  // ── GAMES ──
+  const R_GSCORES = () => db.collection('games_scores');
+  const R_GACHIEV = () => db.collection('games_achievements');
+  const R_GQUEST  = () => db.collection('games_questions');
+
+  function listenGameScores(cb) {
+    _unsub.game_scores = R_GSCORES().orderBy('ts', 'desc').limit(500).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  function listenGameAchievements(cb) {
+    _unsub.game_achievements = R_GACHIEV().onSnapshot(snap => {
+      const map = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (!map[data.userId]) map[data.userId] = {};
+        map[data.userId][data.achievementId] = { ...data, id: d.id };
+      });
+      cb(map);
+    });
+  }
+  function listenGameQuestions(cb) {
+    _unsub.game_questions = R_GQUEST().orderBy('category').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  async function saveGameScore(data) {
+    await R_GSCORES().add({ ...data, ts: FV.serverTimestamp() });
+  }
+  async function saveGameAchievement(data) {
+    await R_GACHIEV().add({ ...data, ts: FV.serverTimestamp() });
+  }
+  async function addGameQuestion(data)        { await R_GQUEST().add(data); }
+  async function updateGameQuestion(id, data) { await R_GQUEST().doc(id).update(data); }
+  async function deleteGameQuestion(id)       { await R_GQUEST().doc(id).delete(); }
+
+  async function resetGameScores() {
+    const snap  = await R_GSCORES().limit(500).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+
   // ── ABSENCES ──
   const R_ABS = () => db.collection('absences');
 
@@ -561,6 +605,9 @@
     addRewardsRule, updateRewardsRule, deleteRewardsRule,
     addRewardsGrade, updateRewardsGrade, deleteRewardsGrade,
     addRewardsItem, updateRewardsItem, deleteRewardsItem,
-    awardPoints, spendPoints, initRewardsDefaults, resetRewardsDefaults
+    awardPoints, spendPoints, initRewardsDefaults, resetRewardsDefaults,
+    listenGameScores, listenGameAchievements, listenGameQuestions,
+    saveGameScore, saveGameAchievement,
+    addGameQuestion, updateGameQuestion, deleteGameQuestion, resetGameScores
   };
 })();

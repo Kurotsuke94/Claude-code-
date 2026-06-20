@@ -312,7 +312,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.18";
+  const _APP_VER = "1.0.19";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -657,6 +657,17 @@
       state.rewardsUsers = map;
       MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
       if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+
+    DB.listenGameScores(list => {
+      state.gameScores = list;
+      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    });
+    DB.listenGameAchievements(map => {
+      state.gameAchievements = map;
+    });
+    DB.listenGameQuestions(list => {
+      state.gameQuestions = list;
     });
 
     DB.listenPresence(count => {

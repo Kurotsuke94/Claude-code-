@@ -3,15 +3,10 @@
   let _lbPeriod = 'all';
   let _spinBusy = false;
 
-  // ── STATIC GAME CATALOGUE ──
-  // unlockPts: grade threshold to access, comingSoon: not yet playable
+  // ── INSTANT GAMES (spin + daily) ──
   const GAMES = [
-    { id: 'spin',   icon: '🎰', name: 'Roue Chance',      desc: 'Tentez votre chance et remportez des MP !',          unlockPts: 0,    costPerPlay: 5,  maxPlays: null, comingSoon: false },
-    { id: 'daily',  icon: '⚡', name: 'Défi Flash',        desc: 'Terminez toutes les tâches du jour, gagnez +3 MP.', unlockPts: 0,    costPerPlay: 0,  maxPlays: 1,    comingSoon: false },
-    { id: 'puzzle', icon: '🧩', name: 'Puzzle Maintenance',desc: 'Reconstituez un schéma technique contre la montre.', unlockPts: 100,  costPerPlay: 0,  maxPlays: 1,    comingSoon: true  },
-    { id: 'quiz',   icon: '🧠', name: 'Quiz Technique',    desc: 'Questions sur la maintenance industrielle.',         unlockPts: 250,  costPerPlay: 0,  maxPlays: 1,    comingSoon: true  },
-    { id: 'memory', icon: '🃏', name: 'Jeu Mémoire',       desc: 'Retrouvez les paires de cartes équipements.',       unlockPts: 500,  costPerPlay: 10, maxPlays: null, comingSoon: true  },
-    { id: 'arcade', icon: '👾', name: 'Mini-jeu Arcade',   desc: 'Arcade exclusif — débloqué au grade Expert.',       unlockPts: 2000, costPerPlay: 0,  maxPlays: null, comingSoon: true  }
+    { id: 'spin',  icon: '🎰', name: 'Roue Chance', desc: 'Tentez votre chance et remportez des MP !',          unlockPts: 0, costPerPlay: 5, maxPlays: null },
+    { id: 'daily', icon: '⚡', name: 'Défi Flash',  desc: 'Terminez toutes les tâches du jour, gagnez +3 MP.', unlockPts: 0, costPerPlay: 0, maxPlays: 1   }
   ];
 
   // ── GRADE HELPERS ──
@@ -404,50 +399,56 @@
 
   // ── MINI-GAMES ──
   function _renderGames(uid, pts) {
-    let h = `<div class="section-label">Mini-jeux</div>
-    <div class="rw-games-grid">`;
-
+    // ── Instant games (spin + daily) ──
+    let h = `<div class="section-label">Jeux instantanés</div><div class="rw-games-grid">`;
     GAMES.forEach(game => {
-      const locked    = pts < game.unlockPts;
-      const canPlay   = uid && !locked && !game.comingSoon;
-
-      let cardClass = 'rw-game-card';
-      if (locked) cardClass += ' rw-game-locked';
-      else if (game.comingSoon) cardClass += ' rw-game-coming';
-
-      h += `<div class="${cardClass}">
+      const locked = pts < game.unlockPts;
+      h += `<div class="rw-game-card${locked?' rw-game-locked':''}">
         <div class="rw-game-header">
-          <div class="rw-game-icon" style="${locked ? 'filter:grayscale(1);opacity:0.5' : ''}">${game.icon}</div>
+          <div class="rw-game-icon">${game.icon}</div>
           <div>
             <div class="rw-game-title">${MX.esc(game.name)}</div>
             <div class="rw-game-sub">${MX.esc(game.desc)}</div>
           </div>
         </div>
         <div class="rw-game-meta">
-          ${game.costPerPlay > 0
-            ? `<i class="fas fa-coins" style="color:var(--jour)"></i> Coût : ${game.costPerPlay} MP`
-            : '<i class="fas fa-star" style="color:var(--jour)"></i> Gratuit'}
-          ${game.unlockPts > 0 ? ` · Déblocage : ${game.unlockPts} MP` : ''}
+          ${game.costPerPlay > 0 ? `<i class="fas fa-coins" style="color:var(--jour)"></i> Coût : ${game.costPerPlay} MP` : '<i class="fas fa-star" style="color:var(--jour)"></i> Gratuit'}
         </div>`;
-
-      if (locked) {
-        const needed = game.unlockPts - pts;
-        h += `<div class="rw-lock-bar">
-          <div class="rw-prog-track" style="margin-bottom:6px"><div class="rw-prog-fill" style="width:${Math.round(pts/game.unlockPts*100)}%;background:var(--text3)"></div></div>
-          <div style="font-size:11px;color:var(--text3);text-align:center"><i class="fas fa-lock"></i> Encore <b>${needed} MP</b> pour débloquer</div>
-        </div>`;
-      } else if (game.comingSoon) {
-        h += `<div class="rw-coming-badge"><i class="fas fa-hammer"></i> Bientôt disponible</div>`;
-      } else if (game.id === 'spin') {
-        h += _renderSpinGame(uid, pts, game.costPerPlay);
-      } else if (game.id === 'daily') {
-        h += _renderDailyChallenge(uid);
-      }
-
+      if (game.id === 'spin')  h += _renderSpinGame(uid, pts, game.costPerPlay);
+      if (game.id === 'daily') h += _renderDailyChallenge(uid);
       h += `</div>`;
     });
-
     h += `</div>`;
+
+    // ── Arcade mini-games (from minigames.js) ──
+    const MG = window.MX.Pages && window.MX.Pages.MiniGames ? window.MX.Pages.MiniGames.META : [];
+    if (MG.length) {
+      h += `<div class="section-label" style="margin-top:20px">Jeux d'arcade <button class="icon-btn" style="font-size:11px;color:var(--text2);margin-left:8px" onclick="MX.Pages.MiniGames.render()"><i class="fas fa-arrow-up-right-from-square"></i> Ouvrir le hub</button></div>
+      <div class="mg-grid">`;
+      MG.forEach(g => {
+        const locked   = pts < g.unlockPts;
+        const scores   = (MX.state.gameScores||[]).filter(s => s.userId === uid && s.gameId === g.id);
+        const best     = scores.reduce((b,s) => s.score > b ? s.score : b, 0);
+        h += `<div class="mg-card${locked?' mg-locked':''}">
+          <div class="mg-icon" style="${locked?'filter:grayscale(1);opacity:0.4':''}">${g.icon}</div>
+          <div class="mg-name">${MX.esc(g.name)}</div>
+          <div class="mg-desc">${MX.esc(g.desc)}</div>`;
+        if (locked) {
+          const pct = Math.round(pts/g.unlockPts*100);
+          h += `<div class="rw-lock-bar" style="margin-top:8px">
+            <div class="rw-prog-track"><div class="rw-prog-fill" style="width:${pct}%;background:var(--text3)"></div></div>
+            <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px"><i class="fas fa-lock"></i> Encore <b>${g.unlockPts - pts} MP</b></div>
+          </div>`;
+        } else {
+          h += `<div class="mg-footer" style="margin-top:8px">
+            ${best>0 ? `<span style="font-size:11px;color:var(--text3)"><i class="fas fa-star" style="color:var(--jour)"></i> Best: ${best}</span>` : '<span></span>'}
+            ${uid ? `<button class="primary-btn mg-play-btn" onclick="MX.Pages.MiniGames._go('${g.id}')"><i class="fas fa-play"></i> Jouer</button>` : ''}
+          </div>`;
+        }
+        h += `</div>`;
+      });
+      h += `</div>`;
+    }
     return h;
   }
 
