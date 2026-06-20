@@ -324,7 +324,7 @@
 
     h += '</tbody></table></div>';
 
-    // Mobile card view (hidden on desktop via CSS)
+    // Mobile card view — compact 3-row format (hidden on desktop via CSS)
     h += '<div class="ord-mobile-cards">';
     if (vis.length === 0) {
       h += '<div class="ord-empty"><span style="font-size:28px">&#128230;</span><span>Aucun produit trouvé</span></div>';
@@ -336,31 +336,41 @@
         var min  = _min(p);
         var need = _need(p);
         var qtyCol = st === 'rupture' ? 'var(--red)' : st === 'seuil' ? 'var(--orange)' : 'var(--text1)';
+
         h += '<div class="ord-mobile-card">';
-        h += '<div class="ord-mc-top">';
+
+        // Ligne 1 : nom + badge statut + boutons icônes
+        h += '<div class="ord-mc-r1">';
         h += '<div class="ord-mc-name">' + esc(p.name || '—') + '</div>';
-        h += '<span class="ord-badge" style="color:' + sc.col + ';background:' + sc.dim + ';border-color:' + sc.brd + '">' + sc.label + '</span>';
-        h += '</div>';
-        var tags = [];
-        if (p.ref)      tags.push(esc(p.ref));
-        if (p.location) tags.push(esc(p.location));
-        if (p.category) tags.push(esc(p.category));
-        if (tags.length) {
-          h += '<div class="ord-mc-meta">';
-          tags.forEach(function (t) { h += '<span class="ord-mc-tag">' + t + '</span>'; });
-          h += '</div>';
-        }
-        h += '<div class="ord-mc-nums">';
-        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">Stock</div><div class="ord-mc-nval" style="color:' + qtyCol + '">' + qty + '</div></div>';
-        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">Seuil</div><div class="ord-mc-nval" style="color:var(--text2)">' + min + '</div></div>';
-        h += '<div class="ord-mc-num"><div class="ord-mc-nlbl">À commander</div><div class="ord-mc-nval" style="color:' + (need > 0 ? 'var(--red)' : 'var(--text3)') + '">' + (need > 0 ? need : '—') + '</div></div>';
-        h += '</div>';
+        h += '<span class="ord-badge ord-mc-badge" style="color:' + sc.col + ';background:' + sc.dim + ';border-color:' + sc.brd + '">' + sc.label + '</span>';
         if (canEdit) {
-          h += '<div class="ord-mc-actions">';
-          h += '<button class="ord-mc-btn" onclick="MX.Pages.Orders._openProdModal(\'' + esc(p.id) + '\')"><i class="fas fa-pen" aria-hidden="true"></i> Modifier</button>';
-          h += '<button class="ord-mc-btn ord-mc-btn-menu" onclick="MX.Pages.Orders._prodMenu(event,\'' + esc(p.id) + '\')"><i class="fas fa-ellipsis-v" aria-hidden="true"></i> Actions</button>';
+          h += '<div class="ord-mc-acts">';
+          h += '<button class="ord-mc-ico" title="Modifier" onclick="MX.Pages.Orders._openProdModal(\'' + esc(p.id) + '\')"><i class="fas fa-pen" aria-hidden="true"></i></button>';
+          h += '<button class="ord-mc-ico" title="Actions" onclick="MX.Pages.Orders._prodMenu(event,\'' + esc(p.id) + '\')"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></button>';
           h += '</div>';
         }
+        h += '</div>';
+
+        // Ligne 2 : ref • emplacement (si présents)
+        var metas = [];
+        if (p.ref)      metas.push(esc(p.ref));
+        if (p.location) metas.push('&#128205; ' + esc(p.location));
+        if (p.category) metas.push(esc(p.category));
+        if (metas.length) {
+          h += '<div class="ord-mc-r2">' + metas.join(' &bull; ') + '</div>';
+        }
+
+        // Ligne 3 : stats inline — Stock X | Seuil Y | Commande Z
+        h += '<div class="ord-mc-r3">';
+        h += '<span class="ord-mc-stat">Stock <b style="color:' + qtyCol + '">' + qty + '</b></span>';
+        h += '<span class="ord-mc-sep">|</span>';
+        h += '<span class="ord-mc-stat">Seuil <b style="color:var(--text2)">' + min + '</b></span>';
+        if (need > 0) {
+          h += '<span class="ord-mc-sep">|</span>';
+          h += '<span class="ord-mc-stat">Commande <b style="color:var(--red)">' + need + '</b></span>';
+        }
+        h += '</div>';
+
         h += '</div>';
       });
     }

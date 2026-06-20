@@ -580,6 +580,15 @@ html, body {
 
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
+  /* ── FOND INDUSTRIEL — désactivé sur mobile (fixed SVG = bizarre au scroll) ── */
+  body::before, body::after { opacity: 0; pointer-events: none; }
+  /* Fond contenu simplifié : grille subtile supprimée, radial gardé très léger */
+  .main-content {
+    background:
+      radial-gradient(circle at 75% 8%, rgba(0,245,212,0.04) 0%, transparent 40%),
+      var(--bg2);
+  }
+
   .sidebar {
     position: absolute; top: 0; left: 0;
     height: 100%;
