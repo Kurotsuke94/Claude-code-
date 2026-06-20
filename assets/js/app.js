@@ -312,7 +312,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.21";
+  const _APP_VER = "1.0.22";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
