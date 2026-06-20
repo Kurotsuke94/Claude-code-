@@ -133,9 +133,36 @@
   }
 
   // ── MODAL ──
-  function showModal(title, sub, actions) {
-    document.getElementById("m-title").textContent = title;
+  function showModal(titleOrOpts, sub, actions) {
+    const bodyEl = document.getElementById("m-body");
+    // Object-style call: showModal({ title, sub, body, actions })
+    if (titleOrOpts && typeof titleOrOpts === 'object') {
+      const o = titleOrOpts;
+      document.getElementById("m-title").textContent = o.title || '';
+      document.getElementById("m-sub").innerHTML = o.sub || '';
+      if (bodyEl) bodyEl.innerHTML = o.body || '';
+      const ac = document.getElementById("m-actions");
+      if (typeof o.actions === 'string') {
+        ac.innerHTML = o.actions;
+      } else if (Array.isArray(o.actions)) {
+        ac.innerHTML = '';
+        o.actions.forEach(a => {
+          const b = document.createElement("button");
+          b.className  = "modal-btn " + (a.cls || "cancel");
+          b.textContent = a.label;
+          b.onclick = () => { closeModal(); if (a.fn) a.fn(); };
+          ac.appendChild(b);
+        });
+      } else {
+        ac.innerHTML = '';
+      }
+      document.getElementById("modal-bg").classList.add("show");
+      return;
+    }
+    // Legacy call: showModal(title, sub, actions[])
+    document.getElementById("m-title").textContent = titleOrOpts;
     document.getElementById("m-sub").textContent   = sub;
+    if (bodyEl) bodyEl.innerHTML = '';
     const ac = document.getElementById("m-actions");
     ac.innerHTML = "";
     (actions || []).forEach(a => {

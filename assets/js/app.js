@@ -1,30 +1,34 @@
 (function () {
   const NAV = [
-    { id: "msgs",          icon: "fa-comments",      l: "Messages",       badge: true },
     { id: "home",          icon: "fa-house",          l: "Accueil" },
+    { id: "msgs",          icon: "fa-comments",       l: "Messages",        badge: true },
     null,
-    { id: "lundi",         icon: "fa-1",              l: "Lundi",          day: true },
-    { id: "mardi",         icon: "fa-2",              l: "Mardi",          day: true },
-    { id: "mercredi",      icon: "fa-3",              l: "Mercredi",       day: true },
-    { id: "jeudi",         icon: "fa-4",              l: "Jeudi",          day: true },
-    { id: "vendredi",      icon: "fa-5",              l: "Vendredi",       day: true },
-    { id: "samedi",        icon: "fa-6",              l: "Sam",            day: true },
-    { id: "dimanche",      icon: "fa-7",              l: "Dim",            day: true },
-    { id: "today-cl",      icon: "fa-list-check",     l: "Checklist Jour", todayShortcut: true },
+    { id: "today-cl",      icon: "fa-list-check",     l: "Aujourd'hui",     todayShortcut: true },
+    { id: "lundi",         icon: "fa-1",              l: "Lundi",           day: true },
+    { id: "mardi",         icon: "fa-2",              l: "Mardi",           day: true },
+    { id: "mercredi",      icon: "fa-3",              l: "Mercredi",        day: true },
+    { id: "jeudi",         icon: "fa-4",              l: "Jeudi",           day: true },
+    { id: "vendredi",      icon: "fa-5",              l: "Vendredi",        day: true },
+    { id: "samedi",        icon: "fa-6",              l: "Sam",             day: true },
+    { id: "dimanche",      icon: "fa-7",              l: "Dim",             day: true },
     null,
-    { id: "orders",        icon: "fa-box",            l: "Stock" },
-    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.", respOnly: true },
-    { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",          respOnly: true, respDay: "lundi" },
-    { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",          respOnly: true, respDay: "mardi" },
-    { id: "resp-mercredi", icon: "fa-circle-dot",     l: "Mercredi",       respOnly: true, respDay: "mercredi" },
-    { id: "resp-jeudi",    icon: "fa-circle-dot",     l: "Jeudi",          respOnly: true, respDay: "jeudi" },
-    { id: "resp-vendredi", icon: "fa-circle-dot",     l: "Vendredi",       respOnly: true, respDay: "vendredi" },
-    { id: "resp-samedi",   icon: "fa-circle-dot",     l: "Sam",            respOnly: true, respDay: "samedi" },
-    { id: "resp-dimanche", icon: "fa-circle-dot",     l: "Dim",            respOnly: true, respDay: "dimanche" },
-    { id: "admin",         icon: "fa-shield-halved",  l: "Admin" }
+    { id: "orders",        icon: "fa-box",            l: "Stock & Commandes" },
+    { id: "fournisseurs",  icon: "fa-truck",          l: "Fournisseurs",    noBot: true },
+    { id: "documents",     icon: "fa-folder-open",    l: "Documents",       noBot: true },
+    null,
+    { id: "utilisateurs",  icon: "fa-users",          l: "Utilisateurs" },
+    { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
+    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.",  respOnly: true },
+    { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
+    { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",           respOnly: true, respDay: "mardi" },
+    { id: "resp-mercredi", icon: "fa-circle-dot",     l: "Mercredi",        respOnly: true, respDay: "mercredi" },
+    { id: "resp-jeudi",    icon: "fa-circle-dot",     l: "Jeudi",           respOnly: true, respDay: "jeudi" },
+    { id: "resp-vendredi", icon: "fa-circle-dot",     l: "Vendredi",        respOnly: true, respDay: "vendredi" },
+    { id: "resp-samedi",   icon: "fa-circle-dot",     l: "Sam",             respOnly: true, respDay: "samedi" },
+    { id: "resp-dimanche", icon: "fa-circle-dot",     l: "Dim",             respOnly: true, respDay: "dimanche" },
   ];
 
-  const SECTION_LABELS = ["PLANNING", "GESTION"];
+  const SECTION_LABELS = ["CHECK-LISTS", "GESTION", "ADMINISTRATION"];
 
   // ── UNREAD MESSAGES TRACKING ──
   function _getMsgsSeen() {
@@ -57,14 +61,28 @@
 
   function renderPage(id) {
     const { Pages, DAYS } = MX;
-    if (id === "home")      return Pages.Home.render();
-    if (id === "msgs")      return Pages.Messages.render();
-    if (id === "orders")    return Pages.Orders.render();
-    if (id === "admin")     return Pages.Admin.render();
-    if (id === "resp-plan") return Pages.RespPlan.render();
-    if (id === "today-cl")  return Pages.Checklist.render(MX.todayId());
+    if (id === "home")         return Pages.Home.render();
+    if (id === "msgs")         return Pages.Messages.render();
+    if (id === "orders")       return Pages.Orders.render();
+    if (id === "utilisateurs") return Pages.Admin.render();
+    if (id === "parametres")   return Pages.Admin.render();
+    if (id === "admin")        return Pages.Admin.render();
+    if (id === "resp-plan")    return Pages.RespPlan.render();
+    if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
+    if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
+    if (id === "documents")    return _renderStub("Documents", "fa-folder-open", "La gestion des documents sera disponible prochainement.");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
+  }
+
+  function _renderStub(title, icon, msg) {
+    const mc = document.getElementById("main-content");
+    if (!mc) return;
+    mc.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;color:var(--text3);padding:40px">
+      <i class="fas ${MX.esc(icon)}" style="font-size:48px;opacity:0.3"></i>
+      <div style="font-size:18px;font-weight:700;color:var(--text2)">${MX.esc(title)}</div>
+      <div style="font-size:13px;text-align:center;max-width:300px">${MX.esc(msg)}</div>
+    </div>`;
   }
 
   // ── SIDEBAR ──
@@ -101,13 +119,12 @@
     let sideHtml = "";
     let botHtml  = `<div class="bottom-nav-inner">`;
 
-    sideHtml += `<div class="nav-section-label">PRINCIPAL</div>`;
     let sepCount = 0;
 
     NAV.forEach(item => {
       if (!item) {
         const label = SECTION_LABELS[sepCount] || "";
-        if (label === "PLANNING") {
+        if (label === "CHECK-LISTS") {
           sideHtml += `<div class="nav-section-label" onclick="MX.toggleNavPlan()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none">
             <span>${label}</span>
             <i class="fas fa-chevron-${_planOpen?'up':'down'}" style="font-size:9px;color:var(--text3);margin-right:8px;transition:transform 0.2s"></i>
@@ -176,7 +193,7 @@
         ${prog ? `<span class="nav-prog ${progCls}" id="np_${item.id}">${prog}</span>` : ''}
       </button>`;
 
-      if (!item.day && !item.todayShortcut && !item.respDay) {
+      if (!item.day && !item.todayShortcut && !item.respDay && !item.noBot) {
         botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
           <div class="bn-bar"></div>
           <i class="fas ${item.icon}"></i>

@@ -472,7 +472,9 @@ html, body {
 @keyframes slideup { from { transform: translateY(100%); } }
 .modal-handle { width: 36px; height: 4px; background: var(--border2); border-radius: 2px; margin: 12px auto 0; }
 .modal-title { font-size: 17px; font-weight: 700; padding: 16px 20px 4px; }
-.modal-sub { font-size: 13px; color: var(--text2); padding: 0 20px 16px; line-height: 1.5; }
+.modal-sub { font-size: 13px; color: var(--text2); padding: 0 20px 8px; line-height: 1.5; }
+.modal-body { padding: 0 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+.modal-body:empty { display: none; }
 .modal-actions { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 16px; }
 .modal-btn {
   width: 100%; padding: 13px; font-size: 14px; font-weight: 600;
