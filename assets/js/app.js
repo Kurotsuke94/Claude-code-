@@ -264,7 +264,15 @@
     `;
   }
 
+  let _navRaf = null;
   function updateNavProgress() {
+    if (_navRaf) return;
+    _navRaf = requestAnimationFrame(() => {
+      _navRaf = null;
+      _doUpdateNavProgress();
+    });
+  }
+  function _doUpdateNavProgress() {
     _lastSyncTime = new Date();
     renderStatusBar();
     const { DAYS, state, getDaySlots } = MX;

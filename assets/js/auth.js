@@ -120,8 +120,8 @@
 
     const ac = document.getElementById("m-actions");
     ac.innerHTML = `
-      <input id="pin-input" type="password" inputmode="numeric" maxlength="10" class="fi"
-        placeholder="••••" autocomplete="off"
+      <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" class="fi"
+        placeholder="••••" autocomplete="one-time-code"
         style="text-align:center;letter-spacing:8px;font-size:22px;font-family:var(--ffm);margin-bottom:4px">
       <div id="pin-error" style="font-size:12px;color:var(--red);text-align:center;min-height:18px;margin-bottom:6px"></div>
       <button class="modal-btn confirm" onclick="MX.Auth.confirmPin()"><i class="fas fa-check"></i> Confirmer</button>
@@ -138,13 +138,23 @@
     }, 80);
   }
 
-  function confirmPin() {
+  async function confirmPin() {
     const user = (MX.state.users || []).find(u => u.id === _pendingUserId);
     if (!user) return;
-    const entered = (document.getElementById("pin-input") || {}).value || "";
-    const errEl   = document.getElementById("pin-error");
+    const entered   = (document.getElementById("pin-input") || {}).value || "";
+    const errEl     = document.getElementById("pin-error");
+    const storedPin = String(user.pin || "");
 
-    if (entered === String(user.pin || "")) {
+    let match;
+    if (/^[0-9a-f]{64}$/.test(storedPin)) {
+      const hash = await MX.hashPin(entered);
+      match = hash === storedPin;
+    } else {
+      // Legacy: plain-text PIN (auto-migrated next time admin saves)
+      match = entered === storedPin;
+    }
+
+    if (match) {
       MX.closeModal();
       _pendingUserId = null;
       setCurrentUser(user);

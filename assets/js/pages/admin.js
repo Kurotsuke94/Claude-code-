@@ -364,7 +364,9 @@
           </div>
           <div>
             <div class="aplbl">Code PIN</div>
-            <input class="fi fi-sm" type="text" inputmode="numeric" maxlength="10" placeholder="ex: 1234" value="${esc(u.pin||'')}"
+            <input class="fi fi-sm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10"
+              placeholder="${/^[0-9a-f]{64}$/.test(u.pin||'') ? 'PIN configuré — saisir pour modifier' : 'ex: 1234'}"
+              value="${/^[0-9a-f]{64}$/.test(u.pin||'') ? '' : esc(u.pin||'')}"
               oninput="MX.Pages.Admin.updUser('${esc(u.id)}','pin',this.value)"
               style="font-family:var(--ffm);letter-spacing:4px">
           </div>
@@ -611,6 +613,7 @@
     const category   = (document.getElementById("ms-cat")      || {}).value || "autre";
     const deadline   = (document.getElementById("ms-deadline") || {}).value || null;
     if (!text) return MX.toast("Entrez une description d'intervention", true);
+    if (deadline && !/^\d{1,2}:\d{2}$/.test(deadline)) return MX.toast("Heure limite invalide (format HH:MM)", true);
     try {
       await MX.DB.addMission({ text, dayId, assignedTo, priority, category, deadline: deadline || null, createdBy: createdBy || "Responsable" });
       MX.toast("Intervention créée ✓");
@@ -625,6 +628,7 @@
     const category   = (document.getElementById(`edit-ms-cat-${id}`)      || {}).value || "autre";
     const deadline   = (document.getElementById(`edit-ms-deadline-${id}`) || {}).value || null;
     if (!text) return MX.toast("Entrez une description d'intervention", true);
+    if (deadline && !/^\d{1,2}:\d{2}$/.test(deadline)) return MX.toast("Heure limite invalide (format HH:MM)", true);
     try {
       await MX.DB.updateMission(id, { text, dayId, assignedTo, priority, category, deadline: deadline || null });
       _editMissionId = null;
@@ -706,7 +710,12 @@
   async function saveUsers() {
     try {
       for (const u of (MX.state.users || [])) {
-        await MX.DB.updateUser(u.id, { name: u.name||"", role: u.role||"technicien", pin: u.pin||"", color: u.color||"" });
+        let pin = u.pin || '';
+        // Hash if it's a new plain-text PIN (not already a SHA-256 hex)
+        if (pin && !/^[0-9a-f]{64}$/.test(pin)) {
+          pin = await MX.hashPin(pin);
+        }
+        await MX.DB.updateUser(u.id, { name: u.name||"", role: u.role||"technicien", pin, color: u.color||"" });
       }
       MX.toast("Profils enregistrés ✓");
     } catch (e) { MX.toast("Erreur", true); }

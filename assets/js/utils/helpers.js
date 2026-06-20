@@ -113,12 +113,21 @@
   function alertLevel(slot, pct, alerts) {
     const cfg = (alerts || {})[slot];
     if (!cfg || !cfg.active) return "ok";
+    const raw = cfg.deadline || "23:59";
+    if (!/^\d{1,2}:\d{2}$/.test(raw)) return "ok";
     const now   = new Date();
-    const parts = (cfg.deadline || "23:59").split(":");
+    const parts = raw.split(":");
     const dl    = new Date(); dl.setHours(+parts[0], +parts[1], 0, 0);
-    if (now < dl) return "ok";
+    if (isNaN(dl.getTime()) || now < dl) return "ok";
     if (pct >= 100) return "ok";
     return pct >= 50 ? "warn" : "alert";
+  }
+
+  async function hashPin(pin) {
+    if (!pin) return '';
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(pin)));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   // ── TOAST ──
@@ -181,7 +190,7 @@
   Object.assign(window.MX, {
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
-    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, progressClass, alertLevel,
+    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, progressClass, alertLevel, hashPin,
     toast, showModal, closeModal
   });
 })();

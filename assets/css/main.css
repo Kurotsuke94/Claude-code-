@@ -23,6 +23,14 @@ body::after {
   background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" fill="none"><path d="M10 470L10 10L470 10" stroke="%2300F5D4" stroke-width="1"/><circle cx="160" cy="320" r="72" stroke="%2300F5D4" stroke-width=".5" stroke-dasharray="5 8"/><circle cx="160" cy="320" r="46" stroke="%2300F5D4" stroke-width=".5"/><circle cx="160" cy="320" r="7" stroke="%2300F5D4" stroke-width=".5"/><line x1="143" y1="320" x2="177" y2="320" stroke="%2300F5D4" stroke-width=".5"/><line x1="160" y1="303" x2="160" y2="337" stroke="%2300F5D4" stroke-width=".5"/><line x1="10" y1="442" x2="290" y2="442" stroke="%2300F5D4" stroke-width=".5"/><polygon points="14,438 10,442 14,446" fill="%2300F5D4"/><polygon points="286,438 290,442 286,446" fill="%2300F5D4"/><line x1="38" y1="10" x2="38" y2="415" stroke="%2300F5D4" stroke-width=".5"/><polygon points="34,14 38,10 42,14" fill="%2300F5D4"/><polygon points="34,411 38,415 42,411" fill="%2300F5D4"/><rect x="10" y="160" width="110" height="75" stroke="%2300F5D4" stroke-width=".5"/><line x1="10" y1="180" x2="120" y2="180" stroke="%2300F5D4" stroke-width=".3"/><line x1="10" y1="200" x2="120" y2="200" stroke="%2300F5D4" stroke-width=".3"/><line x1="10" y1="220" x2="120" y2="220" stroke="%2300F5D4" stroke-width=".3"/><line x1="60" y1="160" x2="60" y2="235" stroke="%2300F5D4" stroke-width=".3"/><circle cx="340" cy="400" r="2.5" fill="%2300F5D4"/><circle cx="364" cy="400" r="2.5" fill="%2300F5D4"/><circle cx="388" cy="400" r="2.5" fill="%2300F5D4"/><circle cx="340" cy="424" r="2.5" fill="%2300F5D4"/><circle cx="364" cy="424" r="2.5" fill="%2300F5D4"/><circle cx="388" cy="424" r="2.5" fill="%2300F5D4"/><circle cx="340" cy="448" r="2.5" fill="%2300F5D4"/><circle cx="364" cy="448" r="2.5" fill="%2300F5D4"/><circle cx="388" cy="448" r="2.5" fill="%2300F5D4"/></svg>') no-repeat bottom left / 480px 480px;
 }
 
+/* ── ACCESSIBILITY — FOCUS VISIBLE ── */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+*:focus:not(:focus-visible) { outline: none; }
+
 /* ── RESET ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body {
