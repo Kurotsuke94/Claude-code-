@@ -16,7 +16,7 @@
     { id: "fournisseurs",  icon: "fa-truck",          l: "Fournisseurs",    noBot: true },
     { id: "documents",     icon: "fa-book",           l: "Bible Maintix",   noBot: true },
     null,
-    { id: "utilisateurs",  icon: "fa-users",          l: "Utilisateurs" },
+    { id: "utilisateurs",  icon: "fa-users",          l: "Admin" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
     { id: "rewards",       icon: "fa-trophy",         l: "Récompenses" },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
