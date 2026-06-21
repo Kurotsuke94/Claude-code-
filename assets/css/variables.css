@@ -1,3 +1,14 @@
+/* ── THEME TRANSITION (applied only during switch, then removed) ── */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition:
+    background-color 0.25s ease,
+    border-color     0.25s ease,
+    color            0.25s ease,
+    box-shadow       0.25s ease !important;
+}
+
 :root {
   /* Backgrounds — dark navy SaaS */
   --bg:   #080B14;
@@ -13,13 +24,14 @@
 
   /* Text */
   --text:  #F1F5F9;
+  --text1: #E2E8F0;
   --text2: #94A3B8;
   --text3: #475569;
 
   /* Brand */
   --cyan:        #00F5D4;
-  --cyan-dim:    #003B35;
-  --cyan-border: #007A6E;
+  --cyan-dim:    rgba(0,245,212,0.10);
+  --cyan-border: rgba(0,245,212,0.30);
 
   /* Slots */
   --matin:        #F59E0B;
@@ -68,3 +80,67 @@
   /* Transitions */
   --t: 0.18s ease;
 }
+
+/* ── LIGHT THEME ── */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:   #F8FAFC;
+  --bg2:  #F1F5F9;
+  --bg3:  #FFFFFF;
+  --bg4:  #F8FAFC;
+  --bg5:  #EEF2FF;
+
+  --border:  #E2E8F0;
+  --border2: #CBD5E1;
+  --border3: #94A3B8;
+
+  --text:  #0F172A;
+  --text1: #1E293B;
+  --text2: #475569;
+  --text3: #94A3B8;
+
+  --cyan:        #00897B;
+  --cyan-dim:    rgba(0,137,123,0.09);
+  --cyan-border: rgba(0,137,123,0.28);
+
+  --matin:        #D97706;
+  --matin-dim:    rgba(217,119,6,0.08);
+  --matin-border: rgba(217,119,6,0.22);
+  --jour:         #2563EB;
+  --jour-dim:     rgba(37,99,235,0.08);
+  --jour-border:  rgba(37,99,235,0.22);
+  --soir:         #7C3AED;
+  --soir-dim:     rgba(124,58,237,0.08);
+  --soir-border:  rgba(124,58,237,0.22);
+
+  --green:        #16A34A;
+  --green-dim:    rgba(22,163,74,0.08);
+  --green-border: rgba(22,163,74,0.22);
+  --red:          #DC2626;
+  --red-dim:      rgba(220,38,38,0.08);
+  --red-border:   rgba(220,38,38,0.22);
+  --orange:       #EA580C;
+  --orange-dim:   rgba(234,88,12,0.08);
+  --orange-border: rgba(234,88,12,0.22);
+
+  --shadow-card:  0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-hover: 0 4px 16px rgba(0,0,0,0.10);
+  --glow-cyan:    0 0 16px rgba(0,137,123,0.08);
+  --glow-green:   0 0 16px rgba(22,163,74,0.08);
+  --glow-red:     0 0 16px rgba(220,38,38,0.08);
+}
+
+/* ── TEXT SIZE ── */
+[data-size="small"] { font-size: 13px; }
+[data-size="large"] { font-size: 16px; }
+
+/* ── COMPACT MODE ── */
+[data-compact="true"] .ph                { padding: 14px 22px 12px !important; }
+[data-compact="true"] .trow              { padding: 10px 14px !important; }
+[data-compact="true"] .stt-card         { padding: 12px 14px !important; }
+[data-compact="true"] .card-head        { padding: 10px 14px !important; }
+[data-compact="true"] .slot-head        { padding: 10px 14px !important; }
+[data-compact="true"] .stt-toggle-row   { padding: 8px 0 !important; }
+[data-compact="true"] .page-body        { padding: 10px 18px !important; }
+[data-compact="true"] .stt-nav-item     { padding: 8px 12px !important; }

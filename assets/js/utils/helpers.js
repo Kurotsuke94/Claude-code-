@@ -130,6 +130,94 @@
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
+  // ── THEME MANAGER ──
+  const _ACCENT_DARK = {
+    cyan:   '#00F5D4',
+    blue:   '#60A5FA',
+    violet: '#A78BFA',
+    pink:   '#F472B6',
+    orange: '#FB923C',
+    green:  '#4ADE80'
+  };
+  const _ACCENT_LIGHT = {
+    cyan:   '#00897B',
+    blue:   '#2563EB',
+    violet: '#7C3AED',
+    pink:   '#DB2777',
+    orange: '#EA580C',
+    green:  '#16A34A'
+  };
+  const _ACCENT_META = {
+    cyan:   { label: 'Cyan Maintix', swatch: '#00BCD4' },
+    blue:   { label: 'Bleu',         swatch: '#3B82F6' },
+    violet: { label: 'Violet',       swatch: '#8B5CF6' },
+    pink:   { label: 'Rose',         swatch: '#EC4899' },
+    orange: { label: 'Orange',       swatch: '#F97316' },
+    green:  { label: 'Vert',         swatch: '#22C55E' }
+  };
+
+  function _tmGetPrefs() {
+    try { return JSON.parse(localStorage.getItem('mx_user_prefs') || '{}'); } catch(e) { return {}; }
+  }
+  function _tmSetPref(k, v) {
+    const p = _tmGetPrefs();
+    p[k] = v;
+    localStorage.setItem('mx_user_prefs', JSON.stringify(p));
+  }
+
+  function _tmApplyAccent(accent) {
+    const html = document.documentElement;
+    const isLight = html.getAttribute('data-theme') === 'light';
+    html.style.removeProperty('--cyan');
+    html.style.removeProperty('--cyan-dim');
+    html.style.removeProperty('--cyan-border');
+    if (accent === 'cyan') return;
+    const hex = (isLight ? _ACCENT_LIGHT : _ACCENT_DARK)[accent];
+    if (!hex) return;
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    html.style.setProperty('--cyan', hex);
+    html.style.setProperty('--cyan-dim', `rgba(${r},${g},${b},${isLight ? 0.09 : 0.10})`);
+    html.style.setProperty('--cyan-border', `rgba(${r},${g},${b},0.28)`);
+  }
+
+  function _tmApplyTheme(theme) {
+    const html = document.documentElement;
+    html.classList.add('theme-switching');
+    html.setAttribute('data-theme', theme);
+    html.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+    _tmApplyAccent(_tmGetPrefs().accent || 'cyan');
+    setTimeout(() => html.classList.remove('theme-switching'), 300);
+  }
+
+  function _tmApplySize(size) {
+    const html = document.documentElement;
+    html.removeAttribute('data-size');
+    if (size && size !== 'normal') html.setAttribute('data-size', size);
+  }
+
+  function _tmApplyCompact(compact) {
+    document.documentElement.setAttribute('data-compact', compact ? 'true' : 'false');
+  }
+
+  const ThemeManager = {
+    ACCENT_META: _ACCENT_META,
+    init() {
+      const p = _tmGetPrefs();
+      _tmApplyTheme(p.theme || 'dark');
+      _tmApplyAccent(p.accent || 'cyan');
+      _tmApplySize(p.text_size || 'normal');
+      _tmApplyCompact(!!p.compact);
+    },
+    setTheme(t)    { _tmApplyTheme(t);    _tmSetPref('theme', t); },
+    setAccent(a)   { _tmApplyAccent(a);   _tmSetPref('accent', a); },
+    setTextSize(s) { _tmApplySize(s);     _tmSetPref('text_size', s); },
+    setCompact(c)  { _tmApplyCompact(c);  _tmSetPref('compact', c); },
+    getTheme()  { return document.documentElement.getAttribute('data-theme') || 'dark'; },
+    getAccent() { return _tmGetPrefs().accent || 'cyan'; },
+    getSize()   { return _tmGetPrefs().text_size || 'normal'; },
+    getCompact(){ return !!_tmGetPrefs().compact; },
+  };
+
   // ── TOAST ──
   let _toastTimer = null;
   function toast(msg, err) {
@@ -190,7 +278,8 @@
   Object.assign(window.MX, {
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
-    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, progressClass, alertLevel, hashPin,
-    toast, showModal, closeModal
+    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, _contrastColor, progressClass, alertLevel, hashPin,
+    toast, showModal, closeModal,
+    ThemeManager
   });
 })();

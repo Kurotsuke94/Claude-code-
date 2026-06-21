@@ -705,6 +705,7 @@
 
   // ── INIT ──
   async function init() {
+    MX.ThemeManager && MX.ThemeManager.init();
     const loadingTimeout = setTimeout(hideLoading, 4000);
 
     document.getElementById("modal-bg").addEventListener("click", e => {

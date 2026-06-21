@@ -533,54 +533,116 @@
   }
 
   function _renderApparence() {
-    const textSize   = _getPref('text_size', 'normal');
-    const compactMode = _getPref('compact', false);
+    const tm          = MX.ThemeManager;
+    const curTheme    = tm ? tm.getTheme()   : _getPref('theme', 'dark');
+    const curAccent   = tm ? tm.getAccent()  : _getPref('accent', 'cyan');
+    const curSize     = tm ? tm.getSize()    : _getPref('text_size', 'normal');
+    const curCompact  = tm ? tm.getCompact() : _getPref('compact', false);
+    const accentMeta  = (tm && tm.ACCENT_META) || {};
+    const isLight     = curTheme === 'light';
+
+    const themeCards = ['dark','light'].map(t => {
+      const active = curTheme === t;
+      const label  = t === 'dark' ? '🌙 Sombre' : '☀️ Clair';
+      const inner  = t === 'dark'
+        ? `<div class="stt-theme-preview-wrap">
+            <div class="stt-tp-sidebar-dark">
+              <div class="stt-tp-logo-dark"></div>
+              <div class="stt-tp-nav-active-dark"></div>
+              <div class="stt-tp-nav-dark"></div>
+              <div class="stt-tp-nav-dark"></div>
+              <div class="stt-tp-nav-dark"></div>
+            </div>
+            <div class="stt-tp-body-dark">
+              <div class="stt-tp-header-dark"></div>
+              <div class="stt-tp-card-dark"></div>
+              <div class="stt-tp-card-dark"></div>
+              <div class="stt-tp-card-dark"></div>
+            </div>
+          </div>`
+        : `<div class="stt-theme-preview-wrap">
+            <div class="stt-tp-sidebar-light">
+              <div class="stt-tp-logo-light"></div>
+              <div class="stt-tp-nav-active-light"></div>
+              <div class="stt-tp-nav-light"></div>
+              <div class="stt-tp-nav-light"></div>
+              <div class="stt-tp-nav-light"></div>
+            </div>
+            <div class="stt-tp-body-light">
+              <div class="stt-tp-header-light"></div>
+              <div class="stt-tp-card-light"></div>
+              <div class="stt-tp-card-light"></div>
+              <div class="stt-tp-card-light"></div>
+            </div>
+          </div>`;
+      return `<button class="stt-theme-card ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setTheme('${t}')">
+        <div class="stt-theme-active-badge"><i class="fas fa-check"></i></div>
+        ${inner}
+        <div class="stt-theme-label">${label}</div>
+      </button>`;
+    }).join('');
+
+    const accentKeys  = ['cyan','blue','violet','pink','orange','green'];
+    const accentSwatches = {
+      cyan:   isLight ? '#00897B' : '#00F5D4',
+      blue:   isLight ? '#2563EB' : '#60A5FA',
+      violet: isLight ? '#7C3AED' : '#A78BFA',
+      pink:   isLight ? '#DB2777' : '#F472B6',
+      orange: isLight ? '#EA580C' : '#FB923C',
+      green:  isLight ? '#16A34A' : '#4ADE80'
+    };
+    const accentButtons = accentKeys.map(a => {
+      const meta   = accentMeta[a] || { label: a, swatch: accentSwatches[a] };
+      const active = curAccent === a;
+      return `<button class="stt-accent-btn ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setAccent('${a}')">
+        <div class="stt-accent-swatch" style="background:${accentSwatches[a]}"></div>
+        <span class="stt-accent-label">${meta.label}</span>
+      </button>`;
+    }).join('');
+
+    const sizeBtns = [
+      { v:'small',  label:'Petite',  ex:'Aa', fs:'11px' },
+      { v:'normal', label:'Normale', ex:'Aa', fs:'13px' },
+      { v:'large',  label:'Grande',  ex:'Aa', fs:'16px' },
+    ].map(s => `<button class="stt-size-btn ${curSize === s.v ? 'active' : ''}" onclick="MX.Pages.Settings._setTextSize('${s.v}')">
+      <span style="font-size:${s.fs};font-weight:700">${s.ex}</span>
+      <span style="font-size:11px">${s.label}</span>
+      <div class="stt-size-check"><i class="fas fa-check"></i></div>
+    </button>`).join('');
+
+    const displayBtns = [
+      { v:'false', label:'Confortable', rows:[1,1,1] },
+      { v:'true',  label:'Compact',     rows:[1,1,1,1] },
+    ].map(d => {
+      const isComp = d.v === 'true';
+      const active = String(curCompact) === d.v;
+      const cls    = isComp ? 'stt-display-compact' : 'stt-display-comfortable';
+      return `<button class="stt-display-btn ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setCompactMode(${d.v})">
+        <div class="stt-display-preview ${cls}">
+          ${d.rows.map(() => '<div class="stt-dp-row"></div>').join('')}
+        </div>
+        <div class="stt-display-label">${d.label}</div>
+        <i class="fas fa-check stt-display-check"></i>
+      </button>`;
+    }).join('');
 
     return `
       <div class="stt-section-head"><i class="fas fa-palette"></i> Apparence</div>
       <div class="stt-card">
-        <div class="stt-card-title">Thème</div>
-        <div class="stt-theme-grid">
-          <button class="stt-theme-btn active" onclick="MX.Pages.Settings._setTheme('dark')">
-            <div class="stt-theme-preview stt-theme-dark">
-              <div class="stt-tp-bar"></div>
-              <div class="stt-tp-content"></div>
-            </div>
-            <span>Sombre</span>
-            <i class="fas fa-check stt-theme-check"></i>
-          </button>
-          <button class="stt-theme-btn" onclick="MX.Pages.Settings._setTheme('light')">
-            <div class="stt-theme-preview stt-theme-light">
-              <div class="stt-tp-bar"></div>
-              <div class="stt-tp-content"></div>
-            </div>
-            <span>Clair</span>
-            <span class="stt-badge stt-badge-soon">Bientôt</span>
-          </button>
-        </div>
+        <div class="stt-card-title">Thème de l'application</div>
+        <div class="stt-theme-full">${themeCards}</div>
+      </div>
+      <div class="stt-card" style="margin-top:12px">
+        <div class="stt-card-title">Couleur principale</div>
+        <div class="stt-accent-grid">${accentButtons}</div>
       </div>
       <div class="stt-card" style="margin-top:12px">
         <div class="stt-card-title">Taille du texte</div>
-        <div class="stt-radio-group">
-          ${['small', 'normal', 'large'].map(s => {
-            const labels = { small: 'Petit', normal: 'Normal', large: 'Grand' };
-            return `<label class="stt-radio-opt ${textSize === s ? 'active' : ''}" onclick="MX.Pages.Settings._setTextSize('${s}')">
-              <span style="font-size:${s==='small'?'11px':s==='large'?'15px':'13px'}">${labels[s]}</span>
-              <span class="stt-radio-dot ${textSize === s ? 'on' : ''}"></span>
-            </label>`;
-          }).join('')}
-        </div>
+        <div class="stt-size-grid">${sizeBtns}</div>
       </div>
       <div class="stt-card" style="margin-top:12px">
-        <div class="stt-card-title">Mode compact</div>
-        <div class="stt-toggle-row">
-          <span class="stt-toggle-icon"><i class="fas fa-compress"></i></span>
-          <span class="stt-toggle-label">Réduire les espacements et paddings</span>
-          <label class="stt-switch">
-            <input type="checkbox" ${compactMode ? 'checked' : ''} onchange="MX.Pages.Settings._togglePref('compact', this.checked)">
-            <span class="stt-switch-track"></span>
-          </label>
-        </div>
+        <div class="stt-card-title">Affichage</div>
+        <div class="stt-display-grid">${displayBtns}</div>
       </div>`;
   }
 
@@ -827,9 +889,26 @@
   }
   function _setChannel(val) { _setPref('notif_channel', val); }
   function _setTheme(val) {
-    if (val !== 'dark') { MX.toast('Le thème clair arrive bientôt 🎨'); return; }
+    if (MX.ThemeManager) MX.ThemeManager.setTheme(val);
+    _setPrefs({ theme: val });
+    _showSection(_section);
   }
-  function _setTextSize(val) { _setPref('text_size', val); }
+  function _setAccent(val) {
+    if (MX.ThemeManager) MX.ThemeManager.setAccent(val);
+    _setPrefs({ accent: val });
+    _showSection(_section);
+  }
+  function _setTextSize(val) {
+    if (MX.ThemeManager) MX.ThemeManager.setTextSize(val);
+    _setPrefs({ text_size: val });
+    _showSection(_section);
+  }
+  function _setCompactMode(val) {
+    const compact = val === true || val === 'true';
+    if (MX.ThemeManager) MX.ThemeManager.setCompact(compact);
+    _setPrefs({ compact });
+    _showSection(_section);
+  }
   function _setPlanView(val) { _setPref('plan_default_view', val); }
   function _clearCache() {
     if ('caches' in window) {
@@ -887,7 +966,9 @@
     _setPref,
     _setChannel,
     _setTheme,
+    _setAccent,
     _setTextSize,
+    _setCompactMode,
     _setPlanView,
     _clearCache,
     _cropRotate: (deg) => { _cropRot = (_cropRot + deg + 360) % 360; _renderCropCanvas(); },
