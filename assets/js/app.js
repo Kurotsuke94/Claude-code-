@@ -30,7 +30,17 @@
     { id: "resp-dimanche", icon: "fa-circle-dot",     l: "Dim",             respOnly: true, respDay: "dimanche" },
   ];
 
-  const SECTION_LABELS = ["CHECK-LISTS", "GESTION", "ADMINISTRATION"];
+  const BIBLE_CATS = [
+    { id:"electricite", icon:"fa-bolt",               l:"Électricité" },
+    { id:"mecanique",   icon:"fa-gears",              l:"Mécanique" },
+    { id:"automatisme", icon:"fa-robot",              l:"Automatisme" },
+    { id:"hydraulique", icon:"fa-droplet",            l:"Hydraulique" },
+    { id:"pneumatique", icon:"fa-wind",               l:"Pneumatique" },
+    { id:"procedures",  icon:"fa-clipboard-list",     l:"Procédures" },
+    { id:"depannages",  icon:"fa-screwdriver-wrench", l:"Dépannages" },
+    { id:"tutoriels",   icon:"fa-film",               l:"Tutoriels" },
+    { id:"ressources",  icon:"fa-globe",              l:"Ressources Ext." },
+  ];
 
   // ── UNREAD MESSAGES TRACKING ──
   function _getMsgsSeen() {
@@ -55,8 +65,7 @@
       ? (MX.DAYS.find(d => d.id === MX.todayId())?.l || "Aujourd'hui")
       : (navItem?.l || "Maintix");
     document.getElementById("topbar-title").textContent = title;
-    document.querySelectorAll(".nav-item[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
-    document.querySelectorAll(".bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
+    document.querySelectorAll(".sx-item[data-page],.bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     MX.closeSidebar();
     renderPage(id);
   };
@@ -75,6 +84,7 @@
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
+    if (id === "minigames")    return Pages.MiniGames ? Pages.MiniGames.render() : _renderStub("Mini-Jeux", "fa-gamepad", "Chargement…");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
@@ -99,118 +109,185 @@
     document.getElementById("sidebar-overlay").classList.remove("show");
   };
 
-  // ── NAV SECTION COLLAPSE ──
-  let _planOpen = localStorage.getItem("mx_nav_plan") !== "0";
-  let _respOpen = localStorage.getItem("mx_nav_resp") === "1";
-  window.MX.toggleNavPlan = function () {
-    _planOpen = !_planOpen;
-    localStorage.setItem("mx_nav_plan", _planOpen ? "1" : "0");
+  // ── NAV ACCORDION STATE ──
+  let _clOpen    = localStorage.getItem("mx_sx_cl")  !== "0";
+  let _bibleOpen = localStorage.getItem("mx_sx_bib") === "1";
+  let _respClOpen= localStorage.getItem("mx_sx_rsp") !== "0";
+  let _resOpen   = localStorage.getItem("mx_sx_res") !== "0";
+  let _gamiOpen  = localStorage.getItem("mx_sx_gam") === "1";
+  let _adminOpen = localStorage.getItem("mx_sx_adm") === "1";
+
+  function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
+
+  function _toggleSec(which) {
+    const mob = window.innerWidth <= 900;
+    if (mob) {
+      const wasCl  = _clOpen, wasRsp = _respClOpen, wasRes = _resOpen,
+            wasGam = _gamiOpen, wasAdm = _adminOpen;
+      _clOpen = false; _respClOpen = false; _resOpen = false;
+      _gamiOpen = false; _adminOpen = false;
+      if (which === "cl")  _clOpen    = !wasCl;
+      if (which === "rsp") _respClOpen= !wasRsp;
+      if (which === "res") _resOpen   = !wasRes;
+      if (which === "gam") _gamiOpen  = !wasGam;
+      if (which === "adm") _adminOpen = !wasAdm;
+    } else {
+      if (which === "cl")  _clOpen    = !_clOpen;
+      if (which === "rsp") _respClOpen= !_respClOpen;
+      if (which === "res") _resOpen   = !_resOpen;
+      if (which === "gam") _gamiOpen  = !_gamiOpen;
+      if (which === "adm") _adminOpen = !_adminOpen;
+    }
+    _sx("mx_sx_cl",  _clOpen); _sx("mx_sx_rsp", _respClOpen);
+    _sx("mx_sx_res", _resOpen); _sx("mx_sx_gam", _gamiOpen);
+    _sx("mx_sx_adm", _adminOpen);
+    buildNav();
+  }
+
+  window.MX.toggleNavCl    = function() { _toggleSec("cl"); };
+  window.MX.toggleNavRspCl = function() { _toggleSec("rsp"); };
+  window.MX.toggleNavRes   = function() { _toggleSec("res"); };
+  window.MX.toggleNavGami  = function() { _toggleSec("gam"); };
+  window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
+  window.MX.toggleNavBible = function(e) {
+    if (e) e.stopPropagation();
+    _bibleOpen = !_bibleOpen;
+    _sx("mx_sx_bib", _bibleOpen);
     buildNav();
   };
-  window.MX.toggleNavResp = function (e) {
-    if (e) e.stopPropagation();
-    _respOpen = !_respOpen;
-    localStorage.setItem("mx_nav_resp", _respOpen ? "1" : "0");
-    buildNav();
+
+  window.MX.showBibleCat = function(catId) {
+    MX.state._bibleStartCat = catId;
+    MX.showPage("documents");
+  };
+  window.MX.showAdminTab = function(tabId) {
+    localStorage.setItem("mx_admin_tab", tabId);
+    MX.showPage("utilisateurs");
   };
 
   // ── BUILD NAVIGATION ──
   function buildNav() {
-    const sideNav  = document.getElementById("sidebar-nav");
-    const botNav   = document.getElementById("bottom-nav");
+    const sideNav = document.getElementById("sidebar-nav");
+    const botNav  = document.getElementById("bottom-nav");
+    if (!sideNav) return;
     const { DAYS, getDaySlots, state } = MX;
+    const cur    = state.currentPage || "";
+    const canAll = MX.Auth.canSeeAll();
 
-    let sideHtml = "";
-    let botHtml  = `<div class="bottom-nav-inner">`;
+    function _dayPct(dayId) {
+      let t = 0, d = 0;
+      getDaySlots(dayId).forEach(sl => {
+        (state.tasks[`${dayId}_${sl}`] || []).forEach(task => {
+          t++;
+          if (state.checks[`${dayId}_${sl}_${task.id}`]) d++;
+        });
+      });
+      return t ? Math.round(d / t * 100) : 0;
+    }
+    function _respPct(dayId) {
+      const dt = (state.respTasks || []).filter(t => t.dayId === dayId);
+      const dn = dt.filter(t => !!state.checks["resp_" + t.id]).length;
+      return dt.length ? Math.round(dn / dt.length * 100) : 0;
+    }
+    function _cls(pct) { return pct >= 80 ? "done" : pct >= 40 ? "warn" : "low"; }
+    function _bar(pct, id) {
+      const c = _cls(pct);
+      return `<div class="sx-prog"><span class="sx-pct sx-pct--${c}" id="sxpp_${id}">${pct}%</span><div class="sx-track"><div class="sx-fill sx-fill--${c}" id="sxpf_${id}" style="width:${pct}%"></div></div></div>`;
+    }
+    function _item(id, icon, label, opts) {
+      const o = opts || {};
+      const act = cur === id;
+      const cls = ["sx-item", o.sub ? "sx-sub" : "", o.sub2 ? "sx-sub2" : "", act ? "active" : ""].filter(Boolean).join(" ");
+      const fn  = o.fn || `MX.showPage('${id}')`;
+      let r = "";
+      if (o.badge)              r += `<span class="sx-badge" id="sxb_${id}"></span>`;
+      if (o.pct !== undefined)  r += _bar(o.pct, id);
+      if (o.count !== undefined && o.count !== null) r += `<span class="sx-count">${o.count}</span>`;
+      if (o.chev !== undefined) r += `<i class="fas fa-chevron-${o.chev?"up":"down"} sx-chev"></i>`;
+      if (o.soon)               r += `<span class="sx-soon">Soon</span>`;
+      return `<button class="${cls}"${id ? ` data-page="${id}"` : ""} onclick="${fn}"><i class="fas ${icon} sx-ico${act?" sx-ico--on":""}"></i><span class="sx-lbl">${label}</span>${r}</button>`;
+    }
+    function _sec(cardCls, icon, title, sub, fn, open, items) {
+      return `<div class="sx-sec"><button class="sx-card ${cardCls}" onclick="MX.${fn}()"><span class="sx-card-ico"><i class="fas ${icon}"></i></span><div class="sx-card-txt"><div class="sx-card-ttl">${title}</div><div class="sx-card-sub">${sub}</div></div><i class="fas fa-chevron-${open?"up":"down"} sx-card-chev"></i></button>${open?`<div class="sx-body">${items}</div>`:""}</div>`;
+    }
 
-    let sepCount = 0;
+    const todayId = MX.todayId ? MX.todayId() : "lundi";
+    let h = "";
 
-    NAV.forEach(item => {
-      if (!item) {
-        const label = SECTION_LABELS[sepCount] || "";
-        if (label === "CHECK-LISTS") {
-          sideHtml += `<div class="nav-section-label" onclick="MX.toggleNavPlan()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none">
-            <span>${label}</span>
-            <i class="fas fa-chevron-${_planOpen?'up':'down'}" style="font-size:9px;color:var(--text3);margin-right:8px;transition:transform 0.2s"></i>
-          </div>`;
-        } else {
-          sideHtml += `<div class="nav-section-label">${label}</div>`;
-        }
-        sepCount++;
-        return;
-      }
+    // ── Accueil + Messages (standalone) ──
+    h += `<div class="sx-top">`;
+    h += _item("home", "fa-house", "Accueil");
+    h += _item("msgs", "fa-comments", "Messages", { badge: true });
+    h += `</div>`;
 
-      if (item.respOnly && !MX.Auth.canSeeAll()) return;
-      if ((item.day || item.todayShortcut) && !_planOpen) return;
-      if (item.respDay && !_respOpen) return;
+    // ── Section 1: CHECK-LISTS TECHNICIENS ──
+    let clItems = _item("today-cl", "fa-star", "Aujourd'hui", { pct: _dayPct(todayId) });
+    DAYS.forEach(d => { clItems += _item(d.id, "fa-calendar-day", d.l, { sub: true, pct: _dayPct(d.id) }); });
+    h += _sec("sx-card--violet", "fa-list-check", "Check-lists Tech.", "Tâches quotidiennes", "toggleNavCl", _clOpen, clItems);
 
-      const isActive = item.id === state.currentPage;
+    // ── Section 2: CHECK-LISTS RESPONSABLE (respOnly) ──
+    if (canAll) {
+      const totRT = (state.respTasks || []).length;
+      let rItems = _item("resp-plan", "fa-clipboard-check", "Vue d'ensemble", { count: totRT + " tâches" });
+      DAYS.forEach(d => { rItems += _item("resp-"+d.id, "fa-calendar-day", d.l, { sub: true, pct: _respPct(d.id) }); });
+      h += _sec("sx-card--violet sx-card--resp", "fa-clipboard-check", "Check-lists Resp.", "Planning responsable", "toggleNavRspCl", _respClOpen, rItems);
+    }
 
-      let prog = "", progCls = "";
-      if (item.day || item.todayShortcut) {
-        const dayId = item.todayShortcut ? MX.todayId() : item.id;
-        const day   = DAYS.find(d => d.id === dayId);
-        if (day) {
-          let t = 0, d = 0;
-          getDaySlots(day.id).forEach(sl => {
-            (state.tasks[`${day.id}_${sl}`] || []).forEach(task => {
-              t++;
-              if (state.checks[`${day.id}_${sl}_${task.id}`]) d++;
-            });
-          });
-          const pct = t ? Math.round(d / t * 100) : 0;
-          prog    = pct + "%";
-          progCls = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
-        }
-      }
-      if (item.respDay) {
-        const dayTasks = (state.respTasks || []).filter(t => t.dayId === item.respDay);
-        const total    = dayTasks.length;
-        const done     = dayTasks.filter(t => !!state.checks["resp_" + t.id]).length;
-        const pct      = total ? Math.round(done / total * 100) : 0;
-        prog    = pct + "%";
-        progCls = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
-      }
+    // ── Section 3: RESSOURCES ──
+    const bibAct = cur === "documents" || cur.startsWith("bible-");
+    let resItems = _item("orders", "fa-box", "Stock & Commandes");
+    resItems    += _item("fournisseurs", "fa-truck", "Fournisseurs");
+    resItems    += `<button class="sx-item${bibAct?" active":""}" data-page="documents" onclick="MX.showPage('documents')"><i class="fas fa-book sx-ico${bibAct?" sx-ico--on":""}"></i><span class="sx-lbl">Bible Maintix</span><i class="fas fa-chevron-${_bibleOpen?"up":"down"} sx-chev" onclick="MX.toggleNavBible(event)" style="pointer-events:auto"></i></button>`;
+    if (_bibleOpen) {
+      BIBLE_CATS.forEach(c => {
+        resItems += `<button class="sx-item sx-sub sx-sub2" onclick="MX.showBibleCat('${c.id}')"><i class="fas ${c.icon} sx-ico"></i><span class="sx-lbl">${c.l}</span></button>`;
+      });
+    }
+    h += _sec("sx-card--blue", "fa-folder-open", "Ressources", "Stock, docs & fournisseurs", "toggleNavRes", _resOpen, resItems);
 
-      // Planning Resp. — with collapse chevron on right
-      if (item.id === "resp-plan" && MX.Auth.canSeeAll()) {
-        sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
-          <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
-          <span class="nav-label">${item.l}</span>
-          <span onclick="MX.toggleNavResp(event)" style="padding:4px 2px;cursor:pointer;color:var(--text3);font-size:9px;flex-shrink:0" title="${_respOpen?'Réduire':'Déplier'}">
-            <i class="fas fa-chevron-${_respOpen?'up':'down'}"></i>
-          </span>
-        </button>`;
-        botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
-          <div class="bn-bar"></div>
-          <i class="fas ${item.icon}"></i>
-          <span>${item.l}</span>
-        </button>`;
-        return;
-      }
+    // ── Section 4: GAMIFICATION ──
+    let gItems = _item("rewards",   "fa-trophy",  "Récompenses");
+    gItems    += _item("minigames", "fa-gamepad", "Mini-Jeux");
+    gItems    += `<button class="sx-item" onclick="MX.showPage('rewards')"><i class="fas fa-crown sx-ico"></i><span class="sx-lbl">Classements</span></button>`;
+    gItems    += `<button class="sx-item" onclick="MX.toast('Événements — bientôt disponible')"><i class="fas fa-calendar-star sx-ico"></i><span class="sx-lbl">Événements</span><span class="sx-soon">Soon</span></button>`;
+    h += _sec("sx-card--green", "fa-trophy", "Gamification", "Points, jeux & challenges", "toggleNavGami", _gamiOpen, gItems);
 
-      const subStyle = item.respDay ? 'style="padding-left:30px;font-size:12px"' : '';
-      sideHtml += `<button class="nav-item ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')" ${subStyle}>
-        <span class="nav-icon"><i class="fas ${item.icon}"></i></span>
-        <span class="nav-label">${item.l}</span>
-        ${item.badge ? `<span class="nav-badge" id="nb_${item.id}"></span>` : ''}
-        ${prog ? `<span class="nav-prog ${progCls}" id="np_${item.id}">${prog}</span>` : ''}
-      </button>`;
+    // ── Section 5: ADMIN (respOnly) ──
+    if (canAll) {
+      const admAct = cur === "utilisateurs" || cur === "parametres";
+      let aItems = "";
+      [
+        { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Gestion Utilisateurs", act: cur==="utilisateurs" },
+        { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",        act: false },
+        { fn:"MX.showAdminTab('games-admin')",    icon:"fa-gamepad",             l:"Gestion Jeux",         act: false },
+        { fn:"MX.showAdminTab('players-admin')",  icon:"fa-user-group",          l:"Gestion Joueurs",      act: false },
+        { fn:"MX.showPage('parametres')",         icon:"fa-gear",                l:"Paramètres",           act: cur==="parametres" },
+        { fn:"MX.showAdminTab('admin-journal')",  icon:"fa-book-journal-whills", l:"Journal d'actions",    act: false },
+      ].forEach(n => {
+        aItems += `<button class="sx-item${n.act?" active":""}" onclick="${n.fn}"><i class="fas ${n.icon} sx-ico${n.act?" sx-ico--on":""}"></i><span class="sx-lbl">${n.l}</span></button>`;
+      });
+      h += _sec("sx-card--premium", "fa-shield-halved", "Administration", "Gestion & supervision", "toggleNavAdmin", _adminOpen, aItems);
+    }
 
-      if (!item.day && !item.todayShortcut && !item.respDay && !item.noBot) {
-        botHtml += `<button class="bn ${isActive?'active':''}" data-page="${item.id}" onclick="MX.showPage('${item.id}')">
-          <div class="bn-bar"></div>
-          <i class="fas ${item.icon}"></i>
-          ${item.badge ? `<span class="nav-badge" id="bnb_${item.id}"></span>` : ''}
-          <span>${item.l}</span>
-        </button>`;
-      }
-    });
+    sideNav.innerHTML = h;
 
-    botHtml += `</div>`;
-    sideNav.innerHTML = sideHtml;
-    botNav.innerHTML  = botHtml;
+    // ── Bottom nav ──
+    const dayIds = DAYS.map(d => d.id);
+    const resIds = ["orders","fournisseurs","documents"];
+    const gamIds = ["rewards","minigames","planning"];
+    let bot = `<div class="bottom-nav-inner">`;
+    bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
+    bot += `<button class="bn${cur==="msgs"?" active":""}" data-page="msgs" onclick="MX.showPage('msgs')"><div class="bn-bar"></div><i class="fas fa-comments"></i><span class="nav-badge" id="bnb_msgs"></span><span>Messages</span></button>`;
+    bot += `<button class="bn${(cur==="today-cl"||dayIds.includes(cur))?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Check-lists</span></button>`;
+    bot += `<button class="bn${resIds.includes(cur)?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-folder-open"></i><span>Ressources</span></button>`;
+    bot += `<button class="bn${gamIds.includes(cur)?" active":""}" onclick="MX.showPage('rewards')"><div class="bn-bar"></div><i class="fas fa-trophy"></i><span>Gamification</span></button>`;
+    if (canAll) {
+      bot += `<button class="bn${(cur==="utilisateurs"||cur==="parametres")?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
+    }
+    bot += `</div>`;
+    botNav.innerHTML = bot;
 
+    _updBadges();
     MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
     buildDeskHeader();
   }
@@ -268,18 +345,37 @@
     `;
   }
 
+  function _updBadges() {
+    const seen   = _getMsgsSeen();
+    const unread = (MX.state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
+    const val    = unread > 9 ? "9+" : (unread || "");
+    const sxb = document.getElementById("sxb_msgs");
+    if (sxb) { sxb.textContent = val; sxb.style.display = unread ? "" : "none"; }
+    const bnb = document.getElementById("bnb_msgs");
+    if (bnb) { bnb.textContent = val; bnb.className = "nav-badge" + (unread ? " show" : ""); }
+    const dhb = document.getElementById("dh-bell-badge");
+    if (dhb) { dhb.textContent = val; dhb.className = "nav-badge" + (unread ? " show" : ""); }
+  }
+
   let _navRaf = null;
   function updateNavProgress() {
     if (_navRaf) return;
-    _navRaf = requestAnimationFrame(() => {
-      _navRaf = null;
-      _doUpdateNavProgress();
-    });
+    _navRaf = requestAnimationFrame(() => { _navRaf = null; _doUpdateNavProgress(); });
   }
   function _doUpdateNavProgress() {
     _lastSyncTime = new Date();
     renderStatusBar();
     const { DAYS, state, getDaySlots } = MX;
+
+    function _upd(id, pct) {
+      const c  = pct >= 80 ? "done" : pct >= 40 ? "warn" : "low";
+      const pf = document.getElementById("sxpf_" + id);
+      const pp = document.getElementById("sxpp_" + id);
+      if (pf) { pf.style.width = pct + "%"; pf.className = "sx-fill sx-fill--" + c; }
+      if (pp) { pp.textContent = pct + "%";  pp.className = "sx-pct sx-pct--" + c; }
+    }
+
+    const todayId = MX.todayId ? MX.todayId() : "lundi";
     DAYS.forEach(day => {
       let t = 0, d = 0;
       getDaySlots(day.id).forEach(sl => {
@@ -288,29 +384,16 @@
           if (state.checks[`${day.id}_${sl}_${task.id}`]) d++;
         });
       });
-      const pct   = t ? Math.round(d / t * 100) : 0;
-      const cls   = pct >= 80 ? "done" : pct >= 40 ? "warn" : "alert";
-      const npEl  = document.getElementById("np_" + day.id);
-      if (npEl) { npEl.textContent = pct + "%"; npEl.className = "nav-prog " + cls; }
+      const pct = t ? Math.round(d / t * 100) : 0;
+      _upd(day.id, pct);
+      if (day.id === todayId) _upd("today-cl", pct);
 
-      // Resp planning day progress
-      const dayTasks = (state.respTasks || []).filter(t => t.dayId === day.id);
-      const rt = dayTasks.length;
-      const rd = dayTasks.filter(t => !!state.checks["resp_" + t.id]).length;
-      const rpct = rt ? Math.round(rd / rt * 100) : 0;
-      const rcls = rpct >= 80 ? "done" : rpct >= 40 ? "warn" : "alert";
-      const rnpEl = document.getElementById("np_resp-" + day.id);
-      if (rnpEl) { rnpEl.textContent = rpct + "%"; rnpEl.className = "nav-prog " + rcls; }
+      const dt   = (state.respTasks || []).filter(t => t.dayId === day.id);
+      const rpct = dt.length ? Math.round(dt.filter(t => !!state.checks["resp_" + t.id]).length / dt.length * 100) : 0;
+      _upd("resp-" + day.id, rpct);
     });
 
-    const seen   = _getMsgsSeen();
-    const unread = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
-    const badge  = document.getElementById("nb_msgs");
-    if (badge)  { badge.textContent = unread > 9 ? "9+" : unread; badge.className = "nav-badge" + (unread ? " show" : ""); }
-    const bnBadge = document.getElementById("bnb_msgs");
-    if (bnBadge){ bnBadge.textContent = unread > 9 ? "9+" : unread; bnBadge.className = "nav-badge" + (unread ? " show" : ""); }
-    const dhBadge = document.getElementById("dh-bell-badge");
-    if (dhBadge){ dhBadge.textContent = unread > 9 ? "9+" : (unread || ""); dhBadge.className = "nav-badge" + (unread ? " show" : ""); }
+    _updBadges();
   }
 
   // ── STATUS BAR ──

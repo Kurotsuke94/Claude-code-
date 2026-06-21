@@ -238,62 +238,66 @@
   function updateSidebarFooter() {
     const el = document.getElementById("sidebar-footer");
     if (!el) return;
-    const admin  = window.MX.state.adminUser;
-    const cu     = window.MX.state.currentUser;
+    const admin = window.MX.state.adminUser;
+    const cu    = window.MX.state.currentUser;
 
     if (admin) {
+      const email    = admin.email || "";
+      const initials = email.substring(0, 2).toUpperCase();
       el.innerHTML = `
-        <button class="nav-item" onclick="MX.Auth.logout()">
-          <span class="nav-icon"><i class="fas fa-lock-open"></i></span>
-          <span class="nav-label" style="font-size:12px">${MX.esc(admin.email)}</span>
-          <span style="font-size:10px;color:var(--red)"><i class="fas fa-sign-out-alt"></i></span>
+        <button class="sxf-btn" onclick="MX.Auth.logout()">
+          <div class="sxf-avatar sxf-avatar--admin">${MX.esc(initials)}</div>
+          <div class="sxf-info">
+            <div class="sxf-name">${MX.esc(email.split("@")[0])}</div>
+            <div class="sxf-role"><span class="sxf-dot sxf-dot--on"></span><span class="sxf-role-lbl">Administrateur</span></div>
+          </div>
+          <i class="fas fa-sign-out-alt sxf-logout"></i>
         </button>`;
     } else if (cu) {
-      const nc  = MX.userColors ? MX.userColors(cu.name) : { bg: MX.avatarBg(cu.name), fg: MX.avatarFg(cu.name) };
-      const bg  = cu.color || nc.bg;
-      const fg  = cu.color ? _contrastColor(cu.color) : nc.fg;
-      const lbl = cu.role === "responsable" ? "Responsable" : "Technicien";
-      const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : '';
+      const nc       = MX.userColors ? MX.userColors(cu.name) : { bg: MX.avatarBg(cu.name), fg: MX.avatarFg(cu.name) };
+      const bg       = cu.color || nc.bg;
+      const fg       = cu.color ? _contrastColor(cu.color) : nc.fg;
+      const lbl      = cu.role === "responsable" ? "Responsable" : "Technicien";
+      const fullUser = (MX.state.users || []).find(u => u.id === cu.id) || cu;
+      const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : "";
+      const rUser    = (MX.state.rewardsUsers || {})[cu.name] || {};
+      const pts      = rUser.points || 0;
       el.innerHTML = `
-        <button class="nav-item" onclick="MX.Auth.clearCurrentUser()">
-          <span class="nav-icon" style="background:${bg};color:${fg};border-radius:8px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;font-family:var(--ffm);overflow:hidden;padding:0">${
-            ((MX.state.users || []).find(u => u.id === cu.id) || cu).avatarUrl
-              ? `<img src="${((MX.state.users || []).find(u => u.id === cu.id) || cu).avatarUrl}" style="width:28px;height:28px;object-fit:cover;border-radius:8px">`
-              : MX.esc(cu.name.substring(0,2).toUpperCase())
-          }</span>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(cu.name)}</div>
-            <div style="font-size:10px;color:var(--text2);display:flex;align-items:center;gap:4px;flex-wrap:wrap">${lbl}${gradeBadge ? ' · ' + gradeBadge : ''}</div>
-            <div class="user-online"><span class="user-online-dot"></span>En ligne</div>
+        <button class="sxf-btn" onclick="MX.Auth.clearCurrentUser()">
+          <div class="sxf-avatar" style="background:${bg};color:${fg}">${
+            fullUser.avatarUrl
+              ? `<img src="${MX.esc(fullUser.avatarUrl)}" class="sxf-avatar-img">`
+              : MX.esc(cu.name.substring(0, 2).toUpperCase())
+          }</div>
+          <div class="sxf-info">
+            <div class="sxf-name">${MX.esc(cu.name)}</div>
+            <div class="sxf-role">
+              <span class="sxf-dot sxf-dot--on"></span>
+              <span class="sxf-role-lbl">${lbl}</span>
+              ${pts ? `<span class="sxf-pts">${pts} pts</span>` : ""}
+            </div>
+            ${gradeBadge ? `<div class="sxf-grade">${gradeBadge}</div>` : ""}
           </div>
-          <span style="font-size:10px;color:var(--cyan)"><i class="fas fa-exchange-alt"></i></span>
+          <i class="fas fa-exchange-alt sxf-logout"></i>
         </button>`;
     } else {
       el.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:4px;padding:4px 8px">
-          <button class="nav-item" onclick="MX.Auth.showUserPicker()">
-            <span class="nav-icon"><i class="fas fa-user-circle"></i></span>
-            <span class="nav-label" style="font-size:12px;color:var(--cyan)">Se connecter</span>
-          </button>
-          <button class="nav-item" onclick="MX.showPage('admin')">
-            <span class="nav-icon"><i class="fas fa-shield-halved"></i></span>
-            <span class="nav-label">Administration</span>
-          </button>
+        <div class="sxf-anon">
+          <button class="sxf-anon-btn sxf-anon-btn--primary" onclick="MX.Auth.showUserPicker()"><i class="fas fa-user-circle"></i> Se connecter</button>
+          <button class="sxf-anon-btn" onclick="MX.showPage('utilisateurs')"><i class="fas fa-shield-halved"></i> Administration</button>
         </div>`;
     }
-    // Notification permission button (visible until granted)
     if ("Notification" in window && Notification.permission !== "granted") {
-      const notifDiv = document.createElement("div");
-      notifDiv.style.cssText = "padding:2px 8px";
-      notifDiv.innerHTML = `<button onclick="MX.enableNotifications()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text2);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-bell-slash"></i> Activer les notifications</button>`;
-      el.appendChild(notifDiv);
+      const d = document.createElement("div");
+      d.style.cssText = "padding:4px 0 0";
+      d.innerHTML = `<button onclick="MX.enableNotifications()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text2);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-bell-slash"></i> Activer les notifications</button>`;
+      el.appendChild(d);
     }
-    // PWA install button
     if (MX._canInstall) {
-      const installDiv = document.createElement("div");
-      installDiv.style.cssText = "padding:2px 8px";
-      installDiv.innerHTML = `<button onclick="MX.tryInstall()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-download"></i> Installer l'appli</button>`;
-      el.appendChild(installDiv);
+      const d = document.createElement("div");
+      d.style.cssText = "padding:4px 0 0";
+      d.innerHTML = `<button onclick="MX.tryInstall()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-download"></i> Installer l'appli</button>`;
+      el.appendChild(d);
     }
   }
 
