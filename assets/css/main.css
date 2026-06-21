@@ -33,12 +33,15 @@ body::after {
 
 /* ── RESET ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+img { max-width: 100%; }
 html, body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--ffs);
   min-height: 100dvh;
   overflow: hidden;
+  overflow-x: hidden;
+  max-width: 100vw;
   color-scheme: dark;
 }
 
@@ -138,10 +141,11 @@ html, body {
 .sidebar-logo {
   height: 58px !important;
   width: auto !important;
-  max-width: 200px !important;
+  max-width: clamp(120px, 40vw, 200px) !important;
   max-height: 58px !important;
   object-fit: contain !important;
   display: block;
+  flex-shrink: 1 !important;
 }
 .logo-mark {
   width: 34px; height: 34px;
@@ -351,10 +355,11 @@ html, body {
   height: 32px !important;
   max-height: 32px !important;
   width: auto !important;
-  max-width: 120px !important;
+  max-width: clamp(80px, 25vw, 120px) !important;
   object-fit: contain !important;
-  flex-shrink: 0;
+  flex-shrink: 1 !important;
   display: block;
+  overflow: hidden;
 }
 .topbar-title {
   font-size: 15px; font-weight: 600;
@@ -368,6 +373,7 @@ html, body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  max-width: 100vw;
   background:
     repeating-linear-gradient(
       rgba(0,245,212,0.04) 0px, rgba(0,245,212,0.04) 1px,
@@ -394,6 +400,8 @@ html, body {
   border-bottom: 1px solid var(--border);
   background: var(--bg2);
   position: -webkit-sticky; position: sticky; top: 0; z-index: 20;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 .ph-eye {
   font-size: 10px; color: var(--cyan);
@@ -412,7 +420,7 @@ html, body {
 }
 
 /* ── PAGE BODY ── */
-.page-body { padding: 20px 28px; }
+.page-body { padding: 20px 28px; overflow-x: hidden; max-width: 100%; }
 .page-body.narrow { max-width: 720px; }
 .page-grid {
   display: grid;
@@ -612,9 +620,14 @@ html, body {
 
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
-  /* ── FOND INDUSTRIEL — désactivé sur mobile (fixed SVG = bizarre au scroll) ── */
-  body::before, body::after { opacity: 0; pointer-events: none; }
-  /* Fond contenu simplifié : grille subtile supprimée, radial gardé très léger */
+  /* ── FOND INDUSTRIEL — supprimé sur mobile (content:none = retire le pseudo-élément) ── */
+  body::before, body::after { content: none; display: none; }
+
+  /* Conteneurs — aucun débordement horizontal sur mobile */
+  html, body, .app-shell, .main-wrapper, .main-content,
+  .ph, .page-body { overflow-x: hidden !important; max-width: 100vw !important; }
+
+  /* Fond contenu simplifié */
   .main-content {
     background:
       radial-gradient(circle at 75% 8%, rgba(0,245,212,0.04) 0%, transparent 40%),
@@ -627,14 +640,28 @@ html, body {
     width: var(--sidebar-w);
     transform: translateX(-100%);
     z-index: 100;
+    overflow: hidden;
   }
   .sidebar.open { transform: translateX(0); }
   .main-wrapper { width: 100%; min-width: 0; flex: 1; }
   .sidebar-overlay.show { display: block; }
   .desk-header { display: none; }
+
+  /* Logo sidebar — réduit sur mobile */
+  .sidebar-logo {
+    height: clamp(36px, 8vw, 50px) !important;
+    max-width: clamp(100px, 40vw, 180px) !important;
+  }
+  /* Logo topbar — contrainte clamp responsive */
+  .topbar-logo {
+    height: clamp(24px, 6vw, 32px) !important;
+    max-width: clamp(80px, 25vw, 120px) !important;
+  }
+
   /* Topbar — compense le notch/Dynamic Island iOS */
   .topbar {
     display: flex;
+    overflow: hidden;
     padding-top: env(safe-area-inset-top);
     height: calc(var(--topbar-h) + env(safe-area-inset-top));
     min-height: calc(var(--topbar-h) + env(safe-area-inset-top));
@@ -651,9 +678,7 @@ html, body {
   .toast { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 10px); }
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
-  .sidebar {
-    padding-top: env(safe-area-inset-top);
-  }
+  .sidebar { padding-top: env(safe-area-inset-top); }
   /* C3 — pied de sidebar ne passe pas sous la barre de gestes iOS */
   .sidebar-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 }
