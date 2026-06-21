@@ -579,7 +579,7 @@
   }
 
   async function loadPlanningMonth(year, month) {
-    const ym = `${year}-${String(month).padStart(2,'0')}`;
+    const ym = `${year}-${String(month + 1).padStart(2,'0')}`;
     const snap = await R_PLAN_ENT().where('ym', '==', ym).get();
     const map = {};
     snap.docs.forEach(d => {
