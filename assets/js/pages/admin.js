@@ -1,12 +1,40 @@
 (function () {
   let aTab = "tasks";
   let aDay = "lundi";
-  let _editMissionId = null;
+  let _editMissionId  = null;
+  let _adminJournal   = [];
+  let _journalUnsub   = null;
+  let _gamesConfig    = null;
+  let _bibleStats     = null;
+  let _biblePerms     = null;
+  let _expandedPlayer = null;
+
   const _saveTimers = {};
   function _sched(key, fn, delay) {
     clearTimeout(_saveTimers[key]);
     _saveTimers[key] = setTimeout(fn, delay !== undefined ? delay : 700);
   }
+
+  // ── Bible & Games constants (used in new admin tabs) ──
+  const BIBLE_ROLES  = ['Lecteur', 'Contributeur', 'Validateur', 'Administrateur'];
+  const BIBLE_PERM_L = ['Lecture', 'Écriture', 'Modification', 'Suppression', 'Validation'];
+  const BIBLE_PERM_D = {
+    Lecteur:       [true,  false, false, false, false],
+    Contributeur:  [true,  true,  true,  false, false],
+    Validateur:    [true,  true,  true,  true,  true ],
+    Administrateur:[true,  true,  true,  true,  true ]
+  };
+  const GAMES_META = [
+    { id:'quiz',  icon:'📡', name:'Quiz Technique',   desc:'Questions de maintenance industrielle.' },
+    { id:'snake', icon:'🔌', name:'Snake Industriel',  desc:'Collecte les outils, évite les pannes.' },
+    { id:'stock', icon:'📦', name:'Tri du Stock',      desc:'Range les produits dans les bons rayons.' }
+  ];
+  const GAMES_CFG_D = {
+    globalEnabled: true, winPts: 10, partPts: 3, dailyBonus: 15, eventBonus: 25,
+    quiz:  { active: true, visible: true },
+    snake: { active: true, visible: true },
+    stock: { active: true, visible: true }
+  };
 
   const PRIO = {
     urgent: { l:"Urgent", ico:"fa-fire",               c:"var(--red)",    bg:"var(--red-dim)",    border:"var(--red-border)"   },
@@ -47,22 +75,34 @@
     }
 
     const allTabs = [
-      { id: "tasks",    label: "📋 Tâches"      },
-      { id: "team",     label: "👥 Équipe"       },
-      { id: "missions", label: "🚨 Interventions" },
-      { id: "alerts",   label: "🔔 Alertes"      },
-      { id: "orders",   label: "📦 Stock"        },
-      { id: "week",     label: "📅 Semaine"      },
-      { id: "history",  label: "📊 Historique"   },
-      { id: "msgs",     label: "💬 Messages"     },
-      { id: "logs",     label: "📋 Activité"     },
-      { id: "users",    label: "👤 Utilisateurs", adminOnly: true },
-      { id: "absences", label: "🏖 Absences",      adminOnly: true },
-      { id: "pin",      label: "🔑 Accès",        adminOnly: true }
+      { id: "tasks",          label: "📋 Tâches"          },
+      { id: "team",           label: "👥 Équipe"           },
+      { id: "missions",       label: "🚨 Interventions"   },
+      { id: "alerts",         label: "🔔 Alertes"         },
+      { id: "orders",         label: "📦 Stock"           },
+      { id: "week",           label: "📅 Semaine"         },
+      { id: "history",        label: "📊 Historique"      },
+      { id: "msgs",           label: "💬 Messages"        },
+      { id: "logs",           label: "📋 Activité"        },
+      { id: "bible-admin",    label: "📖 Gestion Bible"   },
+      { id: "games-admin",    label: "🎮 Gestion Jeux"    },
+      { id: "players-admin",  label: "👥 Gestion Joueurs" },
+      { id: "admin-journal",  label: "📓 Journal"         },
+      { id: "users",          label: "👤 Utilisateurs",    adminOnly: true },
+      { id: "absences",       label: "🏖 Absences",        adminOnly: true },
+      { id: "pin",            label: "🔑 Accès",           adminOnly: true }
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
     if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences")) aTab = "missions";
+
+    // Start admin journal listener on first use
+    if (aTab === 'admin-journal' && !_journalUnsub) {
+      _journalUnsub = MX.DB.listenAdminJournal(entries => {
+        _adminJournal = entries;
+        if (aTab === 'admin-journal') render();
+      });
+    }
 
     const actionBtn = isAdmin
       ? `<button class="logout-btn" onclick="MX.Auth.logout()"><i class="fas fa-lock"></i> Verrouiller</button>`
@@ -93,9 +133,13 @@
     if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
     if (aTab === "logs")              h += renderLogs();
-    if (aTab === "users"    && isAdmin)  h += renderUsers();
-    if (aTab === "absences" && isAdmin)  h += renderAbsences();
-    if (aTab === "pin"      && isAdmin)  h += renderPin();
+    if (aTab === "users"         && isAdmin)  h += renderUsers();
+    if (aTab === "absences"      && isAdmin)  h += renderAbsences();
+    if (aTab === "pin"           && isAdmin)  h += renderPin();
+    if (aTab === "bible-admin")               h += renderBibleAdmin();
+    if (aTab === "games-admin")               h += renderGamesAdmin();
+    if (aTab === "players-admin")             h += renderPlayersAdmin();
+    if (aTab === "admin-journal")             h += renderAdminJournal();
 
     h += `</div>`;
     el.innerHTML = h;
@@ -842,8 +886,422 @@
     ]);
   }
 
+  // ── ADMIN JOURNAL HELPER ──
+  async function _logAdminAction(action) {
+    try { await MX.DB.addAdminJournal({ action }); } catch(e) { /* silent */ }
+  }
+
+  // ── BIBLE ADMIN ──
+  async function _loadBibleAdminData() {
+    try {
+      const [articles, perms] = await Promise.all([
+        MX.DB.getRecentBibleArticles(),
+        MX.DB.getBiblePermissions()
+      ]);
+      const s = { total: 0, published: 0, pending: 0, draft: 0, archived: 0, pendingList: [] };
+      articles.forEach(a => {
+        s.total++;
+        if      (a.status === 'published') s.published++;
+        else if (a.status === 'pending')  { s.pending++; s.pendingList.push(a); }
+        else if (a.status === 'draft')     s.draft++;
+        else if (a.status === 'archived')  s.archived++;
+      });
+      _bibleStats = s;
+      _biblePerms = Object.keys(perms).length ? perms : JSON.parse(JSON.stringify(BIBLE_PERM_D));
+    } catch(e) {
+      _bibleStats = { total: 0, published: 0, pending: 0, draft: 0, archived: 0, pendingList: [] };
+      _biblePerms = JSON.parse(JSON.stringify(BIBLE_PERM_D));
+    }
+    render();
+  }
+
+  function renderBibleAdmin() {
+    const { esc } = MX;
+    if (!_bibleStats || _biblePerms === null) {
+      _loadBibleAdminData();
+      return `<div style="text-align:center;padding:40px;color:var(--text3)">
+        <i class="fas fa-circle-notch fa-spin" style="font-size:24px;color:var(--cyan)"></i>
+        <div style="margin-top:12px;font-size:13px">Chargement des données Bible…</div>
+      </div>`;
+    }
+
+    let h = `<div class="ba-kpi-row">
+      <div class="apcard ba-kpi"><div class="ba-kpi-val" style="color:var(--cyan)">${_bibleStats.total}</div><div class="ba-kpi-lbl">Articles</div></div>
+      <div class="apcard ba-kpi"><div class="ba-kpi-val" style="color:var(--green)">${_bibleStats.published}</div><div class="ba-kpi-lbl">Publiés</div></div>
+      <div class="apcard ba-kpi"><div class="ba-kpi-val" style="color:${_bibleStats.pending>0?'var(--orange)':'var(--text3)'}">${_bibleStats.pending}</div><div class="ba-kpi-lbl">En attente</div></div>
+      <div class="apcard ba-kpi"><div class="ba-kpi-val" style="color:var(--text3)">${_bibleStats.draft}</div><div class="ba-kpi-lbl">Brouillons</div></div>
+    </div>`;
+
+    if (_bibleStats.pendingList.length) {
+      h += `<div class="section-label" style="margin:16px 0 8px">⏳ En attente de validation (${_bibleStats.pendingList.length})</div>`;
+      _bibleStats.pendingList.forEach(a => {
+        h += `<div class="apcard" style="margin-bottom:8px"><div class="aphd" style="padding:12px 14px;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.title||'—')}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">par ${esc(a.author||'?')} · ${esc(a.categoryId||'')}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="save-btn" style="padding:4px 10px;font-size:11px;margin:0" onclick="MX.Pages.Admin.biblePublish('${esc(a.id)}','${esc(a.title||'')}')"><i class="fas fa-check"></i> Publier</button>
+            <button class="icon-btn del" title="Rejeter" onclick="MX.Pages.Admin.bibleReject('${esc(a.id)}','${esc(a.title||'')}')"><i class="fas fa-xmark"></i></button>
+          </div>
+        </div></div>`;
+      });
+    }
+
+    h += `<div class="section-label" style="margin:20px 0 8px">🔒 Droits d'accès par rôle</div>
+    <div class="apcard" style="overflow-x:auto;margin-bottom:12px">
+      <table class="ba-perm-table">
+        <thead><tr><th>Rôle</th>${BIBLE_PERM_L.map(p => `<th>${p}</th>`).join('')}</tr></thead>
+        <tbody>${BIBLE_ROLES.map(role => `<tr>
+          <td class="ba-perm-role">${role}</td>
+          ${BIBLE_PERM_L.map((p, pi) => {
+            const chk = Array.isArray(_biblePerms[role]) ? !!_biblePerms[role][pi] : !!BIBLE_PERM_D[role][pi];
+            return `<td style="text-align:center"><input type="checkbox" class="ba-perm-cb" id="bperm_${role}_${pi}" ${chk?'checked':''}></td>`;
+          }).join('')}
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="save-btn" onclick="MX.Pages.Admin.bibleSavePerms()"><i class="fas fa-floppy-disk"></i> Sauvegarder les droits</button>
+      <button class="dash-btn" onclick="MX.Pages.Admin.bibleRefreshStats()"><i class="fas fa-rotate"></i> Actualiser</button>
+    </div>`;
+    return h;
+  }
+
+  async function biblePublish(id, title) {
+    try {
+      await MX.DB.updateBibleArticle(id, { status: 'published', publishedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await _logAdminAction(`Publication de l'article Bible : "${title}"`);
+      _bibleStats = null; render();
+      MX.toast('Article publié ✓');
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function bibleReject(id, title) {
+    MX.showModal('Rejeter cet article ?', 'L\'article repassera en brouillon.', [
+      { label: 'Rejeter', cls: 'danger', fn: async () => {
+        try {
+          await MX.DB.updateBibleArticle(id, { status: 'draft' });
+          await _logAdminAction(`Rejet de l'article Bible : "${title}"`);
+          _bibleStats = null; render();
+          MX.toast('Article rejeté');
+        } catch(e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  async function bibleSavePerms() {
+    const perms = {};
+    BIBLE_ROLES.forEach(role => {
+      perms[role] = BIBLE_PERM_L.map((p, pi) => {
+        const cb = document.getElementById(`bperm_${role}_${pi}`);
+        return cb ? cb.checked : false;
+      });
+    });
+    try {
+      await MX.DB.setBiblePermissions(perms);
+      _biblePerms = perms;
+      await _logAdminAction('Mise à jour des droits d\'accès Bible');
+      MX.toast('Droits sauvegardés ✓');
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  function bibleRefreshStats() { _bibleStats = null; _biblePerms = null; render(); }
+
+  // ── GAMES ADMIN ──
+  async function _loadGamesConfig() {
+    try {
+      const cfg = await MX.DB.getGamesConfig();
+      _gamesConfig = cfg ? { ...GAMES_CFG_D, ...cfg } : { ...GAMES_CFG_D };
+    } catch(e) { _gamesConfig = { ...GAMES_CFG_D }; }
+    render();
+  }
+
+  function renderGamesAdmin() {
+    const { esc } = MX;
+    if (!_gamesConfig) {
+      _loadGamesConfig();
+      return `<div style="text-align:center;padding:40px;color:var(--text3)">
+        <i class="fas fa-circle-notch fa-spin" style="font-size:24px;color:var(--cyan)"></i>
+        <div style="margin-top:12px;font-size:13px">Chargement de la configuration…</div>
+      </div>`;
+    }
+
+    const cfg = _gamesConfig;
+    let h = `<div class="apcard" style="margin-bottom:12px">
+      <div class="aphd" style="padding:12px 16px">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:700">Arcade Maintix</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${cfg.globalEnabled ? '🟢 Activée' : '🔴 Désactivée'}</div>
+        </div>
+        <button class="tog ${cfg.globalEnabled?'on':'off'}" onclick="MX.Pages.Admin.gamesToggleGlobal()" aria-label="Global"></button>
+      </div>
+    </div>`;
+
+    h += `<div class="section-label" style="margin-bottom:8px">Jeux disponibles</div>`;
+    GAMES_META.forEach(g => {
+      const gc = cfg[g.id] || { active: true, visible: true };
+      h += `<div class="apcard" style="margin-bottom:8px"><div class="aphd" style="padding:12px 14px;gap:10px">
+        <div style="font-size:24px;width:38px;text-align:center;flex-shrink:0">${g.icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(g.name)}</div>
+          <div style="font-size:11px;color:var(--text2)">${esc(g.desc)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)">Actif
+            <button class="tog ${gc.active?'on':'off'}" onclick="MX.Pages.Admin.gamesToggle('${g.id}','active')" aria-label="Actif"></button>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)">Visible
+            <button class="tog ${gc.visible?'on':'off'}" onclick="MX.Pages.Admin.gamesToggle('${g.id}','visible')" aria-label="Visible"></button>
+          </label>
+        </div>
+      </div></div>`;
+    });
+
+    h += `<div class="section-label" style="margin:16px 0 8px">Configuration des points</div>
+    <div class="apcard" style="padding:14px;margin-bottom:12px">
+      <div class="apgrid">
+        <div><div class="aplbl">Points victoire</div><input class="fi fi-sm" type="number" min="0" value="${cfg.winPts||10}" id="gcfg-win"></div>
+        <div><div class="aplbl">Points participation</div><input class="fi fi-sm" type="number" min="0" value="${cfg.partPts||3}" id="gcfg-part"></div>
+        <div><div class="aplbl">Bonus quotidien max</div><input class="fi fi-sm" type="number" min="0" value="${cfg.dailyBonus||15}" id="gcfg-daily"></div>
+        <div><div class="aplbl">Bonus événement</div><input class="fi fi-sm" type="number" min="0" value="${cfg.eventBonus||25}" id="gcfg-event"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="save-btn" onclick="MX.Pages.Admin.gamesSaveConfig()"><i class="fas fa-floppy-disk"></i> Sauvegarder</button>
+      <button class="danger-btn" onclick="MX.Pages.Admin.gamesResetScores()"><i class="fas fa-trash"></i> Réinitialiser classements</button>
+    </div>`;
+    return h;
+  }
+
+  function gamesToggleGlobal() {
+    if (_gamesConfig) { _gamesConfig.globalEnabled = !_gamesConfig.globalEnabled; render(); }
+  }
+
+  function gamesToggle(gameId, field) {
+    if (!_gamesConfig) return;
+    if (!_gamesConfig[gameId]) _gamesConfig[gameId] = { active: true, visible: true };
+    _gamesConfig[gameId][field] = !_gamesConfig[gameId][field];
+    render();
+  }
+
+  async function gamesSaveConfig() {
+    if (!_gamesConfig) return;
+    const winPts     = parseInt((document.getElementById('gcfg-win')  ||{}).value) || 10;
+    const partPts    = parseInt((document.getElementById('gcfg-part') ||{}).value) || 3;
+    const dailyBonus = parseInt((document.getElementById('gcfg-daily')||{}).value) || 15;
+    const eventBonus = parseInt((document.getElementById('gcfg-event')||{}).value) || 25;
+    const cfg = { ..._gamesConfig, winPts, partPts, dailyBonus, eventBonus };
+    try {
+      await MX.DB.setGamesConfig(cfg);
+      _gamesConfig = cfg;
+      await _logAdminAction('Mise à jour de la configuration des jeux');
+      MX.toast('Configuration sauvegardée ✓');
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function gamesResetScores() {
+    MX.showModal('Réinitialiser tous les classements ?', 'Tous les scores seront supprimés définitivement.', [
+      { label: 'Réinitialiser', cls: 'danger', fn: async () => {
+        try {
+          await MX.DB.resetGameScores();
+          await _logAdminAction('Réinitialisation des classements de jeux');
+          MX.toast('Classements réinitialisés ✓');
+        } catch(e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  // ── PLAYERS ADMIN ──
+  function renderPlayersAdmin() {
+    const { state, esc, avatarBg, avatarFg } = MX;
+    const users      = state.users || [];
+    const rewardsMap = state.rewardsUsers || {};
+    const achieveMap = state.gameAchievements || {};
+    const history    = state.rewardsHistory || [];
+
+    function getGrade(pts) {
+      const grades = (state.rewardsGrades || []).slice().sort((a, b) => b.minPoints - a.minPoints);
+      return grades.find(g => pts >= g.minPoints) || { name: 'Recrue', icon: '🔩', color: '#6B7280' };
+    }
+
+    if (!users.length) {
+      return `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">Aucun joueur enregistré</div>`;
+    }
+
+    let h = '';
+    users.forEach(u => {
+      const rd       = rewardsMap[u.id] || {};
+      const pts      = rd.points || 0;
+      const xp       = rd.xp    || 0;
+      const grade    = getGrade(pts);
+      const achMap   = achieveMap[u.id] || {};
+      const achCount = Object.keys(achMap).length;
+      const bg       = avatarBg(u.name);
+      const fg       = avatarFg(u.name);
+      const initials = (u.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      const expanded = _expandedPlayer === u.id;
+
+      h += `<div class="apcard" style="margin-bottom:8px">
+        <div class="aphd" style="padding:12px 14px;cursor:pointer" onclick="MX.Pages.Admin.togglePlayer('${esc(u.id)}')">
+          <div style="width:36px;height:36px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">${esc(initials)}</div>
+          <div style="flex:1;margin-left:10px;min-width:0">
+            <div style="font-size:14px;font-weight:700">${esc(u.name)}</div>
+            <div style="font-size:11px;color:var(--text2)">${esc(u.role||'technicien')}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;margin-right:8px">
+            <div style="font-size:16px;font-weight:800;color:var(--cyan);font-family:var(--ffm)">${pts} <span style="font-size:10px;font-weight:400;color:var(--text3)">MP</span></div>
+            <div style="font-size:11px;color:var(--text2)">${grade.icon} ${esc(grade.name)} · ${achCount} succès</div>
+          </div>
+          <i class="fas fa-chevron-${expanded?'up':'down'}" style="color:var(--text3);font-size:11px;flex-shrink:0"></i>
+        </div>`;
+
+      if (expanded) {
+        const userHist = history.filter(e => e.userId === u.id).slice(0, 5);
+        h += `<div style="padding:0 14px 14px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text2);margin:10px 0 12px">XP total : <strong style="color:var(--cyan)">${xp}</strong></div>
+
+          <div class="section-label" style="font-size:11px;margin-bottom:8px">Actions</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div>
+              <div class="aplbl">Points MP (+ ou −)</div>
+              <div style="display:flex;gap:6px">
+                <input class="fi fi-sm" type="number" id="pts-${esc(u.id)}" placeholder="ex: 100" style="flex:1">
+                <button class="save-btn" style="margin:0;padding:5px 10px;font-size:11px;flex-shrink:0" onclick="MX.Pages.Admin.playerAdjPts('${esc(u.id)}','${esc(u.name)}')">
+                  <i class="fas fa-plus-minus"></i>
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="aplbl">XP (+ ou −)</div>
+              <div style="display:flex;gap:6px">
+                <input class="fi fi-sm" type="number" id="xp-${esc(u.id)}" placeholder="ex: 50" style="flex:1">
+                <button class="save-btn" style="margin:0;padding:5px 10px;font-size:11px;flex-shrink:0" onclick="MX.Pages.Admin.playerAdjXP('${esc(u.id)}','${esc(u.name)}')">
+                  <i class="fas fa-plus-minus"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          ${achCount ? `<div class="section-label" style="font-size:11px;margin-bottom:6px">Succès (${achCount})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">
+            ${Object.values(achMap).map(a => `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:var(--cyan)">${esc(a.icon||'🏆')} ${esc(a.name||'Succès')}</span>`).join('')}
+          </div>` : ''}
+
+          ${userHist.length ? `<div class="section-label" style="font-size:11px;margin-bottom:6px">Derniers gains</div>
+          <div style="margin-bottom:12px">
+            ${userHist.map(e => `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)">
+              <span style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(e.description||e.event||'?')}</span>
+              <span style="color:${(e.points||0)>=0?'var(--green)':'var(--red)'};font-weight:700;font-family:var(--ffm);flex-shrink:0;margin-left:8px">${(e.points||0)>0?'+':''}${e.points||0} MP</span>
+            </div>`).join('')}
+          </div>` : ''}
+
+          <button class="danger-btn" style="font-size:11px;padding:5px 14px" onclick="MX.Pages.Admin.playerReset('${esc(u.id)}','${esc(u.name)}')">
+            <i class="fas fa-rotate-left"></i> Réinitialiser le profil
+          </button>
+        </div>`;
+      }
+      h += `</div>`;
+    });
+    return h;
+  }
+
+  function togglePlayer(uid) { _expandedPlayer = _expandedPlayer === uid ? null : uid; render(); }
+
+  async function playerAdjPts(userId, userName) {
+    const inp = document.getElementById(`pts-${userId}`);
+    const val = inp ? parseInt(inp.value) : NaN;
+    if (isNaN(val) || val === 0) return MX.toast('Entrez un montant (positif ou négatif)', true);
+    try {
+      await MX.DB.awardPoints(userId, userName, 'admin_adjust', val, `Ajustement admin : ${val>0?'+':''}${val} MP`);
+      await _logAdminAction(`${val>0?'Ajout':'Retrait'} de ${Math.abs(val)} MP à ${userName}`);
+      MX.toast(`${val>0?'+':''}${val} MP appliqués à ${userName} ✓`);
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function playerAdjXP(userId, userName) {
+    const inp = document.getElementById(`xp-${userId}`);
+    const val = inp ? parseInt(inp.value) : NaN;
+    if (isNaN(val) || val === 0) return MX.toast('Entrez un montant XP (positif ou négatif)', true);
+    try {
+      await MX.DB.adjustPlayerXP(userId, val);
+      await _logAdminAction(`${val>0?'Ajout':'Retrait'} de ${Math.abs(val)} XP à ${userName}`);
+      MX.toast(`${val>0?'+':''}${val} XP appliqués à ${userName} ✓`);
+    } catch(e) { MX.toast('Erreur', true); }
+  }
+
+  async function playerReset(userId, userName) {
+    MX.showModal(`Réinitialiser ${userName} ?`, 'Points, XP, succès et historique seront supprimés définitivement.', [
+      { label: 'Réinitialiser', cls: 'danger', fn: async () => {
+        try {
+          await MX.DB.resetPlayerProfile(userId);
+          await _logAdminAction(`Réinitialisation du profil joueur de ${userName}`);
+          MX.toast(`Profil de ${userName} réinitialisé ✓`);
+        } catch(e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  // ── ADMIN JOURNAL ──
+  function renderAdminJournal() {
+    const { esc } = MX;
+    const entries = _adminJournal;
+
+    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text2);font-family:var(--ffm)">${entries.length} entrée${entries.length!==1?'s':''}</div>
+      ${entries.length ? `<button class="icon-btn del" onclick="MX.Pages.Admin.clearJournal()" style="width:auto;height:auto;padding:4px 12px;font-size:11px;gap:4px"><i class="fas fa-trash"></i> Vider</button>` : ''}
+    </div>`;
+
+    if (!entries.length) {
+      return h + `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
+        <div style="font-size:36px;margin-bottom:12px">📓</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucune action enregistrée</div>
+        <div style="font-size:13px;line-height:1.5">Les actions sur Bible, Jeux et Joueurs apparaîtront ici.</div>
+      </div>`;
+    }
+
+    entries.forEach(e => {
+      const ts      = e.ts ? (e.ts.toDate ? e.ts.toDate() : new Date(e.ts)) : null;
+      const dateStr = ts ? ts.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric' }) : '–';
+      const timeStr = ts ? ts.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '–';
+      const bg      = MX.avatarBg(e.user||'?');
+      const fg      = MX.avatarFg(e.user||'?');
+      const init    = (e.user||'?').slice(0,2).toUpperCase();
+      h += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="width:30px;height:30px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${esc(init)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${esc(e.user||'Système')}</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.4">${esc(e.action||'?')}</div>
+        </div>
+        <div style="flex-shrink:0;text-align:right">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--ffm)">${dateStr}</div>
+          <div style="font-size:10px;color:var(--text3);font-family:var(--ffm)">${timeStr}</div>
+        </div>
+      </div>`;
+    });
+    return h;
+  }
+
+  async function clearJournal() {
+    MX.showModal('Vider le journal ?', 'Toutes les entrées seront supprimées.', [
+      { label: 'Vider', cls: 'danger', fn: async () => {
+        try {
+          await MX.DB.clearAdminJournal();
+          _adminJournal = [];
+          MX.toast('Journal vidé ✓');
+          render();
+        } catch(e) { MX.toast('Erreur', true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
   // ── HISTORY ──
   function renderHistory() {
+    MX.DB.purgeOldHistory().catch(() => {});
     const { state, esc, fmtTime } = MX;
     const history = state.history || [];
     if (!history.length) {
@@ -1067,6 +1525,10 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     delMsg,
     confirmClearLogs, confirmReset, confirmNewWeek,
     generateReport,
-    addAbsence, validateAbsence, deleteAbsence
+    addAbsence, validateAbsence, deleteAbsence,
+    biblePublish, bibleReject, bibleSavePerms, bibleRefreshStats,
+    gamesToggleGlobal, gamesToggle, gamesSaveConfig, gamesResetScores,
+    togglePlayer, playerAdjPts, playerAdjXP, playerReset,
+    clearJournal
   };
 })();

@@ -685,6 +685,80 @@
     await R_ABS().doc(id).delete();
   }
 
+  // ── ADMIN JOURNAL ──
+  const R_AJRN = () => db.collection('admin_journal');
+
+  function listenAdminJournal(cb) {
+    return R_AJRN().orderBy('ts', 'desc').limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addAdminJournal(data) {
+    const actor = window.MX.state.adminUser
+      ? (window.MX.state.adminUser.email || 'admin').split('@')[0]
+      : (window.MX.state.currentUser ? window.MX.state.currentUser.name : 'Système');
+    await R_AJRN().add({ ...data, user: actor, ts: FV.serverTimestamp() });
+  }
+  async function clearAdminJournal() {
+    const snap = await R_AJRN().limit(500).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+
+  // ── HISTORY PURGE (30-day limit) ──
+  async function purgeOldHistory() {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    const ts   = firebase.firestore.Timestamp.fromDate(cutoff);
+    const snap = await db.collection('weekHistory').where('archivedAt', '<', ts).get();
+    if (snap.empty) return 0;
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    return snap.size;
+  }
+
+  // ── BIBLE PERMISSIONS ──
+  async function getBiblePermissions() {
+    const snap = await db.collection('config').doc('bible_permissions').get();
+    return snap.exists ? snap.data() : {};
+  }
+  async function setBiblePermissions(data) {
+    await db.collection('config').doc('bible_permissions').set(data);
+  }
+
+  // ── GAMES CONFIG ──
+  async function getGamesConfig() {
+    const snap = await db.collection('config').doc('games_config').get();
+    return snap.exists ? snap.data() : null;
+  }
+  async function setGamesConfig(data) {
+    await db.collection('config').doc('games_config').set(data, { merge: true });
+  }
+
+  // ── BIBLE ARTICLES (one-time read for admin stats) ──
+  async function getRecentBibleArticles() {
+    const snap = await R_BIBLE_ART().orderBy('updatedAt', 'desc').limit(500).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  // ── PLAYER MANAGEMENT ──
+  async function adjustPlayerXP(userId, amount) {
+    await R_RUSERS().doc(userId).set({ xp: FV.increment(amount), lastActivity: FV.serverTimestamp() }, { merge: true });
+  }
+  async function resetPlayerProfile(userId) {
+    const [achSnap, hstSnap] = await Promise.all([
+      R_GACHIEV().where('userId', '==', userId).get(),
+      R_RHIST().where('userId', '==', userId).limit(500).get()
+    ]);
+    const batch = db.batch();
+    achSnap.docs.forEach(d => batch.delete(d.ref));
+    hstSnap.docs.forEach(d => batch.delete(d.ref));
+    batch.set(R_RUSERS().doc(userId), { points: 0, xp: 0, lastActivity: FV.serverTimestamp() });
+    await batch.commit();
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -722,6 +796,12 @@
     addGameQuestion, updateGameQuestion, deleteGameQuestion, resetGameScores,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,
-    listenBibleComments, addBibleComment, deleteBibleComment
+    listenBibleComments, addBibleComment, deleteBibleComment,
+    listenAdminJournal, addAdminJournal, clearAdminJournal,
+    purgeOldHistory,
+    getBiblePermissions, setBiblePermissions,
+    getGamesConfig, setGamesConfig,
+    getRecentBibleArticles,
+    adjustPlayerXP, resetPlayerProfile
   };
 })();

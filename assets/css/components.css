@@ -3315,3 +3315,63 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 @media (min-width: 900px) {
   .bl-articles-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 }
+
+/* ═══════════════════════════════════════════════
+   ADMIN PANEL — GESTION BIBLE / JEUX / JOUEURS
+   ═══════════════════════════════════════════════ */
+
+/* KPI row (4 cols) */
+.ba-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.ba-kpi {
+  padding: 12px 14px !important;
+  text-align: center;
+}
+.ba-kpi-val {
+  font-size: 26px;
+  font-weight: 800;
+  font-family: var(--ffm);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.ba-kpi-lbl {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+/* Permission table */
+.ba-perm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 420px;
+}
+.ba-perm-table th {
+  padding: 8px 10px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text3);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ba-perm-table th:first-child { text-align: left; }
+.ba-perm-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.ba-perm-role { font-weight: 600; white-space: nowrap; }
+.ba-perm-cb {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--cyan);
+}
+
+@media (max-width: 640px) {
+  .ba-kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
