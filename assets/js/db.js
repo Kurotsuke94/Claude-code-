@@ -557,6 +557,49 @@
     await batch.commit();
   }
 
+  // ── BIBLE MAINTIX ──
+  const R_BIBLE_ART = () => db.collection('bible_articles');
+  const R_BIBLE_CMT = () => db.collection('bible_comments');
+
+  function listenBibleArticles(cb) {
+    return R_BIBLE_ART().orderBy('updatedAt', 'desc').limit(500).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addBibleArticle(data) {
+    const ref = await R_BIBLE_ART().add(data);
+    return ref.id;
+  }
+  async function updateBibleArticle(id, data) {
+    await R_BIBLE_ART().doc(id).update(data);
+  }
+  async function deleteBibleArticle(id) {
+    const batch = db.batch();
+    const cmts = await R_BIBLE_CMT().where('articleId', '==', id).get();
+    cmts.docs.forEach(d => batch.delete(d.ref));
+    batch.delete(R_BIBLE_ART().doc(id));
+    await batch.commit();
+  }
+  async function incrementBibleViews(id) {
+    await R_BIBLE_ART().doc(id).update({ viewCount: FV.increment(1) });
+  }
+  async function toggleBibleLike(id, userName, currentlyLiked) {
+    await R_BIBLE_ART().doc(id).update({
+      likes: currentlyLiked ? FV.arrayRemove(userName) : FV.arrayUnion(userName)
+    });
+  }
+  function listenBibleComments(articleId, cb) {
+    return R_BIBLE_CMT().where('articleId', '==', articleId).orderBy('createdAt', 'asc').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addBibleComment(data) {
+    await R_BIBLE_CMT().add({ ...data, createdAt: FV.serverTimestamp() });
+  }
+  async function deleteBibleComment(id) {
+    await R_BIBLE_CMT().doc(id).delete();
+  }
+
   // ── PLANNING MODULE ──
   const R_PLAN_ENT = () => db.collection('planning_entries');
   const R_PLAN_SHF = () => db.collection('planning_shifts');
@@ -676,6 +719,9 @@
     awardPoints, spendPoints, initRewardsDefaults, resetRewardsDefaults,
     listenGameScores, listenGameAchievements, listenGameQuestions,
     saveGameScore, saveGameAchievement,
-    addGameQuestion, updateGameQuestion, deleteGameQuestion, resetGameScores
+    addGameQuestion, updateGameQuestion, deleteGameQuestion, resetGameScores,
+    listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
+    incrementBibleViews, toggleBibleLike,
+    listenBibleComments, addBibleComment, deleteBibleComment
   };
 })();

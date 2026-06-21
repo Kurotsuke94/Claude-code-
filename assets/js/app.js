@@ -14,7 +14,7 @@
     null,
     { id: "orders",        icon: "fa-box",            l: "Stock & Commandes" },
     { id: "fournisseurs",  icon: "fa-truck",          l: "Fournisseurs",    noBot: true },
-    { id: "documents",     icon: "fa-folder-open",    l: "Documents",       noBot: true },
+    { id: "documents",     icon: "fa-book",           l: "Bible Maintix",   noBot: true },
     null,
     { id: "utilisateurs",  icon: "fa-users",          l: "Utilisateurs" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
@@ -74,7 +74,7 @@
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
-    if (id === "documents")    return _renderStub("Documents", "fa-folder-open", "La gestion des documents sera disponible prochainement.");
+    if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
