@@ -152,43 +152,67 @@
     _cropImg = new Image();
     _cropImg.onload = () => {
       const s = 256;
-      const scaleToFit = Math.min(s / _cropImg.naturalWidth, s / _cropImg.naturalHeight) * 0.9;
-      _cropScale = scaleToFit;
+      _cropScale = Math.min(s / _cropImg.naturalWidth, s / _cropImg.naturalHeight) * 0.9;
       _renderCropCanvas();
     };
     _cropImg.src = dataUrl;
 
-    MX.showModal({
-      title: 'Recadrer la photo',
-      sub: 'Faites glisser pour centrer · Molette pour zoomer · Boutons pour rotation',
-      noAutoClose: true,
-    }, '', [
-      { label: '<i class="fas fa-check"></i> Enregistrer', cls: 'primary-btn', fn: async () => {
-        const base64 = _cropCommit();
-        MX.closeModal();
-        await _saveAvatar(base64);
-      }},
-      { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
-    ]);
+    // Remove any stale overlay
+    const prev = document.getElementById('mx-crop-overlay');
+    if (prev) prev.remove();
 
-    setTimeout(() => {
-      const body = document.getElementById('m-body');
-      if (!body) return;
-      body.innerHTML = `
-        <div class="stt-crop-wrap">
-          <canvas id="stt-crop-canvas" width="256" height="256" class="stt-crop-canvas"></canvas>
-          <div class="stt-crop-controls">
-            <button class="stt-crop-rot" onclick="MX.Pages.Settings._cropRotate(-90)"><i class="fas fa-rotate-left"></i></button>
-            <input type="range" id="stt-crop-zoom" min="30" max="500" value="100" class="stt-crop-slider"
-              oninput="MX.Pages.Settings._cropZoom(this.value)">
-            <button class="stt-crop-rot" onclick="MX.Pages.Settings._cropRotate(90)"><i class="fas fa-rotate-right"></i></button>
+    // Build dedicated overlay (not the generic modal) so the footer is always anchored
+    const overlay = document.createElement('div');
+    overlay.id = 'mx-crop-overlay';
+    overlay.innerHTML = `
+      <div class="mx-crop-sheet">
+        <div class="mx-crop-header">
+          <div class="mx-crop-handle"></div>
+          <div class="mx-crop-title">Recadrer la photo</div>
+          <div class="mx-crop-sub">Faites glisser · Molette pour zoomer · Boutons pour rotation</div>
+        </div>
+        <div class="mx-crop-body">
+          <div class="stt-crop-wrap">
+            <canvas id="stt-crop-canvas" width="256" height="256" class="stt-crop-canvas"></canvas>
+            <div class="stt-crop-controls">
+              <button class="stt-crop-rot" onclick="MX.Pages.Settings._cropRotate(-90)"><i class="fas fa-rotate-left"></i></button>
+              <input type="range" id="stt-crop-zoom" min="30" max="500" value="100" class="stt-crop-slider"
+                oninput="MX.Pages.Settings._cropZoom(this.value)">
+              <button class="stt-crop-rot" onclick="MX.Pages.Settings._cropRotate(90)"><i class="fas fa-rotate-right"></i></button>
+            </div>
           </div>
-        </div>`;
-      _cropCanvas = document.getElementById('stt-crop-canvas');
-      _cropCtx   = _cropCanvas.getContext('2d');
-      _bindCropEvents(_cropCanvas);
-      if (_cropImg.complete) _renderCropCanvas();
-    }, 60);
+        </div>
+        <div class="mx-crop-footer">
+          <button id="mx-crop-cancel" class="modal-btn cancel" style="flex:1">Annuler</button>
+          <button id="mx-crop-save"   class="modal-btn confirm" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px">
+            <i class="fas fa-check"></i> Valider
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // Bind canvas
+    _cropCanvas = document.getElementById('stt-crop-canvas');
+    _cropCtx   = _cropCanvas.getContext('2d');
+    _bindCropEvents(_cropCanvas);
+    if (_cropImg.complete) _renderCropCanvas();
+
+    function _close() {
+      const el = document.getElementById('mx-crop-overlay');
+      if (el) el.remove();
+    }
+
+    document.getElementById('mx-crop-cancel').addEventListener('click', _close);
+    // Tap backdrop to cancel
+    overlay.addEventListener('click', e => { if (e.target === overlay) _close(); });
+
+    document.getElementById('mx-crop-save').addEventListener('click', async () => {
+      const btn = document.getElementById('mx-crop-save');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Enregistrement…'; }
+      const base64 = _cropCommit();
+      _close();
+      await _saveAvatar(base64);
+    });
   }
 
   async function _saveAvatar(base64) {
@@ -203,7 +227,7 @@
       cu.avatarUrl = base64;
       localStorage.setItem('mx_user', JSON.stringify(cu));
       MX.syncEnd && MX.syncEnd();
-      MX.toast('Photo de profil mise à jour');
+      MX.toast('Photo de profil mise à jour avec succès ✓');
       _showSection(_section);
       MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
     } catch(err) {
