@@ -67,7 +67,7 @@
     if (id === "msgs")         return Pages.Messages.render();
     if (id === "orders")       return Pages.Orders.render();
     if (id === "utilisateurs") return Pages.Admin.render();
-    if (id === "parametres")   return Pages.Admin.render();
+    if (id === "parametres")   return Pages.Settings ? Pages.Settings.render() : null;
     if (id === "admin")        return Pages.Admin.render();
     if (id === "rewards")      return Pages.Rewards.render();
     if (id === "planning")     return Pages.Planning ? Pages.Planning.render() : null;
