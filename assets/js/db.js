@@ -557,7 +557,74 @@
     await batch.commit();
   }
 
-  // ── ABSENCES ──
+  // ── PLANNING MODULE ──
+  const R_PLAN_ENT = () => db.collection('planning_entries');
+  const R_PLAN_SHF = () => db.collection('planning_shifts');
+
+  const _DEF_SHIFTS = [
+    { code:'1',   name:'Matin',     color:'#FDE047', textColor:'#1a1a1a', start:'08:00', end:'16:33', bold:false, order:0 },
+    { code:'2',   name:'Journée',   color:'#9CA3AF', textColor:'#1a1a1a', start:'09:00', end:'17:33', bold:false, order:1 },
+    { code:'3',   name:'Ap-Midi',   color:'#3B82F6', textColor:'#ffffff', start:'10:00', end:'18:33', bold:false, order:2 },
+    { code:'4',   name:'Soir',      color:'#EF4444', textColor:'#ffffff', start:'13:00', end:'21:33', bold:false, order:3 },
+    { code:'RH',  name:'Repos',     color:'#22C55E', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:4 },
+    { code:'CP',  name:'Congé',     color:'#F97316', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:5 },
+    { code:'JFL', name:'J.Férié',   color:'#F97316', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:6 },
+    { code:'EXT', name:'Extérieur', color:'#FFFFFF', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:7 },
+  ];
+
+  function listenPlanningShifts(cb) {
+    _unsub.planning_shifts = R_PLAN_SHF().orderBy('order').onSnapshot(snap => {
+      cb(snap.empty ? _DEF_SHIFTS : snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  async function loadPlanningMonth(year, month) {
+    const ym = `${year}-${String(month).padStart(2,'0')}`;
+    const snap = await R_PLAN_ENT().where('ym', '==', ym).get();
+    const map = {};
+    snap.docs.forEach(d => {
+      const data = d.data();
+      map[`${data.userId}_${data.date}`] = data;
+    });
+    return map;
+  }
+
+  async function setPlanningEntry(userId, dateStr, shiftCode) {
+    const user = (window.MX.state.users || []).find(u => u.id === userId);
+    const ym = dateStr.slice(0, 7);
+    const actor = window.MX.state.adminUser
+      ? (window.MX.state.adminUser.email || 'admin')
+      : (window.MX.state.currentUser ? window.MX.state.currentUser.name : 'system');
+    await R_PLAN_ENT().doc(`${userId}_${dateStr}`).set({
+      userId,
+      userName: user ? user.name : userId,
+      date: dateStr,
+      ym,
+      shiftCode,
+      updatedBy: actor,
+      updatedAt: FV.serverTimestamp()
+    });
+    if (window.MX.state.planningEntries) {
+      window.MX.state.planningEntries[`${userId}_${dateStr}`] = { userId, userName: user ? user.name : userId, date: dateStr, ym, shiftCode };
+    }
+  }
+
+  async function deletePlanningEntry(userId, dateStr) {
+    await R_PLAN_ENT().doc(`${userId}_${dateStr}`).delete();
+    if (window.MX.state.planningEntries) {
+      delete window.MX.state.planningEntries[`${userId}_${dateStr}`];
+    }
+  }
+
+  async function savePlanningShifts(shiftsArray) {
+    const snap = await R_PLAN_SHF().get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    shiftsArray.forEach(s => batch.set(R_PLAN_SHF().doc(), s));
+    await batch.commit();
+  }
+
+
   const R_ABS = () => db.collection('absences');
 
   function listenAbsences(cb) {
@@ -600,6 +667,7 @@
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
     listenOrders, addOrder, updateOrderStatus,
+    listenPlanningShifts, loadPlanningMonth, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenRewardsRules, listenRewardsGrades, listenRewardsItems, listenRewardsHistory, listenRewardsUsers,
     addRewardsRule, updateRewardsRule, deleteRewardsRule,

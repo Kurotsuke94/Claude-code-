@@ -19,6 +19,7 @@
     { id: "utilisateurs",  icon: "fa-users",          l: "Utilisateurs" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
     { id: "rewards",       icon: "fa-trophy",         l: "Récompenses" },
+    { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
     { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.",  respOnly: true },
     { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
     { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",           respOnly: true, respDay: "mardi" },
@@ -69,6 +70,7 @@
     if (id === "parametres")   return Pages.Admin.render();
     if (id === "admin")        return Pages.Admin.render();
     if (id === "rewards")      return Pages.Rewards.render();
+    if (id === "planning")     return Pages.Planning ? Pages.Planning.render() : null;
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
@@ -634,6 +636,11 @@
     DB.listenAbsences(list => {
       state.absences = list;
       if (state.currentPage === 'utilisateurs') MX.Pages.Admin.render();
+    });
+
+    DB.listenPlanningShifts(list => {
+      state.planningShifts = list;
+      if (state.currentPage === 'planning' && Pages.Planning) Pages.Planning.render();
     });
 
     DB.listenRewardsRules(list => {

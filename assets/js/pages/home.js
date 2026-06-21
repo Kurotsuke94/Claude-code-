@@ -397,47 +397,17 @@
       </div>
     </div>`;
 
-    // ── Planning section ──
-    const canEdit = MX.Auth.canSeeAll();
-    const planUrl = state.planningUrl;
-
-    h += `<div class="section-label">Planning</div>
-    <div class="day-card" style="margin-bottom:28px;animation:none">`;
-
-    if (canEdit) {
-      h += `<input type="file" id="plan-upload" accept="image/*" style="display:none" onchange="MX.Pages.Home.uploadPlan(this)">`;
-    }
-
-    if (planUrl) {
-      h += `<div style="padding:14px 16px">
-        <img src="${esc(planUrl)}" alt="Planning" loading="lazy"
-          style="width:100%;border-radius:10px;display:block;cursor:pointer;max-height:600px;object-fit:contain;background:var(--bg2)"
-          onclick="MX.Pages.Home.openPlan()">
-        ${canEdit ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-          <button type="button" onclick="document.getElementById('plan-upload').click()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--ffs)">
-            <i class="fas fa-camera"></i> Changer la photo
-          </button>
-          <button type="button" onclick="MX.Pages.Home.clearPlan()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--red-border);border-radius:8px;background:none;color:var(--red);cursor:pointer;font-size:13px;font-family:var(--ffs)">
-            <i class="fas fa-trash"></i> Supprimer
-          </button>
-        </div>` : ''}
-      </div>`;
-    } else {
-      h += `<div style="padding:32px 16px;text-align:center">
-        <div style="width:56px;height:56px;border-radius:14px;background:var(--bg4);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px">📅</div>`;
-      if (canEdit) {
-        h += `<div style="font-size:14px;font-weight:600;margin-bottom:6px">Aucun planning affiché</div>
-          <div style="font-size:12px;color:var(--text2);margin-bottom:18px">Ajoutez une photo du planning hebdomadaire</div>
-          <button type="button" onclick="document.getElementById('plan-upload').click()" class="primary-btn" style="margin:0 auto;width:auto;padding:10px 24px">
-            <i class="fas fa-upload"></i> Ajouter une photo
-          </button>`;
-      } else {
-        h += `<div style="font-size:13px;color:var(--text2)">Aucun planning disponible</div>`;
-      }
-      h += `</div>`;
-    }
-
-    h += `</div></div>`;
+    // ── Raccourci planning ──
+    h += `<div class="day-card" style="margin-bottom:28px;animation:none;cursor:pointer" onclick="MX.showPage('planning')">
+      <div style="padding:14px 16px;display:flex;align-items:center;gap:14px">
+        <div style="width:42px;height:42px;border-radius:11px;background:rgba(67,56,202,0.15);border:1px solid rgba(67,56,202,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">📅</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">Planning</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">Consulter les horaires de l'équipe</div>
+        </div>
+        <i class="fas fa-chevron-right" style="color:var(--text3);font-size:13px;flex-shrink:0"></i>
+      </div>
+    </div></div>`;
     el.innerHTML = h;
   }
 
