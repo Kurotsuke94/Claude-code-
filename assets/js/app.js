@@ -20,7 +20,7 @@
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
     { id: "rewards",       icon: "fa-trophy",         l: "Récompenses" },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
-    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Planning Resp.",  respOnly: true },
+    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Checklist Resp.",  respOnly: true },
     { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
     { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",           respOnly: true, respDay: "mardi" },
     { id: "resp-mercredi", icon: "fa-circle-dot",     l: "Mercredi",        respOnly: true, respDay: "mercredi" },

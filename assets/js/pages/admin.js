@@ -88,7 +88,7 @@
       { id: "games-admin",    label: "🎮 Gestion Jeux"    },
       { id: "players-admin",  label: "👥 Gestion Joueurs" },
       { id: "admin-journal",  label: "📓 Journal"         },
-      { id: "users",          label: "👤 Utilisateurs",    adminOnly: true },
+      { id: "users",          label: "👤 Admin",           adminOnly: true },
       { id: "absences",       label: "🏖 Absences",        adminOnly: true },
       { id: "pin",            label: "🔑 Accès",           adminOnly: true }
     ];
