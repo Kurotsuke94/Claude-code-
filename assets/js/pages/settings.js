@@ -533,23 +533,20 @@
   }
 
   function _renderApparence() {
-    const tm          = MX.ThemeManager;
-    const curTheme    = tm ? tm.getTheme()   : _getPref('theme', 'dark');
-    const curAccent   = tm ? tm.getAccent()  : _getPref('accent', 'cyan');
-    const curSize     = tm ? tm.getSize()    : _getPref('text_size', 'normal');
-    const curCompact  = tm ? tm.getCompact() : _getPref('compact', false);
-    const accentMeta  = (tm && tm.ACCENT_META) || {};
-    const isLight     = curTheme === 'light';
+    const tm         = MX.ThemeManager;
+    const curTheme   = tm ? tm.getTheme()   : _getPref('theme', 'dark');
+    const curAccent  = tm ? tm.getAccent()  : _getPref('accent', 'cyan');
+    const curSize    = tm ? tm.getSize()    : _getPref('text_size', 'normal');
+    const curCompact = tm ? tm.getCompact() : _getPref('compact', false);
+    const isLight    = curTheme === 'light';
 
-    const themeCards = ['dark','light'].map(t => {
-      const active = curTheme === t;
-      const label  = t === 'dark' ? '🌙 Sombre' : '☀️ Clair';
-      const inner  = t === 'dark'
+    // Mini mockup sidebar+body HTML pour les aperçus thème
+    function _themeMockup(t) {
+      return t === 'dark'
         ? `<div class="stt-theme-preview-wrap">
             <div class="stt-tp-sidebar-dark">
               <div class="stt-tp-logo-dark"></div>
               <div class="stt-tp-nav-active-dark"></div>
-              <div class="stt-tp-nav-dark"></div>
               <div class="stt-tp-nav-dark"></div>
               <div class="stt-tp-nav-dark"></div>
             </div>
@@ -566,7 +563,6 @@
               <div class="stt-tp-nav-active-light"></div>
               <div class="stt-tp-nav-light"></div>
               <div class="stt-tp-nav-light"></div>
-              <div class="stt-tp-nav-light"></div>
             </div>
             <div class="stt-tp-body-light">
               <div class="stt-tp-header-light"></div>
@@ -575,74 +571,98 @@
               <div class="stt-tp-card-light"></div>
             </div>
           </div>`;
-      return `<button class="stt-theme-card ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setTheme('${t}')">
-        <div class="stt-theme-active-badge"><i class="fas fa-check"></i></div>
-        ${inner}
-        <div class="stt-theme-label">${label}</div>
+    }
+
+    // ── Cartes Thème ──
+    const themeCards = [
+      { v:'dark',  icon:'🌙', label:'Sombre' },
+      { v:'light', icon:'☀️', label:'Clair'  },
+    ].map(({ v, icon, label }) => {
+      const active = curTheme === v;
+      return `<button class="app-sel-card app-theme-card ${active ? 'active' : ''}"
+          onclick="MX.Pages.Settings._setTheme('${v}')">
+        <div class="app-check"><i class="fas fa-check"></i></div>
+        ${_themeMockup(v)}
+        <div class="app-theme-footer">
+          <span class="app-theme-icon">${icon}</span>
+          <span class="app-clabel">${label}</span>
+        </div>
       </button>`;
     }).join('');
 
-    const accentKeys  = ['cyan','blue','violet','pink','orange','green'];
+    // ── Cartes Couleur ──
     const accentSwatches = {
       cyan:   isLight ? '#00897B' : '#00F5D4',
       blue:   isLight ? '#2563EB' : '#60A5FA',
       violet: isLight ? '#7C3AED' : '#A78BFA',
       pink:   isLight ? '#DB2777' : '#F472B6',
       orange: isLight ? '#EA580C' : '#FB923C',
-      green:  isLight ? '#16A34A' : '#4ADE80'
+      green:  isLight ? '#16A34A' : '#4ADE80',
     };
-    const accentButtons = accentKeys.map(a => {
-      const meta   = accentMeta[a] || { label: a, swatch: accentSwatches[a] };
+    const accentNames = {
+      cyan:'Cyan', blue:'Bleu', violet:'Violet',
+      pink:'Rose', orange:'Orange', green:'Vert',
+    };
+    const accentCards = Object.keys(accentSwatches).map(a => {
       const active = curAccent === a;
-      return `<button class="stt-accent-btn ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setAccent('${a}')">
-        <div class="stt-accent-swatch" style="background:${accentSwatches[a]}"></div>
-        <span class="stt-accent-label">${meta.label}</span>
+      return `<button class="app-sel-card app-accent-card ${active ? 'active' : ''}"
+          onclick="MX.Pages.Settings._setAccent('${a}')">
+        <div class="app-check"><i class="fas fa-check"></i></div>
+        <div class="app-accent-swatch" style="background:${accentSwatches[a]}"></div>
+        <span class="app-clabel">${accentNames[a]}</span>
       </button>`;
     }).join('');
 
-    const sizeBtns = [
-      { v:'small',  label:'Petite',  ex:'Aa', fs:'11px' },
-      { v:'normal', label:'Normale', ex:'Aa', fs:'13px' },
-      { v:'large',  label:'Grande',  ex:'Aa', fs:'16px' },
-    ].map(s => `<button class="stt-size-btn ${curSize === s.v ? 'active' : ''}" onclick="MX.Pages.Settings._setTextSize('${s.v}')">
-      <span style="font-size:${s.fs};font-weight:700">${s.ex}</span>
-      <span style="font-size:11px">${s.label}</span>
-      <div class="stt-size-check"><i class="fas fa-check"></i></div>
+    // ── Cartes Taille ──
+    const sizeCards = [
+      { v:'small',  label:'Petite',  fs:'18px' },
+      { v:'normal', label:'Normale', fs:'26px' },
+      { v:'large',  label:'Grande',  fs:'33px' },
+    ].map(s => `<button class="app-sel-card app-size-card ${curSize === s.v ? 'active' : ''}"
+        onclick="MX.Pages.Settings._setTextSize('${s.v}')">
+      <div class="app-check"><i class="fas fa-check"></i></div>
+      <span class="app-size-sample" style="font-size:${s.fs}">Aa</span>
+      <span class="app-size-sub">${s.label}</span>
     </button>`).join('');
 
-    const displayBtns = [
-      { v:'false', label:'Confortable', rows:[1,1,1] },
-      { v:'true',  label:'Compact',     rows:[1,1,1,1] },
+    // ── Cartes Affichage ──
+    const displayCards = [
+      { v:false, label:'Confortable', cls:'comfortable', rows:3 },
+      { v:true,  label:'Compact',     cls:'compact',     rows:5 },
     ].map(d => {
-      const isComp = d.v === 'true';
-      const active = String(curCompact) === d.v;
-      const cls    = isComp ? 'stt-display-compact' : 'stt-display-comfortable';
-      return `<button class="stt-display-btn ${active ? 'active' : ''}" onclick="MX.Pages.Settings._setCompactMode(${d.v})">
-        <div class="stt-display-preview ${cls}">
-          ${d.rows.map(() => '<div class="stt-dp-row"></div>').join('')}
+      const active = curCompact === d.v;
+      const rows   = Array(d.rows).fill('<div class="app-dp-row"></div>').join('');
+      return `<button class="app-sel-card app-display-card ${d.cls} ${active ? 'active' : ''}"
+          onclick="MX.Pages.Settings._setCompactMode(${d.v})">
+        <div class="app-check"><i class="fas fa-check"></i></div>
+        <div class="app-display-mockup">${rows}</div>
+        <div class="app-display-footer">
+          <span class="app-clabel">${d.label}</span>
         </div>
-        <div class="stt-display-label">${d.label}</div>
-        <i class="fas fa-check stt-display-check"></i>
       </button>`;
     }).join('');
 
     return `
       <div class="stt-section-head"><i class="fas fa-palette"></i> Apparence</div>
+
       <div class="stt-card">
         <div class="stt-card-title">Thème de l'application</div>
-        <div class="stt-theme-full">${themeCards}</div>
+        <div class="app-theme-grid">${themeCards}</div>
       </div>
+
       <div class="stt-card" style="margin-top:12px">
         <div class="stt-card-title">Couleur principale</div>
-        <div class="stt-accent-grid">${accentButtons}</div>
+        <div class="app-accent-grid">${accentCards}</div>
       </div>
+
       <div class="stt-card" style="margin-top:12px">
         <div class="stt-card-title">Taille du texte</div>
-        <div class="stt-size-grid">${sizeBtns}</div>
+        <div class="app-size-grid">${sizeCards}</div>
       </div>
+
       <div class="stt-card" style="margin-top:12px">
         <div class="stt-card-title">Affichage</div>
-        <div class="stt-display-grid">${displayBtns}</div>
+        <div class="app-display-grid">${displayCards}</div>
       </div>`;
   }
 

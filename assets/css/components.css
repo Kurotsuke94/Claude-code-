@@ -2622,3 +2622,238 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 [data-theme="light"] .stt-display-preview     { background:var(--bg2); border-color:var(--border); }
 [data-theme="light"] .stt-display-comfortable .stt-dp-row,
 [data-theme="light"] .stt-display-compact .stt-dp-row { background:var(--border2); }
+
+/* ══════════════════════════════════════════════
+   APPARENCE — CARTES MOBILES (design system app-)
+   Mobile-first, 100% tactile, iOS / Notion style
+   ══════════════════════════════════════════════ */
+
+/* ── Carte de base sélectionnable ── */
+.app-sel-card {
+  position: relative;
+  border: 2px solid var(--border2);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.02);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color 0.2s ease,
+    background   0.2s ease,
+    box-shadow   0.2s ease,
+    transform    0.15s ease;
+  overflow: hidden;
+  /* Reset browser button defaults */
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  text-align: left;
+}
+.app-sel-card:active { transform: scale(0.965); }
+.app-sel-card:hover:not(.active) {
+  border-color: var(--border3);
+  background: rgba(255,255,255,0.04);
+}
+.app-sel-card.active {
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+  box-shadow: 0 0 0 1px var(--cyan-border), 0 4px 20px rgba(0,0,0,0.18);
+}
+
+/* ── Badge ✓ animé (coin haut-droit) ── */
+.app-check {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--cyan);
+  color: #000;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800;
+  opacity: 0;
+  transform: scale(0.4) rotate(-20deg);
+  transition:
+    opacity 0.2s ease,
+    transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+  z-index: 2;
+  pointer-events: none;
+}
+.app-sel-card.active .app-check {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+/* ── Label commun aux cartes ── */
+.app-clabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: color 0.2s ease;
+  line-height: 1.2;
+}
+.app-sel-card.active .app-clabel { color: var(--cyan); }
+
+/* ── SECTION : THÈME ── */
+.app-theme-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.app-theme-card {
+  display: flex;
+  flex-direction: column;
+}
+/* Aperçu mockup — on hérite de stt-theme-preview-wrap mais on surcharge l'aspect */
+.app-theme-card .stt-theme-preview-wrap {
+  aspect-ratio: 3/2;
+  border-radius: 12px 12px 0 0;
+  flex-shrink: 0;
+}
+.app-theme-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  min-height: 48px;
+  gap: 8px;
+}
+.app-theme-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
+
+/* ── SECTION : COULEURS ── */
+.app-accent-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (min-width: 640px) {
+  .app-accent-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 900px) {
+  .app-accent-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.app-accent-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  min-height: 60px;
+}
+.app-accent-swatch {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.28);
+  transition: transform 0.22s cubic-bezier(0.34,1.56,0.64,1);
+}
+.app-sel-card.active .app-accent-swatch { transform: scale(1.18); }
+
+/* ── SECTION : TAILLE DU TEXTE ── */
+.app-size-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.app-size-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px 10px;
+  min-height: 88px;
+}
+.app-size-sample {
+  font-weight: 800;
+  font-family: var(--ffm);
+  line-height: 1;
+  color: var(--text);
+  transition: color 0.2s ease;
+}
+.app-sel-card.active .app-size-sample { color: var(--cyan); }
+.app-size-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text3);
+  transition: color 0.2s ease;
+  text-align: center;
+}
+.app-sel-card.active .app-size-sub { color: var(--cyan); }
+
+/* ── SECTION : AFFICHAGE ── */
+.app-display-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.app-display-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+/* Maquette UI à l'intérieur de la carte */
+.app-display-mockup {
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 10px 10px 4px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+.app-dp-row {
+  border-radius: 5px;
+  background: var(--bg4);
+  flex-shrink: 0;
+}
+/* Largeurs alternées — simule du contenu texte variable */
+.app-dp-row:nth-child(1) { width: 100%; }
+.app-dp-row:nth-child(2) { width: 80%;  }
+.app-dp-row:nth-child(3) { width: 100%; }
+.app-dp-row:nth-child(4) { width: 65%;  }
+.app-dp-row:nth-child(5) { width: 90%;  }
+/* Espacements selon mode */
+.app-display-card.comfortable .app-dp-row { height: 10px; margin-bottom: 8px; }
+.app-display-card.comfortable .app-dp-row:last-child { margin-bottom: 0; }
+.app-display-card.compact    .app-dp-row { height: 7px;  margin-bottom: 4px; }
+.app-display-card.compact    .app-dp-row:last-child { margin-bottom: 0; }
+.app-display-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+}
+
+/* ── THÈME CLAIR — surcharges app-* ── */
+[data-theme="light"] .app-sel-card {
+  background: rgba(0,0,0,0.01);
+  border-color: var(--border2);
+}
+[data-theme="light"] .app-sel-card:hover:not(.active) {
+  background: rgba(0,0,0,0.03);
+  border-color: var(--border3);
+}
+[data-theme="light"] .app-sel-card.active {
+  background: var(--cyan-dim);
+  border-color: var(--cyan);
+}
+[data-theme="light"] .app-display-mockup {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+[data-theme="light"] .app-dp-row { background: var(--border2); }
+
+/* ── RESPONSIVE AJUSTEMENTS ── */
+@media (max-width: 400px) {
+  .app-accent-grid  { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .app-size-grid    { gap: 8px; }
+  .app-size-card    { padding: 16px 8px; }
+  .app-display-grid { gap: 8px; }
+  .app-theme-grid   { gap: 8px; }
+}
+@media (min-width: 768px) {
+  .app-accent-grid  { grid-template-columns: repeat(3, 1fr); }
+  .app-theme-grid   { gap: 16px; }
+  .app-size-card    { padding: 24px 12px; min-height: 100px; }
+  .app-display-card { padding: 18px; }
+}
