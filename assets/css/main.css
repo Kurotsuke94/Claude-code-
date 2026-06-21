@@ -42,34 +42,62 @@ html, body {
   color-scheme: dark;
 }
 
-/* ── LOADING SCREEN ── */
+/* ── SPLASH SCREEN (premium iOS-style) ── */
 .app-loading {
   position: fixed; inset: 0;
-  background: var(--bg);
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 24px; z-index: 9999;
-  transition: opacity 0.4s;
+  background: linear-gradient(148deg, #1D4ED8 0%, #4338CA 30%, #7C3AED 68%, #6D28D9 100%);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999; overflow: hidden;
+  transition: opacity 0.55s cubic-bezier(0.4,0,0.2,1);
+  will-change: opacity;
 }
 .app-loading.fade-out { opacity: 0; pointer-events: none; }
-.loading-logo {
-  font-family: var(--ffm);
-  font-size: 36px; font-weight: 700;
-  color: var(--cyan);
-  letter-spacing: 0.05em;
+
+/* Ambient glow layers */
+.spl-glow {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 65% 75% at 78% 38%, rgba(192,132,252,0.50) 0%, transparent 65%),
+    radial-gradient(ellipse 45% 55% at 18% 72%, rgba(96,165,250,0.28) 0%, transparent 60%),
+    radial-gradient(ellipse 30% 40% at 55% 20%, rgba(139,92,246,0.20) 0%, transparent 55%);
+  animation: splGlowIn 0.9s ease forwards;
 }
-.loading-dots { display: flex; gap: 8px; }
-.loading-dots span {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--cyan);
-  animation: loadpulse 1.2s infinite ease-in-out;
+@keyframes splGlowIn { from { opacity:0; } to { opacity:1; } }
+
+/* Particles */
+.spl-particles { position:absolute; inset:0; pointer-events:none; }
+.spl-dot {
+  position: absolute; border-radius: 50%; background: #fff;
+  will-change: opacity;
+  animation: splTwinkle var(--dur,2s) var(--del,0s) infinite alternate ease-in-out;
 }
-.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes loadpulse {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
-  40% { transform: scale(1); opacity: 1; }
+@keyframes splTwinkle { from { opacity:var(--a1,.08); } to { opacity:var(--a2,.65); } }
+
+/* Content */
+.spl-content {
+  position: relative; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  animation: splContentIn 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.1s both;
+  will-change: transform,opacity;
+}
+@keyframes splContentIn {
+  from { opacity:0; transform:scale(0.88); }
+  to   { opacity:1; transform:scale(1); }
+}
+
+.spl-logo {
+  width: 132px; height: 132px; object-fit: contain;
+  filter: drop-shadow(0 6px 28px rgba(109,40,217,0.55)) drop-shadow(0 0 56px rgba(139,92,246,0.38));
+}
+
+.spl-name {
+  font-family: -apple-system,'SF Pro Display','Helvetica Neue',sans-serif;
+  font-size: 28px; font-weight: 700; letter-spacing: 0.5px; color: #fff;
+  animation: splNameIn 0.45s ease 0.62s both;
+}
+@keyframes splNameIn {
+  from { opacity:0; transform:translateY(10px); }
+  to   { opacity:1; transform:translateY(0); }
 }
 
 /* ── APP SHELL ── */

@@ -32,13 +32,18 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v47";
+const CACHE  = "maintix-v48";
 const SHELL  = [
   "/",
   "/index.html",
   "/manifest.json",
   "/favicon.ico",
   "/assets/icons/maintix-logo.png",
+  "/assets/icons/icon-72.png",
+  "/assets/icons/icon-96.png",
+  "/assets/icons/icon-128.png",
+  "/assets/icons/icon-144.png",
+  "/assets/icons/icon-152.png",
   "/assets/icons/icon-192.png",
   "/assets/icons/icon-192-maskable.png",
   "/assets/icons/icon-256.png",

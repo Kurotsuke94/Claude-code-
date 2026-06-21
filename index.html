@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0D1117">
+  <meta name="theme-color" content="#4338CA">
   <meta name="color-scheme" content="dark">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -13,17 +13,22 @@
   <title>Maintix</title>
 
   <!-- PWA -->
-  <link rel="manifest" href="/manifest.json?v=50">
+  <link rel="manifest" href="/manifest.json?v=51">
 
-  <!-- Favicons (cache-buster pour forcer le rechargement par le navigateur) -->
-  <link rel="icon" href="/favicon.ico?v=50" sizes="any">
-  <link rel="icon" href="/assets/icons/favicon-16.png?v=50" sizes="16x16" type="image/png">
-  <link rel="icon" href="/assets/icons/favicon-32.png?v=50" sizes="32x32" type="image/png">
-  <link rel="icon" href="/assets/icons/favicon-48.png?v=50" sizes="48x48" type="image/png">
+  <!-- Favicons -->
+  <link rel="icon" href="/favicon.ico?v=51" sizes="any">
+  <link rel="icon" href="/assets/icons/favicon-16.png?v=51" sizes="16x16" type="image/png">
+  <link rel="icon" href="/assets/icons/favicon-32.png?v=51" sizes="32x32" type="image/png">
+  <link rel="icon" href="/assets/icons/favicon-48.png?v=51" sizes="48x48" type="image/png">
 
-  <!-- Apple Touch Icon (180×180 — iPhone / iPad home screen) -->
-  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png?v=50">
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
+  <!-- Apple Touch Icon (180×180 — iPhone / iPad écran d'accueil) -->
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png?v=51">
+  <link rel="apple-touch-icon" sizes="152x152" href="/assets/icons/icon-152.png?v=51">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png?v=51">
+
+  <!-- PWA icons supplémentaires -->
+  <link rel="icon" href="/assets/icons/icon-192.png?v=51" sizes="192x192" type="image/png">
+  <link rel="icon" href="/assets/icons/icon-512.png?v=51" sizes="512x512" type="image/png">
 
   <!-- Fonts (Google Fonts avec fallback système si bloqué) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,11 +48,27 @@
   <!-- ── INDUSTRIAL BACKGROUND ── -->
   <div id="mx-bg" aria-hidden="true"></div>
 
-  <!-- ── LOADING SCREEN ── -->
+  <!-- ── SPLASH SCREEN ── -->
   <div id="app-loading" class="app-loading">
-    <div class="loading-logo">MX</div>
-    <div class="loading-dots"><span></span><span></span><span></span></div>
+    <div class="spl-glow" aria-hidden="true"></div>
+    <div class="spl-particles" id="spl-particles" aria-hidden="true"></div>
+    <div class="spl-content">
+      <img src="/assets/icons/maintix-logo.png" alt="Maintix" class="spl-logo">
+      <div class="spl-name">Maintix</div>
+    </div>
   </div>
+  <!-- Particle init — runs immediately, GPU-only, no jank -->
+  <script>(function(){
+    var p=document.getElementById('spl-particles');
+    if(!p)return;
+    for(var i=0;i<48;i++){
+      var d=document.createElement('div');
+      d.className='spl-dot';
+      var sz=(Math.random()*2.2+0.6).toFixed(1);
+      d.style.cssText='left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;width:'+sz+'px;height:'+sz+'px;--a1:'+((Math.random()*0.15+0.04).toFixed(2))+';--a2:'+((Math.random()*0.55+0.25).toFixed(2))+';--dur:'+((Math.random()*2.8+1.4).toFixed(1))+'s;--del:'+((Math.random()*3.5).toFixed(1))+'s';
+      p.appendChild(d);
+    }
+  })();</script>
 
   <!-- ── APP SHELL ── -->
   <div id="app-shell" class="app-shell hidden">
@@ -159,27 +180,27 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 
   <!-- ── APP SCRIPTS ── -->
-  <script src="/assets/js/firebase-config.js?v=50"></script>
-  <script src="/assets/js/utils/helpers.js?v=50"></script>
-  <script src="/assets/js/utils/uuid.js?v=50"></script>
-  <script src="/assets/js/db.js?v=50"></script>
-  <script src="/assets/js/auth.js?v=50"></script>
+  <script src="/assets/js/firebase-config.js?v=51"></script>
+  <script src="/assets/js/utils/helpers.js?v=51"></script>
+  <script src="/assets/js/utils/uuid.js?v=51"></script>
+  <script src="/assets/js/db.js?v=51"></script>
+  <script src="/assets/js/auth.js?v=51"></script>
   <!-- Widgets -->
-  <script src="/assets/js/widgets/task-row.js?v=50"></script>
-  <script src="/assets/js/widgets/user-badge.js?v=50"></script>
-  <script src="/assets/js/widgets/progress-widget.js?v=50"></script>
-  <script src="/assets/js/widgets/slot-card.js?v=50"></script>
-  <script src="/assets/js/widgets/global-search.js?v=50"></script>
+  <script src="/assets/js/widgets/task-row.js?v=51"></script>
+  <script src="/assets/js/widgets/user-badge.js?v=51"></script>
+  <script src="/assets/js/widgets/progress-widget.js?v=51"></script>
+  <script src="/assets/js/widgets/slot-card.js?v=51"></script>
+  <script src="/assets/js/widgets/global-search.js?v=51"></script>
   <!-- Pages -->
-  <script src="/assets/js/pages/home.js?v=50"></script>
-  <script src="/assets/js/pages/checklist.js?v=50"></script>
-  <script src="/assets/js/pages/messages.js?v=50"></script>
-  <script src="/assets/js/pages/orders.js?v=50"></script>
-  <script src="/assets/js/pages/admin.js?v=50"></script>
-  <script src="/assets/js/pages/resp-planning.js?v=50"></script>
-  <script src="/assets/js/pages/rewards.js?v=50"></script>
-  <script src="/assets/js/pages/minigames.js?v=50"></script>
-  <script src="/assets/js/app.js?v=50"></script>
+  <script src="/assets/js/pages/home.js?v=51"></script>
+  <script src="/assets/js/pages/checklist.js?v=51"></script>
+  <script src="/assets/js/pages/messages.js?v=51"></script>
+  <script src="/assets/js/pages/orders.js?v=51"></script>
+  <script src="/assets/js/pages/admin.js?v=51"></script>
+  <script src="/assets/js/pages/resp-planning.js?v=51"></script>
+  <script src="/assets/js/pages/rewards.js?v=51"></script>
+  <script src="/assets/js/pages/minigames.js?v=51"></script>
+  <script src="/assets/js/app.js?v=51"></script>
 
 </body>
 </html>
