@@ -16,12 +16,11 @@
   }
 
   // ── Bible & Games constants (used in new admin tabs) ──
-  const BIBLE_ROLES  = ['Lecteur', 'Contributeur', 'Validateur', 'Administrateur'];
+  const BIBLE_ROLES  = ['Technicien', 'Responsable', 'Administrateur'];
   const BIBLE_PERM_L = ['Lecture', 'Écriture', 'Modification', 'Suppression', 'Validation'];
   const BIBLE_PERM_D = {
-    Lecteur:       [true,  false, false, false, false],
-    Contributeur:  [true,  true,  true,  false, false],
-    Validateur:    [true,  true,  true,  true,  true ],
+    Technicien:    [true,  true,  true,  false, false],
+    Responsable:   [true,  true,  true,  true,  true ],
     Administrateur:[true,  true,  true,  true,  true ]
   };
   const GAMES_META = [
