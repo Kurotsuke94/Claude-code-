@@ -131,78 +131,152 @@
         .reduce((s, r) => s + (r.consumption || 0), 0);
     }
 
-    let kpi = '';
+    // ── KPI cards ──
+    let kpiHtml = '';
     Object.entries(MT).forEach(([type, meta]) => {
-      const val  = _sumConso(type, today);
-      const vY   = _sumConso(type, yest);
-      const isW  = type === 'eau_froide' || type === 'eau_chaude';
+      const val   = _sumConso(type, today);
+      const vY    = _sumConso(type, yest);
+      const isW   = type === 'eau_froide' || type === 'eau_chaude';
       const ratio = cli > 0 && val > 0 ? (isW ? val * 1000 / cli : val / cli) : null;
       const rUnit = isW ? 'L/client' : `${meta.unit}/client`;
-
-      let trend = '';
+      let deltaHtml = '';
       if (val > 0 && vY > 0) {
         const pct = Math.round((val - vY) / vY * 100);
-        const cls = pct > 15 ? 'cso-up' : pct < -5 ? 'cso-dn' : 'cso-ok';
-        trend = `<span class="${cls}">${pct > 0 ? '↑' : '↓'} ${Math.abs(pct)}% vs hier</span>`;
+        const cls = pct > 15 ? 'up' : pct < -5 ? 'dn' : 'eq';
+        deltaHtml = `<div class="cso-kpi-delta ${cls}">${pct > 0 ? '▲' : '▼'}&thinsp;${Math.abs(pct)}%&thinsp;vs&thinsp;hier</div>`;
       }
-
-      kpi += `<div class="cso-kpi" style="--kc:${meta.color};--kd:${meta.dim}">
-        <div class="cso-kpi-head"><span class="cso-kpi-ico">${meta.icon}</span><span>${meta.label}</span></div>
-        <div class="cso-kpi-val">${val > 0 ? _fmt(val) : '—'} <span class="cso-kpi-u">${meta.unit}</span></div>
-        <div class="cso-kpi-foot">${trend}${ratio !== null ? `<span class="cso-ratio-badge">${_fmt(ratio, isW?0:2)} ${rUnit}</span>` : ''}</div>
+      kpiHtml += `<div class="cso-kpi-card" style="--kc:${meta.color};--kd:${meta.dim}">
+        <div class="cso-kpi-bar"></div>
+        <div class="cso-kpi-hd">
+          <span class="cso-kpi-emoji">${meta.icon}</span>
+          <span class="cso-kpi-nm">${meta.label}</span>
+        </div>
+        <div class="cso-kpi-v">${val > 0 ? _fmt(val) : '—'}<span class="cso-kpi-u">&thinsp;${meta.unit}</span></div>
+        ${deltaHtml}
+        <div class="cso-kpi-r">${ratio !== null ? `${_fmt(ratio, isW ? 0 : 2)}&thinsp;${rUnit}` : '<span style="color:var(--text3)">—</span>'}</div>
       </div>`;
     });
 
+    // ── Mini 7-day bar chart ──
+    const days7 = Array.from({ length: 7 }, (_, i) => _daysAgo(6 - i));
+    const DOW   = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+    let chartHtml = '';
+    const firstEntry = Object.entries(MT).find(([type]) => {
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      return ids.length && days7.some(ds => _readings.some(r => ids.includes(r.meterId) && r.date === ds && r.consumption > 0));
+    });
+    if (firstEntry) {
+      const [type, meta] = firstEntry;
+      const ids  = _meters.filter(m => m.type === type).map(m => m.id);
+      const vals = days7.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
+      const maxV = Math.max(...vals, 0.001);
+      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
+      chartHtml = `<div class="cso-dash-chart">
+        <div class="cso-dash-chart-hd">
+          <span>${meta.icon} ${meta.label} — 7 derniers jours</span>
+          <span class="cso-dash-chart-tot">Total : <b>${_fmt(vals.reduce((a,b)=>a+b,0))} ${esc(unit)}</b></span>
+        </div>
+        <div class="cso-bars7">
+          ${days7.map((ds, i) => {
+            const pct = vals[i] > 0 ? Math.max(vals[i] / maxV * 100, 5) : 0;
+            const lbl = DOW[new Date(ds + 'T12:00').getDay()];
+            const isT = ds === today;
+            return `<div class="cso-bar7-col">
+              <div class="cso-bar7" style="height:${pct}%;background:${meta.color};opacity:${pct ? (isT ? 1 : 0.5) : 0.1}${isT ? ';box-shadow:0 0 8px '+meta.color+'80' : ''}"></div>
+              <div class="cso-bar7-lbl${isT ? ' today' : ''}">${lbl}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+
     return `<div class="cso-inner">
       <div class="cso-cli-bar">
-        <span class="cso-cli-ico">👥</span>
-        <div>
+        <div class="cso-cli-ico">👥</div>
+        <div class="cso-cli-info">
           <div class="cso-cli-val">${cli > 0 ? cli : '—'}</div>
-          <div class="cso-cli-lbl">Clients présents — ${_dateLbl(today)}</div>
+          <div class="cso-cli-lbl">Clients présents · ${_dateLbl(today)}</div>
         </div>
-        <button class="cso-edit-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})"><i class="fas fa-pen"></i></button>
-      </div>
-      <div class="cso-sec-ttl">Consommations — ${_dateLbl(today)}</div>
-      <div class="cso-kpi-grid">${kpi}</div>
-      <div style="margin-top:16px">
-        <button class="primary-btn cso-fab" onclick="MX.Pages.Conso._newReading(null)">
-          <i class="fas fa-camera"></i> Nouveau relevé
+        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})">
+          <i class="fas fa-pen"></i> Modifier
         </button>
       </div>
+      <div class="cso-kpi-grid">${kpiHtml}</div>
+      ${chartHtml}
+      <button class="cso-fab-btn" onclick="MX.Pages.Conso._newReading(null)">
+        <i class="fas fa-camera"></i> Nouveau relevé
+      </button>
     </div>`;
   }
 
   // ── TAB: COMPTEURS ──
   function _tCompteurs() {
     let html = `<div class="cso-inner">
-      <div class="cso-bar-hdr">
-        <span class="cso-sec-ttl" style="margin:0">${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</span>
-        <button class="primary-btn" style="width:auto;padding:8px 16px" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Ajouter</button>
+      <div class="cso-ph">
+        <div class="cso-ph-ttl"><i class="fas fa-gauge-high"></i> ${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</div>
+        <button class="cso-add-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>
       </div>`;
 
     if (!_meters.length) {
-      html += _empty('fa-gauge-high', 'Aucun compteur configuré.<br>Ajoutez votre premier compteur.');
+      html += `<div class="cso-empty-st">
+        <div class="cso-empty-ico"><i class="fas fa-gauge-high"></i></div>
+        <div class="cso-empty-ttl">Aucun compteur configuré</div>
+        <div class="cso-empty-sub">Ajoutez votre premier compteur pour commencer à enregistrer vos consommations.</div>
+        <button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Ajouter un compteur</button>
+      </div>`;
     } else {
       Object.entries(MT).forEach(([type, meta]) => {
         const list = _meters.filter(m => m.type === type);
         if (!list.length) return;
-        html += `<div class="cso-group-ttl">${meta.icon} ${meta.label}</div>`;
+        html += `<div class="cso-type-sec">
+          <div class="cso-type-hd">${meta.icon} ${meta.label}</div>
+          <div class="cso-mcard-grid">`;
+
         list.forEach(m => {
-          const lr = _readings.find(r => r.meterId === m.id);
-          html += `<div class="cso-meter-card">
-            <div class="cso-mico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
-            <div class="cso-minfo">
-              <div class="cso-mname">${esc(m.name)}</div>
-              <div class="cso-mmeta">${esc(m.location || '')}${m.location ? ' · ' : ''}${esc(m.unit || meta.unit)}</div>
-              <div class="cso-mlast">Dernier: <b>${lr ? _fmt(lr.index, 1) + ' ' + esc(m.unit || meta.unit) : '—'}</b>${lr ? ' · ' + _dateLbl(lr.date) + ' · ' + esc(lr.technicienName || '') : ''}</div>
+          const mReadings = _readings.filter(r => r.meterId === m.id);
+          const lr   = mReadings[0];
+          const unit = m.unit || meta.unit;
+          const deltaHtml = (lr && lr.consumption != null)
+            ? `<div class="cso-mc-delta"><i class="fas fa-arrow-trend-up"></i> +${_fmt(lr.consumption)} ${esc(unit)} relevé précédent</div>`
+            : '';
+
+          html += `<div class="cso-mcard">
+            <div class="cso-mcard-top" style="background:linear-gradient(135deg,${meta.color}22 0%,${meta.color}0a 100%);border-bottom:2px solid ${meta.color}55">
+              <span class="cso-mcard-emoji">${meta.icon}</span>
+              <span class="cso-mcard-type" style="color:${meta.color}">${meta.label}</span>
+              ${m.location ? `<span class="cso-mcard-loc"><i class="fas fa-location-dot"></i> ${esc(m.location)}</span>` : ''}
             </div>
-            <div class="cso-mbtns">
-              <button class="cso-ibtn" title="Relevé" onclick="MX.Pages.Conso._newReading('${m.id}')"><i class="fas fa-camera"></i></button>
-              <button class="cso-ibtn" title="Modifier" onclick="MX.Pages.Conso._meterForm('${m.id}')"><i class="fas fa-pen"></i></button>
-              <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>
+            <div class="cso-mcard-body">
+              <div class="cso-mcard-name">${esc(m.name)}</div>
+              <div class="cso-mcard-idx-wrap">
+                <div class="cso-mcard-idx-lbl">Index actuel</div>
+                <div class="cso-mcard-idx-val">${lr ? _fmt(lr.index, 1) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
+              </div>
+              <div class="cso-mcard-last">
+                ${lr
+                  ? `<i class="fas fa-clock"></i> ${_dateLbl(lr.date)}${lr.technicienName ? ` · <b>${esc(lr.technicienName)}</b>` : ''}`
+                  : `<span style="color:var(--text3)"><i class="fas fa-ban"></i> Aucun relevé</span>`}
+              </div>
+              ${deltaHtml}
+            </div>
+            <div class="cso-mcard-acts">
+              <button class="cso-mact primary" onclick="MX.Pages.Conso._newReading('${m.id}')">
+                <i class="fas fa-camera"></i> Relevé
+              </button>
+              <button class="cso-mact" onclick="MX.Pages.Conso._meterHistory('${m.id}')">
+                <i class="fas fa-chart-line"></i> Historique
+              </button>
+              <button class="cso-mact" onclick="MX.Pages.Conso._meterForm('${m.id}')">
+                <i class="fas fa-pen"></i>
+              </button>
+              <button class="cso-mact del" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')">
+                <i class="fas fa-trash"></i>
+              </button>
             </div>
           </div>`;
         });
+
+        html += `</div></div>`;
       });
     }
     return html + '</div>';
@@ -213,13 +287,17 @@
     const nowMs = Date.now();
     const exp7  = 7 * 86400000;
     let html = `<div class="cso-inner">
-      <div class="cso-bar-hdr">
-        <span class="cso-sec-ttl" style="margin:0">${_readings.length} relevé${_readings.length !== 1 ? 's' : ''}</span>
-        <button class="primary-btn" style="width:auto;padding:8px 16px" onclick="MX.Pages.Conso._newReading(null)"><i class="fas fa-camera"></i> Nouveau relevé</button>
+      <div class="cso-ph">
+        <div class="cso-ph-ttl"><i class="fas fa-camera"></i> ${_readings.length} relevé${_readings.length !== 1 ? 's' : ''}</div>
+        <button class="cso-add-btn" onclick="MX.Pages.Conso._newReading(null)"><i class="fas fa-camera"></i> Nouveau relevé</button>
       </div>`;
 
     if (!_readings.length) {
-      html += _empty('fa-camera', 'Aucun relevé enregistré.<br>Prenez votre premier relevé.');
+      html += `<div class="cso-empty-st">
+        <div class="cso-empty-ico"><i class="fas fa-camera"></i></div>
+        <div class="cso-empty-ttl">Aucun relevé enregistré</div>
+        <div class="cso-empty-sub">Prenez votre premier relevé pour commencer le suivi.</div>
+      </div>`;
     } else {
       let lastDate = null;
       _readings.forEach(r => {
@@ -261,11 +339,15 @@
       <div class="cso-cli-bar" style="margin-bottom:20px">
         <span class="cso-cli-ico">👥</span>
         <div><div class="cso-cli-val">${cli > 0 ? cli : '—'}</div><div class="cso-cli-lbl">Clients présents — ${_dateLbl(today)}</div></div>
-        <button class="cso-edit-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})"><i class="fas fa-pen"></i></button>
+        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})"><i class="fas fa-pen"></i> Modifier</button>
       </div>`;
 
     if (cli === 0) {
-      html += _empty('fa-users-slash', 'Saisissez le nombre de clients<br>pour calculer les ratios.');
+      html += `<div class="cso-empty-st">
+        <div class="cso-empty-ico"><i class="fas fa-users-slash"></i></div>
+        <div class="cso-empty-ttl">Nombre de clients manquant</div>
+        <div class="cso-empty-sub">Saisissez le nombre de clients présents pour calculer les ratios.</div>
+      </div>`;
     } else {
       html += `<div class="cso-sec-ttl">Ratios du jour</div>`;
       Object.entries(MT).forEach(([type, meta]) => {
@@ -276,7 +358,6 @@
         const isW  = type === 'eau_froide' || type === 'eau_chaude';
         const rv   = isW ? conso * 1000 / cli : conso / cli;
         const rU   = isW ? 'L/client' : `${meta.unit}/client`;
-        // 7-day avg
         const vals = [];
         for (let i = 1; i <= 7; i++) {
           const ds = _daysAgo(i), c = _clients[ds] || 0;
@@ -351,13 +432,26 @@
     const today = _today();
     const cli   = _clients[today] || 0;
     const todayReadings = _readings.filter(r => r.date === today);
-    let html = `<div class="cso-inner"><div class="cso-sec-ttl">Détection automatique des anomalies</div>`;
-    let hasAny = false;
+
+    let html = `<div class="cso-inner">
+      <div class="cso-ph">
+        <div class="cso-ph-ttl"><i class="fas fa-bell"></i> Alertes automatiques</div>
+      </div>`;
 
     if (!todayReadings.length) {
-      html += _empty('fa-bell-slash', 'Aucun relevé aujourd\'hui.<br>Effectuez des relevés pour activer la détection.');
+      html += `<div class="cso-empty-st">
+        <div class="cso-empty-ico"><i class="fas fa-bell-slash"></i></div>
+        <div class="cso-empty-ttl">Aucun relevé aujourd'hui</div>
+        <div class="cso-empty-sub">Effectuez des relevés pour activer la détection des anomalies.</div>
+        <button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._newReading(null)"><i class="fas fa-camera"></i> Nouveau relevé</button>
+      </div>`;
     } else if (!cli) {
-      html += _empty('fa-users-slash', 'Saisissez le nombre de clients<br>pour activer les alertes.');
+      html += `<div class="cso-empty-st">
+        <div class="cso-empty-ico"><i class="fas fa-users-slash"></i></div>
+        <div class="cso-empty-ttl">Nombre de clients manquant</div>
+        <div class="cso-empty-sub">Saisissez le nombre de clients présents pour activer les alertes de ratio.</div>
+        <button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._editCli('${today}',0)"><i class="fas fa-pen"></i> Saisir les clients</button>
+      </div>`;
     } else {
       const SUGG = {
         eau_froide:  ['Vérifier les WC', 'Contrôler les réseaux', 'Détecter les fuites'],
@@ -365,17 +459,21 @@
         electricite: ['Vérifier la climatisation', 'Contrôler l\'éclairage'],
         gaz:         ['Vérifier la chaudière', 'Contrôler les brûleurs'],
       };
+
+      let hasAny = false;
+      let alertsHtml = '';
+      let okHtml = '';
+
       Object.entries(MT).forEach(([type, meta]) => {
         const ids = _meters.filter(m => m.type === type).map(m => m.id);
         if (!ids.length) return;
         const conso = todayReadings.filter(r => ids.includes(r.meterId)).reduce((s, r) => s + (r.consumption || 0), 0);
         if (!conso) return;
         hasAny = true;
-        const isW = type === 'eau_froide' || type === 'eau_chaude';
+        const isW    = type === 'eau_froide' || type === 'eau_chaude';
         const todayR = isW ? conso * 1000 / cli : conso / cli;
-        const rU = isW ? 'L/client' : `${meta.unit}/client`;
-        // 7-day avg
-        const avgs = [];
+        const rU     = isW ? 'L/client' : `${meta.unit}/client`;
+        const avgs   = [];
         for (let i = 1; i <= 7; i++) {
           const ds = _daysAgo(i), c = _clients[ds] || 0;
           if (!c) continue;
@@ -385,21 +483,63 @@
         const avg7 = avgs.length ? avgs.reduce((a, b) => a + b) / avgs.length : 0;
         const dev  = avg7 > 0 ? (todayR - avg7) / avg7 * 100 : 0;
         const lvl  = Math.abs(dev) < 20 ? 'ok' : Math.abs(dev) < 60 ? 'warn' : 'crit';
-        const badge = lvl === 'ok' ? '✅ Normal' : `🚨 ${dev > 0 ? '+' : ''}${Math.round(dev)}%`;
 
-        html += `<div class="cso-alert-card ${lvl}">
-          <div class="cso-alert-top">
-            <span class="cso-alert-pill ${lvl}">${badge}</span>
-            <span class="cso-alert-name">${meta.icon} ${meta.label}</span>
-          </div>
-          <div class="cso-alert-vals">
-            <div><div class="cso-alert-vl">Aujourd'hui</div><div class="cso-alert-vv">${_fmt(todayR, isW ? 0 : 2)} ${rU}</div></div>
-            ${avg7 > 0 ? `<div><div class="cso-alert-vl">Moy. 7j</div><div class="cso-alert-vv">${_fmt(avg7, isW ? 0 : 2)} ${rU}</div></div>` : ''}
-          </div>
-          ${lvl !== 'ok' ? `<div class="cso-sugg">${(SUGG[type] || []).map(s => `<span>• ${s}</span>`).join('')}</div>` : ''}
-        </div>`;
+        if (lvl !== 'ok') {
+          const pctStr = `${dev > 0 ? '+' : ''}${Math.round(dev)}%`;
+          alertsHtml += `<div class="cso-av2 ${lvl}">
+            <div class="cso-av2-left">
+              <div class="cso-av2-badge ${lvl}">${lvl === 'crit' ? '🚨 Critique' : '⚠️ Avertissement'}</div>
+              <div class="cso-av2-pct ${lvl}">${pctStr}</div>
+              <div class="cso-av2-pct-lbl">par rapport à la moyenne</div>
+            </div>
+            <div class="cso-av2-right">
+              <div class="cso-av2-name">${meta.icon} ${meta.label}</div>
+              <div class="cso-av2-vals">
+                <div class="cso-av2-val-item">
+                  <div class="cso-av2-val-lbl">Aujourd'hui</div>
+                  <div class="cso-av2-val-n">${_fmt(todayR, isW ? 0 : 2)} <span>${rU}</span></div>
+                </div>
+                ${avg7 > 0 ? `<div class="cso-av2-val-item">
+                  <div class="cso-av2-val-lbl">Moy. 7 jours</div>
+                  <div class="cso-av2-val-n">${_fmt(avg7, isW ? 0 : 2)} <span>${rU}</span></div>
+                </div>` : ''}
+              </div>
+              ${(SUGG[type] || []).length ? `<div class="cso-av2-sugg">
+                ${(SUGG[type] || []).map(s => `<span class="cso-av2-pill">${s}</span>`).join('')}
+              </div>` : ''}
+            </div>
+          </div>`;
+        } else {
+          okHtml += `<div class="cso-av2 ok">
+            <div class="cso-av2-ok-ico">✅</div>
+            <div class="cso-av2-right">
+              <div class="cso-av2-name">${meta.icon} ${meta.label}</div>
+              <div class="cso-av2-ok-desc">${_fmt(todayR, isW ? 0 : 2)} ${rU}${avg7 > 0 ? ` · Moy. 7j : ${_fmt(avg7, isW ? 0 : 2)} ${rU}` : ''}</div>
+            </div>
+          </div>`;
+        }
       });
-      if (!hasAny) html += _empty('fa-bell-slash', 'Aucune consommation relevée aujourd\'hui.');
+
+      if (!hasAny) {
+        html += `<div class="cso-empty-st">
+          <div class="cso-empty-ico"><i class="fas fa-bell-slash"></i></div>
+          <div class="cso-empty-ttl">Aucune consommation relevée</div>
+          <div class="cso-empty-sub">Les alertes s'activent dès que des relevés sont disponibles.</div>
+        </div>`;
+      } else {
+        if (alertsHtml) {
+          html += `<div class="cso-alert-sec">
+            <div class="cso-alert-sec-ttl">🚨 Anomalies détectées</div>
+            ${alertsHtml}
+          </div>`;
+        }
+        if (okHtml) {
+          html += `<div class="cso-alert-sec">
+            <div class="cso-alert-sec-ttl">✅ Consommations normales</div>
+            ${okHtml}
+          </div>`;
+        }
+      }
     }
     return html + '</div>';
   }
@@ -409,7 +549,9 @@
     const today = _today();
     const from  = _daysAgo(30);
     return `<div class="cso-inner">
-      <div class="cso-sec-ttl">Exporter les données</div>
+      <div class="cso-ph">
+        <div class="cso-ph-ttl"><i class="fas fa-file-export"></i> Exporter les données</div>
+      </div>
       <div class="cso-export-form">
         <label class="cso-exp-lbl">Période</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -526,6 +668,36 @@
     });
   }
 
+  function _meterHistory(id) {
+    const m = _meters.find(x => x.id === id);
+    if (!m) return;
+    const meta = MT[m.type] || MT.eau_froide;
+    const unit = m.unit || meta.unit;
+    const mReadings = _readings.filter(r => r.meterId === id).slice(0, 30);
+    let rows = '';
+    if (!mReadings.length) {
+      rows = '<div style="text-align:center;color:var(--text3);padding:28px 0">Aucun relevé enregistré</div>';
+    } else {
+      mReadings.forEach(r => {
+        const d    = _tsDate(r.createdAt);
+        const time = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+        rows += `<div class="cso-hist-row">
+          <div class="cso-hist-date">${_dateLbl(r.date)}<span class="cso-hist-time">${time}</span></div>
+          <div class="cso-hist-idx">${_fmt(r.index, 1)}<span class="cso-hist-u"> ${esc(unit)}</span></div>
+          <div class="cso-hist-conso">${r.consumption != null ? `+${_fmt(r.consumption)}` : '—'}</div>
+          <div class="cso-hist-tech">${esc(r.technicienName || '')}</div>
+        </div>`;
+      });
+    }
+    MX.showModal({
+      title: `${meta.icon} ${esc(m.name)}`,
+      sub: `Historique${m.location ? ' · ' + esc(m.location) : ''} · ${mReadings.length} relevés`,
+      body: `<div class="cso-hist-hdr"><span>Date</span><span>Index</span><span>Conso.</span><span>Technicien</span></div>
+             <div class="cso-hist-list">${rows}</div>`,
+      actions: [{ label: 'Fermer', cls: 'cancel' }]
+    });
+  }
+
   // ── NEW READING WORKFLOW ──
   function _newReading(preId) {
     _photoB64 = null;
@@ -591,13 +763,13 @@
   }
 
   async function _saveReading() {
-    const meterId = document.getElementById('cso-rm')?.value;
-    const dateStr = document.getElementById('cso-rd')?.value;
+    const meterId  = document.getElementById('cso-rm')?.value;
+    const dateStr  = document.getElementById('cso-rd')?.value;
     const indexRaw = document.getElementById('cso-ri')?.value;
-    const index = parseFloat(indexRaw);
+    const index    = parseFloat(indexRaw);
 
-    if (!meterId)          { MX.toast('Sélectionnez un compteur', true); return; }
-    if (!dateStr)          { MX.toast('Sélectionnez une date', true); return; }
+    if (!meterId)               { MX.toast('Sélectionnez un compteur', true); return; }
+    if (!dateStr)               { MX.toast('Sélectionnez une date', true); return; }
     if (!indexRaw || isNaN(index)) { MX.toast('Saisissez l\'index', true); return; }
 
     const m = _meters.find(x => x.id === meterId);
@@ -630,10 +802,10 @@
   }
 
   function _getRows() {
-    const from = document.getElementById('cso-ef')?.value;
-    const to   = document.getElementById('cso-et')?.value;
+    const from  = document.getElementById('cso-ef')?.value;
+    const to    = document.getElementById('cso-et')?.value;
     const allCk = document.getElementById('cso-eall')?.checked;
-    const ids  = allCk ? _meters.map(m => m.id) : Array.from(document.querySelectorAll('.cso-mcb:checked')).map(x => x.value);
+    const ids   = allCk ? _meters.map(m => m.id) : Array.from(document.querySelectorAll('.cso-mcb:checked')).map(x => x.value);
     return _readings.filter(r => ids.includes(r.meterId) && (!from || r.date >= from) && (!to || r.date <= to));
   }
 
@@ -695,7 +867,7 @@
   window.MX.Pages.Conso = {
     render,
     _tab, _editCli, _meterForm, _delMeter, _delReading,
-    _newReading, _onPhoto, _showPhoto,
+    _newReading, _onPhoto, _showPhoto, _meterHistory,
     _allMeters, _csv, _pdf,
   };
 })();
