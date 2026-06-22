@@ -4585,3 +4585,106 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   align-items: center;
   gap: 6px;
 }
+
+/* ── DATE NAV (Compteurs tab) ── */
+.cso-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.cso-date-btn {
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg1);
+  color: var(--text2);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.cso-date-btn:hover:not(:disabled) { background: var(--purple); color: #fff; border-color: var(--purple); }
+.cso-date-btn:disabled { opacity: 0.35; cursor: default; }
+.cso-date-inp {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text1);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--ffm);
+  text-align: center;
+  cursor: pointer;
+  outline: none;
+}
+.cso-date-inp::-webkit-calendar-picker-indicator { cursor: pointer; filter: invert(var(--icon-inv, 0)); }
+.cso-date-today-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--purple);
+  background: transparent;
+  color: var(--purple);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.cso-date-today-btn:hover { background: var(--purple); color: #fff; }
+
+/* ── CLIENT HISTORY ── */
+.cso-cli-hist {
+  margin-top: 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.cso-cli-hist-ttl {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text3);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cso-cli-hist-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.cso-cli-hist-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+  font-size: 13px;
+}
+.cso-cli-hist-row:last-child { border-bottom: none; }
+.cso-cli-hist-row:hover { background: var(--bg2); }
+.cso-cli-hist-row.active {
+  background: rgba(124,58,237,0.08);
+  border-left: 3px solid var(--purple);
+}
+.cso-cli-hist-date {
+  font-family: var(--ffm);
+  font-weight: 600;
+  color: var(--text1);
+}
+.cso-cli-hist-count {
+  color: var(--text2);
+  font-weight: 500;
+}

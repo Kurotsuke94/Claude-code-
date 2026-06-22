@@ -2,13 +2,14 @@
   'use strict';
 
   // ── STATE ──
-  let _curTab   = 'dashboard';
-  let _meters   = [];
-  let _readings = [];
-  let _clients  = {};
-  let _loaded   = false;
-  let _unsubCso = {};
-  let _photoB64 = null;
+  let _curTab     = 'dashboard';
+  let _csoSelDate = ''; // '' = today; set to 'YYYY-MM-DD' when browsing a past date
+  let _meters     = [];
+  let _readings   = [];
+  let _clients    = {};
+  let _loaded     = false;
+  let _unsubCso   = {};
+  let _photoB64   = null;
 
   // ── CONSTANTS ──
   const FV = firebase.firestore.FieldValue;
@@ -130,6 +131,30 @@
     }
   }
 
+  // ── DATE NAV (Compteurs tab) ──
+  function _csoDateSet(ds) {
+    const today = _today();
+    if (!ds || ds > today) return;
+    _csoSelDate = ds === today ? '' : ds;
+    if (_curTab === 'compteurs') _rerender();
+  }
+  function _csoDatePrev() {
+    const base = _csoSelDate || _today();
+    const d = new Date(base + 'T12:00');
+    d.setDate(d.getDate() - 1);
+    _csoSelDate = d.toISOString().slice(0, 10);
+    _rerender();
+  }
+  function _csoDateNext() {
+    if (!_csoSelDate) return;
+    const today = _today();
+    const d = new Date(_csoSelDate + 'T12:00');
+    d.setDate(d.getDate() + 1);
+    const next = d.toISOString().slice(0, 10);
+    _csoSelDate = next >= today ? '' : next;
+    _rerender();
+  }
+
   // ── TAB: DASHBOARD ──
   function _tDashboard() {
     const today = _today();
@@ -222,18 +247,35 @@
 
   // ── TAB: COMPTEURS & RATIOS ──
   function _tCompteurs() {
-    const today = _today();
-    const cli   = _clients[today] || 0;
+    const today   = _today();
+    const selDate = _csoSelDate || today;
+    const isToday = selDate === today;
+    const cli     = _clients[selDate] || 0;
+
+    // Compute next/prev dates
+    const prevDs = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+    const nextDs = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() + 1); const n = d.toISOString().slice(0, 10); return n <= today ? n : null; })();
 
     let html = `<div class="cso-inner">
+      <div class="cso-date-nav">
+        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDatePrev()" title="${_dateLbl(prevDs)}">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+        <input type="date" class="cso-date-inp" value="${selDate}" max="${today}"
+               onchange="MX.Pages.Conso._csoDateSet(this.value)">
+        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDateNext()"${!nextDs ? ' disabled' : ''} title="${nextDs ? _dateLbl(nextDs) : ''}">
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        ${!isToday ? `<button class="cso-date-today-btn" onclick="MX.Pages.Conso._csoDateSet('${today}')">Aujourd'hui</button>` : ''}
+      </div>
       <div class="cso-cli-bar">
         <div class="cso-cli-ico">👥</div>
         <div class="cso-cli-info">
           <div class="cso-cli-val">${cli > 0 ? cli : '—'}</div>
-          <div class="cso-cli-lbl">Clients présents · ${_dateLbl(today)}</div>
+          <div class="cso-cli-lbl">Clients présents · ${_dateLbl(selDate)}</div>
         </div>
-        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})">
-          <i class="fas fa-pen"></i> Modifier
+        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${selDate}',${cli})">
+          <i class="fas fa-pen"></i> ${cli > 0 ? 'Modifier' : 'Saisir'}
         </button>
       </div>
       <div class="cso-ph">
@@ -258,19 +300,15 @@
           <div class="cso-mcard-grid">`;
 
         list.forEach(m => {
-          const mReadings  = _readings.filter(r => r.meterId === m.id);
-          const lr         = mReadings[0];
-          const unit       = m.unit || meta.unit;
-          const rUnit      = isW ? 'L/client' : `${unit}/client`;
-          const todayConso = _readings
-            .filter(r => r.meterId === m.id && r.date === today)
-            .reduce((s, r) => s + (r.consumption || 0), 0);
-          const ratio = cli > 0 && todayConso > 0
-            ? (isW ? todayConso * 1000 / cli : todayConso / cli)
+          const unit     = m.unit || meta.unit;
+          const rUnit    = isW ? 'L/client' : `${unit}/client`;
+          // Readings scoped to the selected date
+          const dateRdgs = _readings.filter(r => r.meterId === m.id && r.date === selDate);
+          const lr       = dateRdgs[0]; // most-recent reading on selDate (array sorted desc)
+          const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
+          const ratio    = cli > 0 && selConso > 0
+            ? (isW ? selConso * 1000 / cli : selConso / cli)
             : null;
-          const deltaHtml = (lr && lr.consumption != null)
-            ? `<div class="cso-mc-delta"><i class="fas fa-arrow-trend-up"></i> +${_fmtIdx(lr.consumption)} ${esc(unit)} relevé précédent</div>`
-            : '';
 
           html += `<div class="cso-mcard">
             <div class="cso-mcard-top" style="background:linear-gradient(135deg,${meta.color}22 0%,${meta.color}0a 100%);border-bottom:2px solid ${meta.color}55">
@@ -281,13 +319,13 @@
             <div class="cso-mcard-body">
               <div class="cso-mcard-name">${esc(m.name)}</div>
               <div class="cso-mcard-idx-wrap">
-                <div class="cso-mcard-idx-lbl">Index actuel</div>
+                <div class="cso-mcard-idx-lbl">${isToday ? 'Index actuel' : `Index du ${_dateLbl(selDate)}`}</div>
                 <div class="cso-mcard-idx-val">${lr ? _fmtIdx(lr.index) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
               </div>
               <div class="cso-mcard-stats">
                 <div class="cso-mcard-stat">
-                  <div class="cso-mcard-stat-lbl">Conso. aujourd'hui</div>
-                  <div class="cso-mcard-stat-val${todayConso ? '' : ' cso-stat-empty'}">${todayConso ? _fmtIdx(todayConso) : '—'}</div>
+                  <div class="cso-mcard-stat-lbl">Consommation</div>
+                  <div class="cso-mcard-stat-val${selConso ? '' : ' cso-stat-empty'}">${selConso ? _fmtIdx(selConso) : '—'}</div>
                   <div class="cso-mcard-stat-u">${esc(unit)}</div>
                 </div>
                 <div class="cso-mcard-stat">
@@ -298,10 +336,9 @@
               </div>
               <div class="cso-mcard-last">
                 ${lr
-                  ? `<i class="fas fa-clock"></i> ${_dateLbl(lr.date)}${lr.technicienName ? ` · <b>${esc(lr.technicienName)}</b>` : ''}`
-                  : `<span style="color:var(--text3)"><i class="fas fa-ban"></i> Aucun relevé</span>`}
+                  ? `<i class="fas fa-clock"></i> ${lr.technicienName ? `<b>${esc(lr.technicienName)}</b> · ` : ''}${_dateLbl(lr.date)}`
+                  : `<span style="color:var(--text3)"><i class="fas fa-ban"></i> Aucun relevé ce jour</span>`}
               </div>
-              ${deltaHtml}
             </div>
             <div class="cso-mcard-acts">
               <button class="cso-mact primary" onclick="MX.Pages.Conso._newReading('${m.id}')">
@@ -323,6 +360,25 @@
         html += `</div></div>`;
       });
     }
+
+    // ── Client history ──
+    const cliEntries = Object.entries(_clients)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 30);
+    if (cliEntries.length) {
+      html += `<div class="cso-cli-hist">
+        <div class="cso-cli-hist-ttl"><i class="fas fa-calendar-days"></i> Historique clients</div>
+        <div class="cso-cli-hist-list">
+          ${cliEntries.map(([ds, count]) => `
+            <div class="cso-cli-hist-row${ds === selDate ? ' active' : ''}" onclick="MX.Pages.Conso._csoDateSet('${ds}')">
+              <span class="cso-cli-hist-date">${_dateLbl(ds)}</span>
+              <span class="cso-cli-hist-count">👥 ${count} client${count > 1 ? 's' : ''}</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
     return html + '</div>';
   }
 
@@ -744,7 +800,7 @@
       sub: '',
       body: `<div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
         <select id="cso-rm" class="fi">${opts}</select>
-        <input type="date" id="cso-rd" class="fi" value="${_today()}">
+        <input type="date" id="cso-rd" class="fi" value="${_csoSelDate || _today()}">
         <input type="number" id="cso-ri" class="fi" step="0.001" placeholder="Index (ex: 12547)"
           style="text-align:center;font-size:22px;font-family:var(--ffm)">
         <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px dashed var(--border2);border-radius:10px;cursor:pointer;color:var(--text2);font-size:13px">
@@ -897,5 +953,6 @@
     _tab, _editCli, _meterForm, _delMeter, _delReading,
     _newReading, _onPhoto, _showPhoto, _meterHistory,
     _allMeters, _csv, _pdf,
+    _csoDateSet, _csoDatePrev, _csoDateNext,
   };
 })();
