@@ -214,10 +214,11 @@
     const todayId = MX.todayId ? MX.todayId() : "lundi";
     let h = "";
 
-    // ── Accueil + Messages (standalone) ──
+    // ── Accueil + Messages + Planning (standalone) ──
     h += `<div class="sx-top">`;
     h += _item("home", "fa-house", "Accueil");
     h += _item("msgs", "fa-comments", "Messages", { badge: true });
+    h += _item("planning", "fa-calendar-days", "Planning");
     h += `</div>`;
 
     // ── Section 1: CHECK-LISTS TECHNICIENS ──
@@ -277,10 +278,11 @@
     // ── Bottom nav ──
     const dayIds = DAYS.map(d => d.id);
     const resIds = ["orders","fournisseurs","documents"];
-    const gamIds = ["rewards","minigames","planning"];
+    const gamIds = ["rewards","minigames"];
     let bot = `<div class="bottom-nav-inner">`;
     bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
     bot += `<button class="bn${cur==="msgs"?" active":""}" data-page="msgs" onclick="MX.showPage('msgs')"><div class="bn-bar"></div><i class="fas fa-comments"></i><span class="nav-badge" id="bnb_msgs"></span><span>Messages</span></button>`;
+    bot += `<button class="bn${cur==="planning"?" active":""}" data-page="planning" onclick="MX.showPage('planning')"><div class="bn-bar"></div><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
     bot += `<button class="bn${(cur==="today-cl"||dayIds.includes(cur))?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Check-lists</span></button>`;
     bot += `<button class="bn${resIds.includes(cur)?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-folder-open"></i><span>Ressources</span></button>`;
     bot += `<button class="bn${gamIds.includes(cur)?" active":""}" onclick="MX.showPage('rewards')"><div class="bn-bar"></div><i class="fas fa-trophy"></i><span>Gamification</span></button>`;
