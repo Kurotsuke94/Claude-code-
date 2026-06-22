@@ -43,6 +43,14 @@
     const d = dec !== undefined ? dec : (Math.abs(n) >= 100 ? 1 : 2);
     return n.toFixed(d).replace('.', ',');
   }
+  // Display exact index / consumption — no rounding, min 2 decimals, max 3
+  function _fmtIdx(n) {
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    const s = n.toString();
+    const dot = s.indexOf('.');
+    const sig = dot >= 0 ? s.length - dot - 1 : 0;
+    return n.toFixed(Math.min(Math.max(sig, 2), 3)).replace('.', ',');
+  }
   function _dateLbl(str) {
     if (!str) return '';
     const [y, m, d] = str.split('-');
@@ -242,7 +250,7 @@
           const lr   = mReadings[0];
           const unit = m.unit || meta.unit;
           const deltaHtml = (lr && lr.consumption != null)
-            ? `<div class="cso-mc-delta"><i class="fas fa-arrow-trend-up"></i> +${_fmt(lr.consumption)} ${esc(unit)} relevé précédent</div>`
+            ? `<div class="cso-mc-delta"><i class="fas fa-arrow-trend-up"></i> +${_fmtIdx(lr.consumption)} ${esc(unit)} relevé précédent</div>`
             : '';
 
           html += `<div class="cso-mcard">
@@ -255,7 +263,7 @@
               <div class="cso-mcard-name">${esc(m.name)}</div>
               <div class="cso-mcard-idx-wrap">
                 <div class="cso-mcard-idx-lbl">Index actuel</div>
-                <div class="cso-mcard-idx-val">${lr ? _fmt(lr.index, 1) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
+                <div class="cso-mcard-idx-val">${lr ? _fmtIdx(lr.index) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
               </div>
               <div class="cso-mcard-last">
                 ${lr
@@ -321,8 +329,8 @@
             <div class="cso-rname">${esc(r.meterName || '?')}</div>
             <div class="cso-rmeta">
               <span>${time}</span>
-              <span>Index: <b>${_fmt(r.index, 1)} ${esc(unit)}</b></span>
-              ${r.consumption != null ? `<span>+${_fmt(r.consumption, 2)} ${esc(unit)}</span>` : ''}
+              <span>Index: <b>${_fmtIdx(r.index)} ${esc(unit)}</b></span>
+              ${r.consumption != null ? `<span>+${_fmtIdx(r.consumption)} ${esc(unit)}</span>` : ''}
               <span>${esc(r.technicienName || '')}</span>
             </div>
           </div>
@@ -688,8 +696,8 @@
         const time = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
         rows += `<div class="cso-hist-row">
           <div class="cso-hist-date">${_dateLbl(r.date)}<span class="cso-hist-time">${time}</span></div>
-          <div class="cso-hist-idx">${_fmt(r.index, 1)}<span class="cso-hist-u"> ${esc(unit)}</span></div>
-          <div class="cso-hist-conso">${r.consumption != null ? `+${_fmt(r.consumption)}` : '—'}</div>
+          <div class="cso-hist-idx">${_fmtIdx(r.index)}<span class="cso-hist-u"> ${esc(unit)}</span></div>
+          <div class="cso-hist-conso">${r.consumption != null ? `+${_fmtIdx(r.consumption)}` : '—'}</div>
           <div class="cso-hist-tech">${esc(r.technicienName || '')}</div>
         </div>`;
       });
@@ -797,7 +805,7 @@
       });
       await CSO.meters().doc(meterId).update({ lastIndex: index, lastReadAt: FV.serverTimestamp() });
       _photoB64 = null;
-      MX.toast(consumption !== null ? `Relevé enregistré · +${_fmt(consumption)} ${m.unit}` : 'Relevé enregistré');
+      MX.toast(consumption !== null ? `Relevé enregistré · +${_fmtIdx(consumption)} ${m.unit}` : 'Relevé enregistré');
     } catch(e) { MX.toast('Erreur enregistrement', true); console.error(e); }
   }
 
@@ -843,7 +851,7 @@
       const m = _meters.find(x => x.id === r.meterId);
       return `<tr><td>${r.date?_dateLbl(r.date):''}</td><td>${d?d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):''}</td>
         <td>${r.meterName||''}</td><td>${MT[r.meterType||'']?.label||''}</td>
-        <td>${r.index??''}</td><td>${r.consumption!=null?'+'+_fmt(r.consumption):'—'}</td>
+        <td>${r.index!=null?_fmtIdx(r.index):''}</td><td>${r.consumption!=null?'+'+_fmtIdx(r.consumption):'—'}</td>
         <td>${m?.unit||'m³'}</td><td>${r.technicienName||''}</td></tr>`;
     }).join('');
     const win = window.open('','_blank');
