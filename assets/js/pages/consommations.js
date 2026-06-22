@@ -2,7 +2,7 @@
   'use strict';
 
   // ── STATE ──
-  let _tab      = 'dashboard';
+  let _curTab   = 'dashboard';
   let _meters   = [];
   let _readings = [];
   let _clients  = {};
@@ -82,13 +82,13 @@
 
   // ── RENDER ──
   function render() {
-    if (window._csoStartTab) { _tab = window._csoStartTab; window._csoStartTab = null; }
+    if (window._csoStartTab) { _curTab = window._csoStartTab; window._csoStartTab = null; }
     _load();
     const mc = document.getElementById('main-content');
     if (!mc) return;
     mc.innerHTML = `<div class="cso-page">
       <div class="cso-tabs">
-        ${TABS.map(t => `<button class="cso-tab${_tab===t.id?' active':''}" data-tab="${t.id}" onclick="MX.Pages.Conso._tab('${t.id}')">
+        ${TABS.map(t => `<button class="cso-tab${_curTab===t.id?' active':''}" data-tab="${t.id}" onclick="MX.Pages.Conso._tab('${t.id}')">
           <i class="fas ${t.icon}"></i><span>${t.l}</span>
         </button>`).join('')}
       </div>
@@ -102,13 +102,13 @@
   }
 
   function _tab(id) {
-    _tab = id;
+    _curTab = id;
     document.querySelectorAll('.cso-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
     _rerender();
   }
 
   function _body() {
-    switch (_tab) {
+    switch (_curTab) {
       case 'compteurs': return _tCompteurs();
       case 'releves':   return _tReleves();
       case 'ratios':    return _tRatios();
@@ -531,9 +531,7 @@
     _photoB64 = null;
     if (!_meters.length) {
       MX.toast('Créez d\'abord un compteur', true);
-      _tab = 'compteurs';
-      _rerender();
-      document.querySelectorAll('.cso-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'compteurs'));
+      _tab('compteurs');
       return;
     }
     const opts = _meters.map(m => {
