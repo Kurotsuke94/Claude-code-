@@ -79,7 +79,8 @@
     if (id === "parametres")   return Pages.Settings ? Pages.Settings.render() : null;
     if (id === "admin")        return Pages.Admin.render();
     if (id === "rewards")      return Pages.Rewards.render();
-    if (id === "planning")     return Pages.Planning ? Pages.Planning.render() : null;
+    if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
+    if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
@@ -116,6 +117,7 @@
   let _resOpen   = localStorage.getItem("mx_sx_res") !== "0";
   let _gamiOpen  = localStorage.getItem("mx_sx_gam") === "1";
   let _adminOpen = localStorage.getItem("mx_sx_adm") === "1";
+  let _csoOpen   = localStorage.getItem("mx_sx_cso") === "1";
 
   function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
 
@@ -123,24 +125,26 @@
     const mob = window.innerWidth <= 900;
     if (mob) {
       const wasCl  = _clOpen, wasRsp = _respClOpen, wasRes = _resOpen,
-            wasGam = _gamiOpen, wasAdm = _adminOpen;
+            wasGam = _gamiOpen, wasAdm = _adminOpen, wasCso = _csoOpen;
       _clOpen = false; _respClOpen = false; _resOpen = false;
-      _gamiOpen = false; _adminOpen = false;
+      _gamiOpen = false; _adminOpen = false; _csoOpen = false;
       if (which === "cl")  _clOpen    = !wasCl;
       if (which === "rsp") _respClOpen= !wasRsp;
       if (which === "res") _resOpen   = !wasRes;
       if (which === "gam") _gamiOpen  = !wasGam;
       if (which === "adm") _adminOpen = !wasAdm;
+      if (which === "cso") _csoOpen   = !wasCso;
     } else {
       if (which === "cl")  _clOpen    = !_clOpen;
       if (which === "rsp") _respClOpen= !_respClOpen;
       if (which === "res") _resOpen   = !_resOpen;
       if (which === "gam") _gamiOpen  = !_gamiOpen;
       if (which === "adm") _adminOpen = !_adminOpen;
+      if (which === "cso") _csoOpen   = !_csoOpen;
     }
     _sx("mx_sx_cl",  _clOpen); _sx("mx_sx_rsp", _respClOpen);
     _sx("mx_sx_res", _resOpen); _sx("mx_sx_gam", _gamiOpen);
-    _sx("mx_sx_adm", _adminOpen);
+    _sx("mx_sx_adm", _adminOpen); _sx("mx_sx_cso", _csoOpen);
     buildNav();
   }
 
@@ -149,6 +153,8 @@
   window.MX.toggleNavRes   = function() { _toggleSec("res"); };
   window.MX.toggleNavGami  = function() { _toggleSec("gam"); };
   window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
+  window.MX.toggleNavCso   = function() { _toggleSec("cso"); };
+  window.MX.showCsoTab     = function(tab) { window._csoStartTab = tab; MX.showPage('consommations'); };
   window.MX.toggleNavBible = function(e) {
     if (e) e.stopPropagation();
     _bibleOpen = !_bibleOpen;
@@ -246,7 +252,22 @@
     }
     h += _sec("sx-card--blue", "fa-folder-open", "Ressources", "Stock, docs & fournisseurs", "toggleNavRes", _resOpen, resItems);
 
-    // ── Section 4: GAMIFICATION ──
+    // ── Section 4: CONSOMMATIONS ──
+    let csoItems = "";
+    [
+      { tab: "dashboard", icon: "fa-gauge",          l: "Tableau de bord" },
+      { tab: "compteurs", icon: "fa-tachometer-alt", l: "Compteurs" },
+      { tab: "releves",   icon: "fa-camera",         l: "Relevés" },
+      { tab: "ratios",    icon: "fa-percent",        l: "Ratios" },
+      { tab: "analyses",  icon: "fa-chart-bar",      l: "Analyses" },
+      { tab: "alertes",   icon: "fa-bell",           l: "Alertes" },
+      { tab: "exports",   icon: "fa-file-export",    l: "Exportations" },
+    ].forEach(t => {
+      csoItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+    });
+    h += _sec("sx-card--teal", "fa-droplet", "Consommations", "Eau, électricité & gaz", "toggleNavCso", _csoOpen, csoItems);
+
+    // ── Section 5: GAMIFICATION ──
     let gItems = _item("rewards",   "fa-trophy",  "Récompenses");
     gItems    += _item("minigames", "fa-gamepad", "Mini-Jeux");
     gItems    += `<button class="sx-item" onclick="MX.showPage('rewards')"><i class="fas fa-crown sx-ico"></i><span class="sx-lbl">Classements</span></button>`;
@@ -277,7 +298,7 @@
 
     // ── Bottom nav ──
     const dayIds = DAYS.map(d => d.id);
-    const resIds = ["orders","fournisseurs","documents"];
+    const resIds = ["orders","fournisseurs","documents","consommations"];
     const gamIds = ["rewards","minigames"];
     let bot = `<div class="bottom-nav-inner">`;
     bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
