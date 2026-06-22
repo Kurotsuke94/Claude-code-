@@ -3780,10 +3780,12 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* ── Tabs ── */
 .cso-tabs {
-  display: flex; gap: 4px; padding: 0 16px 12px;
-  overflow-x: auto; scrollbar-width: none;
+  display: flex; flex-wrap: nowrap; gap: 4px; padding: 0 16px 12px;
+  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
 }
 .cso-tabs::-webkit-scrollbar { display: none; }
+.cso-tab-full { display: inline; }
+.cso-tab-mob  { display: none; }
 .cso-tab {
   flex-shrink: 0;
   padding: 7px 13px; border-radius: 20px; border: none; cursor: pointer;
@@ -4408,6 +4410,25 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .cso-hist-conso { font-family: var(--ffm); font-size: 12px; color: #34d399; }
 .cso-hist-tech  { font-size: 11px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── Mobile action button text ── */
+.cso-mact-txt { display: inline; }
+
+/* ── Mobile floating action button ── */
+.cso-mob-fab {
+  display: none;
+  position: fixed;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  right: 16px;
+  width: 56px; height: 56px; border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #fff; border: none; cursor: pointer;
+  font-size: 22px;
+  align-items: center; justify-content: center;
+  box-shadow: 0 4px 20px rgba(124,58,237,0.55);
+  z-index: 200; transition: transform 0.15s;
+}
+.cso-mob-fab:active { transform: scale(0.93); }
+
 /* ── Responsive — Consommations redesign ── */
 @media (min-width: 1100px) {
   .cso-kpi-grid   { grid-template-columns: repeat(4, 1fr); }
@@ -4417,13 +4438,94 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .cso-kpi-grid   { grid-template-columns: repeat(2, 1fr); }
   .cso-mcard-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Mobile ≤ 700px — mobile-first redesign ── */
 @media (max-width: 700px) {
-  .cso-kpi-grid   { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .cso-mcard-grid { grid-template-columns: 1fr; }
-  .cso-kpi-v      { font-size: 20px; }
-  .cso-av2-left   { min-width: 90px; padding: 12px 10px; }
-  .cso-av2-pct    { font-size: 22px; }
+  /* Tabs: single scrollable row, no icons, short labels */
+  .cso-tabs      { flex-wrap: nowrap; gap: 5px; padding: 0 10px 12px; }
+  .cso-tab       { font-size: 11px; padding: 7px 12px; }
+  .cso-tab i     { display: none; }
+  .cso-tab-full  { display: none; }
+  .cso-tab-mob   { display: inline; }
+
+  /* Body spacing */
+  .cso-body  { padding: 0 12px calc(92px + env(safe-area-inset-bottom, 0px)); }
+  .cso-inner { gap: 12px; }
+
+  /* Inline FAB hidden on mobile (replaced by fixed .cso-mob-fab) */
+  .cso-fab-btn { display: none; }
+
+  /* Mobile FAB visible */
+  .cso-mob-fab { display: flex; }
+
+  /* KPI cards — horizontal scroll carousel */
+  .cso-kpi-grid {
+    display: flex; flex-direction: row;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory; gap: 10px; padding-bottom: 4px;
+    grid-template-columns: unset;
+  }
+  .cso-kpi-grid::-webkit-scrollbar { display: none; }
+  .cso-kpi-card {
+    flex-shrink: 0; width: 150px;
+    scroll-snap-align: start;
+  }
+  .cso-kpi-v { font-size: 21px; }
+  .cso-kpi-r { font-size: 10px; }
+
+  /* Dashboard chart compact */
+  .cso-bars7      { height: 64px; }
+  .cso-dash-chart { padding: 12px; }
+  .cso-dash-chart-hd { font-size: 12px; }
+
+  /* Client bar compact */
+  .cso-cli-bar   { padding: 10px 12px; gap: 8px; }
+  .cso-cli-val   { font-size: 16px; }
+  .cso-cli-btn   { font-size: 11px; padding: 6px 10px; }
+
+  /* Page header: stack on small screens */
+  .cso-ph         { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .cso-ph-ttl     { font-size: 13px; }
+  .cso-add-btn    { font-size: 12px; padding: 7px 13px; align-self: flex-end; }
+
+  /* Empty state compact */
+  .cso-empty-st   { padding: 30px 16px; }
+  .cso-empty-ico  { width: 50px; height: 50px; font-size: 20px; }
+  .cso-empty-ttl  { font-size: 14px; }
+  .cso-empty-sub  { font-size: 12px; }
+
+  /* Meter cards: 1 column, compact actions */
+  .cso-mcard-grid { gap: 10px; }
+  .cso-mcard-acts { gap: 5px; }
+
+  /* Action buttons: icon-only except primary */
+  .cso-mact           { font-size: 0; gap: 0; padding: 9px; flex: 0 0 auto; }
+  .cso-mact i         { font-size: 14px; }
+  .cso-mact-txt       { display: none; }
+  .cso-mact.primary   { font-size: 12px; gap: 5px; padding: 9px 12px; flex: 1; }
+  .cso-mact.primary i { font-size: 13px; }
+  .cso-mact.primary .cso-mact-txt { display: inline; }
+
+  .cso-mcard-idx-val  { font-size: 20px; }
+
+  /* Alert cards v2: stack vertically */
+  .cso-av2:not(.ok)  { flex-direction: column; }
+  .cso-av2-left {
+    flex-direction: row; align-items: center; justify-content: flex-start;
+    gap: 14px; padding: 10px 14px; min-width: unset;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .cso-av2-pct     { font-size: 26px; }
+  .cso-av2-pct-lbl { display: none; }
+
+  /* Ratio compact */
+  .cso-ratio-val { font-size: 24px; }
+
+  /* History modal */
   .cso-hist-hdr,
-  .cso-hist-row   { grid-template-columns: 1fr 1fr 0.6fr; }
-  .cso-hist-tech  { display: none; }
+  .cso-hist-row  { grid-template-columns: 1fr 1fr 0.6fr; }
+  .cso-hist-tech { display: none; }
+
+  /* Analysis bars */
+  .cso-bars { height: 80px; }
 }

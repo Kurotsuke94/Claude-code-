@@ -26,13 +26,13 @@
   };
 
   const TABS = [
-    { id: 'dashboard', icon: 'fa-gauge',        l: 'Tableau de bord' },
-    { id: 'compteurs', icon: 'fa-gauge-high',   l: 'Compteurs'       },
-    { id: 'releves',   icon: 'fa-camera',       l: 'Relevés'         },
-    { id: 'ratios',    icon: 'fa-percent',      l: 'Ratios'          },
-    { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses'        },
-    { id: 'alertes',   icon: 'fa-bell',         l: 'Alertes'         },
-    { id: 'exports',   icon: 'fa-file-export',  l: 'Exports'         },
+    { id: 'dashboard', icon: 'fa-gauge',        l: 'Tableau de bord', mob: 'Dashboard' },
+    { id: 'compteurs', icon: 'fa-gauge-high',   l: 'Compteurs',       mob: 'Compteurs' },
+    { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',         mob: 'Relevés'   },
+    { id: 'ratios',    icon: 'fa-percent',      l: 'Ratios',          mob: 'Ratios'    },
+    { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',        mob: 'Analyses'  },
+    { id: 'alertes',   icon: 'fa-bell',         l: 'Alertes',         mob: 'Alertes'   },
+    { id: 'exports',   icon: 'fa-file-export',  l: 'Exports',         mob: 'Exports'   },
   ];
 
   // ── HELPERS ──
@@ -89,10 +89,15 @@
     mc.innerHTML = `<div class="cso-page">
       <div class="cso-tabs">
         ${TABS.map(t => `<button class="cso-tab${_curTab===t.id?' active':''}" data-tab="${t.id}" onclick="MX.Pages.Conso._tab('${t.id}')">
-          <i class="fas ${t.icon}"></i><span>${t.l}</span>
+          <i class="fas ${t.icon}"></i>
+          <span class="cso-tab-full">${t.l}</span>
+          <span class="cso-tab-mob">${t.mob}</span>
         </button>`).join('')}
       </div>
       <div class="cso-body" id="cso-body">${_body()}</div>
+      <button class="cso-mob-fab" onclick="MX.Pages.Conso._newReading(null)" aria-label="Nouveau relevé">
+        <i class="fas fa-camera"></i>
+      </button>
     </div>`;
   }
 
@@ -261,10 +266,10 @@
             </div>
             <div class="cso-mcard-acts">
               <button class="cso-mact primary" onclick="MX.Pages.Conso._newReading('${m.id}')">
-                <i class="fas fa-camera"></i> Relevé
+                <i class="fas fa-camera"></i><span class="cso-mact-txt"> Relevé</span>
               </button>
               <button class="cso-mact" onclick="MX.Pages.Conso._meterHistory('${m.id}')">
-                <i class="fas fa-chart-line"></i> Historique
+                <i class="fas fa-chart-line"></i><span class="cso-mact-txt"> Historique</span>
               </button>
               <button class="cso-mact" onclick="MX.Pages.Conso._meterForm('${m.id}')">
                 <i class="fas fa-pen"></i>
