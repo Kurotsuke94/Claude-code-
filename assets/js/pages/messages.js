@@ -191,7 +191,7 @@
 
     return `<div class="ann-compose">
       <div class="ann-compose-who">
-        <div class="ann-av" style="background:${bg};color:${fg}">${esc(author.substring(0,2).toUpperCase())}</div>
+        ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}">${esc(author.substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(author, {size:36,radius:10})}
         <div>
           <div style="font-size:13px;font-weight:600">${esc(author)}</div>
           <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
@@ -247,7 +247,7 @@
       </div>
       <div class="ann-card-mid">
         <div class="ann-av-wrap">
-          <div class="ann-av" style="background:${bg};color:${fg}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>
+          ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(ann.authorName||'?', {size:36,radius:10})}
           <div>
             <div style="font-size:13px;font-weight:600">${esc(ann.authorName || '?')}</div>
             <div class="ann-role" style="color:${t.c};background:${t.cd};border-color:${t.cb}">${rLabel}</div>
@@ -296,7 +296,7 @@
         const rLbl = { admin: 'Admin', responsable: 'Resp.', technicien: 'Tech.' }[r.authorRole] || '';
         const canDel = _canDelReply(r);
         h += `<div class="ann-reply">
-          <div class="ann-av sm" style="background:${bg};color:${fg}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>
+          ${isAdm ? `<div class="ann-av sm" style="background:${bg};color:${fg}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(r.authorName||'?', {size:28,radius:8})}
           <div style="flex:1;min-width:0">
             <div class="ann-reply-meta">
               <span class="ann-reply-author">${esc(r.authorName||'?')}</span>

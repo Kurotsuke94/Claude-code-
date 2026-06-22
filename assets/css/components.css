@@ -785,7 +785,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   box-shadow: 0 0 6px rgba(0,245,212,0.6);
   flex-shrink: 0;
 }
-.ann-ts { font-size: 11px; color: var(--text3); font-family: var(--ffm); }
+.ann-ts { font-size: 11px; color: var(--text3); font-family: var(--ffm); flex-shrink: 0; white-space: nowrap; }
 .ann-card-mid {
   padding: 10px 14px 12px;
   display: flex; flex-direction: column; gap: 10px;
@@ -3725,3 +3725,42 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 [data-theme="light"] .sxf-btn { background: #FFFFFF; border-color: var(--border); }
 [data-theme="light"] .sxf-btn:hover { background: var(--bg2); }
 [data-theme="light"] .sxf-anon-btn { background: var(--bg2); }
+
+/* ── Paramètres standalone item ── */
+.sx-params { padding: 6px 0 2px; }
+
+/* ── MOBILE SIDEBAR (≤900px) ── */
+@media (max-width: 900px) {
+  .sx-item     { min-height: 44px; padding: 11px 14px; font-size: 13px; }
+  .sx-sub      { min-height: 42px; padding: 10px 14px 10px 22px; }
+  .sx-sub2     { min-height: 40px; padding: 9px 14px 9px 32px; }
+  .sx-card     { min-height: 52px; padding: 12px 14px; }
+  .sx-card-ico { width: 34px; height: 34px; border-radius: 9px; font-size: 15px; }
+  .sx-card-ttl { font-size: 12px; }
+  .sx-card-sub { font-size: 10px; }
+  .sx-track    { display: none; }
+  .sx-pct      { font-size: 10px; min-width: 32px; text-align: right; }
+  .sx-lbl      { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-params   { padding: 4px 0 2px; }
+
+  /* Mobile profile footer — vertical centered layout */
+  .sxf-btn {
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 10px 10px;
+    gap: 5px;
+    text-align: center;
+  }
+  .sxf-avatar        { width: 64px; height: 64px; border-radius: 16px; font-size: 22px; }
+  .sxf-avatar-img    { width: 64px; height: 64px; }
+  .sxf-avatar--admin { width: 64px; height: 64px; border-radius: 16px; font-size: 22px; }
+  .sxf-info          { align-items: center; gap: 3px; }
+  .sxf-name          { font-size: 13px; font-weight: 700; }
+  .sxf-role          { justify-content: center; gap: 4px; }
+  .sxf-role-lbl      { font-size: 11px; }
+  .sxf-pts           { font-size: 10px; padding: 1px 5px; }
+  .sxf-grade         { justify-content: center; margin-top: 2px; }
+  .sxf-logout        { display: none; }
+  .sxf-anon          { flex-direction: column; gap: 6px; }
+  .sxf-anon-btn      { justify-content: center; }
+}

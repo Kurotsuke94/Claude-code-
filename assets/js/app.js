@@ -252,16 +252,19 @@
     gItems    += `<button class="sx-item" onclick="MX.toast('Événements — bientôt disponible')"><i class="fas fa-calendar-star sx-ico"></i><span class="sx-lbl">Événements</span><span class="sx-soon">Soon</span></button>`;
     h += _sec("sx-card--green", "fa-trophy", "Gamification", "Points, jeux & challenges", "toggleNavGami", _gamiOpen, gItems);
 
+    // ── Paramètres (visible à tous) ──
+    h += `<div class="sx-params">`;
+    h += _item("parametres", "fa-gear", "Paramètres");
+    h += `</div>`;
+
     // ── Section 5: ADMIN (respOnly) ──
     if (canAll) {
-      const admAct = cur === "utilisateurs" || cur === "parametres";
       let aItems = "";
       [
         { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Gestion Utilisateurs", act: cur==="utilisateurs" },
         { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",        act: false },
         { fn:"MX.showAdminTab('games-admin')",    icon:"fa-gamepad",             l:"Gestion Jeux",         act: false },
         { fn:"MX.showAdminTab('players-admin')",  icon:"fa-user-group",          l:"Gestion Joueurs",      act: false },
-        { fn:"MX.showPage('parametres')",         icon:"fa-gear",                l:"Paramètres",           act: cur==="parametres" },
         { fn:"MX.showAdminTab('admin-journal')",  icon:"fa-book-journal-whills", l:"Journal d'actions",    act: false },
       ].forEach(n => {
         aItems += `<button class="sx-item${n.act?" active":""}" onclick="${n.fn}"><i class="fas ${n.icon} sx-ico${n.act?" sx-ico--on":""}"></i><span class="sx-lbl">${n.l}</span></button>`;
@@ -281,8 +284,9 @@
     bot += `<button class="bn${(cur==="today-cl"||dayIds.includes(cur))?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Check-lists</span></button>`;
     bot += `<button class="bn${resIds.includes(cur)?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-folder-open"></i><span>Ressources</span></button>`;
     bot += `<button class="bn${gamIds.includes(cur)?" active":""}" onclick="MX.showPage('rewards')"><div class="bn-bar"></div><i class="fas fa-trophy"></i><span>Gamification</span></button>`;
+    bot += `<button class="bn${cur==="parametres"?" active":""}" data-page="parametres" onclick="MX.showPage('parametres')"><div class="bn-bar"></div><i class="fas fa-gear"></i><span>Paramètres</span></button>`;
     if (canAll) {
-      bot += `<button class="bn${(cur==="utilisateurs"||cur==="parametres")?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
+      bot += `<button class="bn${cur==="utilisateurs"?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
     }
     bot += `</div>`;
     botNav.innerHTML = bot;
