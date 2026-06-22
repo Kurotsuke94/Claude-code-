@@ -26,13 +26,12 @@
   };
 
   const TABS = [
-    { id: 'dashboard', icon: 'fa-gauge',        l: 'Tableau de bord', mob: 'Dashboard' },
-    { id: 'compteurs', icon: 'fa-gauge-high',   l: 'Compteurs',       mob: 'Compteurs' },
-    { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',         mob: 'Relevés'   },
-    { id: 'ratios',    icon: 'fa-percent',      l: 'Ratios',          mob: 'Ratios'    },
-    { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',        mob: 'Analyses'  },
-    { id: 'alertes',   icon: 'fa-bell',         l: 'Alertes',         mob: 'Alertes'   },
-    { id: 'exports',   icon: 'fa-file-export',  l: 'Exports',         mob: 'Exports'   },
+    { id: 'dashboard', icon: 'fa-gauge',        l: 'Tableau de bord',    mob: 'Dashboard' },
+    { id: 'compteurs', icon: 'fa-gauge-high',   l: 'Compteurs & Ratios', mob: 'Compteurs' },
+    { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',            mob: 'Relevés'   },
+    { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',           mob: 'Analyses'  },
+    { id: 'alertes',   icon: 'fa-bell',         l: 'Alertes',            mob: 'Alertes'   },
+    { id: 'exports',   icon: 'fa-file-export',  l: 'Exports',            mob: 'Exports'   },
   ];
 
   // ── HELPERS ──
@@ -124,7 +123,6 @@
     switch (_curTab) {
       case 'compteurs': return _tCompteurs();
       case 'releves':   return _tReleves();
-      case 'ratios':    return _tRatios();
       case 'analyses':  return _tAnalyses();
       case 'alertes':   return _tAlertes();
       case 'exports':   return _tExports();
@@ -222,9 +220,22 @@
     </div>`;
   }
 
-  // ── TAB: COMPTEURS ──
+  // ── TAB: COMPTEURS & RATIOS ──
   function _tCompteurs() {
+    const today = _today();
+    const cli   = _clients[today] || 0;
+
     let html = `<div class="cso-inner">
+      <div class="cso-cli-bar">
+        <div class="cso-cli-ico">👥</div>
+        <div class="cso-cli-info">
+          <div class="cso-cli-val">${cli > 0 ? cli : '—'}</div>
+          <div class="cso-cli-lbl">Clients présents · ${_dateLbl(today)}</div>
+        </div>
+        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})">
+          <i class="fas fa-pen"></i> Modifier
+        </button>
+      </div>
       <div class="cso-ph">
         <div class="cso-ph-ttl"><i class="fas fa-gauge-high"></i> ${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</div>
         <button class="cso-add-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>
@@ -241,14 +252,22 @@
       Object.entries(MT).forEach(([type, meta]) => {
         const list = _meters.filter(m => m.type === type);
         if (!list.length) return;
+        const isW = type === 'eau_froide' || type === 'eau_chaude';
         html += `<div class="cso-type-sec">
           <div class="cso-type-hd">${meta.icon} ${meta.label}</div>
           <div class="cso-mcard-grid">`;
 
         list.forEach(m => {
-          const mReadings = _readings.filter(r => r.meterId === m.id);
-          const lr   = mReadings[0];
-          const unit = m.unit || meta.unit;
+          const mReadings  = _readings.filter(r => r.meterId === m.id);
+          const lr         = mReadings[0];
+          const unit       = m.unit || meta.unit;
+          const rUnit      = isW ? 'L/client' : `${unit}/client`;
+          const todayConso = _readings
+            .filter(r => r.meterId === m.id && r.date === today)
+            .reduce((s, r) => s + (r.consumption || 0), 0);
+          const ratio = cli > 0 && todayConso > 0
+            ? (isW ? todayConso * 1000 / cli : todayConso / cli)
+            : null;
           const deltaHtml = (lr && lr.consumption != null)
             ? `<div class="cso-mc-delta"><i class="fas fa-arrow-trend-up"></i> +${_fmtIdx(lr.consumption)} ${esc(unit)} relevé précédent</div>`
             : '';
@@ -264,6 +283,18 @@
               <div class="cso-mcard-idx-wrap">
                 <div class="cso-mcard-idx-lbl">Index actuel</div>
                 <div class="cso-mcard-idx-val">${lr ? _fmtIdx(lr.index) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
+              </div>
+              <div class="cso-mcard-stats">
+                <div class="cso-mcard-stat">
+                  <div class="cso-mcard-stat-lbl">Conso. aujourd'hui</div>
+                  <div class="cso-mcard-stat-val${todayConso ? '' : ' cso-stat-empty'}">${todayConso ? _fmtIdx(todayConso) : '—'}</div>
+                  <div class="cso-mcard-stat-u">${esc(unit)}</div>
+                </div>
+                <div class="cso-mcard-stat">
+                  <div class="cso-mcard-stat-lbl">Ratio / client</div>
+                  <div class="cso-mcard-stat-val${ratio !== null ? '' : ' cso-stat-empty'}">${ratio !== null ? _fmt(ratio, isW ? 0 : 2) : '—'}</div>
+                  <div class="cso-mcard-stat-u">${ratio !== null ? rUnit : (cli ? esc(unit) : 'clients ?')}</div>
+                </div>
               </div>
               <div class="cso-mcard-last">
                 ${lr
@@ -344,54 +375,6 @@
     return html + '</div>';
   }
 
-  // ── TAB: RATIOS ──
-  function _tRatios() {
-    const today = _today();
-    const cli   = _clients[today] || 0;
-    let html = `<div class="cso-inner">
-      <div class="cso-cli-bar" style="margin-bottom:20px">
-        <span class="cso-cli-ico">👥</span>
-        <div><div class="cso-cli-val">${cli > 0 ? cli : '—'}</div><div class="cso-cli-lbl">Clients présents — ${_dateLbl(today)}</div></div>
-        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})"><i class="fas fa-pen"></i> Modifier</button>
-      </div>`;
-
-    if (cli === 0) {
-      html += `<div class="cso-empty-st">
-        <div class="cso-empty-ico"><i class="fas fa-users-slash"></i></div>
-        <div class="cso-empty-ttl">Nombre de clients manquant</div>
-        <div class="cso-empty-sub">Saisissez le nombre de clients présents pour calculer les ratios.</div>
-      </div>`;
-    } else {
-      html += `<div class="cso-sec-ttl">Ratios du jour</div>`;
-      Object.entries(MT).forEach(([type, meta]) => {
-        const ids = _meters.filter(m => m.type === type).map(m => m.id);
-        if (!ids.length) return;
-        const conso = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
-        if (!conso) return;
-        const isW  = type === 'eau_froide' || type === 'eau_chaude';
-        const rv   = isW ? conso * 1000 / cli : conso / cli;
-        const rU   = isW ? 'L/client' : `${meta.unit}/client`;
-        const vals = [];
-        for (let i = 1; i <= 7; i++) {
-          const ds = _daysAgo(i), c = _clients[ds] || 0;
-          if (!c) continue;
-          const cv = _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0);
-          if (cv) vals.push(isW ? cv * 1000 / c : cv / c);
-        }
-        const avg7 = vals.length ? vals.reduce((a, b) => a + b) / vals.length : 0;
-        html += `<div class="cso-ratio-card" style="--kc:${meta.color};--kd:${meta.dim}">
-          <div class="cso-ratio-head">${meta.icon} ${meta.label}</div>
-          <div class="cso-ratio-body">
-            <div><div class="cso-ratio-val">${_fmt(rv, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rU}</div></div>
-            ${avg7 ? `<div class="cso-ratio-avg"><div class="cso-ratio-avglbl">Moy. 7j</div><div class="cso-ratio-avgval">${_fmt(avg7, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rU}</div></div>` : ''}
-          </div>
-          <div class="cso-ratio-base">Basé sur ${cli} client${cli > 1 ? 's' : ''} · ${_fmt(conso)} ${meta.unit}</div>
-        </div>`;
-      });
-    }
-    return html + '</div>';
-  }
-
   // ── TAB: ANALYSES ──
   function _tAnalyses() {
     const periods = [{ id: '7', l: '7 jours' }, { id: '30', l: '30 jours' }, { id: '90', l: '3 mois' }, { id: '365', l: '1 an' }];
@@ -399,10 +382,42 @@
     const days = parseInt(sel);
     const dates = Array.from({ length: days }, (_, i) => _daysAgo(days - 1 - i));
 
+    // ── Ratio history section ──
+    let ratioHtml = '';
+    Object.entries(MT).forEach(([type, meta]) => {
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      if (!ids.length) return;
+      const isW  = type === 'eau_froide' || type === 'eau_chaude';
+      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
+      const rUnit = isW ? 'L/client' : `${unit}/client`;
+      const dailyRatios = dates
+        .map(ds => {
+          const c = _clients[ds] || 0;
+          if (!c) return null;
+          const cv = _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0);
+          return cv > 0 ? (isW ? cv * 1000 / c : cv / c) : null;
+        })
+        .filter(v => v !== null);
+      if (!dailyRatios.length) return;
+      const avgRatio = dailyRatios.reduce((a, b) => a + b) / dailyRatios.length;
+      const minRatio = Math.min(...dailyRatios);
+      const maxRatio = Math.max(...dailyRatios);
+      ratioHtml += `<div class="cso-ratio-card" style="--kc:${meta.color};--kd:${meta.dim}">
+        <div class="cso-ratio-head">${meta.icon} ${meta.label}</div>
+        <div class="cso-ratio-body">
+          <div><div class="cso-ratio-val">${_fmt(avgRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit} moy.</div></div>
+          <div class="cso-ratio-avg"><div class="cso-ratio-avglbl">Min</div><div class="cso-ratio-avgval">${_fmt(minRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit}</div></div>
+          <div class="cso-ratio-avg"><div class="cso-ratio-avglbl">Max</div><div class="cso-ratio-avgval">${_fmt(maxRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit}</div></div>
+        </div>
+        <div class="cso-ratio-base">Sur ${dailyRatios.length} jour${dailyRatios.length > 1 ? 's' : ''} avec données clients</div>
+      </div>`;
+    });
+
     let html = `<div class="cso-inner">
       <div class="cso-period-row">
         ${periods.map(p => `<button class="cso-per-btn${sel===p.id?' active':''}" onclick="window._csoPer='${p.id}';MX.Pages.Conso._tab('analyses')">${p.l}</button>`).join('')}
-      </div>`;
+      </div>
+      ${ratioHtml ? `<div class="cso-an-ratio-sec"><div class="cso-an-ratio-ttl"><i class="fas fa-percent"></i> Ratios sur la période</div>${ratioHtml}</div>` : ''}`;
 
     Object.entries(MT).forEach(([type, meta]) => {
       const ids = _meters.filter(m => m.type === type).map(m => m.id);
