@@ -35,6 +35,9 @@
   <!-- Fonts (Google Fonts avec fallback système si bloqué) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Orbitron — chargement prioritaire pour le splash screen -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=block" onload="this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=block"></noscript>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 
   <!-- Icons — auto-hébergé (résistant aux bloqueurs de pub) -->
@@ -53,21 +56,24 @@
   <!-- ── SPLASH SCREEN ── -->
   <div id="app-loading" class="app-loading">
     <div class="spl-glow" aria-hidden="true"></div>
+    <div class="spl-halo" aria-hidden="true"></div>
     <div class="spl-particles" id="spl-particles" aria-hidden="true"></div>
     <div class="spl-content">
       <img src="/assets/icons/maintix-logo.png" alt="Maintix" class="spl-logo">
-      <div class="spl-name">Maintix</div>
+      <div class="spl-name">MAINTIX</div>
+      <div class="spl-bar-wrap" aria-hidden="true"><div class="spl-bar"><div class="spl-bar-inner"></div></div></div>
+      <div class="spl-ver">Maintix v1.0.24</div>
     </div>
   </div>
   <!-- Particle init — runs immediately, GPU-only, no jank -->
   <script>(function(){
     var p=document.getElementById('spl-particles');
     if(!p)return;
-    for(var i=0;i<48;i++){
+    for(var i=0;i<56;i++){
       var d=document.createElement('div');
       d.className='spl-dot';
-      var sz=(Math.random()*2.2+0.6).toFixed(1);
-      d.style.cssText='left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;width:'+sz+'px;height:'+sz+'px;--a1:'+((Math.random()*0.15+0.04).toFixed(2))+';--a2:'+((Math.random()*0.55+0.25).toFixed(2))+';--dur:'+((Math.random()*2.8+1.4).toFixed(1))+'s;--del:'+((Math.random()*3.5).toFixed(1))+'s';
+      var sz=(Math.random()*2.4+0.5).toFixed(1);
+      d.style.cssText='left:'+Math.random()*100+'%;top:'+Math.random()*100+'%;width:'+sz+'px;height:'+sz+'px;--a1:'+((Math.random()*0.12+0.03).toFixed(2))+';--a2:'+((Math.random()*0.60+0.20).toFixed(2))+';--dur:'+((Math.random()*3.2+1.6).toFixed(1))+'s;--del:'+((Math.random()*4.0).toFixed(1))+'s';
       p.appendChild(d);
     }
   })();</script>

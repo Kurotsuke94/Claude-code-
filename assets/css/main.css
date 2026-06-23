@@ -45,13 +45,13 @@ html, body {
   color-scheme: dark;
 }
 
-/* ── SPLASH SCREEN (premium iOS-style) ── */
+/* ── SPLASH SCREEN (premium SaaS) ── */
 .app-loading {
   position: fixed; inset: 0;
-  background: linear-gradient(148deg, #1D4ED8 0%, #4338CA 30%, #7C3AED 68%, #6D28D9 100%);
+  background: linear-gradient(148deg, #1D4ED8 0%, #3730A3 28%, #4338CA 52%, #7C3AED 80%, #6D28D9 100%);
   display: flex; align-items: center; justify-content: center;
   z-index: 9999; overflow: hidden;
-  transition: opacity 0.55s cubic-bezier(0.4,0,0.2,1);
+  transition: opacity 0.6s cubic-bezier(0.4,0,0.2,1);
   will-change: opacity;
 }
 .app-loading.fade-out { opacity: 0; pointer-events: none; }
@@ -60,12 +60,31 @@ html, body {
 .spl-glow {
   position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(ellipse 65% 75% at 78% 38%, rgba(192,132,252,0.50) 0%, transparent 65%),
-    radial-gradient(ellipse 45% 55% at 18% 72%, rgba(96,165,250,0.28) 0%, transparent 60%),
-    radial-gradient(ellipse 30% 40% at 55% 20%, rgba(139,92,246,0.20) 0%, transparent 55%);
-  animation: splGlowIn 0.9s ease forwards;
+    radial-gradient(ellipse 70% 80% at 80% 35%, rgba(167,139,250,0.45) 0%, transparent 62%),
+    radial-gradient(ellipse 50% 60% at 15% 75%, rgba(96,165,250,0.30) 0%, transparent 58%),
+    radial-gradient(ellipse 35% 45% at 50% 15%, rgba(139,92,246,0.22) 0%, transparent 55%);
+  animation: splGlowIn 1.0s ease forwards;
 }
 @keyframes splGlowIn { from { opacity:0; } to { opacity:1; } }
+
+/* Central halo behind logo */
+.spl-halo {
+  position: absolute;
+  left: 50%; top: 46%;
+  width: 360px; height: 360px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 80% 80% at 50% 50%, rgba(139,92,246,0.50) 0%, rgba(99,102,241,0.28) 38%, transparent 72%);
+  filter: blur(36px);
+  pointer-events: none; z-index: 5;
+  animation: splHaloIn 0.8s cubic-bezier(0.4,0,0.2,1) 0.12s both;
+  will-change: opacity, transform;
+}
+@keyframes splHaloIn {
+  from { opacity:0; transform:translate(-50%,-50%) scale(0.4); }
+  to   { opacity:1; transform:translate(-50%,-50%) scale(1); }
+}
 
 /* Particles */
 .spl-particles { position:absolute; inset:0; pointer-events:none; }
@@ -74,33 +93,86 @@ html, body {
   will-change: opacity;
   animation: splTwinkle var(--dur,2s) var(--del,0s) infinite alternate ease-in-out;
 }
-@keyframes splTwinkle { from { opacity:var(--a1,.08); } to { opacity:var(--a2,.65); } }
+@keyframes splTwinkle { from { opacity:var(--a1,.06); } to { opacity:var(--a2,.60); } }
 
-/* Content */
+/* Content wrapper */
 .spl-content {
   position: relative; z-index: 10;
-  display: flex; flex-direction: column; align-items: center; gap: 18px;
-  animation: splContentIn 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.1s both;
-  will-change: transform,opacity;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  animation: splLogoIn 0.6s cubic-bezier(0.34,1.46,0.64,1) 0.22s both;
+  will-change: transform, opacity;
 }
-@keyframes splContentIn {
-  from { opacity:0; transform:scale(0.88); }
-  to   { opacity:1; transform:scale(1); }
+@keyframes splLogoIn {
+  from { opacity:0; transform:scale(0.82) translateY(12px); }
+  to   { opacity:1; transform:scale(1) translateY(0); }
 }
 
+/* Logo */
 .spl-logo {
-  width: 132px; height: 132px; object-fit: contain;
-  filter: drop-shadow(0 6px 28px rgba(109,40,217,0.55)) drop-shadow(0 0 56px rgba(139,92,246,0.38));
+  width: 128px; height: 128px; object-fit: contain;
+  filter:
+    drop-shadow(0 0 28px rgba(167,139,250,0.70))
+    drop-shadow(0 0 56px rgba(99,102,241,0.42))
+    drop-shadow(0 8px 20px rgba(0,0,0,0.35));
+  margin-bottom: 22px;
 }
 
+/* MAINTIX title */
 .spl-name {
-  font-family: -apple-system,'SF Pro Display','Helvetica Neue',sans-serif;
-  font-size: 28px; font-weight: 700; letter-spacing: 0.5px; color: #fff;
-  animation: splNameIn 0.45s ease 0.62s both;
+  font-family: 'Orbitron', 'Space Mono', 'Courier New', monospace;
+  font-size: clamp(22px, 5.5vw, 34px);
+  font-weight: 700;
+  letter-spacing: clamp(10px, 2.5vw, 16px);
+  color: #ffffff;
+  text-indent: clamp(10px, 2.5vw, 16px); /* compensate letter-spacing so it appears centered */
+  text-shadow:
+    0 0  16px rgba(255,255,255,0.85),
+    0 0  36px rgba(196,181,253,0.65),
+    0 0  70px rgba(139,92,246,0.45),
+    0 2px 12px rgba(0,0,0,0.30);
+  animation: splNameIn 0.55s cubic-bezier(0.25,0.46,0.45,0.94) 0.68s both;
+  margin-bottom: 20px;
 }
 @keyframes splNameIn {
-  from { opacity:0; transform:translateY(10px); }
+  from { opacity:0; transform:translateY(8px) scale(0.97); letter-spacing: clamp(4px,1vw,6px); }
+  to   { opacity:1; transform:translateY(0) scale(1); letter-spacing: clamp(10px,2.5vw,16px); }
+}
+
+/* Loading bar */
+.spl-bar-wrap {
+  width: clamp(160px, 42vw, 240px);
+  margin-bottom: 14px;
+  animation: splFadeUp 0.4s ease 0.88s both;
+}
+.spl-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.14);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.spl-bar-inner {
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.5) 0%, #a78bfa 40%, #818cf8 70%, #fff 100%);
+  box-shadow: 0 0 10px rgba(167,139,250,0.95), 0 0 3px rgba(255,255,255,0.8);
+  animation: splBarFill 1.35s cubic-bezier(0.22,0.61,0.36,1) 0.9s both;
+}
+@keyframes splBarFill { from { width:0; } to { width:100%; } }
+@keyframes splFadeUp {
+  from { opacity:0; transform:translateY(6px); }
   to   { opacity:1; transform:translateY(0); }
+}
+
+/* Version label */
+.spl-ver {
+  font-family: 'Orbitron', 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 3px;
+  text-indent: 3px;
+  color: rgba(255,255,255,0.40);
+  animation: splFadeUp 0.4s ease 1.0s both;
 }
 
 /* ── APP SHELL ── */

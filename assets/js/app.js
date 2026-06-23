@@ -747,9 +747,11 @@
   }
 
   // ── INIT ──
+  const _splashStart = performance.now();
+
   async function init() {
     MX.ThemeManager && MX.ThemeManager.init();
-    const loadingTimeout = setTimeout(hideLoading, 4000);
+    const loadingTimeout = setTimeout(hideLoading, 4500);
 
     document.getElementById("modal-bg").addEventListener("click", e => {
       if (e.target === e.currentTarget) MX.closeModal();
@@ -778,7 +780,8 @@
       await MX.DB.initDefaults();
       await MX.DB.initDefaultBadges();
       setupListeners();
-      await new Promise(r => setTimeout(r, 800));
+      const _elapsed = performance.now() - _splashStart;
+      await new Promise(r => setTimeout(r, Math.max(0, 2400 - _elapsed)));
     } catch (e) {
       console.error("Firebase init error:", e);
     }
