@@ -105,14 +105,15 @@
 
 /* ── FORMS ── */
 .fi {
-  width: 100%; font-size: 14px;
+  width: 100%; font-size: 16px;
   padding: 10px 12px; border: 1px solid var(--border2);
   border-radius: var(--rs); background: var(--bg4);
   color: var(--text); font-family: var(--ffs);
   transition: border-color var(--t);
+  min-height: 44px; box-sizing: border-box;
 }
 .fi:focus { outline: none; border-color: var(--cyan-border); }
-.fi-sm { font-size: 12px; padding: 7px 10px; }
+.fi-sm { font-size: 12px; padding: 7px 10px; min-height: 38px; }
 textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .fi[type="number"] { -moz-appearance: textfield; }
 .fi[type="number"]::-webkit-outer-spin-button,
@@ -5087,4 +5088,227 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .int-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .int-cal-month-grid { grid-template-rows: repeat(6, auto); }
   .int-cal-month { overflow-y: auto; }
+}
+
+/* ══════════════════════════════════════════════════════
+   MOBILE-FIRST GLOBAL OVERRIDES
+   Cibles : iPhone SE → Pro Max, Galaxy, Pixel, Xiaomi
+══════════════════════════════════════════════════════ */
+
+/* ── Touch active feedback (remplace :hover absent sur tactile) ── */
+@media (hover: none) and (pointer: coarse) {
+  .int-act-btn:active,
+  .int-tab:active,
+  .cso-tab:active,
+  .sx-item:active,
+  .modal-btn:active,
+  .int-btn-primary:active,
+  .int-tech-pick-item:active,
+  .int-cal-nav-btn:active,
+  .cso-date-btn:active { opacity: 0.65; }
+}
+
+/* ── Taille minimale touch Apple/Google : 44×44px ── */
+@media (max-width: 900px) {
+  /* Inputs */
+  .fi { font-size: 16px; min-height: 44px; }
+  select.fi, select.int-filter-sel { min-height: 44px; font-size: 16px; }
+
+  /* Boutons d'action en ligne */
+  .int-act-btn { min-height: 36px; padding: 7px 13px; }
+  .int-xfr-btn--ok,
+  .int-xfr-btn--no { min-height: 36px; padding: 6px 14px; font-size: 12px; }
+
+  /* Bottom nav items — zone de toucher élargie */
+  .bn { min-width: 52px; padding: 6px 10px; }
+
+  /* Encoches latérales (paysage iPhone) */
+  .int-body,
+  .cso-body { padding-left:  max(10px, env(safe-area-inset-left,  0px));
+              padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+
+  /* Calendrier interventions — safe area gauche/droite */
+  .int-cal-wrap { padding-left:  env(safe-area-inset-left,  0px);
+                  padding-right: env(safe-area-inset-right, 0px); }
+}
+
+/* ══════════════════════════════════════════════════════
+   INTERVENTIONS — MOBILE APPROFONDI
+══════════════════════════════════════════════════════ */
+@media (max-width: 700px) {
+  /* Page */
+  .int-page { padding-bottom: 0; }
+  .int-body { padding: 0 10px calc(80px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Tabs — scroll horizontal compact */
+  .int-tabs { padding: 0 10px 10px; gap: 3px; }
+  .int-tab  { padding: 6px 10px; font-size: 11px; }
+
+  /* Cards — pleine largeur, infos compactes */
+  .int-card { border-radius: 12px; }
+  .int-card-top { padding: 10px 12px 6px; }
+  .int-card-title { font-size: 13px; }
+  .int-card-footer { padding: 6px 12px 8px; gap: 6px; }
+  .int-card-acts { gap: 4px; }
+
+  /* Masquer le texte des boutons d'action sur très petits écrans */
+  .int-act-btn span.int-act-lbl { display: none; }
+
+  /* Toolbar — empilée sur iPhone SE */
+  .int-toolbar { flex-direction: column; align-items: stretch; gap: 6px; }
+  .int-count    { margin-left: 0; }
+
+  /* Formulaire nouvelle intervention */
+  .int-form { gap: 10px; }
+  .int-form-date-col { grid-template-columns: 1fr; gap: 8px; }
+
+  /* Tech picker — grille 2 colonnes sur mobile */
+  .int-tech-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .int-tech-pick-item { border-radius: 12px; justify-content: flex-start; }
+
+  /* Vue détail intervention */
+  .int-view-dates { grid-template-columns: 1fr; }
+  .int-view-body  { gap: 10px; }
+
+  /* Calendrier — vue semaine cachée sur très petits écrans */
+  .int-cal-week-view-hint {
+    padding: 20px; text-align: center;
+    font-size: 13px; color: var(--text3);
+  }
+
+  /* Calendrier en-tête */
+  .int-cal-hdr { gap: 6px; }
+  .int-cal-period { font-size: 12px; padding: 0 3px; }
+  .int-cal-view-btns { margin-left: 0; flex: 1; }
+  .int-cal-vbtn { padding: 5px 8px; font-size: 11px; flex: 1; text-align: center; }
+
+  /* Calendrier mois — plein écran */
+  .int-cal-month { min-height: calc(100dvh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .int-cal-cell-dom { font-size: 11px; }
+  .int-cal-cell-ev  { font-size: 8px; }
+
+  /* Stats grid — 2 colonnes */
+  .int-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .int-stat-v { font-size: 24px; }
+
+  /* FAB plus visible */
+  .int-fab { width: 54px; height: 54px; font-size: 22px; }
+}
+
+/* Mode paysage — calendrier et scroll */
+@media (max-height: 500px) and (max-width: 900px) {
+  .int-cal-wrap { height: auto; min-height: 0; }
+  .int-cal-scroll { max-height: calc(100dvh - 140px); overflow-y: auto; }
+  .int-cal-month { min-height: 0; height: auto; }
+}
+
+/* ══════════════════════════════════════════════════════
+   STOCK & COMMANDES — AMÉLIORATIONS MOBILE
+   (les cartes mobiles sont déjà générées par orders.js)
+══════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* KPIs — 2 colonnes sur mobile */
+  .ord-kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ord-kpi  { padding: 10px; }
+
+  /* Toolbar empilée */
+  .ord-toolbar { flex-direction: column; align-items: stretch; gap: 6px; }
+  .ord-search-wrap { width: 100%; }
+  .ord-hdr-btns { flex-wrap: wrap; }
+  .ord-btn-ghost { flex: 1; justify-content: center; min-height: 44px; }
+
+  /* Boutons action des cartes mobiles — touch 44px */
+  .ord-mc-ico { min-width: 44px; min-height: 44px; }
+}
+
+/* ══════════════════════════════════════════════════════
+   CONSOMMATIONS — MOBILE APPROFONDI
+══════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* Date nav — compact */
+  .cso-date-nav { flex-wrap: nowrap; gap: 4px; }
+  .cso-date-today-btn { padding: 5px 10px; font-size: 11px; }
+  .cso-date-inp { font-size: 13px; }
+
+  /* Meter cards — pleine largeur */
+  .cso-mcard-stats { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .cso-mcard-stat-val { font-size: 16px; }
+
+  /* Historique clients */
+  .cso-cli-hist-date { font-size: 12px; }
+  .cso-cli-hist-count { font-size: 12px; }
+
+  /* KPI scroll carousel — largeur carte adaptée */
+  .cso-kpi-card { width: clamp(130px, 40vw, 160px); }
+}
+
+/* ══════════════════════════════════════════════════════
+   FORMULAIRES MODAUX — OPTIMISATION MOBILE
+══════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* Modal — occupe presque tout l'écran sur iPhone */
+  .modal { max-height: calc(96dvh - env(safe-area-inset-bottom)); }
+
+  /* Corps du modal — scroll interne obligatoire */
+  .modal-body { max-height: calc(65dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
+
+  /* Boutons — taille touch */
+  .modal-btn { padding: 14px; font-size: 15px; min-height: 50px; }
+
+  /* Inputs dans modaux — pas de zoom iOS */
+  .modal-body .fi,
+  .modal-body select { font-size: 16px; min-height: 44px; }
+
+  /* Titre et sous-titre de modal */
+  .modal-title { font-size: 16px; padding: 14px 16px 4px; }
+  .modal-sub   { font-size: 12px; padding: 0 16px 6px; }
+
+  /* Annuler en bas, bien séparé */
+  .modal-actions { gap: 6px; padding: 0 14px 14px; }
+}
+
+/* ══════════════════════════════════════════════════════
+   PRISE DE PHOTO — OPTIMISATION MOBILE
+══════════════════════════════════════════════════════ */
+.mob-camera-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 12px 16px; min-height: 48px;
+  border-radius: 12px; border: 2px dashed var(--border2);
+  background: var(--bg3); color: var(--text2);
+  font-size: 14px; font-weight: 600; font-family: var(--ffm);
+  cursor: pointer; transition: all 0.15s;
+}
+.mob-camera-btn:hover, .mob-camera-btn:active { border-color: var(--cyan); color: var(--cyan); }
+.mob-camera-btn input[type="file"] { display: none; }
+
+/* Aperçu photo capturée */
+.mob-photo-preview {
+  width: 100%; max-height: 200px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--border);
+  margin-top: 8px; display: block;
+}
+
+/* ══════════════════════════════════════════════════════
+   BOTTOM NAV — OPTIMISATION TAILLE ET LISIBILITÉ
+══════════════════════════════════════════════════════ */
+@media (max-width: 400px) {
+  /* Très petits écrans (iPhone SE, Galaxy A) */
+  .bn { padding: 5px 6px; min-width: 40px; }
+  .bn i { font-size: 14px; }
+  .bn span:not(.bn-bar):not(.nav-badge) { font-size: 7px; }
+  .bottom-nav-inner { gap: 0; }
+}
+
+/* ══════════════════════════════════════════════════════
+   MODE PAYSAGE — AJUSTEMENTS GÉNÉRAUX
+══════════════════════════════════════════════════════ */
+@media (orientation: landscape) and (max-width: 900px) {
+  /* En paysage on cache la bottom nav pour gagner la hauteur,
+     sauf si l'utilisateur veut naviguer */
+  .main-content {
+    padding-left:  max(16px, env(safe-area-inset-left,  0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  /* Réduire la hauteur du topbar en paysage */
+  .topbar { min-height: var(--topbar-h) !important; }
 }

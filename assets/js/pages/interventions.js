@@ -13,7 +13,8 @@
   let _users         = [];
   let _loaded    = false;
   let _unsubInt  = {};
-  let _pickerSel = [];
+  let _pickerSel  = [];
+  let _intPhotoB64 = null;
 
   // ── FIRESTORE ──
   const DB = {
@@ -693,8 +694,52 @@
     }
   }
 
+  // ── PHOTO HELPERS ──
+  function _intPhotoHtml(existing) {
+    const prev = existing ? `<img id="int-ph-prev" class="mob-photo-preview" src="${esc(existing)}" alt="Photo">` : `<img id="int-ph-prev" class="mob-photo-preview" style="display:none" alt="Photo">`;
+    return `<div>
+      <div class="int-form-label"><i class="fas fa-camera"></i> Photo (optionnel)</div>
+      <label class="mob-camera-btn">
+        <i class="fas fa-camera"></i>
+        <span>Prendre / choisir une photo</span>
+        <input type="file" accept="image/*" capture="environment" onchange="MX.Pages.Int._onIntPhoto(this)" style="display:none">
+      </label>
+      ${prev}
+    </div>`;
+  }
+
+  function _onIntPhoto(input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    _compressInt(file, 800, 800, 0.72).then(b64 => {
+      _intPhotoB64 = b64;
+      const prev = document.getElementById('int-ph-prev');
+      if (prev) { prev.src = b64; prev.style.display = 'block'; }
+    }).catch(() => MX.toast('Erreur lecture photo', true));
+  }
+
+  function _compressInt(file, mW, mH, q) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > mW) { h = Math.round(h * mW / w); w = mW; }
+        if (h > mH) { w = Math.round(w * mH / h); h = mH; }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', q));
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
   // ── ACTIONS ──
   function _newInt(defaultDate, defaultTime) {
+    _intPhotoB64 = null;
     const today = _today();
     const ds = defaultDate || today;
     const ts = defaultTime || '09:00';
@@ -724,6 +769,7 @@
           </div>
         </div>
         ${_canAll() ? _techPicker([]) : ''}
+        ${_intPhotoHtml(null)}
       </div>`,
       actions: [
         { label: 'Créer', cls: 'confirm', fn: async () => {
@@ -741,6 +787,7 @@
             endDate:     document.getElementById('int-f-ed')?.value || today,
             endTime:     document.getElementById('int-f-et')?.value || '10:00',
             assignedTo:  assigned,
+            photo:       _intPhotoB64 || null,
             createdBy:   _author(),
             createdAt:   FV.serverTimestamp(),
             updatedAt:   FV.serverTimestamp(),
@@ -758,6 +805,7 @@
   }
 
   function _editInt(id) {
+    _intPhotoB64 = null;
     const iv = _interventions.find(x => x.id === id);
     if (!iv) return;
     MX.showModal({
@@ -786,6 +834,7 @@
           </div>
         </div>
         ${_techPicker(iv.assignedTo)}
+        ${_intPhotoHtml(iv.photo || null)}
       </div>`,
       actions: [
         { label: 'Enregistrer', cls: 'confirm', fn: async () => {
@@ -805,6 +854,7 @@
             endDate:     document.getElementById('int-f-ed')?.value || iv.endDate,
             endTime:     document.getElementById('int-f-et')?.value || iv.endTime,
             assignedTo:  assigned,
+            photo:       _intPhotoB64 !== null ? _intPhotoB64 : (iv.photo || null),
             updatedAt:   FV.serverTimestamp(),
           };
           try {
@@ -864,6 +914,10 @@
           <div class="int-form-label">Rapport de clôture</div>
           <div class="int-view-desc">${esc(iv.completionNotes)}</div>
           ${iv.timeSpentMin ? `<div class="int-view-row"><i class="fas fa-clock"></i> ${iv.timeSpentMin < 60 ? iv.timeSpentMin + ' min' : (Math.round(iv.timeSpentMin / 60 * 10) / 10) + ' h'} · ${esc(iv.completedBy || '')}</div>` : ''}
+        </div>` : ''}
+        ${iv.photo ? `<div>
+          <div class="int-form-label"><i class="fas fa-camera"></i> Photo</div>
+          <img src="${esc(iv.photo)}" alt="Photo intervention" class="mob-photo-preview">
         </div>` : ''}
         <div class="int-view-meta">Créée par ${esc(iv.createdBy || '')}${createdD ? ' · ' + createdD.toLocaleDateString('fr-FR') : ''}</div>
       </div>`,
@@ -1043,7 +1097,7 @@
     render, _tab,
     _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
-    _setFilter, _toggleTech,
+    _setFilter, _toggleTech, _onIntPhoto,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
   };
 })();
