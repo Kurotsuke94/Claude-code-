@@ -2,25 +2,26 @@
   let _filter  = 'all';
   let _search  = '';
   let _sel     = new Set();
-  let _pdfInc  = { rupture: true, seuil: true, arrivant: true, manual: false };
+  let _pdfInc  = { rupture: true, seuil: true, sous_rec: false, manual: false };
   let _pdfSupp = '';
   let _pdfNote = '';
 
-  function _qty(p)  { return parseInt(p.qty   || 0, 10); }
+  function _qty(p)  { return parseInt(p.qty    || 0, 10); }
   function _min(p)  { return parseInt(p.minQty || 0, 10); }
-  function _need(p) { return Math.max(0, _min(p) - _qty(p)); }
+  function _rec(p)  { return p.recQty ? parseInt(p.recQty, 10) : _min(p) * 2; }
+  function _need(p) { return Math.max(0, _rec(p) - _qty(p)); }
   function _status(p) {
-    var q = _qty(p), m = _min(p);
-    if (q <= 0)              return 'rupture';
-    if (q < m)               return 'seuil';
-    if (m > 0 && q < m * 2) return 'arrivant';
+    var q = _qty(p), m = _min(p), r = _rec(p);
+    if (q <= 0)  return 'rupture';
+    if (q <= m)  return 'seuil';
+    if (q < r)   return 'sous_rec';
     return 'ok';
   }
   var SC = {
-    rupture:  { label: 'Rupture',          col: 'var(--red)',    dim: 'var(--red-dim)',    brd: 'var(--red-border)' },
-    seuil:    { label: 'Sous le seuil',    col: 'var(--orange)', dim: 'var(--orange-dim)', brd: 'var(--orange-border)' },
-    arrivant: { label: 'Arrivant rupture', col: '#EAB308',       dim: '#EAB30820',         brd: '#EAB30880' },
-    ok:       { label: 'OK',               col: 'var(--green)',  dim: 'var(--green-dim)',  brd: 'var(--green-border)' }
+    rupture:  { label: 'Rupture',           col: 'var(--red)',    dim: 'var(--red-dim)',    brd: 'var(--red-border)' },
+    seuil:    { label: 'Sous le seuil',     col: 'var(--red)',    dim: 'var(--red-dim)',    brd: 'var(--red-border)' },
+    sous_rec: { label: 'Sous recommandé',   col: 'var(--orange)', dim: 'var(--orange-dim)', brd: 'var(--orange-border)' },
+    ok:       { label: 'Stock optimal',     col: 'var(--green)',  dim: 'var(--green-dim)',  brd: 'var(--green-border)' },
   };
 
   function _filtered() {
@@ -34,7 +35,8 @@
       if (_filter === 'all')      return true;
       if (_filter === 'rupture')  return _status(p) === 'rupture';
       if (_filter === 'seuil')    return _status(p) === 'seuil';
-      if (_filter === 'arrivant') return _status(p) === 'arrivant';
+      if (_filter === 'sous_rec') return _status(p) === 'sous_rec';
+      if (_filter === 'critique') return _status(p) === 'rupture' || _status(p) === 'seuil';
       if (_filter === 'ordered')  return p.orderStatus === 'ordered' || p.orderStatus === 'delivering';
       if (_filter === 'received') return p.orderStatus === 'received';
       return true;
@@ -46,9 +48,9 @@
     var out = [];
     prods.forEach(function (p) {
       var st = _status(p);
-      if (_pdfInc.rupture  && st === 'rupture')  { out.push(p); return; }
+      if (_pdfInc.rupture  && st === 'rupture')   { out.push(p); return; }
       if (_pdfInc.seuil    && st === 'seuil')     { out.push(p); return; }
-      if (_pdfInc.arrivant && st === 'arrivant')  { out.push(p); return; }
+      if (_pdfInc.sous_rec && st === 'sous_rec')  { out.push(p); return; }
       if (_pdfInc.manual   && _sel.has(p.id))     { out.push(p); return; }
     });
     var seen = new Set();
@@ -81,10 +83,10 @@
 
   function _renderPanel(items) {
     var esc = MX.esc;
-    var nR = (MX.state.products || []).filter(function (p) { return _status(p) === 'rupture'; }).length;
-    var nS = (MX.state.products || []).filter(function (p) { return _status(p) === 'seuil'; }).length;
-    var nA = (MX.state.products || []).filter(function (p) { return _status(p) === 'arrivant'; }).length;
-    var nM = _sel.size;
+    var nR  = (MX.state.products || []).filter(function (p) { return _status(p) === 'rupture'; }).length;
+    var nS  = (MX.state.products || []).filter(function (p) { return _status(p) === 'seuil'; }).length;
+    var nSR = (MX.state.products || []).filter(function (p) { return _status(p) === 'sous_rec'; }).length;
+    var nM  = _sel.size;
     var suppliers = _getSuppliers();
     var dlId = 'ord-supp-dl-' + Date.now();
 
@@ -106,9 +108,9 @@
     h += '</div>';
 
     h += '<div class="ord-panel-chk">';
-    h += '<input type="checkbox" id="pdf-inc-arrivant"' + (_pdfInc.arrivant ? ' checked' : '') + ' onchange="MX.Pages.Orders._setPdfInc(\'arrivant\',this.checked)">';
-    h += '<label for="pdf-inc-arrivant">Arrivant rupture</label>';
-    h += '<span class="ord-panel-cnt" style="background:#EAB30820;color:#EAB308">' + nA + '</span>';
+    h += '<input type="checkbox" id="pdf-inc-sous-rec"' + (_pdfInc.sous_rec ? ' checked' : '') + ' onchange="MX.Pages.Orders._setPdfInc(\'sous_rec\',this.checked)">';
+    h += '<label for="pdf-inc-sous-rec">Sous recommandé</label>';
+    h += '<span class="ord-panel-cnt" style="background:var(--orange-dim);color:var(--orange)">' + nSR + '</span>';
     h += '</div>';
 
     h += '<div class="ord-panel-chk">';
@@ -203,9 +205,11 @@
 
     var nRupture  = _countByStatus('rupture');
     var nSeuil    = _countByStatus('seuil');
-    var nArrivant = _countByStatus('arrivant');
+    var nSousRec  = _countByStatus('sous_rec');
+    var nOk       = _countByStatus('ok');
     var nOrdered  = _countOrdered();
     var nReceived = _countReceived();
+    var totalNeed = prods.reduce(function (s, p) { return s + _need(p); }, 0);
 
     var h = '<div class="ord-page">';
     h += '<div class="ord-main">';
@@ -242,11 +246,11 @@
 
     // KPI cards
     h += '<div class="ord-kpis">';
-    h += '<div class="ord-kpi"><div class="ord-kpi-ico" style="background:rgba(0,245,212,0.12);color:var(--cyan)">&#128230;</div><div><div class="ord-kpi-val" style="color:var(--cyan)">' + prods.length + '</div><div class="ord-kpi-lbl">Articles en stock</div><div class="ord-kpi-sub">produits total</div></div></div>';
-    h += '<div class="ord-kpi"><div class="ord-kpi-ico" style="background:var(--orange-dim);color:var(--orange)">&#9888;</div><div><div class="ord-kpi-val" style="color:var(--orange)">' + nSeuil + '</div><div class="ord-kpi-lbl">Sous le seuil</div><div class="ord-kpi-sub">stock insuffisant</div></div></div>';
-    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'rupture\')"><div class="ord-kpi-ico" style="background:var(--red-dim);color:var(--red)">&#128683;</div><div><div class="ord-kpi-val" style="color:var(--red)">' + nRupture + '</div><div class="ord-kpi-lbl">En rupture</div><div class="ord-kpi-sub">stock à zéro</div></div></div>';
-    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'arrivant\')"><div class="ord-kpi-ico" style="background:#EAB30820;color:#EAB308">&#9203;</div><div><div class="ord-kpi-val" style="color:#EAB308">' + nArrivant + '</div><div class="ord-kpi-lbl">Arrivant en rupture</div><div class="ord-kpi-sub">presque à court</div></div></div>';
-    h += '<div class="ord-kpi"><div class="ord-kpi-ico" style="background:rgba(168,85,247,0.12);color:#A855F7">&#128196;</div><div><div class="ord-kpi-val" style="color:#A855F7">' + pdfList.length + '</div><div class="ord-kpi-lbl">PDF commandes</div><div class="ord-kpi-sub">produits sélectionnés</div></div></div>';
+    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'all\')"><div class="ord-kpi-ico" style="background:rgba(0,245,212,0.12);color:var(--cyan)">&#128230;</div><div><div class="ord-kpi-val" style="color:var(--cyan)">' + prods.length + '</div><div class="ord-kpi-lbl">Articles en stock</div><div class="ord-kpi-sub">produits total</div></div></div>';
+    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'all\')"><div class="ord-kpi-ico" style="background:var(--green-dim);color:var(--green)">&#9989;</div><div><div class="ord-kpi-val" style="color:var(--green)">' + nOk + '</div><div class="ord-kpi-lbl">Stock optimal</div><div class="ord-kpi-sub">≥ recommandé</div></div></div>';
+    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'sous_rec\')"><div class="ord-kpi-ico" style="background:var(--orange-dim);color:var(--orange)">&#9203;</div><div><div class="ord-kpi-val" style="color:var(--orange)">' + nSousRec + '</div><div class="ord-kpi-lbl">Sous recommandé</div><div class="ord-kpi-sub">réappro. conseillé</div></div></div>';
+    h += '<div class="ord-kpi ord-kpi-click" onclick="MX.Pages.Orders._setFilter(\'critique\')"><div class="ord-kpi-ico" style="background:var(--red-dim);color:var(--red)">&#128683;</div><div><div class="ord-kpi-val" style="color:var(--red)">' + (nRupture + nSeuil) + '</div><div class="ord-kpi-lbl">Sous le minimum</div><div class="ord-kpi-sub">commande urgente</div></div></div>';
+    h += '<div class="ord-kpi"><div class="ord-kpi-ico" style="background:rgba(168,85,247,0.12);color:#A855F7">&#128230;</div><div><div class="ord-kpi-val" style="color:#A855F7">' + totalNeed + '</div><div class="ord-kpi-lbl">Unités à commander</div><div class="ord-kpi-sub">stock recommandé</div></div></div>';
     h += '</div>';
 
     // Toolbar
@@ -258,12 +262,12 @@
       var cntHtml = cnt > 0 ? '<span class="ord-fb-cnt ord-fb-cnt-v">' + cnt + '</span>' : '';
       return '<button class="ord-fb' + on + '" onclick="MX.Pages.Orders._setFilter(\'' + key + '\')">' + label + cntHtml + '</button>';
     }
-    h += fb('all',      'Tous',                prods.length);
-    h += fb('rupture',  'En rupture',          nRupture);
-    h += fb('seuil',    'Sous le seuil',       nSeuil);
-    h += fb('arrivant', 'Arrivant en rupture', nArrivant);
-    h += fb('ordered',  'En commande',         nOrdered);
-    h += fb('received', 'Réceptionnés',      nReceived);
+    h += fb('all',       'Tous',              prods.length);
+    h += fb('critique',  '🔴 Sous minimum',  nRupture + nSeuil);
+    h += fb('sous_rec',  '🟡 Sous recommandé', nSousRec);
+    h += fb('rupture',   'Rupture',           nRupture);
+    h += fb('ordered',   'En commande',       nOrdered);
+    h += fb('received',  'Réceptionnés',      nReceived);
     h += '</div>';
 
     h += '<div class="ord-search-wrap">';
@@ -279,10 +283,10 @@
     h += '<th class="ord-th ord-th-check"><input type="checkbox" class="ord-chk" onchange="MX.Pages.Orders._selAllVis(this.checked)"></th>';
     h += '<th class="ord-th">Produit</th>';
     h += '<th class="ord-th ord-th-ref">Référence</th>';
-    h += '<th class="ord-th ord-th-cat">Catégorie</th>';
     h += '<th class="ord-th ord-th-loc">Emplacement</th>';
-    h += '<th class="ord-th ord-th-num">Stock</th>';
-    h += '<th class="ord-th ord-th-num">Seuil</th>';
+    h += '<th class="ord-th ord-th-num" title="Stock actuel">Actuel</th>';
+    h += '<th class="ord-th ord-th-num" title="Stock minimum">Min.</th>';
+    h += '<th class="ord-th ord-th-num" title="Stock recommandé">Rec.</th>';
     h += '<th class="ord-th ord-th-num">À commander</th>';
     h += '<th class="ord-th">Statut</th>';
     if (canEdit) h += '<th class="ord-th" style="text-align:right">Actions</th>';
@@ -294,23 +298,27 @@
       h += '<tr><td colspan="' + cols + '"><div class="ord-empty"><span style="font-size:28px">&#128230;</span><span>Aucun produit trouvé</span></div></td></tr>';
     } else {
       vis.forEach(function (p) {
-        var st  = _status(p);
-        var sc  = SC[st];
-        var qty = _qty(p);
-        var min = _min(p);
+        var st   = _status(p);
+        var sc   = SC[st];
+        var qty  = _qty(p);
+        var min  = _min(p);
+        var rec  = _rec(p);
         var need = _need(p);
-        var sel = _sel.has(p.id);
-        var qtyColor = st === 'rupture' ? 'color:var(--red);font-weight:700' : st === 'seuil' ? 'color:var(--orange);font-weight:700' : 'color:var(--text1)';
+        var sel  = _sel.has(p.id);
+        var qtyColor = (st === 'rupture' || st === 'seuil') ? 'color:var(--red);font-weight:700'
+                     : st === 'sous_rec' ? 'color:var(--orange);font-weight:700'
+                     : 'color:var(--green)';
+        var needColor = (st === 'rupture' || st === 'seuil') ? 'color:var(--red);font-weight:700' : 'color:var(--orange);font-weight:600';
 
         h += '<tr class="ord-tr' + (sel ? ' ord-tr-sel' : '') + '">';
         h += '<td class="ord-td ord-td-check"><input type="checkbox" class="ord-chk"' + (sel ? ' checked' : '') + ' onchange="MX.Pages.Orders._toggleSel(\'' + esc(p.id) + '\',this.checked)"></td>';
-        h += '<td class="ord-td"><div class="ord-prod-name">' + esc(p.name || '—') + '</div></td>';
+        h += '<td class="ord-td"><div class="ord-prod-name">' + esc(p.name || '—') + '</div>' + (p.category ? '<div style="font-size:10px;color:var(--text3)">' + esc(p.category) + '</div>' : '') + '</td>';
         h += '<td class="ord-td ord-td-ref">' + (p.ref ? esc(p.ref) : '<span class="ord-na">—</span>') + '</td>';
-        h += '<td class="ord-td ord-td-cat">' + (p.category ? '<span style="font-size:12px;color:var(--text2)">' + esc(p.category) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
         h += '<td class="ord-td ord-td-loc">' + (p.location ? '<span class="ord-loc">' + esc(p.location) + '</span>' : '<span class="ord-na">—</span>') + '</td>';
         h += '<td class="ord-td ord-td-num" style="' + qtyColor + '">' + qty + '</td>';
         h += '<td class="ord-td ord-td-num" style="color:var(--text2)">' + min + '</td>';
-        h += '<td class="ord-td ord-td-num">' + (need > 0 ? '<span style="color:var(--red);font-weight:700">' + need + '</span>' : '<span class="ord-na">—</span>') + '</td>';
+        h += '<td class="ord-td ord-td-num" style="color:var(--text2)">' + (p.recQty ? rec : '<span class="ord-na" title="= min×2">' + rec + '</span>') + '</td>';
+        h += '<td class="ord-td ord-td-num">' + (need > 0 ? '<span style="' + needColor + '">' + need + '</span>' : '<span style="color:var(--green)">&#10003;</span>') + '</td>';
         h += '<td class="ord-td"><span class="ord-badge" style="color:' + sc.col + ';background:' + sc.dim + ';border-color:' + sc.brd + '">' + sc.label + '</span></td>';
         if (canEdit) {
           h += '<td class="ord-td ord-td-act">';
@@ -334,8 +342,9 @@
         var sc   = SC[st];
         var qty  = _qty(p);
         var min  = _min(p);
+        var rec  = _rec(p);
         var need = _need(p);
-        var qtyCol = st === 'rupture' ? 'var(--red)' : st === 'seuil' ? 'var(--orange)' : 'var(--text1)';
+        var qtyCol = (st === 'rupture' || st === 'seuil') ? 'var(--red)' : st === 'sous_rec' ? 'var(--orange)' : 'var(--green)';
 
         h += '<div class="ord-mobile-card">';
 
@@ -360,14 +369,16 @@
           h += '<div class="ord-mc-r2">' + metas.join(' &bull; ') + '</div>';
         }
 
-        // Ligne 3 : stats inline — Stock X | Seuil Y | Commande Z
+        // Ligne 3 : stats inline — Stock X | Min Y | Rec Z | Commande N
         h += '<div class="ord-mc-r3">';
         h += '<span class="ord-mc-stat">Stock <b style="color:' + qtyCol + '">' + qty + '</b></span>';
         h += '<span class="ord-mc-sep">|</span>';
-        h += '<span class="ord-mc-stat">Seuil <b style="color:var(--text2)">' + min + '</b></span>';
+        h += '<span class="ord-mc-stat">Min <b style="color:var(--text2)">' + min + '</b></span>';
+        h += '<span class="ord-mc-sep">|</span>';
+        h += '<span class="ord-mc-stat">Rec <b style="color:var(--text2)">' + rec + '</b></span>';
         if (need > 0) {
           h += '<span class="ord-mc-sep">|</span>';
-          h += '<span class="ord-mc-stat">Commande <b style="color:var(--red)">' + need + '</b></span>';
+          h += '<span class="ord-mc-stat">Cmd <b style="color:' + ((st === 'rupture' || st === 'seuil') ? 'var(--red)' : 'var(--orange)') + '">' + need + '</b></span>';
         }
         h += '</div>';
 
@@ -450,6 +461,7 @@
       rows += '<td>' + (p.location || '—') + '</td>';
       rows += '<td style="text-align:center">' + _qty(p) + '</td>';
       rows += '<td style="text-align:center">' + _min(p) + '</td>';
+      rows += '<td style="text-align:center">' + _rec(p) + '</td>';
       rows += '<td style="text-align:center;color:#DC2626;font-weight:700">' + need + '</td>';
       rows += '</tr>';
     });
@@ -486,9 +498,9 @@
     html += '<div class="meta-item"><label>Fournisseur</label><span>' + supplier + '</span></div>';
     html += '</div>';
     html += '<table>';
-    html += '<thead><tr><th>Référence</th><th>Désignation</th><th>Emplacement</th><th style="text-align:center">Stock actuel</th><th style="text-align:center">Seuil</th><th style="text-align:center">Qté à commander</th></tr></thead>';
+    html += '<thead><tr><th>Référence</th><th>Désignation</th><th>Emplacement</th><th style="text-align:center">Stock actuel</th><th style="text-align:center">Seuil</th><th style="text-align:center">Recommandé</th><th style="text-align:center">Qté à commander</th></tr></thead>';
     html += '<tbody>' + rows + '</tbody>';
-    html += '<tfoot><tr class="total-row"><td colspan="5"><strong>Total à commander</strong></td><td style="text-align:center"><strong>' + total + '</strong></td></tr></tfoot>';
+    html += '<tfoot><tr class="total-row"><td colspan="6"><strong>Total à commander</strong></td><td style="text-align:center"><strong>' + total + '</strong></td></tr></tfoot>';
     html += '</table>';
     if (comment) {
       html += '<div class="comment-box"><strong>Commentaire</strong>' + comment + '</div>';
@@ -511,7 +523,7 @@
       status: 'pending',
       createdAt: new Date(),
       items: items.map(function (p) {
-        return { id: p.id, name: p.name, ref: p.ref || '', location: p.location || '', qty: _qty(p), minQty: _min(p), need: _need(p) };
+        return { id: p.id, name: p.name, ref: p.ref || '', location: p.location || '', qty: _qty(p), minQty: _min(p), recQty: _rec(p), need: _need(p) };
       })
     };
     if (MX.DB && MX.DB.addOrder) {
@@ -548,11 +560,14 @@
     fields += '<div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Emplacement</label>';
     fields += '<input id="prod-loc" class="fi" type="text" placeholder="Ex: Armoire A3, Hall B" value="' + esc(p ? p.location || '' : '') + '"></div>';
 
-    fields += '<div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Stock actuel</label>';
+    fields += '<div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">📊 Stock actuel</label>';
     fields += '<input id="prod-qty" class="fi" type="number" min="0" placeholder="0" value="' + (p ? _qty(p) : '') + '"></div>';
 
-    fields += '<div><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Seuil minimum</label>';
+    fields += '<div><label style="font-size:11px;font-weight:600;color:var(--red);display:block;margin-bottom:5px">📉 Stock minimum</label>';
     fields += '<input id="prod-minqty" class="fi" type="number" min="0" placeholder="0" value="' + (p ? _min(p) : '') + '"></div>';
+
+    fields += '<div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:var(--cyan);display:block;margin-bottom:5px">📦 Stock recommandé <span style="font-size:10px;font-weight:400;color:var(--text3)">(objectif de réapprovisionnement)</span></label>';
+    fields += '<input id="prod-recqty" class="fi" type="number" min="0" placeholder="Ex: 20" value="' + (p && p.recQty ? parseInt(p.recQty, 10) : '') + '"></div>';
 
     fields += '<div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:var(--text2);display:block;margin-bottom:5px">Fournisseur</label>';
     fields += '<input id="prod-supplier" class="fi" type="text" placeholder="Fournisseur" list="' + suppDlId + '" value="' + esc(p ? p.supplier || '' : '') + '">';
@@ -578,12 +593,13 @@
     var qty     = parseInt((document.getElementById('prod-qty')    || {}).value || '0', 10);
     var minQty  = parseInt((document.getElementById('prod-minqty') || {}).value || '0', 10);
     var supplier = (document.getElementById('prod-supplier') || {}).value || '';
+    var recQty  = parseInt((document.getElementById('prod-recqty') || {}).value || '0', 10);
 
     if (!name.trim()) {
       if (MX.toast) MX.toast('Le nom est obligatoire', 'error');
       return;
     }
-    var data = { name: name.trim(), ref: ref.trim(), category: cat.trim(), location: loc.trim(), qty: qty, minQty: minQty, supplier: supplier.trim() };
+    var data = { name: name.trim(), ref: ref.trim(), category: cat.trim(), location: loc.trim(), qty: qty, minQty: minQty, recQty: recQty, supplier: supplier.trim() };
     if (id) {
       MX.DB.updateProduct(id, data).then(function () {
         MX.closeModal();
@@ -685,7 +701,7 @@
 
   function _export() {
     var prods = MX.state.products || [];
-    var rows  = [['ID', 'Nom', 'Référence', 'Catégorie', 'Emplacement', 'Stock', 'Seuil', 'À commander', 'Statut', 'Fournisseur', 'Statut commande']];
+    var rows  = [['ID', 'Nom', 'Référence', 'Catégorie', 'Emplacement', 'Stock', 'Seuil', 'Recommandé', 'À commander', 'Statut', 'Fournisseur', 'Statut commande']];
     prods.forEach(function (p) {
       rows.push([
         p.id || '',
@@ -695,6 +711,7 @@
         p.location || '',
         _qty(p),
         _min(p),
+        _rec(p),
         _need(p),
         SC[_status(p)].label,
         p.supplier || '',
