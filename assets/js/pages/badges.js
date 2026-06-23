@@ -55,7 +55,7 @@
           .map(([name]) => name);
         h += `<div class="apcard">
           <div class="aphd" style="padding:12px 14px;gap:10px">
-            <div style="width:44px;height:44px;border-radius:14px;background:${b.color}22;border:2px solid ${b.border||b.color};display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${esc(b.icon||'🏅')}</div>
+            <div class="bdg-icon" style="width:46px;height:46px;border-radius:14px;background:${b.color}22;border:2px solid ${b.border||b.color};font-size:26px">${b.icon||'🏅'}</div>
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span style="font-size:14px;font-weight:700">${esc(b.name)}</span>
@@ -111,10 +111,10 @@
   }
 
   function _badgeChip(b, esc, small) {
-    const size = small ? '18px' : '22px';
+    const size = small ? '16px' : '20px';
     const pad  = small ? '3px 8px' : '4px 12px';
     return `<div title="${esc(b.name)}" style="display:inline-flex;align-items:center;gap:5px;padding:${pad};border-radius:${small?'8px':'10px'};background:${b.color}22;border:1.5px solid ${b.border||b.color}">
-      <span style="font-size:${size}">${esc(b.icon||'🏅')}</span>
+      <span class="bdg-icon" style="font-size:${size};width:auto;height:auto;overflow:visible">${b.icon||'🏅'}</span>
       ${!small ? `<span style="font-size:12px;font-weight:600;color:${b.color}">${esc(b.name)}</span>` : ''}
     </div>`;
   }

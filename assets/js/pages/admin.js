@@ -1032,7 +1032,7 @@
 
       h += `<div class="apcard" style="margin-bottom:8px">
         <div class="aphd" style="padding:12px 14px;gap:10px">
-          <div style="width:38px;height:38px;border-radius:12px;background:${b.color}22;border:2px solid ${b.border||b.color};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">${esc(b.icon||'🏅')}</div>
+          <div class="bdg-icon" style="width:44px;height:44px;border-radius:13px;background:${b.color}22;border:2px solid ${b.border||b.color};font-size:26px">${b.icon||'🏅'}</div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span style="font-size:13px;font-weight:700">${esc(b.name)}</span>
@@ -1072,7 +1072,7 @@
       <div class="apgrid">
         <div>
           <div class="aplbl">Icône (emoji)</div>
-          <input class="fi fi-sm" id="bdg-icon" value="${esc(b.icon||'🏅')}" maxlength="4" style="font-size:20px;text-align:center">
+          <input class="fi fi-sm" id="bdg-icon" value="${esc(b.icon||'🏅')}" maxlength="4" style="font-size:26px;text-align:center;font-family:'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif;line-height:1">
         </div>
         <div>
           <div class="aplbl">Couleur</div>
