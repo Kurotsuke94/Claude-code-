@@ -1096,20 +1096,24 @@
 
   function badgeOpenCreate() {
     _badgeModal = null;
-    MX.showModal('Nouveau badge', _badgeFormHtml(null), [
-      { label: 'Créer', cls: 'primary', fn: badgeSaveCreate },
-      { label: 'Annuler', cls: 'cancel' }
-    ]);
+    MX.showModal({ title: 'Nouveau badge', body: _badgeFormHtml(null),
+      actions: [
+        { label: 'Créer', cls: 'primary', fn: badgeSaveCreate },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
   }
 
   function badgeOpenEdit(badgeId) {
     const badge = (MX.state.badges||[]).find(b => b.id === badgeId);
     if (!badge) return;
     _badgeModal = badgeId;
-    MX.showModal('Modifier le badge', _badgeFormHtml(badge), [
-      { label: 'Enregistrer', cls: 'primary', fn: badgeSaveEdit },
-      { label: 'Annuler', cls: 'cancel' }
-    ]);
+    MX.showModal({ title: 'Modifier le badge', body: _badgeFormHtml(badge),
+      actions: [
+        { label: 'Enregistrer', cls: 'primary', fn: badgeSaveEdit },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
   }
 
   function _collectBadgeForm() {
@@ -1181,34 +1185,74 @@
       ? ((state.adminUser||{}).email || 'Admin')
       : ((state.currentUser||{}).name || 'Responsable');
 
-    const listHtml = `<div style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto">
-      ${available.map(u => {
-        const bg = avatarBg(u.name);
-        const fg = avatarFg(u.name);
-        const init = (u.name||'?').slice(0,2).toUpperCase();
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:30px;height:30px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${esc(init)}</div>
-            <span style="font-size:13px;font-weight:600">${esc(u.name)}</span>
-          </div>
-          <button class="save-btn" style="margin:0;padding:4px 12px;font-size:11px"
-            onclick="MX.Pages.Admin.badgeDoAssign('${esc(badgeId)}','${esc(u.name)}','${esc(badgeName)}','${esc(actor)}')">
-            <i class="fas fa-plus"></i> Attribuer
-          </button>
-        </div>`;
-      }).join('')}
-    </div>`;
+    window._bdgCtx = { badgeId, badgeName, actor };
 
-    MX.showModal(`Attribuer "${badgeName}"`, listHtml, [{ label: 'Fermer', cls: 'cancel' }]);
+    const rows = available.map(u => {
+      const bg   = avatarBg(u.name);
+      const fg   = avatarFg(u.name);
+      const init = (u.name||'?').slice(0,2).toUpperCase();
+      const role = u.role || 'technicien';
+      return `<label class="bdg-usr-row" data-uname="${esc(u.name)}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;border:1.5px solid var(--border);background:var(--bg3);transition:border-color .15s">
+        <input type="checkbox" value="${esc(u.name)}" onchange="MX.Pages.Admin._bdgUpdCount()" style="width:17px;height:17px;accent-color:var(--cyan);flex-shrink:0;cursor:pointer">
+        <div style="width:34px;height:34px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(init)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)}</div>
+          <div style="font-size:11px;color:var(--text2);text-transform:capitalize">${esc(role)}</div>
+        </div>
+      </label>`;
+    }).join('');
+
+    const bodyHtml = `
+      <input class="fi fi-sm" id="bdg-search" placeholder="Rechercher un membre…"
+        oninput="MX.Pages.Admin._bdgSearch(this.value)"
+        style="width:100%;box-sizing:border-box;margin-bottom:10px">
+      <div id="bdg-ul" style="display:flex;flex-direction:column;gap:6px;max-height:270px;overflow-y:auto">${rows}</div>
+      <div id="bdg-count" style="font-size:12px;color:var(--text2);margin-top:10px;text-align:center">Aucun membre sélectionné</div>`;
+
+    MX.showModal({
+      title: 'Attribuer : ' + badgeName,
+      body: bodyHtml,
+      actions: [
+        { label: 'Attribuer', cls: 'primary', fn: _bdgDoMultiAssign },
+        { label: 'Annuler',   cls: 'cancel' }
+      ]
+    });
   }
 
-  async function badgeDoAssign(badgeId, userName, badgeName, assignedBy) {
+  function _bdgSearch(q) {
+    const rows = document.querySelectorAll('.bdg-usr-row');
+    const lower = (q || '').toLowerCase().trim();
+    rows.forEach(row => {
+      const name = (row.dataset.uname || '').toLowerCase();
+      row.style.display = (!lower || name.includes(lower)) ? '' : 'none';
+    });
+  }
+
+  function _bdgUpdCount() {
+    const checked = document.querySelectorAll('#bdg-ul input[type=checkbox]:checked').length;
+    const el = document.getElementById('bdg-count');
+    if (el) el.textContent = checked
+      ? checked + ' membre' + (checked > 1 ? 's' : '') + ' sélectionné' + (checked > 1 ? 's' : '')
+      : 'Aucun membre sélectionné';
+  }
+
+  async function _bdgDoMultiAssign() {
+    const ctx = window._bdgCtx;
+    if (!ctx) return;
+    const checked = [...document.querySelectorAll('#bdg-ul input[type=checkbox]:checked')];
+    const names   = checked.map(c => c.value).filter(Boolean);
+    if (!names.length) { MX.toast('Sélectionnez au moins un membre', true); return; }
     try {
-      await MX.DB.assignBadge(badgeId, userName, badgeName, assignedBy);
-      await _logAdminAction(`Attribution du badge "${badgeName}" à ${userName}`);
-      MX.toast(`Badge attribué à ${userName} ✓`);
-      MX.closeModal();
-    } catch(e) { MX.toast('Erreur', true); }
+      for (const userName of names) {
+        await MX.DB.assignBadge(ctx.badgeId, userName, ctx.badgeName, ctx.actor);
+      }
+      await _logAdminAction(`Attribution du badge "${ctx.badgeName}" à : ${names.join(', ')}`);
+      const msg = names.length === 1
+        ? `Badge attribué à ${names[0]} ✓`
+        : `Badge attribué à ${names.length} membres ✓`;
+      MX.toast(msg);
+      window._bdgCtx = null;
+    } catch(e) { MX.toast('Erreur lors de l\'attribution', true); }
   }
 
   async function badgeRemoveFrom(userBadgeId, userName, badgeName) {
@@ -1504,7 +1548,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     addAbsence, validateAbsence, deleteAbsence,
     biblePublish, bibleReject, bibleSavePerms, bibleRefreshStats,
     badgeOpenCreate, badgeOpenEdit, badgeToggleActive, badgeDelete,
-    badgeAssign, badgeDoAssign, badgeRemoveFrom,
+    badgeAssign, badgeRemoveFrom,
+    _bdgSearch, _bdgUpdCount,
     clearJournal
   };
 })();
