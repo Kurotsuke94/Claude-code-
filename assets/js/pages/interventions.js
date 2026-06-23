@@ -1093,8 +1093,24 @@
   // ── PUBLIC API ──
   window.MX       = window.MX       || {};
   window.MX.Pages = window.MX.Pages || {};
+  function _getSummary(forUser) {
+    _load();
+    const ints = forUser
+      ? _interventions.filter(iv => (iv.assignedTechnicians || []).includes(forUser))
+      : _interventions;
+    const eff = iv => _effStatus(iv);
+    return {
+      en_attente: ints.filter(iv => { const s = eff(iv); return s === 'planifiee' || s === 'affectee'; }).length,
+      en_cours:   ints.filter(iv => eff(iv) === 'en_cours').length,
+      en_retard:  ints.filter(iv => eff(iv) === 'en_retard').length,
+      terminee:   ints.filter(iv => eff(iv) === 'terminee').length,
+      total:      ints.length,
+      items:      ints.map(iv => ({ ...iv, effStatus: eff(iv) }))
+    };
+  }
+
   window.MX.Pages.Int = {
-    render, _tab,
+    render, _tab, _getSummary,
     _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
     _setFilter, _toggleTech, _onIntPhoto,

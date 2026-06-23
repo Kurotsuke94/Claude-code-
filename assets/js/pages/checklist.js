@@ -21,11 +21,6 @@
     });
     const pct = total ? Math.round(done / total * 100) : 0;
 
-    // Active missions for this day
-    const dayMissions = (state.missions || []).filter(m =>
-      !m.done && (m.dayId === dayId || m.dayId === "all")
-    );
-
     let banner = '';
     if (cu && !MX.Auth.isAdmin()) {
       const nc  = MX.userColors(cu.name);
@@ -67,73 +62,6 @@
           <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
           <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
         </div>`;
-
-    // ── Missions section (above everything) ──
-    const _CL_PRIO = {
-      urgent: { l:"Urgent", ico:"fa-fire",               c:"var(--red)",    bg:"var(--red-dim)",    border:"var(--red-border)"   },
-      normal: { l:"Normal", ico:"fa-circle-exclamation", c:"var(--orange)", bg:"var(--orange-dim)", border:"var(--orange-border)" },
-      low:    { l:"Basse",  ico:"fa-circle-dot",         c:"var(--text3)",  bg:"var(--bg4)",        border:"var(--border2)"      }
-    };
-    const _CL_CAT = {
-      panne:    { l:"Panne",    ico:"fa-wrench"        },
-      securite: { l:"Sécurité", ico:"fa-shield-halved" },
-      livraison:{ l:"Livraison",ico:"fa-truck"          },
-      nettoyage:{ l:"Nettoyage",ico:"fa-broom"          },
-      autre:    { l:"Autre",    ico:"fa-ellipsis"       }
-    };
-    function _deadlineStatus(dl) {
-      if (!dl) return null;
-      const [dh, dmin] = dl.split(':').map(Number);
-      const now  = new Date();
-      const dlMs = new Date(now); dlMs.setHours(dh, dmin, 0, 0);
-      const diff = dlMs - now;
-      if (diff < 0)          return { label: "DÉPASSÉ",                             c: "var(--red)",    pulse: true  };
-      if (diff < 60*60*1000) return { label: `Dans ${Math.round(diff/60000)}min`,   c: "var(--orange)", pulse: false };
-      return { label: dl, c: "var(--text3)", pulse: false };
-    }
-
-    if (dayMissions.length) {
-      h += `<div class="slot-card" style="border-color:var(--red-border);margin-bottom:20px">
-        <div class="slot-head" style="background:var(--red-dim);border-bottom-color:var(--red-border)">
-          <div class="ch-ico" style="background:var(--red-border);color:var(--red)"><i class="fas fa-circle-exclamation"></i></div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:700;color:var(--red)">INTERVENTIONS</div>
-            <div class="slot-dl">${dayMissions.length} intervention${dayMissions.length > 1 ? 's' : ''} en cours</div>
-            <span class="slot-chip alert"><i class="fas fa-circle-exclamation"></i> À traiter</span>
-          </div>
-          <div class="slot-pct r">${dayMissions.length}</div>
-        </div>`;
-      dayMissions.forEach(m => {
-        const isForAll  = m.assignedTo === "all" || !m.assignedTo;
-        const canToggle = canAll || (cu && (isForAll || cu.name === m.assignedTo));
-        const clickAttr = canToggle ? `onclick="MX.Pages.Checklist.toggleMission('${esc(m.id)}')"` : '';
-        const ptrStyle  = canToggle ? '' : 'cursor:default;pointer-events:none;opacity:0.6';
-        const prio = _CL_PRIO[m.priority] || _CL_PRIO.normal;
-        const cat  = _CL_CAT[m.category]  || _CL_CAT.autre;
-        const dlSt = _deadlineStatus(m.deadline || null);
-        let badge = '';
-        if (isForAll) {
-          badge = `<span class="twho" style="background:var(--red-border);color:var(--red)">Tous</span>`;
-        } else {
-          const nc = MX.userColors(m.assignedTo);
-          badge = `<span class="twho" style="background:${nc.bg};color:${nc.fg}">${esc(m.assignedTo)}</span>`;
-        }
-        h += `<div class="trow" ${clickAttr} style="border-left:3px solid ${prio.c};${ptrStyle}">
-          <div class="tcb" style="border-color:var(--red-border)"><i class="fas fa-check"></i></div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:3px">
-              <span style="background:${prio.bg};color:${prio.c};border:1px solid ${prio.border};padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas ${prio.ico}"></i> ${prio.l}</span>
-              <span style="background:var(--bg4);color:var(--text2);border:1px solid var(--border2);padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas ${cat.ico}"></i> ${cat.l}</span>
-              ${dlSt ? `<span class="${dlSt.pulse?'deadline-overdue':''}" style="color:${dlSt.c};font-size:10px;font-weight:600;font-family:var(--ffm);display:inline-flex;align-items:center;gap:3px"><i class="fas fa-clock"></i> ${esc(dlSt.label)}</span>` : ''}
-            </div>
-            <div class="ttext">${esc(m.text)}</div>
-            ${m.createdBy ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">par ${esc(m.createdBy)}</div>` : ''}
-          </div>
-          ${badge}
-        </div>`;
-      });
-      h += `</div>`;
-    }
 
     // ── Incoming transfers section ──
     if (pendingIn.length || acceptedIn.length) {
@@ -194,6 +122,102 @@
         <div style="font-size:16px;font-weight:700;margin-bottom:8px">Aucun créneau assigné</div>
         <div style="font-size:13px;color:var(--text2)">Aucun créneau n'est assigné à <strong>${esc(worker)}</strong> ce ${esc(day.l)}.</div>
       </div>`;
+    }
+
+    // ── Interventions summary (Responsable / Admin only) ──
+    if (canAll && window.MX.Pages && window.MX.Pages.Int) {
+      const iv = MX.Pages.Int._getSummary();
+      h += `<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:20px">
+        <div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">
+          <div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700;color:#a78bfa">INTERVENTIONS</div>
+            <div class="slot-dl">Synthèse globale</div>
+          </div>
+          <div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">${iv.total}</div>
+        </div>
+        <div style="padding:12px 14px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--orange-dim);border-radius:8px;border:1px solid var(--orange-border)">
+            <span style="font-size:18px">🟡</span>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En attente</div>
+              <div style="font-size:20px;font-weight:700;color:var(--orange);line-height:1.1">${iv.en_attente}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(249,115,22,.1);border-radius:8px;border:1px solid rgba(249,115,22,.3)">
+            <span style="font-size:18px">🟢</span>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En cours</div>
+              <div style="font-size:20px;font-weight:700;color:#F97316;line-height:1.1">${iv.en_cours}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--red-dim);border-radius:8px;border:1px solid var(--red-border)">
+            <span style="font-size:18px">🔴</span>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En retard</div>
+              <div style="font-size:20px;font-weight:700;color:var(--red);line-height:1.1">${iv.en_retard}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border-radius:8px;border:1px solid var(--border2)">
+            <span style="font-size:18px">⚪</span>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Terminées</div>
+              <div style="font-size:20px;font-weight:700;color:var(--text1);line-height:1.1">${iv.terminee}</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:0 14px 14px">
+          <div style="margin-bottom:10px;padding:6px 12px;background:var(--bg3);border-radius:8px;font-size:12px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
+            <span><i class="fas fa-list" style="color:var(--text3);margin-right:5px"></i>Total</span>
+            <strong style="color:var(--text1)">${iv.total} intervention${iv.total!==1?'s':''}</strong>
+          </div>
+          <button onclick="MX.showPage('interventions')"
+            style="width:100%;padding:11px;border:1.5px solid rgba(124,58,237,.5);border-radius:10px;background:rgba(124,58,237,.12);color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:8px">
+            <i class="fas fa-wrench"></i> Ouvrir les interventions
+          </button>
+        </div>
+      </div>`;
+    }
+
+    // ── Mes interventions (technicien uniquement) ──
+    if (!canAll && cu && window.MX.Pages && window.MX.Pages.Int) {
+      const myIv = MX.Pages.Int._getSummary(cu.name);
+      if (myIv.total > 0) {
+        const ST_C = {
+          planifiee: { l:'Planifiée', c:'var(--text2)',   bg:'var(--bg4)'                 },
+          affectee:  { l:'Affectée',  c:'var(--orange)',  bg:'var(--orange-dim)'           },
+          en_cours:  { l:'En cours',  c:'#F97316',        bg:'rgba(249,115,22,.13)'        },
+          terminee:  { l:'Terminée',  c:'#22C55E',        bg:'rgba(34,197,94,.13)'         },
+          en_retard: { l:'En retard', c:'var(--red)',      bg:'var(--red-dim)'             },
+          annulee:   { l:'Annulée',   c:'var(--text3)',   bg:'var(--bg4)'                 }
+        };
+        h += `<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:20px">
+          <div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">
+            <div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700;color:#a78bfa">MES INTERVENTIONS</div>
+              <div class="slot-dl">${myIv.total} affectée${myIv.total!==1?'s':''}</div>
+            </div>
+            <div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">${myIv.total}</div>
+          </div>`;
+        myIv.items.forEach(iv => {
+          const sc = ST_C[iv.effStatus] || ST_C.planifiee;
+          h += `<div class="trow" onclick="MX.showPage('interventions')" style="cursor:pointer">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text1)">${esc(iv.title)}</div>
+              ${iv.startDate ? `<div style="font-size:11px;color:var(--text3);margin-top:2px"><i class="fas fa-calendar-day" style="margin-right:4px"></i>${esc(iv.startDate)}</div>` : ''}
+            </div>
+            <span style="padding:2px 9px;border-radius:6px;font-size:10px;font-weight:700;font-family:var(--ffm);background:${sc.bg};color:${sc.c};white-space:nowrap;flex-shrink:0">${sc.l}</span>
+          </div>`;
+        });
+        h += `<div style="padding:8px 14px">
+          <button onclick="MX.showPage('interventions')"
+            style="width:100%;padding:9px;border:1.5px solid rgba(124,58,237,.3);border-radius:8px;background:rgba(124,58,237,.08);color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:6px">
+            <i class="fas fa-external-link-alt"></i> Voir mes interventions
+          </button>
+        </div>
+        </div>`;
+      }
     }
 
     h += `</div>`;
