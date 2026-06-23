@@ -74,26 +74,25 @@
     }
 
     const allTabs = [
-      { id: "tasks",          label: "📋 Tâches"          },
-      { id: "team",           label: "👥 Équipe"           },
-      { id: "missions",       label: "🚨 Interventions"   },
-      { id: "alerts",         label: "🔔 Alertes"         },
-      { id: "orders",         label: "📦 Stock"           },
-      { id: "week",           label: "📅 Semaine"         },
-      { id: "history",        label: "📊 Historique"      },
-      { id: "msgs",           label: "💬 Messages"        },
-      { id: "logs",           label: "📋 Activité"        },
-      { id: "bible-admin",    label: "📖 Gestion Bible"   },
-      { id: "games-admin",    label: "🎮 Gestion Jeux"    },
-      { id: "players-admin",  label: "👥 Gestion Joueurs" },
-      { id: "admin-journal",  label: "📓 Journal"         },
-      { id: "users",          label: "👤 Admin",           adminOnly: true },
-      { id: "absences",       label: "🏖 Absences",        adminOnly: true },
-      { id: "pin",            label: "🔑 Accès",           adminOnly: true }
+      { id: "tasks",          label: "📋 Tâches"            },
+      { id: "team",           label: "👷 Gestion Équipes"   },
+      { id: "alerts",         label: "🔔 Alertes"           },
+      { id: "week",           label: "📅 Semaine"           },
+      { id: "history",        label: "📊 Historique"        },
+      { id: "msgs",           label: "💬 Messages"          },
+      { id: "logs",           label: "📈 Activité"          },
+      { id: "bible-admin",    label: "📖 Gestion Bible"     },
+      { id: "games-admin",    label: "🎮 Gestion Jeux"      },
+      { id: "players-admin",  label: "👥 Gestion Joueurs"   },
+      { id: "admin-journal",  label: "📜 Journal"           },
+      { id: "users",          label: "👤 Admin",             adminOnly: true },
+      { id: "absences",       label: "🏖 Absences",          adminOnly: true },
+      { id: "pin",            label: "🔑 Accès",             adminOnly: true }
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
-    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences")) aTab = "missions";
+    if (aTab === "missions" || aTab === "orders") aTab = "tasks";
+    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences")) aTab = "tasks";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -125,9 +124,7 @@
 
     if (aTab === "tasks")             h += renderTasks();
     if (aTab === "team")              h += renderTeam();
-    if (aTab === "missions")          h += renderMissions();
     if (aTab === "alerts")            h += renderAlerts();
-    if (aTab === "orders")            h += renderOrders();
     if (aTab === "week")              h += renderWeek();
     if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
@@ -1516,11 +1513,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     render, setTab, setDay,
     editTask, addTask, rmTask, saveTasks, copyTasks,
     editTeam, addTeam, rmTeam, saveTeam,
-    addMission, delMission, undoMission, editMission, startEditMission, cancelEditMission,
-    _setPrio, _setEditPrio,
     updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
-    updProd, updProdMin, addProd, delProd, saveProd,
     delMsg,
     confirmClearLogs, confirmReset, confirmNewWeek,
     generateReport,
