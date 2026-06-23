@@ -2,7 +2,8 @@
   'use strict';
 
   // ── STATE ──
-  let _curTab    = 'toutes';
+  let _curTab         = 'gestion';
+  let _gestionFilter  = '';   // pill active: '' | 'en_attente' | 'en_cours' | 'en_retard' | 'terminees'
   let _calView   = 'semaine';
   let _calDate   = '';
   let _filterTech   = '';
@@ -41,13 +42,8 @@
   };
 
   const TABS = [
-    { id: 'toutes',     icon: 'fa-list',                  l: 'Toutes',       mob: 'Toutes'   },
-    { id: 'calendrier', icon: 'fa-calendar-days',         l: 'Calendrier',   mob: 'Calendrier'},
-    { id: 'en_attente', icon: 'fa-clock',                 l: 'En attente',   mob: 'Attente'  },
-    { id: 'en_cours',   icon: 'fa-spinner',               l: 'En cours',     mob: 'En cours' },
-    { id: 'terminees',  icon: 'fa-circle-check',          l: 'Terminées',    mob: 'Faites'   },
-    { id: 'retards',    icon: 'fa-triangle-exclamation',  l: 'Retards',      mob: 'Retards'  },
-    { id: 'stats',      icon: 'fa-chart-bar',             l: 'Statistiques', mob: 'Stats'    },
+    { id: 'gestion',    icon: 'fa-list',          l: 'Gestion',    mob: 'Gestion'    },
+    { id: 'calendrier', icon: 'fa-calendar-days', l: 'Calendrier', mob: 'Calendrier' },
   ];
 
   const DOW_FR  = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
@@ -166,8 +162,14 @@
   }
 
   // ── RENDER ──
+  const _PILL_MAP = { en_attente:'en_attente', en_cours:'en_cours', terminees:'terminees', retards:'en_retard' };
+
   function render() {
-    if (window._intStartTab) { _curTab = window._intStartTab; window._intStartTab = null; }
+    if (window._intStartTab) {
+      const st = window._intStartTab; window._intStartTab = null;
+      if (st === 'calendrier') { _curTab = 'calendrier'; }
+      else { _curTab = 'gestion'; _gestionFilter = _PILL_MAP[st] || ''; }
+    }
     _load();
     const mc = document.getElementById('main-content');
     if (!mc) return;
@@ -179,7 +181,7 @@
     mc.innerHTML = `<div class="int-page">
       <div class="int-tabs">
         ${TABS.map(t => {
-          const cnt = t.id === 'retards' ? retardCount : 0;
+          const cnt = t.id === 'gestion' ? retardCount : 0;
           return `<button class="int-tab${_curTab === t.id ? ' active' : ''}" data-tab="${t.id}" onclick="MX.Pages.Int._tab('${t.id}')">
             <i class="fas ${t.icon}"></i>
             <span class="int-tab-full">${t.l}</span>
@@ -205,37 +207,50 @@
   }
 
   function _tab(id) {
-    _curTab = id;
-    document.querySelectorAll('.int-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+    if (_PILL_MAP[id]) { _curTab = 'gestion'; _gestionFilter = _PILL_MAP[id]; }
+    else if (id === 'toutes' || id === 'stats') { _curTab = 'gestion'; _gestionFilter = ''; }
+    else { _curTab = id; }
+    document.querySelectorAll('.int-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === _curTab));
     const el = document.getElementById('int-body');
     if (el) el.innerHTML = _body();
     const fab = document.getElementById('int-fab');
-    if (fab) fab.style.display = id === 'calendrier' ? 'none' : '';
+    if (fab) fab.style.display = _curTab === 'calendrier' ? 'none' : '';
   }
 
   function _body() {
     switch (_curTab) {
       case 'calendrier': return _tCalendrier();
-      case 'en_attente': return _tFiltered(['planifiee', 'affectee'], 'En attente');
-      case 'en_cours':   return _tFiltered(['en_cours'],  'En cours');
-      case 'terminees':  return _tFiltered(['terminee'],  'Terminées');
-      case 'retards':    return _tFiltered(['en_retard'], 'En retard');
-      case 'stats':      return _tStats();
-      default:           return _tToutes();
+      default:           return _tGestion();
     }
   }
 
-  // ── TAB: TOUTES ──
-  function _tToutes() {
+  // ── TAB: GESTION (unique page avec KPI + pills + liste + stats) ──
+  function _tGestion() {
     const cu     = MX.state.currentUser;
     const canAll = _canAll();
-    let list = canAll
+
+    // Base list filtered by role
+    const base = canAll
       ? [..._interventions]
       : _interventions.filter(iv => (iv.assignedTo || []).includes(cu?.name));
 
-    if (_filterStatus) list = list.filter(iv => _effStatus(iv) === _filterStatus);
-    if (_filterPrio)   list = list.filter(iv => iv.priority === _filterPrio);
-    if (_filterTech)   list = list.filter(iv => (iv.assignedTo || []).includes(_filterTech));
+    // KPI counts always computed from full base
+    const nEA  = base.filter(iv => { const s = _effStatus(iv); return s === 'planifiee' || s === 'affectee'; }).length;
+    const nEC  = base.filter(iv => _effStatus(iv) === 'en_cours').length;
+    const nER  = base.filter(iv => _effStatus(iv) === 'en_retard').length;
+    const nT   = base.filter(iv => _effStatus(iv) === 'terminee').length;
+    const nTot = base.length;
+
+    // Apply pill filter
+    let list = [...base];
+    if      (_gestionFilter === 'en_attente') list = base.filter(iv => { const s = _effStatus(iv); return s === 'planifiee' || s === 'affectee'; });
+    else if (_gestionFilter === 'en_cours')   list = base.filter(iv => _effStatus(iv) === 'en_cours');
+    else if (_gestionFilter === 'en_retard')  list = base.filter(iv => _effStatus(iv) === 'en_retard');
+    else if (_gestionFilter === 'terminees')  list = base.filter(iv => _effStatus(iv) === 'terminee');
+
+    // Apply toolbar filters
+    if (_filterPrio) list = list.filter(iv => iv.priority === _filterPrio);
+    if (_filterTech) list = list.filter(iv => (iv.assignedTo || []).includes(_filterTech));
 
     const techOpts = canAll && _users.length
       ? `<select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('tech',this.value)">
@@ -246,17 +261,41 @@
          </select>`
       : '';
 
+    // ── KPI bar ──
+    const kpiDef = [
+      { f: '',           val: nTot, lbl: 'Total',       col: 'var(--text1)'   },
+      { f: 'en_attente', val: nEA,  lbl: 'En attente',  col: 'var(--orange)'  },
+      { f: 'en_cours',   val: nEC,  lbl: 'En cours',    col: '#F97316'        },
+      { f: 'en_retard',  val: nER,  lbl: 'En retard',   col: 'var(--red)'     },
+      { f: 'terminees',  val: nT,   lbl: 'Terminées',   col: '#22C55E'        },
+    ];
     let html = `<div class="int-inner">
-      <div class="int-toolbar">
+      <div class="int-kpis">
+        ${kpiDef.map(k => `
+          <div class="int-kpi-card${_gestionFilter === k.f ? ' int-kpi-active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${k.f}')">
+            <div class="int-kpi-val" style="color:${k.col}">${k.val}</div>
+            <div class="int-kpi-lbl">${k.lbl}</div>
+          </div>`).join('')}
+      </div>`;
+
+    // ── Filter pills ──
+    const pillDef = [
+      { f: '',           l: 'Toutes',     emo: '🟦' },
+      { f: 'en_attente', l: 'En attente', emo: '🟡' },
+      { f: 'en_cours',   l: 'En cours',   emo: '🟢' },
+      { f: 'en_retard',  l: 'En retard',  emo: '🔴' },
+      { f: 'terminees',  l: 'Terminées',  emo: '⚪' },
+    ];
+    html += `<div class="int-pills">
+      ${pillDef.map(p => `<button class="int-pill${_gestionFilter === p.f ? ' active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${p.f}')">${p.emo} ${p.l}</button>`).join('')}
+    </div>`;
+
+    // ── Toolbar ──
+    if (techOpts || _filterPrio) {
+      html += `<div class="int-toolbar">
         <span class="int-count">${list.length} intervention${list.length !== 1 ? 's' : ''}</span>
         <div class="int-toolbar-filters">
           ${techOpts}
-          <select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('status',this.value)">
-            <option value="">Tous statuts</option>
-            ${Object.entries(STATUS).map(([k, s]) =>
-              `<option value="${k}"${_filterStatus === k ? ' selected' : ''}>${s.l}</option>`
-            ).join('')}
-          </select>
           <select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('prio',this.value)">
             <option value="">Toutes priorités</option>
             ${Object.entries(PRIO).map(([k, p]) =>
@@ -265,17 +304,75 @@
           </select>
         </div>
       </div>`;
+    } else {
+      html += `<div class="int-toolbar"><span class="int-count">${list.length} intervention${list.length !== 1 ? 's' : ''}</span></div>`;
+    }
 
+    // ── List ──
     if (!list.length) {
       html += _emptyState('fa-screwdriver-wrench',
         'Aucune intervention',
-        canAll ? 'Créez votre première intervention.' : 'Aucune intervention ne vous est affectée.',
-        canAll ? `<button class="int-btn-primary" onclick="MX.Pages.Int._newInt()"><i class="fas fa-plus"></i> Nouvelle intervention</button>` : ''
+        _gestionFilter
+          ? 'Aucune intervention dans cette catégorie.'
+          : (canAll ? 'Créez votre première intervention.' : 'Aucune intervention ne vous est affectée.'),
+        (!_gestionFilter && canAll)
+          ? `<button class="int-btn-primary" onclick="MX.Pages.Int._newInt()"><i class="fas fa-plus"></i> Nouvelle intervention</button>`
+          : ''
       );
     } else {
       list.forEach(iv => { html += _intCard(iv); });
     }
+
+    // ── Stats section (Resp/Admin only, inline at bottom) ──
+    if (canAll && _interventions.length) {
+      const done    = _interventions.filter(iv => iv.status === 'terminee' && iv.timeSpentMin);
+      const avgMin  = done.length ? Math.round(done.reduce((s, iv) => s + (iv.timeSpentMin || 0), 0) / done.length) : null;
+      const byTech  = {};
+      _interventions.forEach(iv => { (iv.assignedTo || []).forEach(n => { byTech[n] = (byTech[n] || 0) + 1; }); });
+      const topTechs = Object.entries(byTech).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+      if (topTechs.length || avgMin !== null) {
+        html += `<div class="int-sec-ttl" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border2)">
+          <i class="fas fa-chart-bar" style="margin-right:6px;color:var(--text3)"></i>Statistiques
+        </div>`;
+        if (avgMin !== null) {
+          html += `<div class="int-stats-grid">
+            <div class="int-stat-card">
+              <div class="int-stat-v">${avgMin < 60 ? avgMin + 'min' : (Math.round(avgMin / 60 * 10) / 10) + 'h'}</div>
+              <div class="int-stat-l">Temps moyen</div>
+            </div>
+            <div class="int-stat-card">
+              <div class="int-stat-v">${done.length}</div>
+              <div class="int-stat-l">Terminées chronométrées</div>
+            </div>
+          </div>`;
+        }
+        if (topTechs.length) {
+          const maxVal = topTechs[0][1];
+          html += `<div class="int-tech-bars">`;
+          topTechs.forEach(([name, count]) => {
+            const u   = _users.find(u => u.name === name);
+            const col = u?.color || '#7C3AED';
+            html += `<div class="int-tech-bar-row">
+              <div class="int-tech-bar-name">${esc(name)}</div>
+              <div class="int-tech-bar-track">
+                <div class="int-tech-bar-fill" style="width:${Math.round(count / maxVal * 100)}%;background:${col}"></div>
+              </div>
+              <span class="int-tech-bar-val">${count}</span>
+            </div>`;
+          });
+          html += `</div>`;
+        }
+      }
+    }
+
     return html + '</div>';
+  }
+
+  function _setGestionFilter(f) {
+    _gestionFilter = f;
+    const el = document.getElementById('int-body');
+    if (el) el.innerHTML = _body();
   }
 
   // ── TAB: FILTERED ──
@@ -1096,7 +1193,7 @@
   function _getSummary(forUser) {
     _load();
     const ints = forUser
-      ? _interventions.filter(iv => (iv.assignedTechnicians || []).includes(forUser))
+      ? _interventions.filter(iv => (iv.assignedTo || []).includes(forUser))
       : _interventions;
     const eff = iv => _effStatus(iv);
     return {
@@ -1110,7 +1207,7 @@
   }
 
   window.MX.Pages.Int = {
-    render, _tab, _getSummary,
+    render, _tab, _getSummary, _setGestionFilter,
     _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
     _setFilter, _toggleTech, _onIntPhoto,

@@ -279,13 +279,8 @@
     if (canAll) {
       let intItems = "";
       [
-        { tab: "toutes",      icon: "fa-list",              l: "Toutes" },
-        { tab: "calendrier",  icon: "fa-calendar-days",     l: "Calendrier" },
-        { tab: "en_attente",  icon: "fa-hourglass-half",    l: "En attente" },
-        { tab: "en_cours",    icon: "fa-play-circle",       l: "En cours" },
-        { tab: "terminees",   icon: "fa-circle-check",      l: "Terminées" },
-        { tab: "retards",     icon: "fa-triangle-exclamation", l: "Retards" },
-        { tab: "stats",       icon: "fa-chart-bar",         l: "Statistiques" },
+        { tab: "gestion",    icon: "fa-list",          l: "Gestion interventions" },
+        { tab: "calendrier", icon: "fa-calendar-days", l: "Calendrier" },
       ].forEach(t => {
         intItems += `<button class="sx-item sx-sub" onclick="MX.showIntTab('${t.tab}')"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
       });

@@ -5053,6 +5053,43 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .int-cal-cell-more { font-size: 9px; color: var(--text3); padding: 0 4px; }
 
 /* ── Stats ── */
+/* KPI bar */
+.int-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border2);
+}
+.int-kpi-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 10px 6px; border-radius: 10px;
+  border: 1.5px solid var(--border2); background: var(--bg3);
+  cursor: pointer; transition: background .15s, border-color .15s;
+  user-select: none;
+}
+.int-kpi-card:hover { background: var(--bg4); }
+.int-kpi-card.int-kpi-active { border-color: #7C3AED; background: rgba(124,58,237,.1); }
+.int-kpi-val { font-size: 22px; font-weight: 700; line-height: 1; font-family: var(--ffm); }
+.int-kpi-lbl { font-size: 9px; color: var(--text3); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; text-align: center; }
+
+/* Filter pills */
+.int-pills {
+  display: flex; gap: 6px; padding: 10px 14px;
+  border-bottom: 1px solid var(--border2);
+  overflow-x: auto; scrollbar-width: none;
+}
+.int-pills::-webkit-scrollbar { display: none; }
+.int-pill {
+  flex-shrink: 0; padding: 5px 13px; border-radius: 20px;
+  border: 1.5px solid var(--border2); background: var(--bg3);
+  color: var(--text2); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: var(--ffs); white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.int-pill:hover { background: var(--bg4); }
+.int-pill.active { border-color: #7C3AED; background: rgba(124,58,237,.15); color: #a78bfa; }
+
 .int-stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .int-stat-card {
   background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
@@ -5086,6 +5123,10 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .int-cal-vbtn { padding: 5px 8px; font-size: 11px; }
   .int-cal-period { font-size: 12px; }
   .int-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .int-kpis { grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px; }
+  .int-kpi-card { padding: 8px 4px; }
+  .int-kpi-val { font-size: 18px; }
+  .int-kpi-lbl { font-size: 8px; }
   .int-cal-month-grid { grid-template-rows: repeat(6, auto); }
   .int-cal-month { overflow-y: auto; }
 }
