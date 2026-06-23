@@ -18,7 +18,7 @@
     null,
     { id: "utilisateurs",  icon: "fa-users",          l: "Admin" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
-    { id: "rewards",       icon: "fa-trophy",         l: "Récompenses" },
+    { id: "badges",        icon: "fa-medal",          l: "Badges",          noBot: true },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
     { id: "resp-plan",     icon: "fa-clipboard-check",l: "Checklist Resp.",  respOnly: true },
     { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
@@ -78,7 +78,7 @@
     if (id === "utilisateurs") return Pages.Admin.render();
     if (id === "parametres")   return Pages.Settings ? Pages.Settings.render() : null;
     if (id === "admin")        return Pages.Admin.render();
-    if (id === "rewards")      return Pages.Rewards.render();
+    if (id === "badges")       return Pages.Badges ? Pages.Badges.render() : null;
     if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
@@ -86,7 +86,6 @@
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
-    if (id === "minigames")    return Pages.MiniGames ? Pages.MiniGames.render() : _renderStub("Mini-Jeux", "fa-gamepad", "Chargement…");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
@@ -116,7 +115,6 @@
   let _bibleOpen = localStorage.getItem("mx_sx_bib") === "1";
   let _respClOpen= localStorage.getItem("mx_sx_rsp") !== "0";
   let _resOpen   = localStorage.getItem("mx_sx_res") !== "0";
-  let _gamiOpen  = localStorage.getItem("mx_sx_gam") === "1";
   let _adminOpen = localStorage.getItem("mx_sx_adm") === "1";
   let _csoOpen   = localStorage.getItem("mx_sx_cso") === "1";
   let _intOpen   = localStorage.getItem("mx_sx_int") === "1";
@@ -127,14 +125,12 @@
     const mob = window.innerWidth <= 900;
     if (mob) {
       const wasCl  = _clOpen, wasRsp = _respClOpen, wasRes = _resOpen,
-            wasGam = _gamiOpen, wasAdm = _adminOpen, wasCso = _csoOpen,
-            wasInt = _intOpen;
+            wasAdm = _adminOpen, wasCso = _csoOpen, wasInt = _intOpen;
       _clOpen = false; _respClOpen = false; _resOpen = false;
-      _gamiOpen = false; _adminOpen = false; _csoOpen = false; _intOpen = false;
+      _adminOpen = false; _csoOpen = false; _intOpen = false;
       if (which === "cl")  _clOpen    = !wasCl;
       if (which === "rsp") _respClOpen= !wasRsp;
       if (which === "res") _resOpen   = !wasRes;
-      if (which === "gam") _gamiOpen  = !wasGam;
       if (which === "adm") _adminOpen = !wasAdm;
       if (which === "cso") _csoOpen   = !wasCso;
       if (which === "int") _intOpen   = !wasInt;
@@ -142,22 +138,19 @@
       if (which === "cl")  _clOpen    = !_clOpen;
       if (which === "rsp") _respClOpen= !_respClOpen;
       if (which === "res") _resOpen   = !_resOpen;
-      if (which === "gam") _gamiOpen  = !_gamiOpen;
       if (which === "adm") _adminOpen = !_adminOpen;
       if (which === "cso") _csoOpen   = !_csoOpen;
       if (which === "int") _intOpen   = !_intOpen;
     }
     _sx("mx_sx_cl",  _clOpen); _sx("mx_sx_rsp", _respClOpen);
-    _sx("mx_sx_res", _resOpen); _sx("mx_sx_gam", _gamiOpen);
-    _sx("mx_sx_adm", _adminOpen); _sx("mx_sx_cso", _csoOpen);
-    _sx("mx_sx_int", _intOpen);
+    _sx("mx_sx_res", _resOpen); _sx("mx_sx_adm", _adminOpen);
+    _sx("mx_sx_cso", _csoOpen); _sx("mx_sx_int", _intOpen);
     buildNav();
   }
 
   window.MX.toggleNavCl    = function() { _toggleSec("cl"); };
   window.MX.toggleNavRspCl = function() { _toggleSec("rsp"); };
   window.MX.toggleNavRes   = function() { _toggleSec("res"); };
-  window.MX.toggleNavGami  = function() { _toggleSec("gam"); };
   window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
   window.MX.toggleNavCso   = function() { _toggleSec("cso"); };
   window.MX.showCsoTab     = function(tab) { window._csoStartTab = tab; MX.showPage('consommations'); };
@@ -287,13 +280,6 @@
       h += _sec("sx-card--orange", "fa-wrench", "Interventions", "Planning & suivi technique", "toggleNavInt", _intOpen, intItems);
     }
 
-    // ── Section 6: GAMIFICATION ──
-    let gItems = _item("rewards",   "fa-trophy",  "Récompenses");
-    gItems    += _item("minigames", "fa-gamepad", "Mini-Jeux");
-    gItems    += `<button class="sx-item" onclick="MX.showPage('rewards')"><i class="fas fa-crown sx-ico"></i><span class="sx-lbl">Classements</span></button>`;
-    gItems    += `<button class="sx-item" onclick="MX.toast('Événements — bientôt disponible')"><i class="fas fa-calendar-star sx-ico"></i><span class="sx-lbl">Événements</span><span class="sx-soon">Soon</span></button>`;
-    h += _sec("sx-card--green", "fa-trophy", "Gamification", "Points, jeux & challenges", "toggleNavGami", _gamiOpen, gItems);
-
     // ── Paramètres (visible à tous) ──
     h += `<div class="sx-params">`;
     h += _item("parametres", "fa-gear", "Paramètres");
@@ -305,8 +291,7 @@
       [
         { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Gestion Utilisateurs", act: cur==="utilisateurs" },
         { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",        act: false },
-        { fn:"MX.showAdminTab('games-admin')",    icon:"fa-gamepad",             l:"Gestion Jeux",         act: false },
-        { fn:"MX.showAdminTab('players-admin')",  icon:"fa-user-group",          l:"Gestion Joueurs",      act: false },
+        { fn:"MX.showAdminTab('badges-admin')",   icon:"fa-medal",               l:"Gestion Badges",       act: false },
         { fn:"MX.showAdminTab('admin-journal')",  icon:"fa-book-journal-whills", l:"Journal d'actions",    act: false },
       ].forEach(n => {
         aItems += `<button class="sx-item${n.act?" active":""}" onclick="${n.fn}"><i class="fas ${n.icon} sx-ico${n.act?" sx-ico--on":""}"></i><span class="sx-lbl">${n.l}</span></button>`;
@@ -319,14 +304,12 @@
     // ── Bottom nav ──
     const dayIds = DAYS.map(d => d.id);
     const resIds = ["orders","fournisseurs","documents","consommations"];
-    const gamIds = ["rewards","minigames"];
     let bot = `<div class="bottom-nav-inner">`;
     bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
     bot += `<button class="bn${cur==="msgs"?" active":""}" data-page="msgs" onclick="MX.showPage('msgs')"><div class="bn-bar"></div><i class="fas fa-comments"></i><span class="nav-badge" id="bnb_msgs"></span><span>Messages</span></button>`;
     bot += `<button class="bn${cur==="planning"?" active":""}" data-page="planning" onclick="MX.showPage('planning')"><div class="bn-bar"></div><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
     bot += `<button class="bn${(cur==="today-cl"||dayIds.includes(cur))?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Check-lists</span></button>`;
     bot += `<button class="bn${resIds.includes(cur)?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-folder-open"></i><span>Ressources</span></button>`;
-    bot += `<button class="bn${gamIds.includes(cur)?" active":""}" onclick="MX.showPage('rewards')"><div class="bn-bar"></div><i class="fas fa-trophy"></i><span>Gamification</span></button>`;
     bot += `<button class="bn${cur==="parametres"?" active":""}" data-page="parametres" onclick="MX.showPage('parametres')"><div class="bn-bar"></div><i class="fas fa-gear"></i><span>Paramètres</span></button>`;
     if (canAll) {
       bot += `<button class="bn${cur==="utilisateurs"?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
@@ -626,33 +609,7 @@
       }
     });
 
-    let _prevChecks = null; // null = first call, skip awards to avoid re-awarding on reload
     DB.listenChecks(data => {
-      // Detect newly checked tasks → award points (skip on first snapshot)
-      if (_prevChecks !== null && Pages.Rewards && MX.state.currentUser) {
-        Object.keys(data).forEach(k => {
-          if (data[k] && !_prevChecks[k] && k.split('_').length >= 3) {
-            Pages.Rewards.awardForEvent('task_done', 'Tâche terminée');
-            // Check if whole day is now complete
-            const parts = k.split('_');
-            const dayId = parts[0];
-            const day   = MX.DAYS.find(d => d.id === dayId);
-            if (day) {
-              let tot = 0, dn = 0;
-              MX.getDaySlots(dayId).forEach(sl => {
-                (state.tasks[`${dayId}_${sl}`] || []).forEach(t => {
-                  tot++;
-                  if (data[`${dayId}_${sl}_${t.id}`]) dn++;
-                });
-              });
-              if (tot > 0 && dn === tot) {
-                Pages.Rewards.awardForEvent('day_complete', 'Toutes les tâches du jour terminées');
-              }
-            }
-          }
-        });
-      }
-      _prevChecks = { ...data };
       state.checks = data;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
@@ -671,18 +628,7 @@
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
-    let _prevProducts = {};
     DB.listenProducts(list => {
-      if (Pages.Rewards && MX.state.currentUser) {
-        list.forEach(p => {
-          const prev = _prevProducts[p.id];
-          if (prev && prev.qty !== p.qty) {
-            Pages.Rewards.awardForEvent('stock_update', 'Stock mis à jour : ' + (p.name || p.id));
-          }
-        });
-      }
-      _prevProducts = {};
-      list.forEach(p => { _prevProducts[p.id] = p; });
       state.products = list;
       updateNavProgress();
       if (state.currentPage === "orders") MX.Pages.Orders.render();
@@ -726,20 +672,8 @@
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
     });
 
-    let _prevMissions = {};
     DB.listenMissions(list => {
       _notifyNewMissions(MX.state.missions || [], list);
-      if (Pages.Rewards && MX.state.currentUser) {
-        list.forEach(m => {
-          const prev = _prevMissions[m.id];
-          if (m.done && prev && !prev.done) {
-            const event = (m.priority === 'urgent') ? 'mission_urgent' : 'mission_done';
-            Pages.Rewards.awardForEvent(event, 'Intervention terminée : ' + (m.text || ''));
-          }
-        });
-      }
-      _prevMissions = {};
-      list.forEach(m => { _prevMissions[m.id] = m; });
       state.missions = list;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
@@ -773,38 +707,14 @@
       if (state.currentPage === 'planning' && Pages.Planning) Pages.Planning.render();
     });
 
-    DB.listenRewardsRules(list => {
-      state.rewardsRules = list;
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
+    DB.listenBadges(list => {
+      state.badges = list;
+      if (state.currentPage === 'badges') Pages.Badges && Pages.Badges.render();
+      if (state.currentPage === 'utilisateurs') Pages.Admin.render();
     });
-    DB.listenRewardsGrades(list => {
-      state.rewardsGrades = list;
-      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
-    });
-    DB.listenRewardsItems(list => {
-      state.rewardsItems = list;
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
-    });
-    DB.listenRewardsHistory(list => {
-      state.rewardsHistory = list;
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
-    });
-    DB.listenRewardsUsers(map => {
-      state.rewardsUsers = map;
-      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
-    });
-
-    DB.listenGameScores(list => {
-      state.gameScores = list;
-      if (state.currentPage === 'rewards') Pages.Rewards.render();
-    });
-    DB.listenGameAchievements(map => {
-      state.gameAchievements = map;
-    });
-    DB.listenGameQuestions(list => {
-      state.gameQuestions = list;
+    DB.listenUserBadges(map => {
+      state.userBadges = map;
+      buildNav();
     });
 
     DB.listenPresence(count => {
@@ -863,7 +773,7 @@
 
     try {
       await MX.DB.initDefaults();
-      await MX.DB.initRewardsDefaults();
+      await MX.DB.initDefaultBadges();
       setupListeners();
       await new Promise(r => setTimeout(r, 800));
     } catch (e) {
@@ -1012,6 +922,19 @@
   window.MX._doNotifPermission = async function() {
     MX._closeNotifOnboard();
     await MX.enableNotifications();
+  };
+
+  window.MX.badgeBorder = function(userName) {
+    if (!userName) return null;
+    const userBadges = MX.state.userBadges || {};
+    const badges     = MX.state.badges || [];
+    const ub = (userBadges[userName] || []);
+    if (!ub.length) return null;
+    const badgeIds = ub.map(b => b.badgeId);
+    const match = badges
+      .filter(b => b.active && badgeIds.includes(b.id))
+      .sort((a, b) => a.priority - b.priority)[0];
+    return match ? match.border : null;
   };
 
   window.MX.buildNav          = buildNav;

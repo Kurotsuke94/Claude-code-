@@ -759,6 +759,78 @@
     await batch.commit();
   }
 
+  // ── BADGES PROFESSIONNELS ──
+  const R_BADGES     = () => db.collection('badges');
+  const R_USR_BADGES = () => db.collection('user_badges');
+
+  function listenBadges(cb) {
+    _unsub.badges = R_BADGES().orderBy('priority').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  function listenUserBadges(cb) {
+    _unsub.user_badges = R_USR_BADGES().onSnapshot(snap => {
+      const map = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (!map[data.userName]) map[data.userName] = [];
+        map[data.userName].push({ id: d.id, ...data });
+      });
+      cb(map);
+    });
+  }
+
+  async function addBadge(data)        { const ref = await R_BADGES().add(data); return ref.id; }
+  async function updateBadge(id, data) { await R_BADGES().doc(id).update(data); }
+  async function deleteBadge(id) {
+    const batch = db.batch();
+    const assigned = await R_USR_BADGES().where('badgeId', '==', id).get();
+    assigned.docs.forEach(d => batch.delete(d.ref));
+    batch.delete(R_BADGES().doc(id));
+    await batch.commit();
+  }
+
+  async function assignBadge(badgeId, userName, badgeName, assignedBy) {
+    const existing = await R_USR_BADGES().where('badgeId', '==', badgeId).where('userName', '==', userName).get();
+    if (!existing.empty) return;
+    await R_USR_BADGES().add({ badgeId, userName, badgeName, assignedBy, assignedAt: FV.serverTimestamp() });
+  }
+
+  async function removeUserBadge(userBadgeId) {
+    await R_USR_BADGES().doc(userBadgeId).delete();
+  }
+
+  async function getUserBadges(userName) {
+    const snap = await R_USR_BADGES().where('userName', '==', userName).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  const _DEFAULT_BADGES = [
+    { name: 'Responsable',              icon: '👑', color: '#F59E0B', border: '#F59E0B', desc: 'Responsable d\'équipe',          mode: 'role',   active: true, priority: 1  },
+    { name: 'Administrateur',           icon: '🛡',  color: '#3B82F6', border: '#3B82F6', desc: 'Administrateur système',         mode: 'role',   active: true, priority: 2  },
+    { name: 'Contributeur Bible',       icon: '📖', color: '#10B981', border: '#10B981', desc: '50 documents contribués',        mode: 'auto',   active: true, priority: 3  },
+    { name: 'Expert Documentation',     icon: '📚', color: '#6366F1', border: '#6366F1', desc: '200 documents contribués',       mode: 'auto',   active: true, priority: 4  },
+    { name: 'Expert Chaufferie',        icon: '🔥', color: '#EF4444', border: '#EF4444', desc: 'Spécialiste chaufferie',         mode: 'manual', active: true, priority: 5  },
+    { name: 'Expert Électricité',       icon: '⚡', color: '#F59E0B', border: '#F59E0B', desc: 'Spécialiste électricité',        mode: 'manual', active: true, priority: 6  },
+    { name: 'Expert Plomberie',         icon: '🚿', color: '#0EA5E9', border: '#0EA5E9', desc: 'Spécialiste plomberie',          mode: 'manual', active: true, priority: 7  },
+    { name: 'Expert Climatisation',     icon: '❄',  color: '#06B6D4', border: '#06B6D4', desc: 'Spécialiste climatisation',      mode: 'manual', active: true, priority: 8  },
+    { name: 'Gestionnaire Stock',       icon: '📦', color: '#8B5CF6', border: '#8B5CF6', desc: 'Gestion des stocks',             mode: 'manual', active: true, priority: 9  },
+    { name: 'Référent Hôtel',           icon: '🏨', color: '#D946EF', border: '#D946EF', desc: 'Référent établissement',         mode: 'manual', active: true, priority: 10 },
+    { name: 'Technicien Polyvalent',    icon: '🔧', color: '#84CC16', border: '#84CC16', desc: '1000+ interventions terminées',  mode: 'auto',   active: true, priority: 11 },
+    { name: 'Astreinte',                icon: '🚨', color: '#EF4444', border: '#EF4444', desc: 'Permanence d\'astreinte active', mode: 'manual', active: true, priority: 12 },
+    { name: 'Formateur',                icon: '🎓', color: '#0EA5E9', border: '#0EA5E9', desc: 'Formateur d\'équipe',             mode: 'manual', active: true, priority: 13 },
+    { name: 'Ancien de l\'établissement', icon: '🏅', color: '#F59E0B', border: '#F59E0B', desc: 'Ancienneté et expérience',    mode: 'manual', active: true, priority: 14 }
+  ];
+
+  async function initDefaultBadges() {
+    const snap = await R_BADGES().limit(1).get();
+    if (!snap.empty) return;
+    const batch = db.batch();
+    _DEFAULT_BADGES.forEach(b => batch.set(R_BADGES().doc(), b));
+    await batch.commit();
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -786,22 +858,16 @@
     listenOrders, addOrder, updateOrderStatus,
     listenPlanningShifts, loadPlanningMonth, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
-    listenRewardsRules, listenRewardsGrades, listenRewardsItems, listenRewardsHistory, listenRewardsUsers,
-    addRewardsRule, updateRewardsRule, deleteRewardsRule,
-    addRewardsGrade, updateRewardsGrade, deleteRewardsGrade,
-    addRewardsItem, updateRewardsItem, deleteRewardsItem,
-    awardPoints, spendPoints, initRewardsDefaults, resetRewardsDefaults,
-    listenGameScores, listenGameAchievements, listenGameQuestions,
-    saveGameScore, saveGameAchievement,
-    addGameQuestion, updateGameQuestion, deleteGameQuestion, resetGameScores,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,
     listenBibleComments, addBibleComment, deleteBibleComment,
     listenAdminJournal, addAdminJournal, clearAdminJournal,
     purgeOldHistory,
     getBiblePermissions, setBiblePermissions,
-    getGamesConfig, setGamesConfig,
     getRecentBibleArticles,
-    adjustPlayerXP, resetPlayerProfile
+    listenBadges, listenUserBadges,
+    addBadge, updateBadge, deleteBadge,
+    assignBadge, removeUserBadge, getUserBadges,
+    initDefaultBadges
   };
 })();
