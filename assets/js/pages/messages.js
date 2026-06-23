@@ -177,6 +177,7 @@
     const isAdm    = MX.Auth.isAdmin();
     const bg       = isAdm ? 'var(--cyan)'   : avatarBg(author);
     const fg       = isAdm ? '#0C0C0E'       : avatarFg(author);
+    const _bdgCp   = MX.badgeBorder ? MX.badgeBorder(author) : null;
     const roleMap  = { admin: 'Administrateur', responsable: 'Responsable', technicien: 'Technicien' };
     const roleLabel = roleMap[_role()] || 'Utilisateur';
 
@@ -191,7 +192,7 @@
 
     return `<div class="ann-compose">
       <div class="ann-compose-who">
-        ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}">${esc(author.substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(author, {size:36,radius:10})}
+        ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}${_bdgCp?';border:2px solid '+_bdgCp:''}">${esc(author.substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(author, {size:36,radius:10})}
         <div>
           <div style="font-size:13px;font-weight:600">${esc(author)}</div>
           <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
@@ -218,6 +219,7 @@
     const isAdm   = ann.authorRole === 'admin';
     const bg      = isAdm ? 'var(--cyan)' : avatarBg(ann.authorName || '');
     const fg      = isAdm ? '#0C0C0E'     : avatarFg(ann.authorName || '');
+    const _bdgC   = MX.badgeBorder ? MX.badgeBorder(ann.authorName || '') : null;
     const rLabel  = { admin: 'Admin', responsable: 'Resp.', technicien: 'Tech.' }[ann.authorRole] || '';
     const reads   = (ann.readBy || []).length;
     const replies = ann.replyCount || 0;
@@ -247,7 +249,7 @@
       </div>
       <div class="ann-card-mid">
         <div class="ann-av-wrap">
-          ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(ann.authorName||'?', {size:36,radius:10})}
+          ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}${_bdgC?';border:2px solid '+_bdgC:''}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(ann.authorName||'?', {size:36,radius:10})}
           <div>
             <div style="font-size:13px;font-weight:600">${esc(ann.authorName || '?')}</div>
             <div class="ann-role" style="color:${t.c};background:${t.cd};border-color:${t.cb}">${rLabel}</div>
@@ -293,10 +295,11 @@
         const isAdm = r.authorRole === 'admin';
         const bg = isAdm ? 'var(--cyan)' : avatarBg(r.authorName || '');
         const fg = isAdm ? '#0C0C0E'     : avatarFg(r.authorName || '');
+        const _bdgR = isAdm && MX.badgeBorder ? MX.badgeBorder(r.authorName || '') : null;
         const rLbl = { admin: 'Admin', responsable: 'Resp.', technicien: 'Tech.' }[r.authorRole] || '';
         const canDel = _canDelReply(r);
         h += `<div class="ann-reply">
-          ${isAdm ? `<div class="ann-av sm" style="background:${bg};color:${fg}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(r.authorName||'?', {size:28,radius:8})}
+          ${isAdm ? `<div class="ann-av sm" style="background:${bg};color:${fg}${_bdgR?';border:2px solid '+_bdgR:''}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(r.authorName||'?', {size:28,radius:8})}
           <div style="flex:1;min-width:0">
             <div class="ann-reply-meta">
               <span class="ann-reply-author">${esc(r.authorName||'?')}</span>

@@ -14,6 +14,11 @@
     _saveTimers[key] = setTimeout(fn, delay !== undefined ? delay : 700);
   }
 
+  function _avBorder(name) {
+    const b = MX.badgeBorder ? MX.badgeBorder(name) : null;
+    return b ? ';border:2px solid ' + b : '';
+  }
+
   // ── Bible & Games constants (used in new admin tabs) ──
   const BIBLE_ROLES  = ['Technicien', 'Responsable', 'Administrateur'];
   const BIBLE_PERM_L = ['Lecture', 'Écriture', 'Modification', 'Suppression', 'Validation'];
@@ -59,6 +64,9 @@
         </div>`;
       return;
     }
+
+    const _lsTab = localStorage.getItem("mx_admin_tab");
+    if (_lsTab) { aTab = _lsTab; localStorage.removeItem("mx_admin_tab"); }
 
     const allTabs = [
       { id: "tasks",          label: "📋 Tâches"            },
@@ -383,7 +391,7 @@
       const role = u.role || "technicien";
       h += `<div class="apcard" style="margin-bottom:8px">
         <div class="aphd">
-          <span style="width:38px;height:38px;border-radius:11px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc((u.name||'?').substring(0,2).toUpperCase())}</span>
+          <span style="width:38px;height:38px;border-radius:11px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:var(--ffm);flex-shrink:0${_avBorder(u.name)}">${esc((u.name||'?').substring(0,2).toUpperCase())}</span>
           <span style="font-weight:600;font-size:13px;flex:1;margin-left:10px">${esc(u.name||'—')}</span>
           <span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:${roleColor[role]||'var(--text2)'};font-family:var(--ffm)">${roleLabel[role]||role}</span>
           <button class="icon-btn del" style="width:30px;height:30px;margin-left:8px" onclick="MX.Pages.Admin.delUser('${esc(u.id)}')"><i class="fas fa-trash"></i></button>
@@ -529,7 +537,7 @@
       const bg = avatarBg(m.author), fg = avatarFg(m.author);
       h += `<div class="msg-card">
         <div class="msg-hd">
-          <div class="msg-av" style="background:${bg};color:${fg}">${esc(avatarTxt(m.author))}</div>
+          <div class="msg-av" style="background:${bg};color:${fg}${_avBorder(m.author)}">${esc(avatarTxt(m.author))}</div>
           <div style="flex:1"><div class="msg-author">${esc(m.author)}</div><div class="msg-time">${fmtTime(m.ts)}</div></div>
           <button class="icon-btn del" onclick="MX.Pages.Admin.delMsg('${esc(m.id)}')"><i class="fas fa-trash"></i></button>
         </div>
@@ -560,7 +568,7 @@
       const color = aColor[log.action] || "var(--text2)";
       const label = aLabel[log.action] || log.action;
       h += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px">
-        <div style="width:28px;height:28px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(avatarTxt(log.workerName||'?'))}</div>
+        <div style="width:28px;height:28px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-family:var(--ffm);flex-shrink:0${_avBorder(log.workerName||'')}">${esc(avatarTxt(log.workerName||'?'))}</div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:600">${esc(log.workerName||'inconnu')}</div>
           <div style="color:${color};font-family:var(--ffm);font-size:11px">${label}</div>
@@ -1081,11 +1089,39 @@
       </div>
       <div>
         <div class="aplbl">Mode d'obtention</div>
-        <select class="fi fi-sm" id="bdg-mode">
+        <select class="fi fi-sm" id="bdg-mode" onchange="MX.Pages.Admin._bdgModeChange(this.value)">
           <option value="manual"  ${(b.mode||'manual')==='manual' ?'selected':''}>Manuel (par un admin)</option>
           <option value="auto"    ${b.mode==='auto'   ?'selected':''}>Automatique (critères)</option>
           <option value="role"    ${b.mode==='role'   ?'selected':''}>Par rôle (Resp./Admin)</option>
         </select>
+      </div>
+      <div id="bdg-auto-fields" style="display:${b.mode==='auto'?'flex':'none'};flex-direction:column;gap:10px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px">
+        <div>
+          <div class="aplbl">🎯 Déclencheur</div>
+          <select class="fi fi-sm" id="bdg-trigger">
+            <option value="interventions_done"     ${(b.autoTrigger||'')==='interventions_done'    ?'selected':''}>Interventions terminées</option>
+            <option value="interventions_created"  ${(b.autoTrigger||'')==='interventions_created' ?'selected':''}>Interventions créées</option>
+            <option value="checklist_tasks"        ${(b.autoTrigger||'')==='checklist_tasks'       ?'selected':''}>Tâches check-list terminées</option>
+            <option value="checklist_transfers"    ${(b.autoTrigger||'')==='checklist_transfers'   ?'selected':''}>Tâches transférées</option>
+            <option value="bible_created"          ${(b.autoTrigger||'')==='bible_created'         ?'selected':''}>Documents Bible créés</option>
+            <option value="bible_modified"         ${(b.autoTrigger||'')==='bible_modified'        ?'selected':''}>Documents Bible modifiés</option>
+            <option value="stock_products"         ${(b.autoTrigger||'')==='stock_products'        ?'selected':''}>Produits ajoutés</option>
+            <option value="stock_movements"        ${(b.autoTrigger||'')==='stock_movements'       ?'selected':''}>Mouvements de stock</option>
+            <option value="cso_readings"           ${(b.autoTrigger||'')==='cso_readings'          ?'selected':''}>Relevés de compteurs réalisés</option>
+            <option value="messages_published"     ${(b.autoTrigger||'')==='messages_published'    ?'selected':''}>Messages publiés</option>
+            <option value="seniority"              ${(b.autoTrigger||'')==='seniority'             ?'selected':''}>Ancienneté utilisateur</option>
+            <option value="login"                  ${(b.autoTrigger||'')==='login'                 ?'selected':''}>Connexion à l'application</option>
+            <option value="badges_obtained"        ${(b.autoTrigger||'')==='badges_obtained'       ?'selected':''}>Badges obtenus</option>
+          </select>
+        </div>
+        <div>
+          <div class="aplbl">📊 Quantité requise</div>
+          <input class="fi fi-sm" id="bdg-qty" type="number" min="1" value="${b.autoQty||1}" placeholder="Ex: 10">
+        </div>
+        <div>
+          <div class="aplbl">📝 Condition (description)</div>
+          <input class="fi fi-sm" id="bdg-cond" value="${esc(b.autoCond||'')}" placeholder="Ex: Atteindre 10 interventions terminées" maxlength="100">
+        </div>
       </div>
       <div>
         <div class="aplbl">Priorité d'affichage (1 = plus important)</div>
@@ -1116,14 +1152,23 @@
     });
   }
 
+  function _bdgModeChange(val) {
+    const panel = document.getElementById('bdg-auto-fields');
+    if (panel) panel.style.display = val === 'auto' ? 'flex' : 'none';
+  }
+
   function _collectBadgeForm() {
-    const icon  = (document.getElementById('bdg-icon') ||{}).value || '🏅';
-    const color = (document.getElementById('bdg-color')||{}).value || '#6366F1';
-    const name  = ((document.getElementById('bdg-name') ||{}).value || '').trim();
-    const desc  = ((document.getElementById('bdg-desc') ||{}).value || '').trim();
-    const mode  = (document.getElementById('bdg-mode') ||{}).value || 'manual';
-    const prio  = parseInt((document.getElementById('bdg-prio')||{}).value||'99',10);
-    return { icon, color, border: color, name, desc, mode, priority: prio, active: true };
+    const icon        = (document.getElementById('bdg-icon')   ||{}).value || '🏅';
+    const color       = (document.getElementById('bdg-color')  ||{}).value || '#6366F1';
+    const name        = ((document.getElementById('bdg-name')  ||{}).value || '').trim();
+    const desc        = ((document.getElementById('bdg-desc')  ||{}).value || '').trim();
+    const mode        = (document.getElementById('bdg-mode')   ||{}).value || 'manual';
+    const prio        = parseInt((document.getElementById('bdg-prio') ||{}).value||'99',10);
+    const autoTrigger = (document.getElementById('bdg-trigger')||{}).value || '';
+    const autoQty     = parseInt((document.getElementById('bdg-qty')  ||{}).value||'1', 10);
+    const autoCond    = ((document.getElementById('bdg-cond')  ||{}).value || '').trim();
+    return { icon, color, border: color, name, desc, mode, priority: prio, active: true,
+             ...(mode === 'auto' ? { autoTrigger, autoQty, autoCond } : {}) };
   }
 
   async function badgeSaveCreate() {
@@ -1194,7 +1239,7 @@
       const role = u.role || 'technicien';
       return `<label class="bdg-usr-row" data-uname="${esc(u.name)}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;border:1.5px solid var(--border);background:var(--bg3);transition:border-color .15s">
         <input type="checkbox" value="${esc(u.name)}" onchange="MX.Pages.Admin._bdgUpdCount()" style="width:17px;height:17px;accent-color:var(--cyan);flex-shrink:0;cursor:pointer">
-        <div style="width:34px;height:34px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(init)}</div>
+        <div style="width:34px;height:34px;border-radius:10px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0${_avBorder(u.name)}">${esc(init)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)}</div>
           <div style="font-size:11px;color:var(--text2);text-transform:capitalize">${esc(role)}</div>
@@ -1294,7 +1339,7 @@
       const fg      = MX.avatarFg(e.user||'?');
       const init    = (e.user||'?').slice(0,2).toUpperCase();
       h += `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-        <div style="width:30px;height:30px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${esc(init)}</div>
+        <div style="width:30px;height:30px;border-radius:8px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0${_avBorder(e.user||'')}">${esc(init)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:12px;font-weight:600">${esc(e.user||'Système')}</div>
           <div style="font-size:12px;color:var(--text2);line-height:1.4">${esc(e.action||'?')}</div>
@@ -1549,7 +1594,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     biblePublish, bibleReject, bibleSavePerms, bibleRefreshStats,
     badgeOpenCreate, badgeOpenEdit, badgeToggleActive, badgeDelete,
     badgeAssign, badgeRemoveFrom,
-    _bdgSearch, _bdgUpdCount,
+    _bdgSearch, _bdgUpdCount, _bdgModeChange,
     clearJournal
   };
 })();

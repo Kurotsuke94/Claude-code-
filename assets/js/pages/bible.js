@@ -203,8 +203,9 @@
     const type   = CONTENT_TYPES.find(t=>t.id===a.type);
     const status = STATUS_META[a.status] || STATUS_META.draft;
     const video  = _parseVideo(a.videoUrl);
-    const nc     = MX.userColors(a.authorName||'');
+    const nc       = MX.userColors(a.authorName||'');
     const initials = (a.authorName||'?').substring(0,2).toUpperCase();
+    const _blBdg   = MX.badgeBorder ? MX.badgeBorder(a.authorName||'') : null;
 
     const thumb = video && video.thumb
       ? `<div class="bl-card-thumb" style="background-image:url('${video.thumb}')"><div class="bl-card-play"><i class="fas fa-play"></i></div></div>`
@@ -226,7 +227,7 @@
         ${tags?`<div class="bl-card-tags">${tags}</div>`:''}
         <div class="bl-card-footer">
           <div class="bl-card-author">
-            <div class="bl-mini-avatar" style="background:${nc.bg};color:${nc.fg}">${MX.esc(initials)}</div>
+            <div class="bl-mini-avatar" style="background:${nc.bg};color:${nc.fg}${_blBdg?';border:2px solid '+_blBdg:''}">${MX.esc(initials)}</div>
             <span>${MX.esc(a.authorName||'Anonyme')}</span>
           </div>
           <div class="bl-card-stats">

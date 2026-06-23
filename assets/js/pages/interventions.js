@@ -120,7 +120,8 @@
       const u = _users.find(u => u.name === name);
       const color = u?.color || '#7C3AED';
       const initials = name.trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
-      return `<span class="int-avatar" style="background:${color}" title="${esc(name)}">${esc(initials)}</span>`;
+      const border = MX.badgeBorder ? MX.badgeBorder(name) : null;
+      return `<span class="int-avatar" style="background:${color}${border ? ';border:2px solid ' + border : ''}" title="${esc(name)}">${esc(initials)}</span>`;
     }).join('') + assignedTo.map(n => `<span class="int-avatar-name">${esc(n)}</span>`).join('');
   }
 
@@ -767,7 +768,7 @@
             data-tech="${esc(u.name)}"
             onclick="MX.Pages.Int._toggleTech(this)">
             ${isSel ? '<i class="fas fa-check int-tp-ck"></i>' : ''}
-            <span class="int-avatar" style="background:${u.color || '#7C3AED'}">${initials}</span>
+            <span class="int-avatar" style="background:${u.color || '#7C3AED'}${MX.badgeBorder && MX.badgeBorder(u.name) ? ';border:2px solid ' + MX.badgeBorder(u.name) : ''}">${initials}</span>
             ${esc(u.name)}
           </button>`;
         }).join('')}

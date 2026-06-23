@@ -279,7 +279,8 @@
     const r  = o.radius !== undefined ? o.radius : Math.round(sz * 0.28);
     const u  = (window.MX && MX.state && MX.state.users || []).find(u => u.name === name);
     const nc = userColors(name);
-    const st = `width:${sz}px;height:${sz}px;border-radius:${r}px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${nc.bg};color:${nc.fg};font-size:${Math.round(sz*0.38)}px;font-weight:700;font-family:var(--ffm);overflow:hidden`;
+    const border = (window.MX && MX.badgeBorder) ? MX.badgeBorder(name) : null;
+    const st = `width:${sz}px;height:${sz}px;border-radius:${r}px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${nc.bg};color:${nc.fg};font-size:${Math.round(sz*0.38)}px;font-weight:700;font-family:var(--ffm);overflow:hidden${border ? ';border:2px solid ' + border : ''}`;
     return `<div style="${st}">${(u && u.avatarUrl) ? `<img src="${esc(u.avatarUrl)}" style="width:100%;height:100%;object-fit:cover;display:block;">` : avatarTxt(name)}</div>`;
   }
 

@@ -343,7 +343,8 @@
     const sz = size || 26;
     const c  = MX.userColors(user.name);
     const ltr = (user.name || '?')[0].toUpperCase();
-    return `<span class="plng-user-avatar" style="width:${sz}px;height:${sz}px;min-width:${sz}px;background:${c.bg};color:${c.fg};font-size:${Math.round(sz * 0.42)}px">${MX.esc(ltr)}</span>`;
+    const border = MX.badgeBorder ? MX.badgeBorder(user.name) : null;
+    return `<span class="plng-user-avatar" style="width:${sz}px;height:${sz}px;min-width:${sz}px;background:${c.bg};color:${c.fg};font-size:${Math.round(sz * 0.42)}px${border ? ';border:2px solid ' + border : ''}">${MX.esc(ltr)}</span>`;
   }
 
   // ── QUICK BAR (shift assignment strip) ──

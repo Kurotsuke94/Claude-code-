@@ -344,8 +344,9 @@
       const bg  = cu.color || nc.bg;
       const fg  = cu.color ? MX._contrastColor(cu.color) : nc.fg;
       const lbl = cu.role === 'responsable' ? 'Responsable' : 'Technicien';
+      const _dhBorder = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
       userHtml = `<div class="dh-user" onclick="MX.Auth.clearCurrentUser()">
-        <div class="dh-avatar" style="background:${bg};color:${fg}">${MX.esc(cu.name.substring(0,2).toUpperCase())}</div>
+        <div class="dh-avatar" style="background:${bg};color:${fg}${_dhBorder?';border:2px solid '+_dhBorder:''}">${MX.esc(cu.name.substring(0,2).toUpperCase())}</div>
         <div>
           <div style="font-size:12px;font-weight:600;line-height:1.2">${MX.esc(cu.name)}</div>
           <div style="font-size:10px;color:var(--text3);line-height:1.2">${lbl}</div>
@@ -715,6 +716,8 @@
     DB.listenUserBadges(map => {
       state.userBadges = map;
       buildNav();
+      buildDeskHeader();
+      if (state.currentPage === 'badges') Pages.Badges && Pages.Badges.render();
     });
 
     DB.listenPresence(count => {
