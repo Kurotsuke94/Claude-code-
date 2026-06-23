@@ -427,7 +427,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.23";
+  const _APP_VER = "1.0.24";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -786,7 +786,8 @@
     _lastSyncTime = new Date();
     renderStatusBar();
     buildNav();
-    MX.showPage("home");
+    const _urlPage = new URLSearchParams(window.location.search).get("page");
+    MX.showPage(_urlPage && NAV.some(n => n && n.id === _urlPage) ? _urlPage : "home");
 
     // Presence heartbeat every 2 minutes
     setInterval(() => {

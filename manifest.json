@@ -1,32 +1,54 @@
 {
   "name": "Maintix",
   "short_name": "Maintix",
-  "description": "Gestion de checklists de maintenance",
+  "description": "Gestion de maintenance technique hôtelière",
+  "version": "1.0.24",
+  "id": "/",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#4338CA",
+  "background_color": "#0f172a",
   "theme_color": "#4338CA",
   "lang": "fr",
   "icons": [
-    { "src": "/assets/icons/icon-72.png?v=52",           "sizes": "72x72",   "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-96.png?v=52",           "sizes": "96x96",   "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-128.png?v=52",          "sizes": "128x128", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-144.png?v=52",          "sizes": "144x144", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-152.png?v=52",          "sizes": "152x152", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/apple-touch-icon.png?v=52",  "sizes": "180x180", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-192.png?v=52",          "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-192-maskable.png?v=52", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/assets/icons/icon-256.png?v=52",          "sizes": "256x256", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-384.png?v=52",          "sizes": "384x384", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-512.png?v=52",          "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/assets/icons/icon-512-maskable.png?v=52", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/assets/icons/icon-72.png?v=68",           "sizes": "72x72",   "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-96.png?v=68",           "sizes": "96x96",   "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-128.png?v=68",          "sizes": "128x128", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-144.png?v=68",          "sizes": "144x144", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-152.png?v=68",          "sizes": "152x152", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/apple-touch-icon.png?v=68",  "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-192.png?v=68",          "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-192-maskable.png?v=68", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/icons/icon-256.png?v=68",          "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-384.png?v=68",          "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-512.png?v=68",          "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-512-maskable.png?v=68", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     {
-      "name": "Accueil",
-      "url": "/?page=home",
-      "icons": [{ "src": "/assets/icons/icon-192.png?v=52", "sizes": "192x192" }]
+      "name": "Messages",
+      "short_name": "Messages",
+      "url": "/?page=messages",
+      "icons": [{ "src": "/assets/icons/icon-192.png?v=68", "sizes": "192x192" }]
+    },
+    {
+      "name": "Check-lists",
+      "short_name": "Checks",
+      "url": "/?page=checks",
+      "icons": [{ "src": "/assets/icons/icon-192.png?v=68", "sizes": "192x192" }]
+    },
+    {
+      "name": "Interventions",
+      "short_name": "Missions",
+      "url": "/?page=missions",
+      "icons": [{ "src": "/assets/icons/icon-192.png?v=68", "sizes": "192x192" }]
+    },
+    {
+      "name": "Stock",
+      "short_name": "Stock",
+      "url": "/?page=stock",
+      "icons": [{ "src": "/assets/icons/icon-192.png?v=68", "sizes": "192x192" }]
     }
   ],
   "categories": ["productivity", "business"],
