@@ -81,6 +81,7 @@
     if (id === "rewards")      return Pages.Rewards.render();
     if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
+    if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
@@ -118,6 +119,7 @@
   let _gamiOpen  = localStorage.getItem("mx_sx_gam") === "1";
   let _adminOpen = localStorage.getItem("mx_sx_adm") === "1";
   let _csoOpen   = localStorage.getItem("mx_sx_cso") === "1";
+  let _intOpen   = localStorage.getItem("mx_sx_int") === "1";
 
   function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
 
@@ -125,15 +127,17 @@
     const mob = window.innerWidth <= 900;
     if (mob) {
       const wasCl  = _clOpen, wasRsp = _respClOpen, wasRes = _resOpen,
-            wasGam = _gamiOpen, wasAdm = _adminOpen, wasCso = _csoOpen;
+            wasGam = _gamiOpen, wasAdm = _adminOpen, wasCso = _csoOpen,
+            wasInt = _intOpen;
       _clOpen = false; _respClOpen = false; _resOpen = false;
-      _gamiOpen = false; _adminOpen = false; _csoOpen = false;
+      _gamiOpen = false; _adminOpen = false; _csoOpen = false; _intOpen = false;
       if (which === "cl")  _clOpen    = !wasCl;
       if (which === "rsp") _respClOpen= !wasRsp;
       if (which === "res") _resOpen   = !wasRes;
       if (which === "gam") _gamiOpen  = !wasGam;
       if (which === "adm") _adminOpen = !wasAdm;
       if (which === "cso") _csoOpen   = !wasCso;
+      if (which === "int") _intOpen   = !wasInt;
     } else {
       if (which === "cl")  _clOpen    = !_clOpen;
       if (which === "rsp") _respClOpen= !_respClOpen;
@@ -141,10 +145,12 @@
       if (which === "gam") _gamiOpen  = !_gamiOpen;
       if (which === "adm") _adminOpen = !_adminOpen;
       if (which === "cso") _csoOpen   = !_csoOpen;
+      if (which === "int") _intOpen   = !_intOpen;
     }
     _sx("mx_sx_cl",  _clOpen); _sx("mx_sx_rsp", _respClOpen);
     _sx("mx_sx_res", _resOpen); _sx("mx_sx_gam", _gamiOpen);
     _sx("mx_sx_adm", _adminOpen); _sx("mx_sx_cso", _csoOpen);
+    _sx("mx_sx_int", _intOpen);
     buildNav();
   }
 
@@ -155,6 +161,8 @@
   window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
   window.MX.toggleNavCso   = function() { _toggleSec("cso"); };
   window.MX.showCsoTab     = function(tab) { window._csoStartTab = tab; MX.showPage('consommations'); };
+  window.MX.toggleNavInt   = function() { _toggleSec("int"); };
+  window.MX.showIntTab     = function(tab) { window._intStartTab = tab; MX.showPage('interventions'); };
   window.MX.toggleNavBible = function(e) {
     if (e) e.stopPropagation();
     _bibleOpen = !_bibleOpen;
@@ -267,7 +275,24 @@
     });
     h += _sec("sx-card--teal", "fa-droplet", "Consommations", "Eau, électricité & gaz", "toggleNavCso", _csoOpen, csoItems);
 
-    // ── Section 5: GAMIFICATION ──
+    // ── Section 5: INTERVENTIONS (respOnly) ──
+    if (canAll) {
+      let intItems = "";
+      [
+        { tab: "toutes",      icon: "fa-list",              l: "Toutes" },
+        { tab: "calendrier",  icon: "fa-calendar-days",     l: "Calendrier" },
+        { tab: "en_attente",  icon: "fa-hourglass-half",    l: "En attente" },
+        { tab: "en_cours",    icon: "fa-play-circle",       l: "En cours" },
+        { tab: "terminees",   icon: "fa-circle-check",      l: "Terminées" },
+        { tab: "retards",     icon: "fa-triangle-exclamation", l: "Retards" },
+        { tab: "stats",       icon: "fa-chart-bar",         l: "Statistiques" },
+      ].forEach(t => {
+        intItems += `<button class="sx-item sx-sub" onclick="MX.showIntTab('${t.tab}')"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+      });
+      h += _sec("sx-card--orange", "fa-wrench", "Interventions", "Planning & suivi technique", "toggleNavInt", _intOpen, intItems);
+    }
+
+    // ── Section 6: GAMIFICATION ──
     let gItems = _item("rewards",   "fa-trophy",  "Récompenses");
     gItems    += _item("minigames", "fa-gamepad", "Mini-Jeux");
     gItems    += `<button class="sx-item" onclick="MX.showPage('rewards')"><i class="fas fa-crown sx-ico"></i><span class="sx-lbl">Classements</span></button>`;
@@ -279,7 +304,7 @@
     h += _item("parametres", "fa-gear", "Paramètres");
     h += `</div>`;
 
-    // ── Section 5: ADMIN (respOnly) ──
+    // ── Section 7: ADMIN (respOnly) ──
     if (canAll) {
       let aItems = "";
       [
