@@ -129,6 +129,162 @@
     </svg>`;
   }
 
+  function _consoBlock(esc) {
+    const Conso = MX.Pages && MX.Pages.Conso;
+    if (!Conso) return '';
+    Conso._load();
+    const cso = Conso._getCsoState();
+
+    const today = new Date().toISOString().slice(0, 10);
+    const yest  = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+    const [ty, tm, td] = today.split('-');
+    const dateLbl = `${td}/${tm}/${ty}`;
+
+    const { meters, readings, clients, loaded } = cso;
+    const cli = clients[today] || 0;
+
+    function _sum(type, date) {
+      const ids = meters.filter(m => m.type === type).map(m => m.id);
+      return readings.filter(r => ids.includes(r.meterId) && r.date === date)
+        .reduce((s, r) => s + (r.consumption || 0), 0);
+    }
+    function _lastIdx(type) {
+      const ids = meters.filter(m => m.type === type).map(m => m.id);
+      const r   = readings.find(r => ids.includes(r.meterId) && r.date === today);
+      return r ? r.index : null;
+    }
+    function _fmt(n, dec) {
+      if (n === null || n === undefined || isNaN(n)) return '—';
+      const d = dec !== undefined ? dec : (Math.abs(n) >= 100 ? 1 : 2);
+      return n.toFixed(d).replace('.', ',');
+    }
+    function _avg7ratio(type) {
+      const ids = meters.filter(m => m.type === type).map(m => m.id);
+      const avgs = [];
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(today + 'T12:00'); d.setDate(d.getDate() - i);
+        const ds = d.toISOString().slice(0, 10);
+        const c  = clients[ds] || 0;
+        if (!c) continue;
+        const cv = readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0);
+        if (cv) avgs.push(cv * 1000 / c);
+      }
+      return avgs.length ? avgs.reduce((a, b) => a + b) / avgs.length : 0;
+    }
+
+    let h = `<div class="section-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px"><i class="fas fa-droplet" style="color:#3B82F6"></i> Consommations</div>
+      <button onclick="window._csoStartTab='releves';MX.showPage('consommations')" style="display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:8px;border:1px solid rgba(59,130,246,0.35);background:rgba(59,130,246,0.12);color:#3B82F6;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);touch-action:manipulation">
+        <i class="fas fa-camera"></i> Nouveau relevé
+      </button>
+    </div>`;
+
+    if (!loaded) {
+      h += `<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;margin-bottom:16px">
+        <i class="fas fa-spinner fa-spin"></i> Chargement des données…
+      </div>`;
+      return h;
+    }
+
+    if (!meters.length) {
+      h += `<div class="apcard" style="padding:20px;text-align:center;margin-bottom:16px;cursor:pointer" onclick="MX.showPage('consommations')">
+        <div style="font-size:28px;margin-bottom:8px">💧</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Aucun compteur configuré</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Configurez vos compteurs pour suivre les consommations</div>
+        <span style="padding:7px 14px;border-radius:8px;border:1px solid #3B82F6;background:rgba(59,130,246,0.15);color:#3B82F6;font-size:12px;font-weight:600;font-family:var(--ffs)"><i class="fas fa-cog"></i> Configurer</span>
+      </div>`;
+      return h;
+    }
+
+    const efC = _sum('eau_froide', today), efY = _sum('eau_froide', yest), efIdx = _lastIdx('eau_froide');
+    const ecC = _sum('eau_chaude', today), ecY = _sum('eau_chaude', yest), ecIdx = _lastIdx('eau_chaude');
+    const efR = cli > 0 && efC > 0 ? efC * 1000 / cli : null;
+    const ecR = cli > 0 && ecC > 0 ? ecC * 1000 / cli : null;
+
+    function _meterCard(icon, label, color, idx, today, yest, ratio) {
+      return `<div class="apcard" style="padding:12px;cursor:pointer" onclick="MX.showPage('consommations')">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <span style="font-size:16px">${icon}</span>
+          <span style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${label}</span>
+        </div>
+        <div style="font-size:20px;font-weight:700;font-family:var(--ffm);line-height:1;color:${today > 0 ? 'var(--text)' : 'var(--text3)'}">
+          ${idx !== null ? _fmt(idx) : '—'}
+          ${idx !== null ? `<span style="font-size:10px;color:var(--text3);margin-left:2px">m³</span>` : ''}
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:1px">Index actuel</div>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;justify-content:space-between;font-size:11px">
+            <span style="color:var(--text2)">Auj.</span>
+            <span style="color:${color};font-weight:600;font-family:var(--ffm)">${today > 0 ? _fmt(today) + ' m³' : '—'}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px">
+            <span style="color:var(--text2)">Hier</span>
+            <span style="color:var(--text3);font-family:var(--ffm)">${yest > 0 ? _fmt(yest) + ' m³' : '—'}</span>
+          </div>
+          ${ratio !== null ? `<div style="display:flex;justify-content:space-between;font-size:11px">
+            <span style="color:var(--text2)">Ratio</span>
+            <span style="color:var(--text3);font-family:var(--ffm)">${_fmt(ratio, 0)} L/cl.</span>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }
+
+    // Alertes
+    const efAvg = _avg7ratio('eau_froide');
+    const ecAvg = _avg7ratio('eau_chaude');
+    let alertItems = [];
+    if (cli > 0 && efC > 0 && efAvg > 0) {
+      const dev = (efC * 1000 / cli - efAvg) / efAvg * 100;
+      if (Math.abs(dev) >= 20) alertItems.push({ crit: Math.abs(dev) >= 60, msg: `💧 EF ${dev > 0 ? '+' : ''}${Math.round(dev)}% vs moy. 7j` });
+    }
+    if (cli > 0 && ecC > 0 && ecAvg > 0) {
+      const dev = (ecC * 1000 / cli - ecAvg) / ecAvg * 100;
+      if (Math.abs(dev) >= 20) alertItems.push({ crit: Math.abs(dev) >= 60, msg: `🔥 EC ${dev > 0 ? '+' : ''}${Math.round(dev)}% vs moy. 7j` });
+    }
+    const hasRelevé = efC > 0 || ecC > 0;
+
+    h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">`;
+    h += _meterCard('💧', 'Eau froide', '#3B82F6', efIdx, efC, efY, efR);
+    h += _meterCard('🔥', 'Eau chaude', '#F97316', ecIdx, ecC, ecY, ecR);
+
+    // Clients card
+    h += `<div class="apcard" style="padding:12px;cursor:pointer" onclick="MX.Pages.Conso._editCli('${today}',${cli})">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <span style="font-size:16px">👥</span>
+        <span style="font-size:10px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.5px">Clients</span>
+      </div>
+      <div style="font-size:28px;font-weight:700;font-family:var(--ffm);line-height:1;color:${cli > 0 ? 'var(--text)' : 'var(--text3)'}">${cli > 0 ? cli : '—'}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px">Clients présents</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:8px">${dateLbl}</div>
+      <div style="font-size:10px;color:var(--cyan);margin-top:4px"><i class="fas fa-pen"></i> ${cli > 0 ? 'Modifier' : 'Saisir'}</div>
+    </div>`;
+
+    // Alertes card
+    h += `<div class="apcard" style="padding:12px;cursor:pointer" onclick="window._csoStartTab='alertes';MX.showPage('consommations')">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <span style="font-size:16px">🔔</span>
+        <span style="font-size:10px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:0.5px">Alertes</span>
+      </div>`;
+
+    if (!hasRelevé) {
+      h += `<div style="font-size:12px;color:var(--text3)">Aucun relevé aujourd'hui</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">Effectuez un relevé pour activer la détection</div>`;
+    } else if (!alertItems.length) {
+      h += `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:600">
+        <i class="fas fa-check-circle"></i> Consommations normales
+      </div>
+      ${!cli ? `<div style="font-size:11px;color:var(--text3);margin-top:6px">Saisissez les clients pour activer les ratios</div>` : ''}`;
+    } else {
+      alertItems.forEach(a => {
+        h += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:11px;font-weight:600;color:${a.crit ? 'var(--red)' : 'var(--orange)'}" >
+          <i class="fas fa-triangle-exclamation"></i> ${a.msg}
+        </div>`;
+      });
+    }
+    h += `</div></div>`;
+    return h;
+  }
+
   function render() {
     const { state, DAYS, SLOTS, getDaySlots, esc, todayId } = MX;
     const el    = document.getElementById("main-content");
@@ -335,52 +491,8 @@
 
     h += `</div></div></div></div>`;
 
-    // ── Day cards ──
-    h += `<div class="section-label">Jours de la semaine</div>
-    <div class="page-grid">`;
-
-    DAYS.forEach((d, idx) => {
-      const slots = getDaySlots(d.id);
-      let dTotal = 0, dDone = 0;
-      const slotData = slots.map(sl => {
-        const tasks = state.tasks[`${d.id}_${sl}`] || [];
-        let sDone = 0;
-        tasks.forEach(t => {
-          dTotal++;
-          if (state.checks[`${d.id}_${sl}_${t.id}`]) { dDone++; sDone++; }
-        });
-        const sPct = tasks.length ? Math.round(sDone / tasks.length * 100) : 0;
-        return { sl, tasks: tasks.length, done: sDone, pct: sPct };
-      });
-      const dPct    = dTotal ? Math.round(dDone / dTotal * 100) : 0;
-      const isToday = d.id === today;
-      const stateClass = isToday ? 'today' : dPct >= 80 ? 'state-ok' : dPct >= 40 ? 'state-warn' : 'state-alert';
-      const pctCls  = dPct >= 80 ? 'g' : dPct >= 40 ? 'o' : 'r';
-
-      h += `<div class="day-card ${stateClass}" style="animation-delay:${idx * 0.04}s" onclick="MX.showPage('${d.id}')">
-        <div class="day-card-head">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div>
-              <div class="day-card-title">${esc(d.l)}${isToday ? ' <span style="font-size:10px;font-weight:600;color:var(--cyan);font-family:var(--ffm);background:var(--cyan-dim);border:1px solid var(--cyan-border);padding:1px 7px;border-radius:10px;margin-left:6px">AUJOURD\'HUI</span>' : ''}</div>
-              <div class="day-card-sub">${dDone} / ${dTotal} tâches complétées</div>
-            </div>
-            <div class="day-pct ${pctCls}">${dPct}%</div>
-          </div>
-          <div class="prog-track" style="margin-top:10px;height:5px"><div class="prog-fill" style="width:${dPct}%;box-shadow:none"></div></div>
-        </div>
-        <div class="day-card-body">
-          <div class="day-slots">`;
-
-      slotData.forEach(({ sl, pct: sPct }) => {
-        const s   = SLOTS[sl];
-        const cls = sPct >= 80 ? 'ok' : sPct >= 40 ? 'warn' : 'alert';
-        h += `<span class="day-slot-chip slot-chip ${cls}">${s.l} ${sPct}%</span>`;
-      });
-
-      h += `</div></div></div>`;
-    });
-
-    h += `</div>`;
+    // ── Consommations block ──
+    h += _consoBlock(esc);
 
     // ── Communications card ──
     h += `<div class="section-label">Communications</div>

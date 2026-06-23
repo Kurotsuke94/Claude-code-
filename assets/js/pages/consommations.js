@@ -112,6 +112,13 @@
   function _rerender() {
     const el = document.getElementById('cso-body');
     if (el) el.innerHTML = _body();
+    if (MX.state && MX.state.currentPage === 'home') {
+      MX.Pages && MX.Pages.Home && MX.Pages.Home.render();
+    }
+  }
+
+  function _getCsoState() {
+    return { meters: _meters, readings: _readings, clients: _clients, loaded: _loaded };
   }
 
   function _tab(id) {
@@ -954,5 +961,6 @@
     _newReading, _onPhoto, _showPhoto, _meterHistory,
     _allMeters, _csv, _pdf,
     _csoDateSet, _csoDatePrev, _csoDateNext,
+    _getCsoState, _load,
   };
 })();
