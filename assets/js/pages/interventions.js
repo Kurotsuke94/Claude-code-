@@ -13,6 +13,7 @@
   let _users         = [];
   let _loaded    = false;
   let _unsubInt  = {};
+  let _pickerSel = [];
 
   // ── FIRESTORE ──
   const DB = {
@@ -654,17 +655,42 @@
 
   // ── TECHNICIAN PICKER HTML ──
   function _techPicker(selected) {
+    _pickerSel = [...(selected || [])];
     if (!_users.length) return '';
     const techs = _users.filter(u => u.role === 'technicien' || u.role === 'responsable');
     if (!techs.length) return '';
     return `<div class="int-form-label">Techniciens affectés</div>
-      <div class="int-tech-picker">
-        ${techs.map(u => `<label class="int-tech-pick-item">
-          <input type="checkbox" class="int-tech-ck" value="${esc(u.name)}"${(selected || []).includes(u.name) ? ' checked' : ''}>
-          <span class="int-avatar" style="background:${u.color || '#7C3AED'}">${(u.name||'?').trim().split(/\s+/).map(w=>w[0]||'').join('').slice(0,2).toUpperCase()}</span>
-          ${esc(u.name)}
-        </label>`).join('')}
+      <div class="int-tech-picker" id="int-tp">
+        ${techs.map(u => {
+          const isSel = _pickerSel.includes(u.name);
+          const initials = (u.name || '?').trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+          return `<button type="button"
+            class="int-tech-pick-item${isSel ? ' selected' : ''}"
+            data-tech="${esc(u.name)}"
+            onclick="MX.Pages.Int._toggleTech(this)">
+            ${isSel ? '<i class="fas fa-check int-tp-ck"></i>' : ''}
+            <span class="int-avatar" style="background:${u.color || '#7C3AED'}">${initials}</span>
+            ${esc(u.name)}
+          </button>`;
+        }).join('')}
       </div>`;
+  }
+
+  function _toggleTech(btn) {
+    const name = btn.dataset.tech;
+    if (!name) return;
+    const isSel = _pickerSel.includes(name);
+    if (isSel) {
+      _pickerSel = _pickerSel.filter(n => n !== name);
+      btn.classList.remove('selected');
+      btn.querySelector('.int-tp-ck')?.remove();
+    } else {
+      _pickerSel.push(name);
+      btn.classList.add('selected');
+      const ck = document.createElement('i');
+      ck.className = 'fas fa-check int-tp-ck';
+      btn.insertBefore(ck, btn.firstChild);
+    }
   }
 
   // ── ACTIONS ──
@@ -703,7 +729,7 @@
         { label: 'Créer', cls: 'confirm', fn: async () => {
           const title = document.getElementById('int-f-title')?.value?.trim();
           if (!title) { MX.toast('Le titre est requis', true); return; }
-          const assigned = Array.from(document.querySelectorAll('.int-tech-ck:checked')).map(c => c.value);
+          const assigned = [..._pickerSel];
           const data = {
             title,
             description: document.getElementById('int-f-desc')?.value?.trim() || '',
@@ -765,7 +791,7 @@
         { label: 'Enregistrer', cls: 'confirm', fn: async () => {
           const title = document.getElementById('int-f-title')?.value?.trim();
           if (!title) { MX.toast('Titre requis', true); return; }
-          const assigned   = Array.from(document.querySelectorAll('.int-tech-ck:checked')).map(c => c.value);
+          const assigned   = [..._pickerSel];
           const newTechs   = assigned.filter(t => !(iv.assignedTo || []).includes(t));
           const newStatus  = document.getElementById('int-f-status')?.value || iv.status;
           const data = {
@@ -1017,7 +1043,7 @@
     render, _tab,
     _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
-    _setFilter,
+    _setFilter, _toggleTech,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
   };
 })();

@@ -4883,15 +4883,17 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .int-form-date-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .int-tech-picker { display: flex; flex-wrap: wrap; gap: 6px; }
 .int-tech-pick-item {
-  display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px;
   border-radius: 20px; border: 1px solid var(--border);
-  background: var(--bg3); cursor: pointer; transition: all 0.15s;
+  background: var(--bg3); cursor: pointer; transition: all 0.18s;
   font-size: 12px; font-weight: 600; color: var(--text2);
+  font-family: var(--ffm); outline: none; user-select: none;
 }
+.int-tech-pick-item:hover:not(.selected) { border-color: var(--cyan); color: var(--text1); }
 .int-tech-pick-item.selected {
-  background: rgba(251,146,60,.15); border-color: #fb923c; color: #fb923c;
+  background: rgba(124,58,237,.18); border-color: #7C3AED; color: #a78bfa;
 }
-.int-tech-ck { display: none; }
+.int-tp-ck { font-size: 10px; color: #a78bfa; flex-shrink: 0; }
 
 /* ── View detail ── */
 .int-view-body { display: flex; flex-direction: column; gap: 14px; }
