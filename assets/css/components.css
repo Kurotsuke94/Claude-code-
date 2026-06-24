@@ -730,6 +730,49 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .ann-char { font-size: 11px; color: var(--text3); }
+.ann-attach-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.ann-attach-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--border2); background: var(--bg4);
+  color: var(--text2); font-size: 11px; font-family: var(--ffs);
+  cursor: pointer; transition: border-color var(--t), color var(--t);
+  white-space: nowrap;
+}
+.ann-attach-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.ann-preview-wrap {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 0;
+}
+.ann-preview-img {
+  max-height: 80px; max-width: 180px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border2); display: block;
+}
+.ann-preview-rm {
+  position: absolute; top: -4px; right: -4px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--red); color: #fff; border: none;
+  font-size: 10px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.ann-img-wrap {
+  margin-top: 10px; border-radius: 10px; overflow: hidden;
+  max-height: 300px; cursor: pointer; border: 1px solid var(--border);
+}
+.ann-img {
+  width: 100%; max-height: 300px; object-fit: cover; display: block;
+  transition: opacity var(--t);
+}
+.ann-img:hover { opacity: 0.88; }
+.ann-pdf-attach {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding: 8px 14px;
+  border: 1px solid var(--border2); border-radius: 8px;
+  background: var(--bg4); color: var(--text2); font-size: 12px;
+  cursor: pointer; transition: border-color var(--t), color var(--t);
+}
+.ann-pdf-attach:hover { border-color: var(--cyan); color: var(--cyan); }
+.ann-pdf-attach i { color: var(--red); }
 
 /* Filters */
 .ann-filters {

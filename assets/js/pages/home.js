@@ -61,12 +61,12 @@
 
   // ── SVG LINE CHART ──
   function _svgLineChart(data, labels) {
-    const W = 360, H = 90, PAD = 14, PADL = 26;
+    const W = 360, H = 180, PAD = 20, PADL = 30;
     const W2 = W - PADL - PAD;
     const H2 = H - PAD * 2;
     const n  = data.length;
 
-    if (n === 0) return `<svg viewBox="0 0 ${W} ${H+20}" width="100%" height="110" xmlns="http://www.w3.org/2000/svg"></svg>`;
+    if (n === 0) return `<svg viewBox="0 0 ${W} ${H+20}" width="100%" style="display:block;height:auto;min-height:100px" xmlns="http://www.w3.org/2000/svg"></svg>`;
 
     const pts = data.map((v, i) => ({
       x: PADL + (n === 1 ? W2 / 2 : (i / (n - 1)) * W2),
@@ -93,7 +93,7 @@
               <text x="${(PADL-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="8" fill="var(--text3)" font-family="var(--ffm)">${v}</text>`;
     }).join('');
 
-    return `<svg viewBox="0 0 ${W} ${H+20}" width="100%" height="120" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+    return `<svg viewBox="0 0 ${W} ${H+20}" width="100%" style="display:block;height:auto;max-height:400px;min-height:150px;overflow:visible" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="lgHome" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.18"/>

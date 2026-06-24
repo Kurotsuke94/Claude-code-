@@ -5,6 +5,7 @@
   let _expandedSet   = new Set();
   let _replyListeners = {};
   let _replies       = {};
+  let _pendingFile   = null;
 
   const T = {
     info:       { icon: '📢', label: 'Information', c: 'var(--cyan)',   cd: 'var(--cyan-dim)',   cb: 'var(--cyan-border)' },
@@ -81,6 +82,76 @@
       return _tsMs(a.createdAt) > seen;
     });
     return sorted;
+  }
+
+  // ── File Attachment ──
+  function _compressMsg(file) {
+    if (!file.type.startsWith('image/')) return Promise.resolve(file);
+    const MAX_PX = 1400, QUALITY = 0.80;
+    return new Promise(function(resolve) {
+      var t = setTimeout(function() { resolve(file); }, 10000);
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function() {
+        URL.revokeObjectURL(url);
+        var w = img.width, h = img.height;
+        if (w <= MAX_PX && h <= MAX_PX && file.size < 400000) { clearTimeout(t); resolve(file); return; }
+        var s = Math.min(1, MAX_PX / Math.max(w, h));
+        w = Math.round(w * s); h = Math.round(h * s);
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        c.toBlob(function(b) { clearTimeout(t); resolve(b || file); }, 'image/jpeg', QUALITY);
+      };
+      img.onerror = function() { clearTimeout(t); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  function _pickFile(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    _pendingFile = file;
+    const prev = document.getElementById('ann-attach-preview');
+    if (!prev) { input.value = ''; return; }
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      prev.innerHTML = `<div class="ann-preview-wrap">
+        <img src="${url}" class="ann-preview-img" alt="preview">
+        <button class="ann-preview-rm" onclick="MX.Pages.Messages._removeFile()"><i class="fas fa-times"></i></button>
+      </div>`;
+    } else {
+      prev.innerHTML = `<div class="ann-preview-wrap">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg4);border-radius:8px;border:1px solid var(--border)">
+          <i class="fas fa-file-pdf" style="color:var(--red);font-size:22px"></i>
+          <span style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(file.name)}</span>
+        </div>
+        <button class="ann-preview-rm" onclick="MX.Pages.Messages._removeFile()"><i class="fas fa-times"></i></button>
+      </div>`;
+    }
+    prev.style.display = 'block';
+    input.value = '';
+  }
+
+  function _removeFile() {
+    _pendingFile = null;
+    const prev = document.getElementById('ann-attach-preview');
+    if (prev) { prev.innerHTML = ''; prev.style.display = 'none'; }
+  }
+
+  function _onDrop(e) {
+    e.preventDefault();
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    _pickFile({ files: [file], value: '' });
+  }
+
+  function _openImg(url) {
+    MX.showModal({
+      title: '',
+      body: `<div style="text-align:center;padding:4px 0"><img src="${MX.esc(url)}" style="max-width:100%;max-height:65vh;border-radius:10px;object-fit:contain;display:block;margin:0 auto"></div>`,
+      actions: [{ label: 'Fermer', cls: 'cancel' }]
+    });
   }
 
   // ── Render ──
@@ -203,7 +274,24 @@
       <textarea class="fi ann-ta" id="ann-content"
         placeholder="Quoi de neuf ? Utilisez @nom pour mentionner quelqu'un…"
         rows="3" maxlength="500"
-        oninput="MX.Pages.Messages._onInput(this)"></textarea>
+        oninput="MX.Pages.Messages._onInput(this)"
+        ondragover="event.preventDefault()"
+        ondrop="MX.Pages.Messages._onDrop(event)"></textarea>
+      <div class="ann-attach-bar">
+        <label class="ann-attach-btn" title="Joindre un fichier">
+          <i class="fas fa-paperclip"></i> Fichier
+          <input type="file" accept="image/*,application/pdf" style="display:none" onchange="MX.Pages.Messages._pickFile(this)">
+        </label>
+        <label class="ann-attach-btn" title="Prendre une photo">
+          <i class="fas fa-camera"></i> Photo
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="MX.Pages.Messages._pickFile(this)">
+        </label>
+        <label class="ann-attach-btn" title="Galerie">
+          <i class="fas fa-image"></i> Galerie
+          <input type="file" accept="image/*" style="display:none" onchange="MX.Pages.Messages._pickFile(this)">
+        </label>
+      </div>
+      <div id="ann-attach-preview" style="display:none"></div>
       <div class="ann-compose-foot">
         <span class="ann-char" id="ann-char">0 / 500</span>
         <button class="primary-btn" onclick="MX.Pages.Messages.send()" style="width:auto;padding:10px 22px">
@@ -256,6 +344,14 @@
           </div>
         </div>
         <div class="ann-body">${_renderContent(ann.content || '')}</div>
+        ${ann.imageUrl ? (ann.imageMime === 'application/pdf'
+          ? `<div class="ann-pdf-attach" onclick="window.open('${esc(ann.imageUrl)}','_blank')">
+              <i class="fas fa-file-pdf"></i> Pièce jointe PDF
+            </div>`
+          : `<div class="ann-img-wrap" onclick="MX.Pages.Messages._openImg('${esc(ann.imageUrl)}')">
+              <img src="${esc(ann.imageUrl)}" class="ann-img" alt="Pièce jointe">
+            </div>`
+        ) : ''}
       </div>
       <div class="ann-card-bot">
         <div class="ann-rxns">${reactionBtns}</div>
@@ -354,20 +450,32 @@
     const author  = _author();
     if (!author) return MX.toast('Connectez-vous pour publier', true);
     const content = ((document.getElementById('ann-content') || {}).value || '').trim();
-    if (!content) return MX.toast('Écrivez quelque chose', true);
+    if (!content && !_pendingFile) return MX.toast('Écrivez quelque chose', true);
     if (content.length > 500) return MX.toast('Maximum 500 caractères', true);
     const allowed = _allowedTypes();
     if (!allowed.includes(_selectedType)) return MX.toast('Type non autorisé pour votre rôle', true);
 
+    const fileToUpload = _pendingFile;
     const btn = document.querySelector('.ann-compose .primary-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
     try {
-      await MX.DB.sendAnnouncement({ type: _selectedType, content, authorName: author, authorRole: _role() });
+      let imageUrl = null, imageMime = null;
+      if (fileToUpload) {
+        MX.toast('Compression…');
+        const compressed = await _compressMsg(fileToUpload);
+        MX.toast('Upload en cours…');
+        imageUrl = await MX.DB.uploadMessageImage(compressed);
+        imageMime = fileToUpload.type || 'image/jpeg';
+      }
+      await MX.DB.sendAnnouncement({ type: _selectedType, content, authorName: author, authorRole: _role(), imageUrl, imageMime });
       MX.toast('Annonce publiée ✓');
       const ta = document.getElementById('ann-content');
       if (ta) ta.value = '';
       const ch = document.getElementById('ann-char');
       if (ch) ch.textContent = '0 / 500';
+      _pendingFile = null;
+      const prev = document.getElementById('ann-attach-preview');
+      if (prev) { prev.innerHTML = ''; prev.style.display = 'none'; }
     } catch (e) {
       console.error(e);
       MX.toast('Erreur lors de la publication', true);
@@ -462,6 +570,7 @@
     _setType, _setFilter, _onInput,
     _react, _pin, _del,
     _toggleReplies, _sendReply, _delReply,
-    _readers
+    _readers,
+    _pickFile, _removeFile, _onDrop, _openImg
   };
 })();

@@ -523,6 +523,7 @@ html, body {
   z-index: 100;
   padding-bottom: env(safe-area-inset-bottom);
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
 .bottom-nav::-webkit-scrollbar { display: none; }
@@ -544,6 +545,7 @@ html, body {
   position: relative;
   transition: color var(--t);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .bn i { font-size: 15px; transition: transform var(--t); }
 .bn.active { color: var(--cyan); }

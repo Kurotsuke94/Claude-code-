@@ -147,8 +147,10 @@
 
   async function uploadMessageImage(file) {
     if (!storage) throw new Error("Firebase Storage non disponible");
-    const ext  = (file.name || "photo.jpg").split('.').pop().replace(/[^a-z0-9]/g, '') || "jpg";
-    const path = `messages/${uuid()}.jpg`;
+    const mime = file.type || "image/jpeg";
+    const extMap = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" };
+    const ext  = extMap[mime] || (file.name || "file").split('.').pop().replace(/[^a-z0-9]/g, '') || "jpg";
+    const path = `messages/${uuid()}.${ext}`;
     const ref  = storage.ref(path);
     return await new Promise((resolve, reject) => {
       var done = false;
@@ -156,12 +158,12 @@
         if (!done) { done = true; reject(new Error("Upload timeout — connexion trop lente")); }
       }, 30000);
 
-      const task = ref.put(file, { contentType: "image/jpeg" });
+      const task = ref.put(file, { contentType: mime });
       task.on('state_changed',
         snap => {
           const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100) || 0;
-          const btn = document.querySelector(".compose .primary-btn");
-          if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Upload ${pct}%`;
+          const btn = document.querySelector(".ann-compose .primary-btn, .compose .primary-btn");
+          if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${pct}%`;
         },
         err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
         async () => {
@@ -321,22 +323,28 @@
         cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
   }
-  async function sendAnnouncement({ type, content, authorName, authorRole }) {
-    await R_ANN().add({
+  async function sendAnnouncement({ type, content, authorName, authorRole, imageUrl, imageMime }) {
+    const data = {
       type, content, authorName, authorRole,
       createdAt: FV.serverTimestamp(),
       pinned: false,
       reactions: { '👍': [], '✅': [], '⚠️': [] },
       readBy: [authorName],
       replyCount: 0
-    });
+    };
+    if (imageUrl) { data.imageUrl = imageUrl; if (imageMime) data.imageMime = imageMime; }
+    await R_ANN().add(data);
   }
   async function deleteAnnouncement(id) {
     const batch = db.batch();
     const replies = await R_ANN().doc(id).collection('replies').get();
     replies.docs.forEach(d => batch.delete(d.ref));
+    const snap = await R_ANN().doc(id).get();
     batch.delete(R_ANN().doc(id));
     await batch.commit();
+    if (snap.exists && snap.data().imageUrl && storage) {
+      try { await storage.refFromURL(snap.data().imageUrl).delete(); } catch(e) {}
+    }
   }
   async function togglePin(id, currentlyPinned) {
     await R_ANN().doc(id).update({ pinned: !currentlyPinned });

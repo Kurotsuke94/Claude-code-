@@ -2,7 +2,7 @@
   "name": "Maintix",
   "short_name": "Maintix",
   "description": "Gestion de maintenance technique hôtelière",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "id": "/",
   "start_url": "/",
   "display": "standalone",
