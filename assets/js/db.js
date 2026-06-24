@@ -714,6 +714,26 @@
     await batch.commit();
   }
 
+  // ── DAILY CLAIMS (auto-attribution per date) ──
+  function listenDailyClaims(dateStr, cb) {
+    if (_unsub.daily_claims) _unsub.daily_claims();
+    _unsub.daily_claims = db.collection('daily_claims').doc(dateStr).onSnapshot(snap => {
+      cb(snap.exists ? snap.data() : {});
+    });
+  }
+  async function setDailyClaim(dateStr, slot, name, lockedBy) {
+    await db.collection('daily_claims').doc(dateStr).set(
+      { [slot]: { name: name || "", lockedBy: lockedBy || "" } },
+      { merge: true }
+    );
+  }
+  async function clearDailyClaim(dateStr, slot) {
+    await db.collection('daily_claims').doc(dateStr).set(
+      { [slot]: { name: "", lockedBy: "" } },
+      { merge: true }
+    );
+  }
+
   // ── HISTORY PURGE (30-day limit) ──
   async function purgeOldHistory() {
     const cutoff = new Date();
@@ -870,6 +890,7 @@
     incrementBibleViews, toggleBibleLike,
     listenBibleComments, addBibleComment, deleteBibleComment,
     listenAdminJournal, addAdminJournal, clearAdminJournal,
+    listenDailyClaims, setDailyClaim, clearDailyClaim,
     purgeOldHistory,
     getBiblePermissions, setBiblePermissions,
     getRecentBibleArticles,

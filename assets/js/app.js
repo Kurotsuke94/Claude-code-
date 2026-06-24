@@ -428,7 +428,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.25";
+  const _APP_VER = "1.0.26";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -755,6 +755,27 @@
       state.orders = list;
       if (state.currentPage === "orders") MX.Pages.Orders.render();
     });
+
+    // ── Daily claims listener (today only) ──
+    DB.listenDailyClaims(state.todayDateStr, data => {
+      state.dailyClaims = data;
+      const tid = MX.todayId ? MX.todayId() : null;
+      if (tid && (state.currentPage === "today-cl" || state.currentPage === tid)) {
+        MX.Pages.Checklist.render(tid);
+      }
+    });
+
+    // ── Planning suggestions for today ──
+    const _SHIFT_TO_SLOT = { '1': 'matin', '2': 'journee', '3': 'journee', '4': 'soir' };
+    DB.loadPlanningMonth(new Date().getFullYear(), new Date().getMonth()).then(entries => {
+      const sugg = {};
+      Object.values(entries).forEach(e => {
+        if (e.date === state.todayDateStr && _SHIFT_TO_SLOT[e.shiftCode]) {
+          if (!sugg[e.userName]) sugg[e.userName] = _SHIFT_TO_SLOT[e.shiftCode];
+        }
+      });
+      state.todayPlanSuggestions = sugg;
+    }).catch(() => {});
   }
 
   // ── INIT ──

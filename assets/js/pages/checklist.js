@@ -8,10 +8,15 @@
     const canAll = MX.Auth.canSeeAll();
     const worker = (!canAll && cu) ? cu.name : null;
 
+    // Today's date detection for daily claims
+    const isToday              = dayId === MX.todayId();
+    const dailyClaims          = isToday ? (state.dailyClaims || {}) : {};
+    const todayPlanSuggestions = isToday ? (state.todayPlanSuggestions || {}) : {};
+
     let total = 0, done = 0;
     slots.forEach(sl => {
       const tasks = state.tasks[`${dayId}_${sl}`] || [];
-      const asn   = state.assignments[`${dayId}_${sl}`] || "";
+      const asn   = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
       if (canAll || !worker || asn === worker) {
         tasks.forEach(t => {
           total++;
@@ -105,14 +110,18 @@
 
     let anyVisible = false;
     slots.forEach(sl => {
-      const tasks = state.tasks[`${dayId}_${sl}`] || [];
-      const asn   = state.assignments[`${dayId}_${sl}`] || "";
+      const tasks      = state.tasks[`${dayId}_${sl}`] || [];
+      const asn        = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
+      const dailyClaim = isToday ? (dailyClaims[sl] || null) : null;
       const html  = Widgets.slotCard({
         dayId, slot: sl,
         tasks, assignment: asn,
         checks:       state.checks,
         showAssign:   canAll,
-        workerFilter: worker
+        workerFilter: worker,
+        isToday,
+        dailyClaim,
+        todayPlanSuggestions
       });
       if (html) { anyVisible = true; h += html; }
     });
@@ -259,6 +268,56 @@
     } catch (e) {
       MX.toast("Erreur lors de l'assignation", true);
     }
+  }
+
+  // ── DAILY CLAIMS (auto-attribution) ──
+  async function claimSlot(slot) {
+    const cu = MX.state.currentUser;
+    if (!cu) return MX.toast("Connectez-vous pour prendre un créneau", true);
+    const dateStr = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
+    const existing = (MX.state.dailyClaims || {})[slot] || {};
+    if (existing.lockedBy) return MX.toast("Ce créneau est verrouillé par le responsable", true);
+    if (existing.name && existing.name !== cu.name) return MX.toast("Ce créneau est déjà pris par " + existing.name, true);
+    try {
+      await MX.DB.setDailyClaim(dateStr, slot, cu.name, "");
+      MX.toast("Créneau pris ✓");
+      MX.DB.addLog({ workerName: cu.name, action: "claim", taskText: "[Aujourd'hui] " + cu.name + " a pris le créneau " + slot, dayId: MX.todayId(), slot }).catch(() => {});
+    } catch(e) { MX.toast("Erreur", true); }
+  }
+
+  async function unclaimSlot(slot) {
+    const cu = MX.state.currentUser;
+    if (!cu) return;
+    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
+    const existing = (MX.state.dailyClaims || {})[slot] || {};
+    if (existing.lockedBy) return MX.toast("Créneau verrouillé — contactez un responsable", true);
+    if (existing.name !== cu.name) return;
+    try {
+      await MX.DB.clearDailyClaim(dateStr, slot);
+      MX.toast("Créneau libéré");
+      MX.DB.addLog({ workerName: cu.name, action: "unclaim", taskText: "[Aujourd'hui] " + cu.name + " a quitté le créneau " + slot, dayId: MX.todayId(), slot }).catch(() => {});
+    } catch(e) { MX.toast("Erreur", true); }
+  }
+
+  async function assignToday(slot, name) {
+    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
+    const existing = (MX.state.dailyClaims || {})[slot] || {};
+    try {
+      await MX.DB.setDailyClaim(dateStr, slot, name, existing.lockedBy || "");
+      const actor = MX.state.adminUser ? MX.state.adminUser.email : (MX.state.currentUser ? MX.state.currentUser.name : "inconnu");
+      MX.DB.addLog({ workerName: actor, action: "assign", taskText: "[Aujourd'hui] " + slot + " → " + (name || "(aucun)"), dayId: MX.todayId(), slot }).catch(() => {});
+    } catch(e) { MX.toast("Erreur lors de l'assignation", true); }
+  }
+
+  async function toggleLockSlot(slot) {
+    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
+    const existing = (MX.state.dailyClaims || {})[slot] || {};
+    const actor    = MX.state.adminUser ? (MX.state.adminUser.email || "admin") : (MX.state.currentUser ? MX.state.currentUser.name : "resp");
+    const newLock  = existing.lockedBy ? "" : actor;
+    try {
+      await MX.DB.setDailyClaim(dateStr, slot, existing.name || "", newLock);
+      MX.toast(newLock ? "Créneau verrouillé 🔒" : "Créneau déverrouillé");
+    } catch(e) { MX.toast("Erreur", true); }
   }
 
   // ── TRANSFER ──
@@ -454,5 +513,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
 })();

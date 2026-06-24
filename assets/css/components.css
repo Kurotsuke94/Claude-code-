@@ -774,6 +774,81 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ann-pdf-attach:hover { border-color: var(--cyan); color: var(--cyan); }
 .ann-pdf-attach i { color: var(--red); }
 
+/* ── DAILY CLAIMS (auto-attribution) ── */
+.daily-claim {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border3);
+}
+.dc-assigned {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.dc-assigned.dc-locked {
+  padding: 7px 10px; border-radius: 8px;
+  background: rgba(251,146,60,.07);
+  border: 1px solid rgba(251,146,60,.2);
+}
+.dc-lock-badge {
+  font-size: 10px; font-weight: 700; font-family: var(--ffm);
+  padding: 2px 7px; border-radius: 5px;
+  background: rgba(251,146,60,.15); color: var(--orange);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.dc-empty, .dc-suggest {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.dc-unassigned {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--text3);
+}
+.dc-suggest-badge {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; font-family: var(--ffs); color: var(--cyan);
+  background: var(--cyan-dim); border: 1px solid var(--cyan-border);
+  padding: 4px 10px; border-radius: 8px;
+}
+.dc-claim-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  background: var(--cyan-dim); color: var(--cyan);
+  border: 1px solid var(--cyan-border); border-radius: 8px;
+  font-size: 12px; font-weight: 700; font-family: var(--ffs);
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--t), color var(--t), border-color var(--t), transform var(--t);
+}
+.dc-claim-btn:hover {
+  background: var(--cyan); color: #0C0C0E; border-color: var(--cyan);
+  transform: translateY(-1px);
+}
+.dc-claim-btn:active { transform: translateY(0); }
+.dc-unclaim-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  background: rgba(239,68,68,.1); color: var(--red);
+  border: 1px solid rgba(239,68,68,.3); border-radius: 8px;
+  font-size: 11px; font-weight: 600; font-family: var(--ffs);
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+.dc-unclaim-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
+.slot-lock-btn {
+  width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
+  background: var(--bg4); border: 1px solid var(--border2);
+  color: var(--text3); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: border-color var(--t), color var(--t), background var(--t);
+}
+.slot-lock-btn.on {
+  background: rgba(251,146,60,.15);
+  border-color: rgba(251,146,60,.5);
+  color: var(--orange);
+}
+.slot-lock-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+@media (max-width: 480px) {
+  .dc-empty, .dc-suggest { flex-direction: column; align-items: flex-start; }
+  .dc-claim-btn { width: 100%; justify-content: center; }
+  .dc-unclaim-btn { width: 100%; justify-content: center; }
+}
+
 /* Filters */
 .ann-filters {
   display: flex; flex-wrap: wrap; gap: 6px;
