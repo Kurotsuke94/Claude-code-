@@ -817,8 +817,26 @@
     setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      const _swHadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register("/sw.js").then(reg => {
+        // Periodic background update check every hour
+        setInterval(() => reg.update().catch(() => {}), 3600000);
+      }).catch(() => {});
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (_swHadController) _showSwUpdateBar();
+      });
     }
+  }
+
+  function _showSwUpdateBar() {
+    if (document.getElementById('sw-update-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'sw-update-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;display:flex;align-items:center;gap:10px;padding:10px 20px;background:var(--cyan);color:#0C0C0E;font-size:13px;font-weight:600;font-family:var(--ffs);box-shadow:0 2px 12px rgba(0,0,0,0.3)';
+    bar.innerHTML = '<i class="fas fa-rocket"></i><span style="flex:1">Nouvelle version disponible</span>'
+      + '<button onclick="window.location.reload()" style="background:#0C0C0E;color:var(--cyan);border:none;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--ffs);flex-shrink:0">Mettre à jour</button>'
+      + '<button onclick="document.getElementById(\'sw-update-bar\').remove()" style="background:transparent;border:none;color:#0C0C0E;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0" title="Plus tard">×</button>';
+    document.body.insertBefore(bar, document.body.firstChild);
   }
 
   function hideLoading() {
