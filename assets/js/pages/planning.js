@@ -411,7 +411,7 @@
       h += `<tr class="plng-user-row" data-uid="${esc(user.id)}">
         <td class="plng-user-cell">
           ${_avatar(user, 26)}
-          <span class="plng-user-name">${esc(user.name)}</span>
+          <span class="plng-user-name">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</span>
           ${canEdit ? `<span class="plng-user-actions">
             <button class="plng-user-btn" title="Copier le mois" onclick="MX.Pages.Planning._copyMonth('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
             <button class="plng-user-btn" title="Coller le mois" onclick="MX.Pages.Planning._pasteMonth('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
@@ -494,7 +494,7 @@
       h += `<tr class="plng-user-row" data-uid="${esc(user.id)}">
         <td class="plng-user-cell">
           ${_avatar(user, 26)}
-          <span class="plng-user-name">${esc(user.name)}</span>
+          <span class="plng-user-name">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</span>
           ${canEdit ? `<span class="plng-user-actions">
             <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
             <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>

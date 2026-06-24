@@ -194,7 +194,7 @@
       <div class="ann-compose-who">
         ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}${_bdgCp?';border:2px solid '+_bdgCp:''}">${esc(author.substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(author, {size:36,radius:10})}
         <div>
-          <div style="font-size:13px;font-weight:600">${esc(author)}</div>
+          <div style="font-size:13px;font-weight:600">${MX.badgeTag ? MX.badgeTag(author) : ''}${esc(author)}</div>
           <div style="font-size:11px;color:var(--text2)">${roleLabel}</div>
         </div>
         <span style="margin-left:auto;color:var(--cyan);font-size:12px"><i class="fas fa-check-circle"></i> Connecté</span>
@@ -251,7 +251,7 @@
         <div class="ann-av-wrap">
           ${isAdm ? `<div class="ann-av" style="background:${bg};color:${fg}${_bdgC?';border:2px solid '+_bdgC:''}">${esc((ann.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(ann.authorName||'?', {size:36,radius:10})}
           <div>
-            <div style="font-size:13px;font-weight:600">${esc(ann.authorName || '?')}</div>
+            <div style="font-size:13px;font-weight:600">${MX.badgeTag ? MX.badgeTag(ann.authorName||'') : ''}${esc(ann.authorName || '?')}</div>
             <div class="ann-role" style="color:${t.c};background:${t.cd};border-color:${t.cb}">${rLabel}</div>
           </div>
         </div>
@@ -302,7 +302,7 @@
           ${isAdm ? `<div class="ann-av sm" style="background:${bg};color:${fg}${_bdgR?';border:2px solid '+_bdgR:''}">${esc((r.authorName||'?').substring(0,2).toUpperCase())}</div>` : MX.userAvatarHtml(r.authorName||'?', {size:28,radius:8})}
           <div style="flex:1;min-width:0">
             <div class="ann-reply-meta">
-              <span class="ann-reply-author">${esc(r.authorName||'?')}</span>
+              <span class="ann-reply-author">${MX.badgeTag ? MX.badgeTag(r.authorName||'') : ''}${esc(r.authorName||'?')}</span>
               <span class="ann-reply-role">${rLbl}</span>
               <span class="ann-reply-ts">${_relTime(r.createdAt)}</span>
               ${canDel ? `<button onclick="MX.Pages.Messages._delReply('${annId}','${r.id}')" class="ann-reply-del"><i class="fas fa-times"></i></button>` : ''}

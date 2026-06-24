@@ -336,6 +336,18 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   border-radius: var(--rx); overflow: hidden; margin-bottom: 12px;
 }
 
+/* ── BADGE EMOJI TAG (inline next to user name) ── */
+.bdg-tag {
+  font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  cursor: default;
+  vertical-align: middle;
+  display: inline-block;
+  margin-right: 3px;
+}
+
 /* ── BADGE EMOJI ICON ── */
 .bdg-icon {
   font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif;

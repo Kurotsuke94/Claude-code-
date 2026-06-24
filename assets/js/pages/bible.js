@@ -228,7 +228,7 @@
         <div class="bl-card-footer">
           <div class="bl-card-author">
             <div class="bl-mini-avatar" style="background:${nc.bg};color:${nc.fg}${_blBdg?';border:2px solid '+_blBdg:''}">${MX.esc(initials)}</div>
-            <span>${MX.esc(a.authorName||'Anonyme')}</span>
+            <span>${MX.badgeTag ? MX.badgeTag(a.authorName||'') : ''}${MX.esc(a.authorName||'Anonyme')}</span>
           </div>
           <div class="bl-card-stats">
             ${(a.viewCount)?`<span><i class="fas fa-eye"></i> ${a.viewCount}</span>`:''}

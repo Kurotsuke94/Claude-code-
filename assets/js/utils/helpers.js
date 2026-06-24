@@ -101,7 +101,9 @@
 
   function chipHtml(name) {
     const nc = userColors(name);
-    return `<span class="chip" style="background:${nc.bg};color:${nc.fg}">${esc(name)}</span>`;
+    const border = (window.MX && MX.badgeBorder) ? MX.badgeBorder(name) : null;
+    const tag    = (window.MX && MX.badgeTag) ? MX.badgeTag(name) : '';
+    return `<span class="chip" style="background:${nc.bg};color:${nc.fg}${border?';border:1.5px solid '+border:''}">${tag}${esc(name)}</span>`;
   }
 
   function progressClass(pct) {
@@ -284,12 +286,19 @@
     return `<div style="${st}">${(u && u.avatarUrl) ? `<img src="${esc(u.avatarUrl)}" style="width:100%;height:100%;object-fit:cover;display:block;">` : avatarTxt(name)}</div>`;
   }
 
+  function badgeTag(userName) {
+    if (!window.MX || !MX.primaryBadge) return '';
+    const b = MX.primaryBadge(userName);
+    if (!b) return '';
+    return `<span class="bdg-tag" title="${esc(b.name)}">${b.icon || '🏅'}</span>`;
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   Object.assign(window.MX, {
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
-    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, userAvatarHtml, _contrastColor, progressClass, alertLevel, hashPin,
+    avatarBg, avatarFg, avatarTxt, chipHtml, userColors, userAvatarHtml, badgeTag, _contrastColor, progressClass, alertLevel, hashPin,
     toast, showModal, closeModal,
     ThemeManager
   });

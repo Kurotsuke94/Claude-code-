@@ -122,7 +122,7 @@
       const initials = name.trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
       const border = MX.badgeBorder ? MX.badgeBorder(name) : null;
       return `<span class="int-avatar" style="background:${color}${border ? ';border:2px solid ' + border : ''}" title="${esc(name)}">${esc(initials)}</span>`;
-    }).join('') + assignedTo.map(n => `<span class="int-avatar-name">${esc(n)}</span>`).join('');
+    }).join('') + assignedTo.map(n => `<span class="int-avatar-name">${MX.badgeTag ? MX.badgeTag(n) : ''}${esc(n)}</span>`).join('');
   }
 
   // ── DATA LAYER ──
@@ -355,7 +355,7 @@
             const u   = _users.find(u => u.name === name);
             const col = u?.color || '#7C3AED';
             html += `<div class="int-tech-bar-row">
-              <div class="int-tech-bar-name">${esc(name)}</div>
+              <div class="int-tech-bar-name">${MX.badgeTag ? MX.badgeTag(name) : ''}${esc(name)}</div>
               <div class="int-tech-bar-track">
                 <div class="int-tech-bar-fill" style="width:${Math.round(count / maxVal * 100)}%;background:${col}"></div>
               </div>

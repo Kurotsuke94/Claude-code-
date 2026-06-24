@@ -348,7 +348,7 @@
       userHtml = `<div class="dh-user" onclick="MX.Auth.clearCurrentUser()">
         <div class="dh-avatar" style="background:${bg};color:${fg}${_dhBorder?';border:2px solid '+_dhBorder:''}">${MX.esc(cu.name.substring(0,2).toUpperCase())}</div>
         <div>
-          <div style="font-size:12px;font-weight:600;line-height:1.2">${MX.esc(cu.name)}</div>
+          <div style="font-size:12px;font-weight:600;line-height:1.2">${MX.badgeTag ? MX.badgeTag(cu.name) : ''}${MX.esc(cu.name)}</div>
           <div style="font-size:10px;color:var(--text3);line-height:1.2">${lbl}</div>
         </div>
       </div>`;
@@ -717,7 +717,18 @@
       state.userBadges = map;
       buildNav();
       buildDeskHeader();
-      if (state.currentPage === 'badges') Pages.Badges && Pages.Badges.render();
+      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
+      const cp = state.currentPage;
+      if (cp === 'badges')       { Pages.Badges  && Pages.Badges.render(); }
+      else if (cp === 'msgs')    { Pages.Messages && Pages.Messages.render(); }
+      else if (cp === 'missions'){ Pages.Missions && Pages.Missions.render(); }
+      else if (cp === 'bible')   { Pages.Bible    && Pages.Bible.render(); }
+      else if (cp === 'home')    { Pages.Home     && Pages.Home.render(); }
+      else if (cp === 'planning'){ Pages.Planning && Pages.Planning.render(); }
+      else if (cp === 'utilisateurs') { Pages.Admin && Pages.Admin.render(); }
+      else if (cp === 'consommations') { Pages.Conso && Pages.Conso.render(); }
+      else if (MX.DAYS && MX.DAYS.find(d => d.id === cp)) { Pages.Checklist && Pages.Checklist.render(cp); }
+      else if (cp.startsWith('resp-')) { Pages.Checklist && Pages.Checklist.render(cp); }
     });
 
     DB.listenPresence(count => {
@@ -931,17 +942,23 @@
     await MX.enableNotifications();
   };
 
-  window.MX.badgeBorder = function(userName) {
+  function _primaryBadge(userName) {
     if (!userName) return null;
     const userBadges = MX.state.userBadges || {};
     const badges     = MX.state.badges || [];
-    const ub = (userBadges[userName] || []);
+    const ub = userBadges[userName] || [];
     if (!ub.length) return null;
     const badgeIds = ub.map(b => b.badgeId);
-    const match = badges
+    return badges
       .filter(b => b.active && badgeIds.includes(b.id))
-      .sort((a, b) => a.priority - b.priority)[0];
-    return match ? match.border : null;
+      .sort((a, b) => a.priority - b.priority)[0] || null;
+  }
+
+  window.MX.primaryBadge = _primaryBadge;
+
+  window.MX.badgeBorder = function(userName) {
+    const b = _primaryBadge(userName);
+    return b ? (b.border || b.color || null) : null;
   };
 
   window.MX.buildNav          = buildNav;

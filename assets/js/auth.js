@@ -262,15 +262,16 @@
       const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : "";
       const rUser    = (MX.state.rewardsUsers || {})[cu.name] || {};
       const pts      = rUser.points || 0;
+      const _sfBdgBorder = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
       el.innerHTML = `
         <button class="sxf-btn" onclick="MX.Auth.clearCurrentUser()">
-          <div class="sxf-avatar" style="background:${bg};color:${fg}">${
+          <div class="sxf-avatar" style="background:${bg};color:${fg}${_sfBdgBorder?';border:2px solid '+_sfBdgBorder:''}">${
             fullUser.avatarUrl
               ? `<img src="${MX.esc(fullUser.avatarUrl)}" class="sxf-avatar-img">`
               : MX.esc(cu.name.substring(0, 2).toUpperCase())
           }</div>
           <div class="sxf-info">
-            <div class="sxf-name">${MX.esc(cu.name)}</div>
+            <div class="sxf-name">${MX.badgeTag ? MX.badgeTag(cu.name) : ''}${MX.esc(cu.name)}</div>
             <div class="sxf-role">
               <span class="sxf-dot sxf-dot--on"></span>
               <span class="sxf-role-lbl">${lbl}</span>

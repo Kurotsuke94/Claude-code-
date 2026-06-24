@@ -27,10 +27,11 @@
       const bg  = cu.color || nc.bg;
       const fg  = cu.color ? MX._contrastColor(cu.color) : nc.fg;
       const lbl = cu.role === "responsable" ? "Responsable · vue complète" : "Technicien · créneaux assignés";
+      const _clBdg = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
       banner = `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;margin-bottom:14px">
-        <span style="width:32px;height:32px;border-radius:9px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(cu.name.substring(0,2).toUpperCase())}</span>
+        <span style="width:32px;height:32px;border-radius:9px;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:var(--ffm);flex-shrink:0${_clBdg?';border:2px solid '+_clBdg:''}">${esc(cu.name.substring(0,2).toUpperCase())}</span>
         <div style="flex:1">
-          <div style="font-size:13px;font-weight:600">${esc(cu.name)}</div>
+          <div style="font-size:13px;font-weight:600">${MX.badgeTag ? MX.badgeTag(cu.name) : ''}${esc(cu.name)}</div>
           <div style="font-size:11px;color:var(--text2)">${lbl}</div>
         </div>
         <button onclick="MX.Auth.clearCurrentUser()" style="font-size:11px;color:var(--cyan);background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--ffs)">Changer</button>
