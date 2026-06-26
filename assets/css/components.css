@@ -5935,3 +5935,129 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 [data-theme="light"] .hotel-plan-card { background: #FFFFFF; }
 [data-theme="light"] .hotel-plan-active { background: var(--cyan-dim); }
 [data-theme="light"] .db-repair-btn { background: #FAFAFA; }
+
+/* ══════════════════════════════════════════════
+   HOME COCKPIT — RESPONSIVE GRID LAYOUT
+   ══════════════════════════════════════════════ */
+
+/* Base: single-column mobile */
+.home-cockpit {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+/* Section wrappers — semantic grid areas */
+.hc-header, .hc-kpis, .hc-conso,
+.hc-activity, .hc-alerts,
+.hc-interventions, .hc-stock, .hc-comms {
+  min-width: 0;
+}
+
+/* Remove legacy two-col in favour of cockpit grid */
+.home-cockpit .home-two-col { display: contents; }
+
+/* ── 768px: conso/activity side by side ── */
+@media (min-width: 768px) {
+  .home-cockpit {
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .hc-header { grid-column: 1 / -1; }
+  .hc-kpis   { grid-column: 1 / -1; }
+  /* conso & activity: cols 1+2 naturally */
+  .hc-alerts { grid-column: 1 / -1; }
+  .hc-interventions { grid-column: 1; }
+  .hc-stock         { grid-column: 2; }
+  .hc-comms  { grid-column: 1 / -1; }
+}
+
+/* ── 1440px (27" 1080p+): 3-column layout ── */
+@media (min-width: 1440px) {
+  .home-cockpit {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 22px;
+  }
+  .hc-header { grid-column: 1 / -1; }
+  .hc-kpis   { grid-column: 1 / -1; }
+  .hc-conso        { grid-column: 1; }
+  .hc-activity     { grid-column: 2; }
+  .hc-alerts       { grid-column: 3; }
+  .hc-interventions { grid-column: 1 / 3; }
+  .hc-stock         { grid-column: 3; }
+  .hc-comms  { grid-column: 1 / -1; }
+}
+
+/* ── 2560px (ultrawide / QHD) ── */
+@media (min-width: 2560px) {
+  .home-cockpit { gap: 28px; }
+
+  /* Larger section headers */
+  .home-cockpit .home-section-title { font-size: 12px; }
+  .home-cockpit .home-section-head  { margin: 20px 0 12px; }
+
+  /* KPI cards — taller, bigger numbers */
+  .home-kpi-card {
+    min-height: 140px;
+    padding: 20px 16px;
+    gap: 6px;
+  }
+  .home-kpi-icon {
+    width: 44px; height: 44px;
+    font-size: 18px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .home-kpi-value { font-size: 32px; }
+  .home-kpi-total { font-size: 15px; }
+  .home-kpi-unit  { font-size: 13px; }
+  .home-kpi-label { font-size: 13px; margin-top: 4px; }
+  .home-kpi-sub   { font-size: 11px; }
+
+  /* Conso meters */
+  .home-cso-meter-val  { font-size: 24px; }
+  .home-cso-meter-row  { font-size: 12px; }
+  .home-cso-meter-label { font-size: 11px; }
+
+  /* Activity */
+  .home-activity-author { font-size: 14px; }
+  .home-activity-text   { font-size: 13px; }
+  .home-activity-time   { font-size: 11px; }
+
+  /* Alert items */
+  .home-alert-title { font-size: 14px; }
+  .home-alert-sub   { font-size: 12px; }
+
+  /* Intervention stats */
+  .home-int-stat-n { font-size: 28px; }
+  .home-int-stat-l { font-size: 12px; }
+  .home-int-item-title { font-size: 14px; }
+
+  /* Stock */
+  .home-stock-name { font-size: 13px; }
+}
+
+/* ── 3200px (4K / ultrawide 49") ── */
+@media (min-width: 3200px) {
+  .home-cockpit { gap: 36px; }
+
+  .home-kpi-card {
+    min-height: 160px;
+    padding: 26px 20px;
+  }
+  .home-kpi-icon {
+    width: 54px; height: 54px;
+    font-size: 22px;
+    border-radius: 14px;
+  }
+  .home-kpi-value { font-size: 40px; }
+  .home-kpi-label { font-size: 15px; }
+  .home-kpi-sub   { font-size: 12px; }
+
+  .home-cso-meter-val  { font-size: 30px; }
+  .home-alert-title    { font-size: 15px; }
+  .home-int-stat-n     { font-size: 34px; }
+}
+
+/* Activity verb style */
+.home-activity-verb { color: var(--text2); font-weight: 400; font-size: 0.9em; }

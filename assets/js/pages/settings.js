@@ -842,7 +842,7 @@
   }
 
   function _renderApropos() {
-    const ver = '1.0.29';
+    const ver = '1.0.30';
     const isOnline = navigator.onLine;
     const users = MX.state.users || [];
     const lastSync = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';

@@ -32,7 +32,7 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v74";
+const CACHE  = "maintix-v75";
 const SHELL  = [
   "/",
   "/index.html",
