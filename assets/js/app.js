@@ -19,6 +19,7 @@
     { id: "utilisateurs",  icon: "fa-users",          l: "Admin" },
     { id: "parametres",    icon: "fa-gear",           l: "Paramètres",      noBot: true },
     { id: "badges",        icon: "fa-medal",          l: "Badges",          noBot: true },
+    { id: "notifs",        icon: "fa-bell",            l: "Notifications", noBot: true },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
     { id: "resp-plan",     icon: "fa-clipboard-check",l: "Checklist Resp.",  respOnly: true },
     { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
@@ -88,6 +89,7 @@
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
     if (id === "resp-plan")    return Pages.RespPlan.render();
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
+    if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
@@ -393,8 +395,12 @@
         <i class="fas fa-rocket"></i>
         <span class="nav-badge show" style="background:var(--cyan);color:#0C0C0E;font-size:9px;font-weight:800">NEW</span>
       </button>` : ''}
-      <button class="dh-btn" onclick="MX.showPage('msgs')" title="Messages">
+      <button class="dh-btn" id="notif-bell-btn" onclick="MX.Notifs.toggleDrop()" title="Notifications">
         <i class="fas fa-bell"></i>
+        <span class="nav-badge" id="notif-bell-badge"></span>
+      </button>
+      <button class="dh-btn" onclick="MX.showPage('msgs')" title="Messages">
+        <i class="fas fa-comments"></i>
         <span class="nav-badge${unread ? ' show' : ''}" id="dh-bell-badge">${unread > 9 ? '9+' : unread || ''}</span>
       </button>
       ${userHtml}
@@ -455,6 +461,29 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.33', date: '2026-06-26', emoji: '🔔',
+      title: 'Centre de notifications unifié',
+      changes: [
+        'Icône 🔔 avec compteur dans la barre supérieure',
+        'Panneau rapide : 10 dernières notifications par catégorie',
+        'Page complète avec filtres : Messages, Interventions, Stock, Badges, Mises à jour, Système',
+        'Notifications automatiques : nouveau message, stock faible, badge obtenu, version',
+        'Actions : marquer lu, tout marquer lu, archiver, supprimer',
+        'Activité récente de l\'accueil synchronisée avec le centre',
+      ]
+    },
+    {
+      ver: '1.0.32', date: '2026-06-26', emoji: '🔧',
+      title: 'Corrections Sprint 1 & 2',
+      changes: [
+        'KPI missions cockpit corrigés (schéma admin vs interventions)',
+        'Toasts admin corrigés (format boolean)',
+        'Optimisation _autoRetard() — batch Firestore + early return',
+        'Libération listener Firestore Bible à la navigation',
+        'Nom hôtel et utilisateur corrects dans l\'accueil',
+      ]
+    },
+    {
       ver: '1.0.31', date: '2026-06-26', emoji: '🚀',
       title: 'Système de gestion des versions',
       changes: [
@@ -498,10 +527,10 @@
       ]
     },
   ];
-  window.MX.appVer = "1.0.31";
+  window.MX.appVer = "1.0.33";
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.31";
+  const _APP_VER = "1.0.33";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -703,6 +732,7 @@
     });
 
     DB.listenProducts(list => {
+      MX.Notifs._checkStock(list);
       state.products = list;
       updateNavProgress();
       if (state.currentPage === "orders") MX.Pages.Orders.render();
@@ -763,6 +793,7 @@
     });
 
     DB.listenAnnouncements(list => {
+      MX.Notifs._checkAnnouncements(list);
       state.announcements = list;
       if (state.currentPage === "msgs") _markMsgsSeen();
       updateNavProgress();
@@ -787,6 +818,7 @@
       if (state.currentPage === 'utilisateurs') Pages.Admin.render();
     });
     DB.listenUserBadges(map => {
+      MX.Notifs._checkUserBadges(map);
       state.userBadges = map;
       buildNav();
       buildDeskHeader();
@@ -849,6 +881,11 @@
       });
       state.todayPlanSuggestions = sugg;
     }).catch(() => {});
+
+    // ── Notifications listener (single global, filter client-side by user) ──
+    DB.listenNotifications(list => {
+      MX.Notifs.onUpdate(list);
+    });
 
     // ── Hotel config (nom, couleurs) ──
     DB.getHotelConfig().then(cfg => {
@@ -926,6 +963,7 @@
       });
     }
 
+    MX.Notifs.init();
     MX.Updates.init();
   }
 
@@ -1075,12 +1113,293 @@
 
   window.MX.primaryBadge = _primaryBadge;
 
+  // ── NOTIFICATIONS MODULE ──
+  window.MX.Notifs = (function() {
+    let _dropOpen = false;
+    let _prevAnnIds = new Set();
+    let _prevMsgIds = new Set();
+    let _prevStockLow = new Set();
+    let _prevUserBadgeIds = new Set();
+    let _initialized = false;
+
+    function _catColor(type) {
+      const m = {
+        message:      'var(--cyan)',
+        intervention: 'var(--orange)',
+        stock:        'var(--jour)',
+        badge:        'var(--green)',
+        update:       '#8B5CF6',
+        system:       'var(--text3)',
+      };
+      return m[type] || 'var(--cyan)';
+    }
+
+    function _catIcon(type) {
+      const m = {
+        message:      '📩',
+        intervention: '🔧',
+        stock:        '📦',
+        badge:        '🏆',
+        update:       '🚀',
+        system:       '⚙️',
+      };
+      return m[type] || '🔔';
+    }
+
+    function _fmtDate(ts) {
+      if (!ts) return '';
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      const now = new Date();
+      const diff = now - d;
+      if (diff < 60000) return 'À l\'instant';
+      if (diff < 3600000) return Math.floor(diff / 60000) + ' min';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h';
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) +
+             ' · ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function updateBell(notifications) {
+      const unread = (notifications || []).filter(n => !n.read).length;
+      const badge = document.getElementById('notif-bell-badge');
+      if (!badge) return;
+      badge.textContent = unread > 99 ? '99+' : (unread || '');
+      badge.className = 'nav-badge' + (unread ? ' show' : '');
+    }
+
+    function _renderItemHtml(n, compact) {
+      const color = _catColor(n.type);
+      const icon  = n.icon || _catIcon(n.type);
+      const time  = _fmtDate(n.createdAt);
+      return `<div class="notif-item${n.read ? '' : ' notif-item--unread'}"
+        onclick="MX.Notifs.onItemClick('${MX.esc(n.id)}')" data-id="${MX.esc(n.id)}">
+        <div class="notif-item-icon" style="color:${color};background:${color}22">${icon}</div>
+        <div class="notif-item-body">
+          <div class="notif-item-title">${MX.esc(n.title)}</div>
+          ${!compact && n.description ? `<div class="notif-item-desc">${MX.esc(n.description)}</div>` : ''}
+          <div class="notif-item-meta">
+            <span style="color:${color};font-size:10px;font-weight:600">${_catIcon(n.type)} ${n.type}</span>
+            ${n.author ? `<span class="notif-meta-sep">·</span><span>${MX.esc(n.author)}</span>` : ''}
+            ${time ? `<span class="notif-meta-sep">·</span><span>${time}</span>` : ''}
+          </div>
+        </div>
+        ${!n.read ? '<div class="notif-dot"></div>' : ''}
+      </div>`;
+    }
+
+    function _renderDropHtml(notifs, unread) {
+      const items = notifs.length
+        ? notifs.map(n => _renderItemHtml(n, true)).join('')
+        : '<div class="notif-empty"><i class="fas fa-bell-slash"></i><div>Aucune notification</div></div>';
+      return `<div class="notif-drop-header">
+          <span class="notif-drop-title">Notifications${unread ? `<span class="notif-count">${unread}</span>` : ''}</span>
+          ${unread ? `<button class="notif-mark-all" onclick="MX.Notifs.markAllRead()">Tout lire</button>` : ''}
+        </div>
+        <div class="notif-drop-list">${items}</div>
+        <div class="notif-drop-footer">
+          <button class="notif-see-all" onclick="MX.Notifs._closeDrop();MX.showPage('notifs')">
+            Voir toutes les notifications
+          </button>
+        </div>`;
+    }
+
+    function toggleDrop() {
+      if (_dropOpen) _closeDrop();
+      else _openDrop();
+    }
+
+    function _openDrop() {
+      _closeDrop();
+      const notifs = (MX.state.notifications || []).slice(0, 10);
+      const unread = notifs.filter(n => !n.read).length;
+      const drop = document.createElement('div');
+      drop.id = 'notif-drop';
+      drop.className = 'notif-drop';
+      drop.innerHTML = _renderDropHtml(notifs, unread);
+      document.body.appendChild(drop);
+      const bell = document.getElementById('notif-bell-btn');
+      if (bell) {
+        const rect = bell.getBoundingClientRect();
+        drop.style.top  = (rect.bottom + 8) + 'px';
+        drop.style.right = (window.innerWidth - rect.right) + 'px';
+      }
+      _dropOpen = true;
+      setTimeout(() => { document.addEventListener('click', _outsideClick); }, 0);
+    }
+
+    function _closeDrop() {
+      const el = document.getElementById('notif-drop');
+      if (el) el.remove();
+      _dropOpen = false;
+      document.removeEventListener('click', _outsideClick);
+    }
+
+    function _outsideClick(e) {
+      const drop = document.getElementById('notif-drop');
+      const bell = document.getElementById('notif-bell-btn');
+      if (drop && !drop.contains(e.target) && bell && !bell.contains(e.target)) {
+        _closeDrop();
+      }
+    }
+
+    function onItemClick(id) {
+      MX.DB.markNotificationRead(id).catch(() => {});
+      const n = (MX.state.notifications || []).find(x => x.id === id);
+      if (n) n.read = true;
+      updateBell(MX.state.notifications || []);
+      if (_dropOpen) {
+        const items = (MX.state.notifications || []).slice(0, 10);
+        const unread = items.filter(n => !n.read).length;
+        const drop = document.getElementById('notif-drop');
+        if (drop) drop.innerHTML = _renderDropHtml(items, unread);
+      }
+    }
+
+    function markAllRead() {
+      const cu = MX.state.currentUser;
+      const userId = cu ? cu.name : 'all';
+      MX.DB.markAllNotificationsRead(userId).catch(() => {});
+      (MX.state.notifications || []).forEach(n => { n.read = true; });
+      updateBell(MX.state.notifications || []);
+      _closeDrop();
+      if (MX.state.currentPage === 'notifs' && MX.Pages.Notifications) {
+        MX.Pages.Notifications.render();
+      }
+    }
+
+    function onUpdate(allNotifications) {
+      // Filter by current user (or 'all' for broadcasts)
+      const cu  = MX.state.currentUser;
+      const ad  = MX.state.adminUser;
+      const uid = cu ? cu.name : (ad ? (ad.email || 'admin').split('@')[0] : null);
+      const notifications = allNotifications.filter(n =>
+        n.userId === 'all' || (uid && n.userId === uid)
+      );
+      MX.state.notifications = notifications;
+      updateBell(notifications);
+      if (MX.state.currentPage === 'notifs' && MX.Pages.Notifications) {
+        MX.Pages.Notifications.render();
+      }
+      if (_dropOpen) {
+        const items = notifications.slice(0, 10);
+        const unread = items.filter(n => !n.read).length;
+        const drop = document.getElementById('notif-drop');
+        if (drop) drop.innerHTML = _renderDropHtml(items, unread);
+      }
+    }
+
+    // Called from setupListeners to detect new announcements
+    function _checkAnnouncements(list) {
+      if (!_initialized) { _prevAnnIds = new Set(list.map(a => a.id)); return; }
+      list.forEach(a => {
+        if (!_prevAnnIds.has(a.id)) {
+          _prevAnnIds.add(a.id);
+          MX.DB.createNotification({
+            key: `ann_${a.id}`,
+            type: 'message',
+            title: '📩 Nouveau message',
+            description: a.content ? a.content.slice(0, 80) : '',
+            icon: '📩',
+            author: a.authorName || '',
+            userId: 'all',
+          }).catch(() => {});
+        }
+      });
+    }
+
+    // Called from setupListeners to detect low-stock products
+    function _checkStock(list) {
+      const lowNow = new Set();
+      list.forEach(p => {
+        if (p.minQty > 0 && p.qty <= p.minQty) {
+          lowNow.add(p.id);
+          if (!_prevStockLow.has(p.id)) {
+            MX.DB.createNotification({
+              key: `stock_${p.id}`,
+              type: 'stock',
+              title: '📦 Stock faible',
+              description: `${p.name} — Stock restant : ${p.qty}`,
+              icon: '📦',
+              author: '',
+              userId: 'all',
+            }).catch(() => {});
+          }
+        }
+      });
+      _prevStockLow = lowNow;
+    }
+
+    // Called from setupListeners to detect new badges for current user
+    function _checkUserBadges(map) {
+      const cu = MX.state.currentUser;
+      if (!cu) return;
+      const myBadges = map[cu.name] || [];
+      if (!_initialized) {
+        _prevUserBadgeIds = new Set(myBadges.map(b => b.id));
+        return;
+      }
+      myBadges.forEach(b => {
+        if (!_prevUserBadgeIds.has(b.id)) {
+          _prevUserBadgeIds.add(b.id);
+          MX.DB.createNotification({
+            key: `badge_${b.id}`,
+            type: 'badge',
+            title: '🏆 Badge obtenu',
+            description: b.badgeName || 'Nouveau badge',
+            icon: '🏆',
+            author: b.assignedBy || '',
+            userId: cu.name,
+          }).catch(() => {});
+        }
+      });
+    }
+
+    // Create version update notification
+    function createVersionNotif(version) {
+      MX.DB.createNotification({
+        key: `update_${version}`,
+        type: 'update',
+        title: `🚀 Maintix v${version}`,
+        description: 'Nouvelle version disponible.',
+        icon: '🚀',
+        author: 'Système',
+        userId: 'all',
+      }).catch(() => {});
+    }
+
+    // Create system notification
+    function createSystemNotif(key, title, description) {
+      MX.DB.createNotification({
+        key: `system_${key}`,
+        type: 'system',
+        title,
+        description,
+        icon: '⚙️',
+        author: 'Système',
+        userId: 'all',
+      }).catch(() => {});
+    }
+
+    function init() {
+      // Mark current user's notifications listener as started
+      setTimeout(() => { _initialized = true; }, 3000);
+    }
+
+    return {
+      init, onUpdate, updateBell, toggleDrop, _closeDrop, onItemClick, markAllRead,
+      _checkAnnouncements, _checkStock, _checkUserBadges,
+      createVersionNotif, createSystemNotif,
+      _catColor, _catIcon, _fmtDate,
+    };
+  })();
+
   // ── VERSION UPDATES MODULE ──
   window.MX.Updates = (function() {
     function init() {
       if (localStorage.getItem('mx_last_ver') !== _APP_VER) {
         buildDeskHeader();
         setTimeout(showModal, 2500);
+        // Create Firestore notification for new version
+        MX.Notifs.createVersionNotif(_APP_VER);
       }
     }
 

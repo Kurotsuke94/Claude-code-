@@ -125,6 +125,44 @@
     }).join('') + assignedTo.map(n => `<span class="int-avatar-name">${MX.badgeTag ? MX.badgeTag(n) : ''}${esc(n)}</span>`).join('');
   }
 
+  // ── NOTIFICATIONS ──
+  const _notifSentIds = new Set();
+
+  function _sendIntNotifs(next) {
+    if (!window.MX || !MX.Notifs || !MX.DB || !MX.DB.createNotification) return;
+    next.forEach(iv => {
+      if (_notifSentIds.has(iv.id)) return;
+      const eff = _effStatus(iv);
+      // New urgent intervention
+      if (iv.priority === 'urgente' && (eff === 'planifiee' || eff === 'affectee')) {
+        _notifSentIds.add(iv.id);
+        const who = Array.isArray(iv.assignedTo) ? iv.assignedTo[0] : (iv.assignedTo || 'all');
+        MX.DB.createNotification({
+          key: `int_urgent_${iv.id}`,
+          type: 'intervention',
+          title: '🔧 Intervention urgente',
+          description: iv.title || iv.location || 'Chambre non spécifiée',
+          icon: '🔧',
+          author: iv.createdBy || '',
+          userId: who || 'all',
+        }).catch(() => {});
+      }
+      // Late intervention
+      if (eff === 'en_retard' && !_notifSentIds.has(iv.id + '_late')) {
+        _notifSentIds.add(iv.id + '_late');
+        MX.DB.createNotification({
+          key: `int_retard_${iv.id}`,
+          type: 'intervention',
+          title: '🔧 Intervention en retard',
+          description: iv.title || iv.location || 'Délai dépassé',
+          icon: '🔧',
+          author: '',
+          userId: 'all',
+        }).catch(() => {});
+      }
+    });
+  }
+
   // ── DATA LAYER ──
   function _load() {
     if (_loaded) return;
@@ -135,6 +173,7 @@
       .limit(300)
       .onSnapshot(snap => {
         _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _sendIntNotifs(_interventions);
         _autoRetard();
         _rerender();
       });

@@ -783,6 +783,55 @@
     await db.collection('config').doc('versions').set(data);
   }
 
+  // ── NOTIFICATIONS ──
+  const R_NOTIFS = () => db.collection('notifications');
+
+  function listenNotifications(cb) {
+    if (_unsub.notifications) _unsub.notifications();
+    _unsub.notifications = R_NOTIFS()
+      .orderBy('createdAt', 'desc')
+      .limit(150)
+      .onSnapshot(snap => {
+        cb(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(n => !n.archived));
+      });
+  }
+
+  async function createNotification(data) {
+    const { key, ...rest } = data;
+    if (key) {
+      const ref = R_NOTIFS().doc(key);
+      const snap = await ref.get();
+      if (snap.exists) return;
+      await ref.set({ ...rest, read: false, archived: false, createdAt: FV.serverTimestamp() });
+    } else {
+      await R_NOTIFS().add({ ...rest, read: false, archived: false, createdAt: FV.serverTimestamp() });
+    }
+  }
+
+  async function markNotificationRead(id) {
+    await R_NOTIFS().doc(id).update({ read: true });
+  }
+
+  async function markAllNotificationsRead(userId) {
+    const snap = await R_NOTIFS().where('read', '==', false).get();
+    const toMark = snap.docs.filter(d => {
+      const uid = d.data().userId;
+      return uid === userId || uid === 'all';
+    });
+    if (!toMark.length) return;
+    const batch = db.batch();
+    toMark.forEach(d => batch.update(d.ref, { read: true }));
+    await batch.commit();
+  }
+
+  async function deleteNotification(id) {
+    await R_NOTIFS().doc(id).delete();
+  }
+
+  async function archiveNotification(id) {
+    await R_NOTIFS().doc(id).update({ archived: true });
+  }
+
   // ── BIBLE ARTICLES (one-time read for admin stats) ──
   async function getRecentBibleArticles() {
     const snap = await R_BIBLE_ART().orderBy('updatedAt', 'desc').limit(500).get();
@@ -917,6 +966,9 @@
     listenBadges, listenUserBadges,
     addBadge, updateBadge, deleteBadge,
     assignBadge, removeUserBadge, getUserBadges,
-    initDefaultBadges
+    initDefaultBadges,
+    listenNotifications, createNotification,
+    markNotificationRead, markAllNotificationsRead,
+    deleteNotification, archiveNotification,
   };
 })();
