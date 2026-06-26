@@ -111,8 +111,8 @@
     });
     const pctTasks = totalAll ? Math.round(doneAll / totalAll * 100) : 0;
 
-    // ── KPI: Interventions ──
-    const missions = state.missions || [];
+    // ── KPI: Interventions — filter out ghost/invalid missions ──
+    const missions = (state.missions || []).filter(m => m && m.id && (m.title || m.description || m.status));
     const mOpen      = missions.filter(m => m.status !== 'done' && m.status !== 'annule').length;
     const mInProg    = missions.filter(m => m.status === 'en_cours');
     const mLate      = missions.filter(m => {
@@ -228,6 +228,13 @@
         <div class="home-kpi-value" style="color:#3B82F6">${efFmt}${efToday > 0 ? '<span class="home-kpi-unit"> m³</span>' : ''}</div>
         <div class="home-kpi-label">Eau froide</div>
         <div class="home-kpi-sub">${efToday > 0 ? dateFr : 'Aucun relevé'}</div>
+      </div>
+
+      <div class="home-kpi-card" onclick="MX.showPage('consommations')">
+        <div class="home-kpi-icon" style="background:rgba(249,115,22,0.12);color:#F97316"><i class="fas fa-fire-flame-curved"></i></div>
+        <div class="home-kpi-value" style="color:#F97316">${ecToday > 0 ? ecToday.toFixed(2).replace('.', ',') : '—'}${ecToday > 0 ? '<span class="home-kpi-unit"> m³</span>' : ''}</div>
+        <div class="home-kpi-label">Eau chaude</div>
+        <div class="home-kpi-sub">${ecToday > 0 ? dateFr : 'Aucun relevé'}</div>
       </div>
 
       <div class="home-kpi-card" onclick="MX.Pages.Conso && MX.Pages.Conso._editCli('${todayISO}',${cliToday})">

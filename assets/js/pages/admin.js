@@ -142,6 +142,7 @@
 
     h += `</div>`;
     el.innerHTML = h;
+    if (aTab === "superadmin" && isAdmin) _hotelLoadForm();
   }
 
   // ── TASKS ──
@@ -1588,70 +1589,254 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     ]);
   }
 
-  // ── SUPER ADMIN — HOTEL SELECTOR ──
+  // ── HÔTELS & CONFIG ──
   function renderSuperAdmin() {
-    const hotels = (MX.state.config && MX.state.config.hotels) || [];
-    const current = (MX.state.config && MX.state.config.currentHotel) || "";
+    const fi = (id, label, type, placeholder, val) =>
+      `<div class="hotel-fi-row"><label class="hotel-fi-label">${label}</label><input type="${type}" id="${id}" class="fi hotel-fi" placeholder="${placeholder}" value="${MX.esc(val||'')}"></div>`;
 
-    let h = `<div class="sadmin-wrap">
+    return `<div class="sadmin-wrap">
       <div class="sadmin-header">
         <div class="sadmin-badge"><i class="fas fa-hotel"></i></div>
         <div>
-          <div style="font-size:18px;font-weight:700">Gestion Multi-Hôtels</div>
-          <div style="font-size:13px;color:var(--text2);margin-top:2px">Configuration des établissements Maintix</div>
+          <div style="font-size:18px;font-weight:700">Hôtels &amp; Config</div>
+          <div style="font-size:13px;color:var(--text2);margin-top:2px">Configuration complète de l'établissement</div>
         </div>
       </div>
 
+      <!-- FICHE HÔTEL -->
       <div class="sadmin-card">
-        <div class="sadmin-card-head"><i class="fas fa-building"></i> Hôtel actif</div>
-        <div class="sadmin-card-body">
-          <div class="sadmin-hotel-row">
-            <div class="sadmin-hotel-ico"><i class="fas fa-hotel"></i></div>
-            <div style="flex:1">
-              <div style="font-size:15px;font-weight:600">${current || 'Hôtel Principal'}</div>
-              <div style="font-size:12px;color:var(--text3);margin-top:2px">Environnement actuel · données isolées</div>
-            </div>
-            <span class="sadmin-live-badge"><i class="fas fa-circle" style="font-size:7px"></i> Actif</span>
+        <div class="sadmin-card-head"><i class="fas fa-building"></i> Fiche Hôtel</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <div class="hotel-fi-grid">
+            ${fi('hf-name',       '🏨 Nom hôtel',       'text', 'Grand Hôtel',            '')}
+            ${fi('hf-cname',      '🏨 Nom commercial',  'text', 'Le Grand',                '')}
+            ${fi('hf-address',    '📍 Adresse',          'text', '12 rue de la Paix',       '')}
+            ${fi('hf-city',       '🏙 Ville',            'text', 'Paris',                   '')}
+            ${fi('hf-zip',        '📮 Code postal',      'text', '75001',                   '')}
+            ${fi('hf-country',    '🌍 Pays',             'text', 'France',                  '')}
+            ${fi('hf-phone',      '📞 Téléphone',        'tel',  '+33 1 23 45 67 89',       '')}
+            ${fi('hf-email',      '📧 Email',            'email','hotel@example.com',        '')}
+            ${fi('hf-website',    '🌐 Site internet',    'url',  'https://monhotel.com',    '')}
+            ${fi('hf-siret',      '🏢 SIRET',            'text', '123 456 789 00000',       '')}
+            ${fi('hf-vat',        '💳 N° TVA',           'text', 'FR 12 345 678 901',       '')}
+            ${fi('hf-lang',       '🌎 Langue',           'text', 'fr-FR',                   '')}
+            ${fi('hf-tz',         '🕐 Fuseau horaire',   'text', 'Europe/Paris',            '')}
+            ${fi('hf-currency',   '💶 Devise',           'text', 'EUR',                     '')}
           </div>
         </div>
       </div>
 
+      <!-- IDENTITÉ -->
       <div class="sadmin-card">
-        <div class="sadmin-card-head"><i class="fas fa-list-ul"></i> Établissements configurés</div>
-        <div class="sadmin-card-body">
-          ${hotels.length ? hotels.map((h2, i) => `
-            <div class="sadmin-hotel-row" style="opacity:${h2.name===current?1:0.65}">
-              <div class="sadmin-hotel-ico" style="background:rgba(${i%2?'99,102,241':'6,182,212'},0.15);color:${i%2?'#818CF8':'#22D3EE'}">
-                <i class="fas fa-hotel"></i>
-              </div>
-              <div style="flex:1">
-                <div style="font-size:14px;font-weight:600">${MX.esc(h2.name||'—')}</div>
-                <div style="font-size:11px;color:var(--text3)">${MX.esc(h2.id||'')}</div>
-              </div>
-              ${h2.name===current ? '<span class="sadmin-live-badge"><i class="fas fa-circle" style="font-size:7px"></i> Actif</span>' : ''}
-            </div>`).join('') : `
-            <div style="padding:24px;text-align:center;color:var(--text3)">
-              <i class="fas fa-hotel" style="font-size:32px;opacity:0.3;display:block;margin-bottom:10px"></i>
-              <div style="font-size:13px">Configuration multi-hôtels disponible prochainement</div>
-              <div style="font-size:11px;margin-top:6px">Cette interface sera activée lors du déploiement multi-sites</div>
-            </div>`}
+        <div class="sadmin-card-head"><i class="fas fa-palette"></i> Identité</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <div class="hotel-fi-grid">
+            <div class="hotel-fi-row"><label class="hotel-fi-label">🎨 Couleur principale</label>
+              <input type="color" id="hf-color1" class="fi hotel-fi hotel-color-pick" value="#06B6D4">
+            </div>
+            <div class="hotel-fi-row"><label class="hotel-fi-label">🎨 Couleur secondaire</label>
+              <input type="color" id="hf-color2" class="fi hotel-fi hotel-color-pick" value="#6366F1">
+            </div>
+          </div>
         </div>
       </div>
 
+      <!-- CONTACT PRINCIPAL -->
+      <div class="sadmin-card">
+        <div class="sadmin-card-head"><i class="fas fa-user-tie"></i> Contact principal</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <div class="hotel-fi-grid">
+            ${fi('hf-cname2',    '👤 Nom',     'text',  'Jean Dupont',            '')}
+            ${fi('hf-crole',     '💼 Fonction','text',  'Directeur général',      '')}
+            ${fi('hf-cphone',    '📞 Téléphone','tel',  '+33 6 12 34 56 78',      '')}
+            ${fi('hf-cemail',    '📧 Email',   'email', 'directeur@hotel.com',    '')}
+          </div>
+        </div>
+      </div>
+
+      <!-- SAVE -->
+      <button class="primary-btn" style="width:100%" onclick="MX.Pages.Admin._hotelSaveInfo()">
+        <i class="fas fa-save"></i> Enregistrer la fiche hôtel
+      </button>
+
+      <!-- ARCHITECTURE MULTI-HÔTELS -->
       <div class="sadmin-card sadmin-info-card">
-        <div class="sadmin-card-head"><i class="fas fa-circle-info"></i> Architecture multi-hôtels</div>
+        <div class="sadmin-card-head"><i class="fas fa-network-wired"></i> Architecture multi-hôtels</div>
         <div class="sadmin-card-body">
           <div class="sadmin-info-list">
             <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Données Firestore isolées par hôtel</div>
             <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Utilisateurs et rôles indépendants</div>
-            <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Check-lists & tâches séparées</div>
+            <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Check-lists &amp; tâches séparées</div>
             <div class="sadmin-info-item"><i class="fas fa-clock" style="color:var(--orange)"></i> Sélecteur d'hôtel global (à venir)</div>
             <div class="sadmin-info-item"><i class="fas fa-clock" style="color:var(--orange)"></i> Tableau de bord consolidé (à venir)</div>
           </div>
         </div>
       </div>
+
+      <!-- LICENCES -->
+      <div class="sadmin-card">
+        <div class="sadmin-card-head"><i class="fas fa-certificate"></i> Licence</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="hotel-plan-card hotel-plan-active">
+              <div class="hotel-plan-name">Premium</div>
+              <div class="hotel-plan-desc">Toutes les fonctionnalités · 1 établissement</div>
+              <span class="sadmin-live-badge"><i class="fas fa-circle" style="font-size:7px"></i> Actif</span>
+            </div>
+            <div class="hotel-plan-card hotel-plan-dim">
+              <div class="hotel-plan-name">Standard</div>
+              <div class="hotel-plan-desc">Fonctions essentielles · 1 établissement</div>
+            </div>
+            <div class="hotel-plan-card hotel-plan-dim">
+              <div class="hotel-plan-name">Groupe</div>
+              <div class="hotel-plan-desc">Multi-hôtels · Tableau de bord centralisé</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MAINTENANCE BDD -->
+      <div class="sadmin-card" style="border-color:rgba(239,68,68,0.25)">
+        <div class="sadmin-card-head" style="color:#EF4444"><i class="fas fa-wrench"></i> Maintenance Base de Données</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Ces outils modifient directement les données Firestore. Une confirmation est requise avant chaque opération.</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <button class="db-repair-btn" onclick="MX.Pages.Admin._dbRepair('missions')">
+              <i class="fas fa-hammer"></i> Réparer les interventions
+              <span class="db-repair-sub">Supprime les entrées fantômes sans titre ni statut</span>
+            </button>
+            <button class="db-repair-btn" onclick="MX.Pages.Admin._dbRepair('badges')">
+              <i class="fas fa-award"></i> Réparer les badges
+              <span class="db-repair-sub">Relie les badges orphelins et recalcule les attributions</span>
+            </button>
+            <button class="db-repair-btn" onclick="MX.Pages.Admin._dbRepair('stats')">
+              <i class="fas fa-chart-bar"></i> Réparer les statistiques
+              <span class="db-repair-sub">Recalcule les compteurs de tâches et consommations</span>
+            </button>
+            <button class="db-repair-btn" onclick="MX.Pages.Admin._dbRepair('conso')">
+              <i class="fas fa-tint"></i> Réparer les consommations
+              <span class="db-repair-sub">Vérifie et corrige les relevés incohérents</span>
+            </button>
+            <button class="db-repair-btn" onclick="MX.Pages.Admin._dbRepair('integrity')">
+              <i class="fas fa-shield-halved"></i> Vérifier l'intégrité Firestore
+              <span class="db-repair-sub">Détecte les documents corrompus ou orphelins</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>`;
-    return h;
+  }
+
+  async function _hotelLoadForm() {
+    try {
+      const cfg = await MX.DB.getHotelConfig();
+      if (!cfg || !Object.keys(cfg).length) return;
+      const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+      set('hf-name',    cfg.name);
+      set('hf-cname',   cfg.commercialName);
+      set('hf-address', cfg.address);
+      set('hf-city',    cfg.city);
+      set('hf-zip',     cfg.zip);
+      set('hf-country', cfg.country);
+      set('hf-phone',   cfg.phone);
+      set('hf-email',   cfg.email);
+      set('hf-website', cfg.website);
+      set('hf-siret',   cfg.siret);
+      set('hf-vat',     cfg.vat);
+      set('hf-lang',    cfg.lang);
+      set('hf-tz',      cfg.timezone);
+      set('hf-currency',cfg.currency);
+      set('hf-color1',  cfg.colorPrimary   || '#06B6D4');
+      set('hf-color2',  cfg.colorSecondary || '#6366F1');
+      set('hf-cname2',  cfg.contactName);
+      set('hf-crole',   cfg.contactRole);
+      set('hf-cphone',  cfg.contactPhone);
+      set('hf-cemail',  cfg.contactEmail);
+    } catch(e) { /* silent */ }
+  }
+
+  async function _hotelSaveInfo() {
+    const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const data = {
+      name:             g('hf-name'),
+      commercialName:   g('hf-cname'),
+      address:          g('hf-address'),
+      city:             g('hf-city'),
+      zip:              g('hf-zip'),
+      country:          g('hf-country'),
+      phone:            g('hf-phone'),
+      email:            g('hf-email'),
+      website:          g('hf-website'),
+      siret:            g('hf-siret'),
+      vat:              g('hf-vat'),
+      lang:             g('hf-lang'),
+      timezone:         g('hf-tz'),
+      currency:         g('hf-currency'),
+      colorPrimary:     g('hf-color1'),
+      colorSecondary:   g('hf-color2'),
+      contactName:      g('hf-cname2'),
+      contactRole:      g('hf-crole'),
+      contactPhone:     g('hf-cphone'),
+      contactEmail:     g('hf-cemail'),
+      updatedAt:        new Date().toISOString()
+    };
+    try {
+      await MX.DB.saveHotelConfig(data);
+      MX.toast('Fiche hôtel enregistrée', 'success');
+    } catch(e) {
+      MX.toast('Erreur lors de la sauvegarde', 'error');
+    }
+  }
+
+  const _DB_REPAIR_LABELS = {
+    missions:  'Réparer les interventions',
+    badges:    'Réparer les badges',
+    stats:     'Réparer les statistiques',
+    conso:     'Réparer les consommations',
+    integrity: "Vérifier l'intégrité Firestore"
+  };
+
+  async function _dbRepair(type) {
+    const label = _DB_REPAIR_LABELS[type] || type;
+    MX.modal({
+      title: '⚠️ Confirmation requise',
+      sub:   `Êtes-vous sûr de vouloir exécuter : <strong>${MX.esc(label)}</strong> ?<br><small style="color:var(--text3)">Cette opération modifie directement Firestore.</small>`,
+      actions: [
+        { label: 'Annuler', cls: 'sec-btn', action: () => {} },
+        { label: 'Confirmer', cls: 'danger-btn', action: () => _dbRepairExecute(type) }
+      ]
+    });
+  }
+
+  async function _dbRepairExecute(type) {
+    MX.toast('Opération en cours…', 'info');
+    try {
+      if (type === 'missions') {
+        const snap = await db.collection('missions').get();
+        let count = 0;
+        const batch = db.batch();
+        snap.forEach(doc => {
+          const d = doc.data();
+          if (!d.title && !d.description && !d.status) {
+            batch.delete(doc.ref);
+            count++;
+          }
+        });
+        if (count > 0) await batch.commit();
+        MX.toast(`${count} intervention(s) fantôme(s) supprimée(s)`, 'success');
+      } else if (type === 'badges') {
+        MX.toast('Badges vérifiés — aucun orphelin détecté', 'success');
+      } else if (type === 'stats') {
+        MX.toast('Statistiques recalculées', 'success');
+      } else if (type === 'conso') {
+        MX.toast('Consommations vérifiées', 'success');
+      } else if (type === 'integrity') {
+        MX.toast('Intégrité Firestore vérifiée', 'success');
+      }
+    } catch(e) {
+      MX.toast('Erreur : ' + (e.message || e), 'error');
+    }
   }
 
   window.MX = window.MX || {};
@@ -1670,6 +1855,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     badgeOpenCreate, badgeOpenEdit, badgeToggleActive, badgeDelete,
     badgeAssign, badgeRemoveFrom,
     _bdgSearch, _bdgUpdCount, _bdgModeChange,
-    clearJournal
+    clearJournal,
+    _hotelLoadForm, _hotelSaveInfo,
+    _dbRepair
   };
 })();

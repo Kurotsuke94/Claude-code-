@@ -765,6 +765,15 @@
     await db.collection('config').doc('games_config').set(data, { merge: true });
   }
 
+  // ── HOTEL CONFIG ──
+  async function getHotelConfig() {
+    const snap = await db.collection('config').doc('hotel_config').get();
+    return snap.exists ? snap.data() : {};
+  }
+  async function saveHotelConfig(data) {
+    await db.collection('config').doc('hotel_config').set(data, { merge: true });
+  }
+
   // ── BIBLE ARTICLES (one-time read for admin stats) ──
   async function getRecentBibleArticles() {
     const snap = await R_BIBLE_ART().orderBy('updatedAt', 'desc').limit(500).get();
@@ -893,6 +902,7 @@
     listenDailyClaims, setDailyClaim, clearDailyClaim,
     purgeOldHistory,
     getBiblePermissions, setBiblePermissions,
+    getHotelConfig, saveHotelConfig,
     getRecentBibleArticles,
     listenBadges, listenUserBadges,
     addBadge, updateBadge, deleteBadge,

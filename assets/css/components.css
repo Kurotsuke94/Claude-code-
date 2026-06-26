@@ -5690,8 +5690,8 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   gap: 8px;
   margin-bottom: 14px;
 }
-@media (min-width: 480px) { .home-kpi-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (min-width: 900px) { .home-kpi-grid { grid-template-columns: repeat(6, 1fr); } }
+@media (min-width: 480px) { .home-kpi-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 900px) { .home-kpi-grid { grid-template-columns: repeat(7, 1fr); } }
 
 .home-kpi-card {
   background: var(--bg3);
@@ -5892,3 +5892,46 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 [data-theme="light"] .home-comms-card,
 [data-theme="light"] .home-state-box { background: #ffffff; }
 [data-theme="light"] .home-activity-item:hover { background: #F8FAFC; }
+
+/* ── HÔTEL CONFIG FORM ── */
+.hotel-fi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 600px) { .hotel-fi-grid { grid-template-columns: 1fr; } }
+.hotel-fi-row { display: flex; flex-direction: column; gap: 4px; }
+.hotel-fi-label { font-size: 11px; color: var(--text2); font-weight: 500; }
+.hotel-fi { font-size: 13px !important; padding: 8px 10px !important; }
+.hotel-color-pick { padding: 2px 4px !important; height: 36px; cursor: pointer; }
+
+/* ── LICENCE CARDS ── */
+.hotel-plan-card {
+  flex: 1; min-width: 140px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px; display: flex; flex-direction: column; gap: 6px;
+  position: relative;
+}
+.hotel-plan-active { border-color: var(--cyan); background: var(--cyan-dim); }
+.hotel-plan-dim    { opacity: 0.5; }
+.hotel-plan-name   { font-size: 14px; font-weight: 700; color: var(--text); }
+.hotel-plan-desc   { font-size: 11px; color: var(--text2); line-height: 1.4; }
+
+/* ── DB REPAIR BUTTONS ── */
+.db-repair-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: var(--r);
+  background: var(--bg3); border: 1px solid rgba(239,68,68,0.18);
+  color: var(--text); font-size: 13px; font-weight: 500;
+  cursor: pointer; text-align: left; width: 100%;
+  transition: background 0.15s, border-color 0.15s;
+}
+.db-repair-btn:hover { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.4); }
+.db-repair-btn i { color: #EF4444; flex-shrink: 0; width: 16px; text-align: center; }
+.db-repair-sub {
+  font-size: 11px; color: var(--text3); font-weight: 400;
+  display: block; margin-top: 2px; margin-left: 26px;
+}
+[data-theme="light"] .hotel-plan-card { background: #FFFFFF; }
+[data-theme="light"] .hotel-plan-active { background: var(--cyan-dim); }
+[data-theme="light"] .db-repair-btn { background: #FAFAFA; }

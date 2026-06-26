@@ -300,7 +300,7 @@
       });
       // Super Admin only items
       if (isAdmin) {
-        aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
+        aItems += `<div class="sx-admin-sep"><span>Hôtels & Config</span></div>`;
         [
           { fn:"MX.showAdminTab('superadmin')", icon:"fa-hotel",     l:"Hôtels & Config",   act: false },
           { fn:"MX.showAdminTab('pin')",        icon:"fa-key",       l:"Codes PIN & Accès", act: false },
@@ -310,7 +310,7 @@
         });
       }
       const cardCls = isAdmin ? "sx-card--premium sx-card--adminsuper" : "sx-card--premium";
-      const adminLbl = isAdmin ? "⚙️ Super Admin" : "⚙️ Administration";
+      const adminLbl = isAdmin ? "⚙️ Hôtels & Config" : "⚙️ Administration";
       const adminSub = isAdmin ? "Config. avancée" : "Gestion & supervision";
       h += _sec(cardCls, isAdmin ? "fa-shield-halved" : "fa-users-gear", adminLbl, adminSub, "toggleNavAdmin", _adminOpen, aItems);
     }
@@ -444,7 +444,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.28";
+  const _APP_VER = "1.0.29";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
