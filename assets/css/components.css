@@ -1491,6 +1491,8 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ord-hist-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
 .ord-hist-upd { background: none; border: 1px solid var(--border2); border-radius: 5px; color: var(--text3); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; flex-shrink: 0; transition: all var(--t); }
 .ord-hist-upd:hover { border-color: var(--cyan); color: var(--cyan); }
+.ord-hist-del { background: none; border: 1px solid var(--border2); border-radius: 5px; color: var(--text3); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; flex-shrink: 0; transition: all var(--t); }
+.ord-hist-del:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
 .ord-hist-more { width: 100%; background: none; border: 1px solid var(--border2); border-radius: 6px; color: var(--text2); padding: 7px; font-size: 11px; cursor: pointer; margin-top: 4px; font-family: var(--ffs); transition: all var(--t); }
 .ord-hist-more:hover { border-color: var(--cyan); color: var(--cyan); }
 

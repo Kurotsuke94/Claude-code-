@@ -416,6 +416,9 @@
   async function updateOrderStatus(id, status) {
     await db.collection("orders").doc(id).update({ status });
   }
+  async function deleteOrder(id) {
+    await db.collection("orders").doc(id).delete();
+  }
 
   // ── REWARDS ──
   const R_RULES  = () => db.collection('rewards_rules');
@@ -950,7 +953,7 @@
     setNote, archiveWeek,
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
-    listenOrders, addOrder, updateOrderStatus,
+    listenOrders, addOrder, updateOrderStatus, deleteOrder,
     listenPlanningShifts, loadPlanningMonth, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,

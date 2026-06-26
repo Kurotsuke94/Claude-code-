@@ -180,6 +180,7 @@
       h += '<span class="ord-hist-user">' + esc(o.user || '—') + '</span>';
       h += '<span class="ord-hist-badge" style="' + _histStatusStyle(o.status) + '">' + _histStatusLabel(o.status) + '</span>';
       h += '<button class="ord-hist-upd" title="Changer le statut" onclick="MX.Pages.Orders._cycleOrderStatus(\'' + esc(o.id) + '\',\'' + esc(o.status) + '\')">&#8635;</button>';
+      h += '<button class="ord-hist-del" title="Supprimer la commande" onclick="MX.Pages.Orders._deleteOrder(\'' + esc(o.id) + '\')">&#10005;</button>';
       h += '</div>';
     });
     h += '</div>';
@@ -443,7 +444,7 @@
     if (!items.length) return;
     var orders = MX.state.orders || [];
     var cmdNum = 'CMD-' + String(orders.length + 1).padStart(3, '0');
-    var user = (MX.state.user && (MX.state.user.displayName || MX.state.user.email)) || 'Utilisateur';
+    var user = MX.state.currentUser || MX.state.adminUser || 'Utilisateur';
     var now = new Date();
     var dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     var timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -596,7 +597,7 @@
     var recQty  = parseInt((document.getElementById('prod-recqty') || {}).value || '0', 10);
 
     if (!name.trim()) {
-      if (MX.toast) MX.toast('Le nom est obligatoire', 'error');
+      if (MX.toast) MX.toast('Le nom est obligatoire', true);
       return;
     }
     var data = { name: name.trim(), ref: ref.trim(), category: cat.trim(), location: loc.trim(), qty: qty, minQty: minQty, recQty: recQty, supplier: supplier.trim() };
@@ -606,7 +607,7 @@
         if (MX.toast) MX.toast('Produit mis à jour ✓');
         render();
       }).catch(function (e) {
-        if (MX.toast) MX.toast('Erreur: ' + e.message, 'error');
+        if (MX.toast) MX.toast('Erreur: ' + e.message, true);
       });
     } else {
       MX.DB.addProduct(data).then(function () {
@@ -614,7 +615,7 @@
         if (MX.toast) MX.toast('Produit ajouté ✓');
         render();
       }).catch(function (e) {
-        if (MX.toast) MX.toast('Erreur: ' + e.message, 'error');
+        if (MX.toast) MX.toast('Erreur: ' + e.message, true);
       });
     }
   }
@@ -630,7 +631,7 @@
       if (MX.toast) MX.toast('Produit supprimé');
       render();
     }).catch(function (e) {
-      if (MX.toast) MX.toast('Erreur: ' + e.message, 'error');
+      if (MX.toast) MX.toast('Erreur: ' + e.message, true);
     });
   }
 
@@ -659,7 +660,7 @@
         if (MX.toast) MX.toast('Statut mis à jour ✓');
         render();
       }).catch(function (e) {
-        if (MX.toast) MX.toast('Erreur: ' + e.message, 'error');
+        if (MX.toast) MX.toast('Erreur: ' + e.message, true);
       });
     }
   }
@@ -673,9 +674,32 @@
         if (MX.toast) MX.toast('Statut: ' + _histStatusLabel(next));
         render();
       }).catch(function (e) {
-        if (MX.toast) MX.toast('Erreur: ' + e.message, 'error');
+        if (MX.toast) MX.toast('Erreur: ' + e.message, true);
       });
     }
+  }
+
+  function _deleteOrder(id) {
+    var orders = MX.state.orders || [];
+    var o = orders.find(function (x) { return x.id === id; });
+    var label = o ? (o.number || 'cette commande') : 'cette commande';
+    MX.showModal(
+      'Supprimer ' + label + ' ?',
+      'La commande sera définitivement supprimée. Cette action est irréversible.',
+      [
+        { label: 'Supprimer', cls: 'danger', fn: function () {
+          if (MX.DB && MX.DB.deleteOrder) {
+            MX.DB.deleteOrder(id).then(function () {
+              if (MX.toast) MX.toast(label + ' supprimée');
+              render();
+            }).catch(function (e) {
+              if (MX.toast) MX.toast('Erreur: ' + e.message, true);
+            });
+          }
+        }},
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    );
   }
 
   function _showAllHistory() {
@@ -693,6 +717,7 @@
       body += '<span style="font-size:11px;color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(o.user || '—') + '</span>';
       body += '<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap;' + _histStatusStyle(o.status) + '">' + _histStatusLabel(o.status) + '</span>';
       body += '<button class="ord-hist-upd" onclick="MX.Pages.Orders._cycleOrderStatus(\'' + esc(o.id) + '\',\'' + esc(o.status) + '\')">&#8635;</button>';
+      body += '<button class="ord-hist-del" title="Supprimer" onclick="MX.closeModal();MX.Pages.Orders._deleteOrder(\'' + esc(o.id) + '\')">&#10005;</button>';
       body += '</div>';
     });
     body += '</div>';
@@ -760,6 +785,7 @@
     _prodMenu: _prodMenu,
     _generatePDF: _generatePDF,
     _cycleOrderStatus: _cycleOrderStatus,
+    _deleteOrder: _deleteOrder,
     _showAllHistory: _showAllHistory,
     _export: _export
   };
