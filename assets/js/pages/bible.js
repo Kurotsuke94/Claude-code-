@@ -36,7 +36,7 @@
   const _VIRTUAL_ARCH    = { id: 'archives', icon: 'fa-box-archive', name: 'Archives',          color: '#6B7280',      virtual: true };
 
   function _getDynCats() {
-    const sorted = [..._categories].sort((a, b) => (a.order || 0) - (b.order || 0));
+    const sorted = [..._categories].filter(c => !c.archived).sort((a, b) => (a.order || 0) - (b.order || 0));
     return [_VIRTUAL_ALL, ...sorted, _VIRTUAL_FAVS, _VIRTUAL_ARCH];
   }
 
@@ -397,7 +397,7 @@
     const a    = _currentArticle || {};
     const isNew = !a.id;
 
-    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const sorted = [..._categories].filter(c => !c.archived).sort((a, b) => (a.order||0) - (b.order||0));
     const catOpts = sorted.map(c=>`<option value="${MX.esc(c.id)}"${a.category===c.id?' selected':''}>${MX.esc(c.name)}</option>`).join('');
     const typeOpts = CONTENT_TYPES
       .map(t=>`<option value="${t.id}"${a.type===t.id?' selected':''}>${MX.esc(t.l)}</option>`).join('');
@@ -550,12 +550,15 @@
     const pendingList = _articles.filter(a=>a.status==='pending');
 
     // Gestion catégories (admin/responsable seulement)
-    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
-    const catMgmtRows = sorted.map((c, idx) => `
+    const allSorted   = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const activeCats  = allSorted.filter(c => !c.archived);
+    const archivedCats = allSorted.filter(c => c.archived);
+
+    const catMgmtRows = activeCats.map((c, idx) => `
       <div class="bl-cat-mgmt-row">
         <div class="bl-cat-mgmt-arrows">
           ${idx > 0 ? `<button class="bl-cat-ord-btn" title="Monter" onclick="MX.Pages.Bible._moveCatUp('${MX.esc(c.id)}')"><i class="fas fa-chevron-up"></i></button>` : '<span class="bl-cat-ord-btn" style="visibility:hidden"></span>'}
-          ${idx < sorted.length-1 ? `<button class="bl-cat-ord-btn" title="Descendre" onclick="MX.Pages.Bible._moveCatDown('${MX.esc(c.id)}')"><i class="fas fa-chevron-down"></i></button>` : '<span class="bl-cat-ord-btn" style="visibility:hidden"></span>'}
+          ${idx < activeCats.length-1 ? `<button class="bl-cat-ord-btn" title="Descendre" onclick="MX.Pages.Bible._moveCatDown('${MX.esc(c.id)}')"><i class="fas fa-chevron-down"></i></button>` : '<span class="bl-cat-ord-btn" style="visibility:hidden"></span>'}
         </div>
         <i class="fas ${MX.esc(c.icon)}" style="color:${MX.esc(c.color)};width:16px;text-align:center;flex-shrink:0"></i>
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(c.name)}</span>
@@ -563,6 +566,23 @@
         <span class="bl-stat-val">${byCat[c.id]||0} art.</span>
         <button class="bl-cat-edit-btn" title="Modifier" onclick="MX.Pages.Bible._openCatModal('${MX.esc(c.id)}')"><i class="fas fa-pen"></i></button>
       </div>`).join('');
+
+    const archivedRows = archivedCats.map(c => `
+      <div class="bl-cat-mgmt-row bl-cat-mgmt-row--archived">
+        <i class="fas ${MX.esc(c.icon)}" style="color:var(--text3);width:16px;text-align:center;flex-shrink:0"></i>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text3)">${MX.esc(c.name)}</span>
+        <span class="bl-stat-val">${byCat[c.id]||0} art.</span>
+        <button class="bl-cat-restore-btn" title="Restaurer la catégorie" onclick="MX.Pages.Bible._restoreCat('${MX.esc(c.id)}')"><i class="fas fa-rotate-left"></i> Restaurer</button>
+        <button class="bl-cat-edit-btn" title="Modifier / Supprimer" onclick="MX.Pages.Bible._openCatModal('${MX.esc(c.id)}')"><i class="fas fa-pen"></i></button>
+      </div>`).join('');
+
+    const archivedSection = archivedCats.length ? `
+      <div style="margin-top:14px">
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+          <i class="fas fa-box-archive" style="margin-right:4px"></i> Archivées (${archivedCats.length})
+        </div>
+        <div class="bl-cat-mgmt-list">${archivedRows}</div>
+      </div>` : '';
 
     mc.innerHTML = `
       <div class="ph bl-admin-page">
@@ -605,10 +625,11 @@
 
         <div class="stt-card">
           <div class="stt-card-title" style="display:flex;align-items:center;justify-content:space-between">
-            <span><i class="fas fa-tags"></i> Gestion des catégories (${_categories.length})</span>
+            <span><i class="fas fa-tags"></i> Gestion des catégories (${activeCats.length} active${activeCats.length!==1?'s':''}${archivedCats.length?` · ${archivedCats.length} archivée${archivedCats.length!==1?'s':''}`:''} )</span>
             <button class="bl-cat-add-sm" onclick="MX.Pages.Bible._openCatModal(null)"><i class="fas fa-plus"></i> Nouvelle</button>
           </div>
-          <div class="bl-cat-mgmt-list">${catMgmtRows||'<div style="color:var(--text3);font-size:13px;padding:8px 0">Aucune catégorie</div>'}</div>
+          <div class="bl-cat-mgmt-list">${catMgmtRows||'<div style="color:var(--text3);font-size:13px;padding:8px 0">Aucune catégorie active</div>'}</div>
+          ${archivedSection}
         </div>
       </div>`;
   }
@@ -974,26 +995,10 @@
     if (!cat) return;
     try {
       const count = await MX.DB.countBibleCategoryArticles(id);
-      if (count > 0) {
-        const others = _categories.filter(c => c.id !== id);
-        const opts   = others.map(c => `<option value="${MX.esc(c.id)}">${MX.esc(c.name)}</option>`).join('');
-        MX.showModal({
-          title: 'Catégorie non vide',
-          sub: `<span style="color:var(--orange)">${count} article${count>1?'s':''} utilisent cette catégorie.</span> Choisissez où les déplacer avant de supprimer.`,
-          body: others.length
-            ? `<div class="form-group"><label>Déplacer les articles vers</label><select class="fi" id="bl-cat-move-to"><option value="">— Choisir —</option>${opts}</select></div>`
-            : `<p style="color:var(--red);font-size:13px;margin:0">Aucune autre catégorie disponible. Créez-en une d'abord.</p>`,
-          actions: others.length
-            ? [
-                { label: 'Déplacer et supprimer', cls: 'danger', fn: () => _doMoveCatAndDelete(id) },
-                { label: 'Annuler', cls: 'cancel' }
-              ]
-            : [{ label: 'Fermer', cls: 'cancel' }]
-        });
-      } else {
+      if (count === 0) {
         MX.showModal(
-          `Supprimer "${MX.esc(cat.name)}" ?`,
-          'La catégorie sera définitivement supprimée.',
+          `Supprimer "${cat.name}" ?`,
+          'Aucun article dans cette catégorie. La suppression est irréversible.',
           [
             { label: 'Supprimer', cls: 'danger', fn: async () => {
               try {
@@ -1005,10 +1010,45 @@
             { label: 'Annuler', cls: 'cancel' }
           ]
         );
+      } else {
+        const others = _categories.filter(c => c.id !== id && !c.archived);
+        const opts   = others.map(c => `<option value="${MX.esc(c.id)}">${MX.esc(c.name)}</option>`).join('');
+        const moveSection = others.length
+          ? `<div class="form-group" style="margin-top:12px">
+               <label>Déplacer les articles vers</label>
+               <select class="fi" id="bl-cat-move-to"><option value="">— Choisir une catégorie —</option>${opts}</select>
+             </div>`
+          : `<p style="font-size:12px;color:var(--text3);margin:10px 0 0">Aucune autre catégorie disponible — créez-en une d'abord, ou archivez.</p>`;
+        MX.showModal({
+          title: `La catégorie "${cat.name}" contient ${count} article${count > 1 ? 's' : ''}`,
+          sub: 'Les articles ne seront jamais supprimés automatiquement.',
+          body: moveSection,
+          actions: [
+            ...(others.length ? [{ label: 'Déplacer et supprimer', cls: 'danger', fn: () => _doMoveCatAndDelete(id) }] : []),
+            { label: 'Archiver la catégorie', cls: 'confirm', fn: () => _archiveCat(id) },
+            { label: 'Annuler', cls: 'cancel' },
+          ]
+        });
       }
     } catch(e) {
       MX.toast('Erreur: ' + e.message, true);
     }
+  }
+
+  async function _archiveCat(id) {
+    try {
+      await MX.DB.updateBibleCategory(id, { archived: true });
+      if (_selectedCategory === id) _selectedCategory = 'all';
+      MX.closeModal();
+      MX.toast('Catégorie archivée — les articles sont conservés');
+    } catch(e) { MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  async function _restoreCat(id) {
+    try {
+      await MX.DB.updateBibleCategory(id, { archived: false });
+      MX.toast('Catégorie restaurée');
+    } catch(e) { MX.toast('Erreur: ' + e.message, true); }
   }
 
   async function _doMoveCatAndDelete(fromId) {
@@ -1071,6 +1111,7 @@
     _addLink, _removeLink, _addTag, _removeTag,
     _previewVideo, _showAdmin,
     _openCatModal, _saveCat, _deleteCat, _doMoveCatAndDelete,
+    _archiveCat, _restoreCat,
     _previewCatIcon, _pickCatIcon, _previewCatColor, _pickCatColor,
     _moveCatUp, _moveCatDown,
   };

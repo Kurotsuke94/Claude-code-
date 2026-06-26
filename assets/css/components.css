@@ -6645,3 +6645,15 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   transition: all var(--t);
 }
 .bl-cat-edit-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+
+.bl-cat-mgmt-row--archived { opacity: 0.65; }
+.bl-cat-mgmt-row--archived:hover { opacity: 1; }
+
+.bl-cat-restore-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; background: none;
+  border: 1px solid var(--border2); border-radius: 6px;
+  color: var(--text3); font-size: 11px; white-space: nowrap; cursor: pointer;
+  transition: all var(--t);
+}
+.bl-cat-restore-btn:hover { border-color: var(--green); color: var(--green); background: rgba(74,222,128,0.08); }
