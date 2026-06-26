@@ -426,19 +426,7 @@ html, body {
   overflow-y: auto;
   overflow-x: hidden;
   max-width: 100vw;
-  background:
-    repeating-linear-gradient(
-      rgba(0,245,212,0.04) 0px, rgba(0,245,212,0.04) 1px,
-      transparent 1px, transparent 40px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      rgba(0,245,212,0.04) 0px, rgba(0,245,212,0.04) 1px,
-      transparent 1px, transparent 40px
-    ),
-    radial-gradient(circle at 75% 8%, rgba(0,245,212,0.07) 0%, transparent 45%),
-    radial-gradient(circle at 10% 90%, rgba(0,245,212,0.04) 0%, transparent 40%),
-    var(--bg2);
+  background: var(--bg);
   scrollbar-width: thin;
   scrollbar-color: var(--border2) transparent;
   padding-bottom: 0;
@@ -713,11 +701,7 @@ html, body {
   .ph, .page-body { overflow-x: hidden !important; max-width: 100vw !important; }
 
   /* Fond contenu simplifié */
-  .main-content {
-    background:
-      radial-gradient(circle at 75% 8%, rgba(0,245,212,0.04) 0%, transparent 40%),
-      var(--bg2);
-  }
+  .main-content { background: var(--bg); }
 
   .sidebar {
     position: absolute; top: 0; left: 0;
@@ -795,10 +779,7 @@ html, body {
 [data-theme="light"] body {
   color-scheme: light;
 }
-[data-theme="light"] body::before,
-[data-theme="light"] body::after {
-  opacity: 0.04;
-}
+/* body::before / body::after are content:none — no pseudo-elements to style */
 [data-theme="light"] .app-shell {
   background: var(--bg);
 }
@@ -854,12 +835,10 @@ html, body {
   color: var(--cyan);
 }
 [data-theme="light"] .main-content {
-  background:
-    radial-gradient(circle at 75% 8%, rgba(0,137,123,0.03) 0%, transparent 40%),
-    var(--bg2);
+  background: var(--bg);
 }
 [data-theme="light"] .ph {
-  background: linear-gradient(135deg, rgba(0,137,123,0.04) 0%, transparent 60%);
+  background: var(--bg2);
   border-bottom-color: var(--border);
 }
 [data-theme="light"] .ph-title { color: var(--text); }
