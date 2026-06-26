@@ -231,14 +231,14 @@
     // ── Section 1: CHECK-LISTS TECHNICIENS ──
     let clItems = _item("today-cl", "fa-star", "Aujourd'hui", { pct: _dayPct(todayId) });
     DAYS.forEach(d => { clItems += _item(d.id, "fa-calendar-day", d.l, { sub: true, pct: _dayPct(d.id) }); });
-    h += _sec("sx-card--violet", "fa-list-check", "Check-lists Tech.", "Tâches quotidiennes", "toggleNavCl", _clOpen, clItems);
+    h += _sec("sx-card--violet", "fa-list-check", "📋 Check-lists", "Tâches quotidiennes", "toggleNavCl", _clOpen, clItems);
 
     // ── Section 2: CHECK-LISTS RESPONSABLE (respOnly) ──
     if (canAll) {
       const totRT = (state.respTasks || []).length;
       let rItems = _item("resp-plan", "fa-clipboard-check", "Vue d'ensemble", { count: totRT + " tâches" });
       DAYS.forEach(d => { rItems += _item("resp-"+d.id, "fa-calendar-day", d.l, { sub: true, pct: _respPct(d.id) }); });
-      h += _sec("sx-card--violet sx-card--resp", "fa-clipboard-check", "Check-lists Resp.", "Planning responsable", "toggleNavRspCl", _respClOpen, rItems);
+      h += _sec("sx-card--violet sx-card--resp", "fa-clipboard-check", "📋 Check-lists Resp.", "Planning responsable", "toggleNavRspCl", _respClOpen, rItems);
     }
 
     // ── Section 3: RESSOURCES ──
@@ -251,7 +251,7 @@
         resItems += `<button class="sx-item sx-sub sx-sub2" onclick="MX.showBibleCat('${c.id}')"><i class="fas ${c.icon} sx-ico"></i><span class="sx-lbl">${c.l}</span></button>`;
       });
     }
-    h += _sec("sx-card--blue", "fa-folder-open", "Ressources", "Stock, docs & fournisseurs", "toggleNavRes", _resOpen, resItems);
+    h += _sec("sx-card--blue", "fa-folder-open", "📁 Ressources", "Stock, docs & fournisseurs", "toggleNavRes", _resOpen, resItems);
 
     // ── Section 4: CONSOMMATIONS ──
     let csoItems = "";
@@ -266,7 +266,7 @@
     ].forEach(t => {
       csoItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
     });
-    h += _sec("sx-card--teal", "fa-droplet", "Consommations", "Eau, électricité & gaz", "toggleNavCso", _csoOpen, csoItems);
+    h += _sec("sx-card--teal", "fa-droplet", "💧 Consommations", "Eau, électricité & gaz", "toggleNavCso", _csoOpen, csoItems);
 
     // ── Section 5: INTERVENTIONS (respOnly) ──
     if (canAll) {
@@ -277,7 +277,7 @@
       ].forEach(t => {
         intItems += `<button class="sx-item sx-sub" onclick="MX.showIntTab('${t.tab}')"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
       });
-      h += _sec("sx-card--orange", "fa-wrench", "Interventions", "Planning & suivi technique", "toggleNavInt", _intOpen, intItems);
+      h += _sec("sx-card--orange", "fa-wrench", "🔧 Interventions", "Planning & suivi technique", "toggleNavInt", _intOpen, intItems);
     }
 
     // ── Paramètres (visible à tous) ──
@@ -285,18 +285,34 @@
     h += _item("parametres", "fa-gear", "Paramètres");
     h += `</div>`;
 
-    // ── Section 7: ADMIN (respOnly) ──
+    // ── Section 7: ADMIN/RESPONSABLE ──
     if (canAll) {
+      const isAdmin = MX.Auth.isAdmin();
       let aItems = "";
+      // Items visible to both Responsable and Admin
       [
-        { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Gestion Utilisateurs", act: cur==="utilisateurs" },
-        { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",        act: false },
-        { fn:"MX.showAdminTab('badges-admin')",   icon:"fa-medal",               l:"Gestion Badges",       act: false },
-        { fn:"MX.showAdminTab('admin-journal')",  icon:"fa-book-journal-whills", l:"Journal d'actions",    act: false },
+        { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Utilisateurs",      act: cur==="utilisateurs" },
+        { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",     act: false },
+        { fn:"MX.showAdminTab('badges-admin')",   icon:"fa-medal",               l:"Gestion Badges",    act: false },
+        { fn:"MX.showAdminTab('admin-journal')",  icon:"fa-book-journal-whills", l:"Journal d'actions", act: false },
       ].forEach(n => {
         aItems += `<button class="sx-item${n.act?" active":""}" onclick="${n.fn}"><i class="fas ${n.icon} sx-ico${n.act?" sx-ico--on":""}"></i><span class="sx-lbl">${n.l}</span></button>`;
       });
-      h += _sec("sx-card--premium", "fa-shield-halved", "Administration", "Gestion & supervision", "toggleNavAdmin", _adminOpen, aItems);
+      // Super Admin only items
+      if (isAdmin) {
+        aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
+        [
+          { fn:"MX.showAdminTab('superadmin')", icon:"fa-hotel",     l:"Hôtels & Config",   act: false },
+          { fn:"MX.showAdminTab('pin')",        icon:"fa-key",       l:"Codes PIN & Accès", act: false },
+          { fn:"MX.showAdminTab('absences')",   icon:"fa-umbrella-beach", l:"Absences",     act: false },
+        ].forEach(n => {
+          aItems += `<button class="sx-item${n.act?" active":""}" onclick="${n.fn}"><i class="fas ${n.icon} sx-ico${n.act?" sx-ico--on":""}"></i><span class="sx-lbl">${n.l}</span></button>`;
+        });
+      }
+      const cardCls = isAdmin ? "sx-card--premium sx-card--adminsuper" : "sx-card--premium";
+      const adminLbl = isAdmin ? "⚙️ Super Admin" : "⚙️ Administration";
+      const adminSub = isAdmin ? "Config. avancée" : "Gestion & supervision";
+      h += _sec(cardCls, isAdmin ? "fa-shield-halved" : "fa-users-gear", adminLbl, adminSub, "toggleNavAdmin", _adminOpen, aItems);
     }
 
     sideNav.innerHTML = h;
@@ -428,7 +444,7 @@
   }
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.26";
+  const _APP_VER = "1.0.27";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

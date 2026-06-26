@@ -56,16 +56,42 @@ html.theme-switching *::after {
   --orange-border: #7C2D12;
 
   /* Shadows & glows */
-  --shadow-card:  0 4px 24px rgba(0,0,0,0.4);
-  --shadow-hover: 0 8px 32px rgba(0,0,0,0.5);
-  --glow-cyan:    0 0 24px rgba(0,245,212,0.12);
-  --glow-green:   0 0 24px rgba(34,197,94,0.12);
-  --glow-red:     0 0 24px rgba(239,68,68,0.12);
+  --shadow-card:  0 2px 8px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
+  --shadow-hover: 0 8px 28px rgba(0,0,0,0.55), 0 4px 8px rgba(0,0,0,0.3);
+  --shadow-lift:  0 16px 40px rgba(0,0,0,0.65), 0 6px 12px rgba(0,0,0,0.4);
+  --glow-cyan:    0 0 24px rgba(0,245,212,0.14);
+  --glow-green:   0 0 24px rgba(34,197,94,0.14);
+  --glow-red:     0 0 24px rgba(239,68,68,0.14);
 
   /* Radius */
-  --r:  12px;
-  --rs:  8px;
-  --rx: 16px;
+  --r:   14px;
+  --rs:   9px;
+  --rx:  20px;
+  --rxx: 28px;
+
+  /* Page accent colors (section identity) */
+  --accent-home:     #7C3AED;
+  --accent-msgs:     #3B82F6;
+  --accent-cl:       #6366F1;
+  --accent-int:      #F97316;
+  --accent-res:      #F59E0B;
+  --accent-cso:      #06B6D4;
+  --accent-bible:    #A78BFA;
+  --accent-badges:   #EAB308;
+  --accent-admin:    #EF4444;
+  --accent-planning: #10B981;
+
+  /* Glass morphism */
+  --glass-bg:     rgba(13,20,36,0.78);
+  --glass-border: rgba(255,255,255,0.07);
+  --glass-blur:   18px;
+
+  /* Animation easings */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast:    150ms;
+  --dur-normal:  200ms;
+  --dur-slow:    250ms;
 
   /* Typography */
   --ffm: 'Space Mono', ui-monospace, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
@@ -124,11 +150,26 @@ html.theme-switching *::after {
   --orange-dim:   rgba(234,88,12,0.08);
   --orange-border: rgba(234,88,12,0.22);
 
-  --shadow-card:  0 1px 4px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-hover: 0 4px 16px rgba(0,0,0,0.10);
-  --glow-cyan:    0 0 16px rgba(0,137,123,0.08);
-  --glow-green:   0 0 16px rgba(22,163,74,0.08);
-  --glow-red:     0 0 16px rgba(220,38,38,0.08);
+  --shadow-card:  0 1px 4px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.05);
+  --shadow-hover: 0 4px 20px rgba(0,0,0,0.13), 0 2px 6px rgba(0,0,0,0.06);
+  --shadow-lift:  0 8px 32px rgba(0,0,0,0.16), 0 4px 8px rgba(0,0,0,0.08);
+  --glow-cyan:    0 0 16px rgba(0,137,123,0.10);
+  --glow-green:   0 0 16px rgba(22,163,74,0.10);
+  --glow-red:     0 0 16px rgba(220,38,38,0.10);
+
+  --accent-home:     #6D28D9;
+  --accent-msgs:     #2563EB;
+  --accent-cl:       #4F46E5;
+  --accent-int:      #EA580C;
+  --accent-res:      #D97706;
+  --accent-cso:      #0891B2;
+  --accent-bible:    #7C3AED;
+  --accent-badges:   #CA8A04;
+  --accent-admin:    #DC2626;
+  --accent-planning: #059669;
+
+  --glass-bg:     rgba(255,255,255,0.88);
+  --glass-border: rgba(0,0,0,0.06);
 }
 
 /* ── TEXT SIZE ── */

@@ -466,6 +466,23 @@ html, body {
 .main-content::-webkit-scrollbar { width: 6px; }
 .main-content::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
+/* ── PAGE TRANSITIONS ── */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ph          { animation: pageIn var(--dur-normal) var(--ease-out) both; }
+.page-body   { animation: pageIn var(--dur-slow) var(--ease-out) 40ms both; }
+.atabs       { animation: fadeIn var(--dur-normal) var(--ease-out) both; }
+
 /* ── PAGE HEADER ── */
 .ph {
   padding: 24px 28px 20px;
@@ -476,9 +493,11 @@ html, body {
   max-width: 100%;
 }
 .ph-eye {
-  font-size: 10px; color: var(--cyan);
-  letter-spacing: 0.14em; text-transform: uppercase;
-  font-weight: 600; margin-bottom: 4px; font-family: var(--ffm);
+  font-size: 9.5px; color: var(--cyan);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  font-weight: 700; margin-bottom: 5px; font-family: var(--ffm);
+  display: inline-flex; align-items: center; gap: 6px;
+  opacity: 0.85;
 }
 .ph-title { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; }
 .ph-sub { font-size: 13px; color: var(--text2); margin-top: 4px; }
@@ -654,13 +673,17 @@ html, body {
 .stat-card {
   background: var(--bg3);
   border: 1px solid var(--border);
-  border-radius: var(--rx);
-  padding: 20px;
+  border-radius: var(--rxx);
+  padding: 22px;
   position: relative; overflow: hidden;
-  transition: transform var(--t), box-shadow var(--t), border-color var(--t);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--dur-normal) var(--ease-out),
+              box-shadow var(--dur-normal) var(--ease-out),
+              border-color var(--dur-normal) ease;
   cursor: default;
+  animation: cardIn var(--dur-slow) var(--ease-out) both;
 }
-.stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: var(--border2); }
+.stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); border-color: var(--border2); }
 .stat-kpi-icon {
   width: 40px; height: 40px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;

@@ -76,18 +76,19 @@
       { id: "history",        label: "📊 Historique"        },
       { id: "msgs",           label: "💬 Messages"          },
       { id: "logs",           label: "📈 Activité"          },
-      { id: "bible-admin",    label: "📖 Gestion Bible"     },
-      { id: "badges-admin",   label: "🏅 Gestion Badges"    },
+      { id: "bible-admin",    label: "📖 Bible"             },
+      { id: "badges-admin",   label: "🏅 Badges"            },
       { id: "admin-journal",  label: "📜 Journal"           },
-      { id: "users",          label: "👤 Admin",             adminOnly: true },
+      { id: "users",          label: "👤 Utilisateurs",      adminOnly: true },
       { id: "absences",       label: "🏖 Absences",          adminOnly: true },
-      { id: "pin",            label: "🔑 Accès",             adminOnly: true }
+      { id: "pin",            label: "🔑 Accès",             adminOnly: true },
+      { id: "superadmin",     label: "🏨 Hôtels",            adminOnly: true }
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
     if (aTab === "missions" || aTab === "orders") aTab = "tasks";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
-    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences")) aTab = "tasks";
+    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -114,7 +115,14 @@
       </div>
       <div class="page-body">
         <div class="atabs">
-          ${tabs.map(t => `<button class="atab ${aTab===t.id?'on':''}" onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`).join('')}
+          ${tabs.map((t, i) => {
+            const prev = tabs[i-1];
+            const sep  = isAdmin && !prev?.adminOnly && t.adminOnly
+              ? `<span class="atab-sep" title="Super Admin uniquement"></span>`
+              : '';
+            return sep + `<button class="atab ${aTab===t.id?'on':''} ${t.adminOnly?'atab--admin':''}"`
+              + ` onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`;
+          }).join('')}
         </div>`;
 
     if (aTab === "tasks")             h += renderTasks();
@@ -130,6 +138,7 @@
     if (aTab === "bible-admin")               h += renderBibleAdmin();
     if (aTab === "badges-admin")              h += renderBadgesAdmin();
     if (aTab === "admin-journal")             h += renderAdminJournal();
+    if (aTab === "superadmin"    && isAdmin)  h += renderSuperAdmin();
 
     h += `</div>`;
     el.innerHTML = h;
@@ -1577,6 +1586,72 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
       }},
       { label: 'Annuler', cls: 'cancel' }
     ]);
+  }
+
+  // ── SUPER ADMIN — HOTEL SELECTOR ──
+  function renderSuperAdmin() {
+    const hotels = (MX.state.config && MX.state.config.hotels) || [];
+    const current = (MX.state.config && MX.state.config.currentHotel) || "";
+
+    let h = `<div class="sadmin-wrap">
+      <div class="sadmin-header">
+        <div class="sadmin-badge"><i class="fas fa-hotel"></i></div>
+        <div>
+          <div style="font-size:18px;font-weight:700">Gestion Multi-Hôtels</div>
+          <div style="font-size:13px;color:var(--text2);margin-top:2px">Configuration des établissements Maintix</div>
+        </div>
+      </div>
+
+      <div class="sadmin-card">
+        <div class="sadmin-card-head"><i class="fas fa-building"></i> Hôtel actif</div>
+        <div class="sadmin-card-body">
+          <div class="sadmin-hotel-row">
+            <div class="sadmin-hotel-ico"><i class="fas fa-hotel"></i></div>
+            <div style="flex:1">
+              <div style="font-size:15px;font-weight:600">${current || 'Hôtel Principal'}</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px">Environnement actuel · données isolées</div>
+            </div>
+            <span class="sadmin-live-badge"><i class="fas fa-circle" style="font-size:7px"></i> Actif</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sadmin-card">
+        <div class="sadmin-card-head"><i class="fas fa-list-ul"></i> Établissements configurés</div>
+        <div class="sadmin-card-body">
+          ${hotels.length ? hotels.map((h2, i) => `
+            <div class="sadmin-hotel-row" style="opacity:${h2.name===current?1:0.65}">
+              <div class="sadmin-hotel-ico" style="background:rgba(${i%2?'99,102,241':'6,182,212'},0.15);color:${i%2?'#818CF8':'#22D3EE'}">
+                <i class="fas fa-hotel"></i>
+              </div>
+              <div style="flex:1">
+                <div style="font-size:14px;font-weight:600">${MX.esc(h2.name||'—')}</div>
+                <div style="font-size:11px;color:var(--text3)">${MX.esc(h2.id||'')}</div>
+              </div>
+              ${h2.name===current ? '<span class="sadmin-live-badge"><i class="fas fa-circle" style="font-size:7px"></i> Actif</span>' : ''}
+            </div>`).join('') : `
+            <div style="padding:24px;text-align:center;color:var(--text3)">
+              <i class="fas fa-hotel" style="font-size:32px;opacity:0.3;display:block;margin-bottom:10px"></i>
+              <div style="font-size:13px">Configuration multi-hôtels disponible prochainement</div>
+              <div style="font-size:11px;margin-top:6px">Cette interface sera activée lors du déploiement multi-sites</div>
+            </div>`}
+        </div>
+      </div>
+
+      <div class="sadmin-card sadmin-info-card">
+        <div class="sadmin-card-head"><i class="fas fa-circle-info"></i> Architecture multi-hôtels</div>
+        <div class="sadmin-card-body">
+          <div class="sadmin-info-list">
+            <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Données Firestore isolées par hôtel</div>
+            <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Utilisateurs et rôles indépendants</div>
+            <div class="sadmin-info-item"><i class="fas fa-check-circle" style="color:var(--green)"></i> Check-lists & tâches séparées</div>
+            <div class="sadmin-info-item"><i class="fas fa-clock" style="color:var(--orange)"></i> Sélecteur d'hôtel global (à venir)</div>
+            <div class="sadmin-info-item"><i class="fas fa-clock" style="color:var(--orange)"></i> Tableau de bord consolidé (à venir)</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    return h;
   }
 
   window.MX = window.MX || {};
