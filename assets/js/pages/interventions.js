@@ -146,20 +146,23 @@
         _rerender();
       });
 
-    db.collection('users').get().then(snap => {
-      _users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    });
+    _users = MX.state.users || [];
   }
 
   function _autoRetard() {
     const now = new Date();
+    const toUpdate = [];
     _interventions.forEach(iv => {
       if (iv.status === 'terminee' || iv.status === 'annulee' || iv.status === 'en_retard') return;
       const endDt = iv.endDate ? new Date(`${iv.endDate}T${iv.endTime || '23:59'}:00`) : null;
-      if (endDt && endDt < now) {
-        DB.int().doc(iv.id).update({ status: 'en_retard', updatedAt: FV.serverTimestamp() }).catch(() => {});
-      }
+      if (endDt && endDt < now) toUpdate.push(iv.id);
     });
+    if (!toUpdate.length) return;
+    const batch = db.batch();
+    toUpdate.forEach(id => {
+      batch.update(DB.int().doc(id), { status: 'en_retard', updatedAt: FV.serverTimestamp() });
+    });
+    batch.commit().catch(() => {});
   }
 
   // ── RENDER ──
@@ -374,25 +377,6 @@
     _gestionFilter = f;
     const el = document.getElementById('int-body');
     if (el) el.innerHTML = _body();
-  }
-
-  // ── TAB: FILTERED ──
-  function _tFiltered(statuses, title) {
-    const cu     = MX.state.currentUser;
-    const canAll = _canAll();
-    const list = canAll
-      ? _interventions.filter(iv => statuses.includes(_effStatus(iv)))
-      : _interventions.filter(iv => statuses.includes(_effStatus(iv)) && (iv.assignedTo || []).includes(cu?.name));
-
-    let html = `<div class="int-inner">
-      <div class="int-sec-ttl">${esc(title)} <span class="int-sec-count">${list.length}</span></div>`;
-
-    if (!list.length) {
-      html += _emptyState('fa-circle-check', 'Aucune intervention dans cette catégorie', '');
-    } else {
-      list.forEach(iv => { html += _intCard(iv); });
-    }
-    return html + '</div>';
   }
 
   // ── INTERVENTION CARD ──
@@ -653,58 +637,6 @@
     }
     h += `</div></div>`;
     return h;
-  }
-
-  // ── TAB: STATS ──
-  function _tStats() {
-    const total    = _interventions.length;
-    const byStatus = {};
-    Object.keys(STATUS).forEach(k => {
-      byStatus[k] = _interventions.filter(iv => _effStatus(iv) === k).length;
-    });
-    const done     = _interventions.filter(iv => iv.status === 'terminee' && iv.timeSpentMin);
-    const avgMin   = done.length ? Math.round(done.reduce((s, iv) => s + (iv.timeSpentMin || 0), 0) / done.length) : null;
-    const byTech   = {};
-    _interventions.forEach(iv => {
-      (iv.assignedTo || []).forEach(n => { byTech[n] = (byTech[n] || 0) + 1; });
-    });
-    const topTechs = Object.entries(byTech).sort((a, b) => b[1] - a[1]).slice(0, 8);
-
-    let html = `<div class="int-inner">
-      <div class="int-stats-grid">
-        <div class="int-stat-card">
-          <div class="int-stat-v">${total}</div>
-          <div class="int-stat-l">Total</div>
-        </div>
-        ${Object.entries(STATUS).map(([k, s]) => `
-          <div class="int-stat-card" style="border-top:3px solid ${s.col}">
-            <div class="int-stat-v" style="color:${s.col}">${byStatus[k] || 0}</div>
-            <div class="int-stat-l">${s.l}</div>
-          </div>`).join('')}
-        ${avgMin !== null ? `<div class="int-stat-card">
-          <div class="int-stat-v">${avgMin < 60 ? avgMin + 'min' : (Math.round(avgMin / 60 * 10) / 10) + 'h'}</div>
-          <div class="int-stat-l">Temps moyen</div>
-        </div>` : ''}
-      </div>`;
-
-    if (topTechs.length) {
-      const maxVal = topTechs[0][1];
-      html += `<div class="int-sec-ttl" style="margin-top:20px">Répartition par technicien</div>
-        <div class="int-tech-bars">`;
-      topTechs.forEach(([name, count]) => {
-        const u   = _users.find(u => u.name === name);
-        const col = u?.color || '#7C3AED';
-        html += `<div class="int-tech-bar-row">
-          <div class="int-tech-bar-name">${esc(name)}</div>
-          <div class="int-tech-bar-track">
-            <div class="int-tech-bar-fill" style="width:${Math.round(count / maxVal * 100)}%;background:${col}"></div>
-          </div>
-          <span class="int-tech-bar-val">${count}</span>
-        </div>`;
-      });
-      html += `</div>`;
-    }
-    return html + '</div>';
   }
 
   // ── EMPTY STATE ──

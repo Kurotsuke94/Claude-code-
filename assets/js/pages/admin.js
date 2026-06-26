@@ -1812,9 +1812,9 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     };
     try {
       await MX.DB.saveHotelConfig(data);
-      MX.toast('Fiche hôtel enregistrée', 'success');
+      MX.toast('Fiche hôtel enregistrée');
     } catch(e) {
-      MX.toast('Erreur lors de la sauvegarde', 'error');
+      MX.toast('Erreur lors de la sauvegarde', true);
     }
   }
 
@@ -1859,7 +1859,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     const emoji = g('vf-emoji') || '📦';
     const title = g('vf-title');
     const notes = g('vf-notes');
-    if (!ver) { MX.toast('Numéro de version requis', 'error'); return; }
+    if (!ver) { MX.toast('Numéro de version requis', true); return; }
 
     const changes = notes.split('\n').map(l => l.trim()).filter(Boolean);
     const newEntry = { ver, date, emoji, title, changes };
@@ -1871,27 +1871,27 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
 
     try {
       await MX.DB.saveVersions({ changelog: newLog });
-      MX.toast('Version publiée ✓', 'success');
+      MX.toast('Version publiée ✓');
       _verLoad();
     } catch(e) {
-      MX.toast('Erreur lors de la publication : ' + (e.message || e), 'error');
+      MX.toast('Erreur lors de la publication : ' + (e.message || e), true);
     }
   }
 
   async function _dbRepair(type) {
     const label = _DB_REPAIR_LABELS[type] || type;
-    MX.modal({
-      title: '⚠️ Confirmation requise',
-      sub:   `Êtes-vous sûr de vouloir exécuter : <strong>${MX.esc(label)}</strong> ?<br><small style="color:var(--text3)">Cette opération modifie directement Firestore.</small>`,
-      actions: [
-        { label: 'Annuler', cls: 'sec-btn', action: () => {} },
-        { label: 'Confirmer', cls: 'danger-btn', action: () => _dbRepairExecute(type) }
+    MX.showModal(
+      '⚠️ Confirmation requise',
+      `Êtes-vous sûr de vouloir exécuter : <strong>${MX.esc(label)}</strong> ?<br><small style="color:var(--text3)">Cette opération modifie directement Firestore.</small>`,
+      [
+        { label: 'Annuler',   cls: 'cancel' },
+        { label: 'Confirmer', cls: 'danger', fn: () => _dbRepairExecute(type) }
       ]
-    });
+    );
   }
 
   async function _dbRepairExecute(type) {
-    MX.toast('Opération en cours…', 'info');
+    MX.toast('Opération en cours…');
     try {
       if (type === 'missions') {
         const snap = await db.collection('missions').get();
@@ -1905,18 +1905,18 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
           }
         });
         if (count > 0) await batch.commit();
-        MX.toast(`${count} intervention(s) fantôme(s) supprimée(s)`, 'success');
+        MX.toast(`${count} intervention(s) fantôme(s) supprimée(s)`);
       } else if (type === 'badges') {
-        MX.toast('Badges vérifiés — aucun orphelin détecté', 'success');
+        MX.toast('Badges vérifiés — aucun orphelin détecté');
       } else if (type === 'stats') {
-        MX.toast('Statistiques recalculées', 'success');
+        MX.toast('Statistiques recalculées');
       } else if (type === 'conso') {
-        MX.toast('Consommations vérifiées', 'success');
+        MX.toast('Consommations vérifiées');
       } else if (type === 'integrity') {
-        MX.toast('Intégrité Firestore vérifiée', 'success');
+        MX.toast('Intégrité Firestore vérifiée');
       }
     } catch(e) {
-      MX.toast('Erreur : ' + (e.message || e), 'error');
+      MX.toast('Erreur : ' + (e.message || e), true);
     }
   }
 

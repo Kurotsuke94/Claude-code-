@@ -93,11 +93,11 @@
 
     // ── User/role ──
     const currentUser = state.currentUser;
-    const displayName = currentUser ? (currentUser.displayName || currentUser.email || 'Utilisateur') : 'Utilisateur';
+    const displayName = currentUser ? (currentUser.name || 'Utilisateur') : 'Utilisateur';
     const firstName = displayName.split(/[\s@]/)[0];
     const isAdmin = MX.Auth && MX.Auth.isAdmin && MX.Auth.isAdmin();
     const isResp  = MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll();
-    const hotelName = (state.config && state.config.hotelName) || 'Mon Hôtel';
+    const hotelName = (state.hotelConfig && (state.hotelConfig.commercialName || state.hotelConfig.name)) || 'Mon Hôtel';
     const weekLabel = state.weekLabel || (MX.mkWeekLabel ? MX.mkWeekLabel() : '');
 
     // ── KPI: Tâches ──
@@ -113,18 +113,18 @@
     const pctTasks = totalAll ? Math.round(doneAll / totalAll * 100) : 0;
     const pctColor = pctTasks >= 80 ? 'var(--green)' : pctTasks >= 50 ? 'var(--orange)' : 'var(--red)';
 
-    // ── KPI: Interventions ──
-    const missions = (state.missions || []).filter(m => m && m.id && (m.title || m.description || m.status));
-    const mOpen      = missions.filter(m => m.status !== 'done' && m.status !== 'annule').length;
-    const mInProg    = missions.filter(m => m.status === 'en_cours');
+    // ── KPI: Interventions (admin missions: { text, done: boolean, priority, deadline }) ──
+    const missions = (state.missions || []).filter(m => m && m.id && (m.text || m.title));
+    const mOpen      = missions.filter(m => !m.done).length;
+    const mInProg    = missions.filter(m => !m.done && m.assignedTo && m.assignedTo !== 'all');
     const mLate      = missions.filter(m => {
-      if (m.status === 'done' || m.status === 'annule') return false;
+      if (m.done) return false;
       return m.deadline && m.deadline < todayISO;
     });
-    const mUrgent    = missions.filter(m => m.priority === 'urgent' && m.status !== 'done' && m.status !== 'annule');
+    const mUrgent    = missions.filter(m => m.priority === 'urgent' && !m.done);
     const mDoneToday = missions.filter(m => {
-      if (m.status !== 'done') return false;
-      const raw = m.doneAt || m.completedAt;
+      if (!m.done) return false;
+      const raw = m.doneAt || m.completedAt || m.ts;
       if (!raw) return false;
       const d2 = typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
       return d2.toISOString().slice(0, 10) === todayISO;
@@ -164,20 +164,22 @@
       feed.push({ type:'msg', name: m.authorName || m.author || 'Utilisateur', action:'a publié', what: m.content || m.text || 'un message', at: m.createdAt, icon:'fas fa-comment', color:'var(--jour)' });
     });
     missions.forEach(m => {
-      if (m.status !== 'done') return;
-      const raw = m.doneAt || m.completedAt;
+      if (!m.done) return;
+      const raw = m.doneAt || m.completedAt || m.ts;
       if (!raw) return;
       const dt = typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
       if (dt < twoDaysAgo) return;
-      feed.push({ type:'mission', name: m.assigneeName || m.responsable || 'Technicien', action:'a clôturé', what: m.title || m.description || 'une intervention', at: raw, icon:'fas fa-check-circle', color:'var(--green)' });
+      const who = Array.isArray(m.assignedTo) ? m.assignedTo[0] : (m.assignedTo || m.createdBy || 'Technicien');
+      feed.push({ type:'mission', name: who, action:'a clôturé', what: m.text || m.title || 'une intervention', at: raw, icon:'fas fa-check-circle', color:'var(--green)' });
     });
     missions.forEach(m => {
-      if (m.status !== 'en_cours') return;
-      const raw = m.updatedAt || m.createdAt;
+      if (m.done || !m.assignedTo || m.assignedTo === 'all') return;
+      const raw = m.updatedAt || m.createdAt || m.ts;
       if (!raw) return;
       const dt = typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
       if (dt < twoDaysAgo) return;
-      feed.push({ type:'mission_prog', name: m.assigneeName || m.responsable || 'Technicien', action:'a pris en charge', what: m.title || m.description || 'une intervention', at: raw, icon:'fas fa-spinner', color:'var(--jour)' });
+      const who = Array.isArray(m.assignedTo) ? m.assignedTo[0] : m.assignedTo;
+      feed.push({ type:'mission_prog', name: who, action:'a pris en charge', what: m.text || m.title || 'une intervention', at: raw, icon:'fas fa-spinner', color:'var(--jour)' });
     });
     feed.sort((a, b) => _tval(b.at) - _tval(a.at));
     const recentFeed = feed.slice(0, 10);

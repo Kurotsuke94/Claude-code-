@@ -58,7 +58,11 @@
 
   // ── PAGE ROUTING ──
   window.MX.showPage = function (id) {
+    const _prevPage = MX.state.currentPage;
     MX.state.currentPage = id;
+    if (_prevPage === 'documents' && id !== 'documents') {
+      MX.Pages.Bible && MX.Pages.Bible._destroy && MX.Pages.Bible._destroy();
+    }
     if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
     const navItem = NAV.find(n => n && n.id === id);
     const title   = id === "today-cl"
@@ -797,7 +801,7 @@
       else if (cp === 'utilisateurs') { Pages.Admin && Pages.Admin.render(); }
       else if (cp === 'consommations') { Pages.Conso && Pages.Conso.render(); }
       else if (MX.DAYS && MX.DAYS.find(d => d.id === cp)) { Pages.Checklist && Pages.Checklist.render(cp); }
-      else if (cp.startsWith('resp-')) { Pages.Checklist && Pages.Checklist.render(cp); }
+      else if (cp.startsWith('resp-')) { Pages.RespPlan && Pages.RespPlan.renderDay(cp.slice(5)); }
     });
 
     DB.listenPresence(count => {
@@ -844,6 +848,11 @@
         }
       });
       state.todayPlanSuggestions = sugg;
+    }).catch(() => {});
+
+    // ── Hotel config (nom, couleurs) ──
+    DB.getHotelConfig().then(cfg => {
+      if (cfg) state.hotelConfig = cfg;
     }).catch(() => {});
   }
 

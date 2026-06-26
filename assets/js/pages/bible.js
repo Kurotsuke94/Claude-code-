@@ -779,8 +779,14 @@
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
+  function _destroy() {
+    if (_unsubArticles) { _unsubArticles(); _unsubArticles = null; }
+    if (_unsubComments) { _unsubComments(); _unsubComments = null; }
+  }
+
   window.MX.Pages.Bible = {
-    render, _setCat, _setTag, _onSearch, _clearSearch,
+    render, _destroy,
+    _setCat, _setTag, _onSearch, _clearSearch,
     _openArticle, _backToList, _backToListWithTag,
     _newArticle, _editArticle, _cancelEdit, _saveArticle,
     _confirmDelete, _setStatus, _toggleLike,
