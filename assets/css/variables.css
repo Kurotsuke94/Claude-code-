@@ -11,9 +11,9 @@ html.theme-switching *::after {
 
 :root {
   /* Backgrounds — dark navy SaaS */
-  --bg:   #080B14;
+  --bg:   #08111F;
   --bg2:  #0D1424;
-  --bg3:  #0F172A;
+  --bg3:  #121A29;
   --bg4:  #1A2540;
   --bg5:  #243252;
 
@@ -95,7 +95,7 @@ html.theme-switching *::after {
 
   /* Typography */
   --ffm: 'Space Mono', ui-monospace, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
-  --ffs: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ffs: 'Inter', 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   /* Layout */
   --sidebar-w:     260px;
