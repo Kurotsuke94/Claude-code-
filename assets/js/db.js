@@ -611,6 +611,45 @@
     await R_BIBLE_CMT().doc(id).delete();
   }
 
+  // ── BIBLE CATEGORIES ──
+  const R_BIBLE_CAT = () => db.collection('bibleCategories');
+
+  function listenBibleCategories(cb) {
+    return R_BIBLE_CAT().orderBy('order').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function addBibleCategory(data) {
+    const { id: specId, ...rest } = data;
+    const payload = { ...rest, createdAt: FV.serverTimestamp() };
+    if (specId) {
+      const ref = R_BIBLE_CAT().doc(specId);
+      const snap = await ref.get();
+      if (!snap.exists) await ref.set(payload);
+      return specId;
+    }
+    const newRef = await R_BIBLE_CAT().add(payload);
+    return newRef.id;
+  }
+  async function updateBibleCategory(id, data) {
+    await R_BIBLE_CAT().doc(id).update(data);
+  }
+  async function deleteBibleCategory(id) {
+    await R_BIBLE_CAT().doc(id).delete();
+  }
+  async function countBibleCategoryArticles(catId) {
+    const snap = await R_BIBLE_ART().where('category', '==', catId).get();
+    return snap.size;
+  }
+  async function moveBibleCategoryArticles(fromId, toId) {
+    const snap = await R_BIBLE_ART().where('category', '==', fromId).get();
+    if (!snap.size) return 0;
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.update(d.ref, { category: toId }));
+    await batch.commit();
+    return snap.size;
+  }
+
   // ── PLANNING MODULE ──
   const R_PLAN_ENT = () => db.collection('planning_entries');
   const R_PLAN_SHF = () => db.collection('planning_shifts');
@@ -959,6 +998,8 @@
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,
     listenBibleComments, addBibleComment, deleteBibleComment,
+    listenBibleCategories, addBibleCategory, updateBibleCategory, deleteBibleCategory,
+    countBibleCategoryArticles, moveBibleCategoryArticles,
     listenAdminJournal, addAdminJournal, clearAdminJournal,
     listenDailyClaims, setDailyClaim, clearDailyClaim,
     purgeOldHistory,

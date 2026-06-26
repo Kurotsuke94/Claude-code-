@@ -6,30 +6,41 @@
   let _searchQuery = '';
   let _currentArticle = null;
   let _articles = [];
+  let _categories = [];
   let _comments = [];
   let _editLinks = [];
   let _editTags  = [];
-  let _unsubArticles = null;
-  let _unsubComments = null;
+  let _unsubArticles   = null;
+  let _unsubComments   = null;
+  let _unsubCategories = null;
+  let _migrationDone   = false;
 
-  // ── CATEGORIES ──
-  const CATEGORIES = [
-    { id: 'all',         icon: 'fa-layer-group',        l: 'Tous les articles',          color: 'var(--text2)' },
-    { id: 'electricite', icon: 'fa-bolt',                l: 'Électricité',                color: '#FDE047' },
-    { id: 'mecanique',   icon: 'fa-gears',               l: 'Mécanique',                  color: '#94A3B8' },
-    { id: 'automatisme', icon: 'fa-robot',               l: 'Automatisme',                color: '#60A5FA' },
-    { id: 'hydraulique', icon: 'fa-droplet',             l: 'Hydraulique',                color: '#38BDF8' },
-    { id: 'pneumatique', icon: 'fa-wind',                l: 'Pneumatique',                color: '#A78BFA' },
-    { id: 'procedures',  icon: 'fa-clipboard-list',      l: 'Procédures',                 color: '#4ADE80' },
-    { id: 'depannages',  icon: 'fa-screwdriver-wrench',  l: 'Dépannages',                 color: '#FB923C' },
-    { id: 'rex',         icon: 'fa-lightbulb',           l: 'REX',                        color: '#F472B6' },
-    { id: 'tutoriels',   icon: 'fa-film',                l: 'Tutoriels Vidéo',            color: '#F87171' },
-    { id: 'docs-const',  icon: 'fa-book',                l: 'Documentation Constructeurs',color: '#34D399' },
-    { id: 'ressources',  icon: 'fa-globe',               l: 'Ressources Externes',        color: '#22D3EE' },
-    { id: 'favoris',     icon: 'fa-star',                l: 'Favoris',                    color: '#FBBF24' },
-    { id: 'archives',    icon: 'fa-box-archive',         l: 'Archives',                   color: '#6B7280' },
+  // ── DEFAULT CATEGORIES (migration vers Firestore) ──
+  const _DEFAULT_CATS = [
+    { id: 'electricite', name: 'Électricité',                  icon: 'fa-bolt',               color: '#FDE047', order: 0  },
+    { id: 'mecanique',   name: 'Mécanique',                    icon: 'fa-gears',              color: '#94A3B8', order: 1  },
+    { id: 'automatisme', name: 'Automatisme',                  icon: 'fa-robot',              color: '#60A5FA', order: 2  },
+    { id: 'hydraulique', name: 'Hydraulique',                  icon: 'fa-droplet',            color: '#38BDF8', order: 3  },
+    { id: 'pneumatique', name: 'Pneumatique',                  icon: 'fa-wind',               color: '#A78BFA', order: 4  },
+    { id: 'procedures',  name: 'Procédures',                   icon: 'fa-clipboard-list',     color: '#4ADE80', order: 5  },
+    { id: 'depannages',  name: 'Dépannages',                   icon: 'fa-screwdriver-wrench', color: '#FB923C', order: 6  },
+    { id: 'rex',         name: 'REX',                          icon: 'fa-lightbulb',          color: '#F472B6', order: 7  },
+    { id: 'tutoriels',   name: 'Tutoriels Vidéo',              icon: 'fa-film',               color: '#F87171', order: 8  },
+    { id: 'docs-const',  name: 'Documentation Constructeurs',  icon: 'fa-book',               color: '#34D399', order: 9  },
+    { id: 'ressources',  name: 'Ressources Externes',          icon: 'fa-globe',              color: '#22D3EE', order: 10 },
   ];
 
+  // Catégories virtuelles (non stockées dans Firestore)
+  const _VIRTUAL_ALL     = { id: 'all',      icon: 'fa-layer-group', name: 'Tous les articles', color: 'var(--text2)', virtual: true };
+  const _VIRTUAL_FAVS    = { id: 'favoris',  icon: 'fa-star',        name: 'Favoris',           color: '#FBBF24',      virtual: true };
+  const _VIRTUAL_ARCH    = { id: 'archives', icon: 'fa-box-archive', name: 'Archives',          color: '#6B7280',      virtual: true };
+
+  function _getDynCats() {
+    const sorted = [..._categories].sort((a, b) => (a.order || 0) - (b.order || 0));
+    return [_VIRTUAL_ALL, ...sorted, _VIRTUAL_FAVS, _VIRTUAL_ARCH];
+  }
+
+  // ── CONTENT TYPES / STATUS META ──
   const CONTENT_TYPES = [
     { id: 'depannage', l: 'Dépannage',         icon: 'fa-screwdriver-wrench' },
     { id: 'procedure', l: 'Procédure',         icon: 'fa-clipboard-list' },
@@ -49,11 +60,23 @@
   };
 
   // ── PERMISSIONS ──
-  function _role()      { const a=MX.state.adminUser,c=MX.state.currentUser; return a?'admin':c&&c.role==='responsable'?'validateur':c?'contributeur':'lecteur'; }
-  function _canEdit()   { const r=_role(); return r==='admin'||r==='validateur'||r==='contributeur'; }
-  function _canValid()  { const r=_role(); return r==='admin'||r==='validateur'; }
-  function _canAdmin()  { return _role()==='admin'; }
-  function _author()    { const a=MX.state.adminUser,c=MX.state.currentUser; return a?(a.email?a.email.split('@')[0]:'Admin'):c?c.name:'Anonyme'; }
+  function _role()         { const a=MX.state.adminUser,c=MX.state.currentUser; return a?'admin':c&&c.role==='responsable'?'validateur':c?'contributeur':'lecteur'; }
+  function _canEdit()      { const r=_role(); return r==='admin'||r==='validateur'||r==='contributeur'; }
+  function _canValid()     { const r=_role(); return r==='admin'||r==='validateur'; }
+  function _canAdmin()     { return _role()==='admin'; }
+  function _canManageCats(){ const r=_role(); return r==='admin'||r==='validateur'; }
+  function _author()       { const a=MX.state.adminUser,c=MX.state.currentUser; return a?(a.email?a.email.split('@')[0]:'Admin'):c?c.name:'Anonyme'; }
+
+  // ── MIGRATION ──
+  async function _migrateDefaultCategories() {
+    if (_migrationDone) return;
+    _migrationDone = true;
+    for (const cat of _DEFAULT_CATS) {
+      try {
+        await MX.DB.addBibleCategory({ id: cat.id, name: cat.name, icon: cat.icon, color: cat.color, description: '', order: cat.order, createdBy: 'migration' });
+      } catch(e) { /* ignore */ }
+    }
+  }
 
   // ── VIDEO ──
   function _parseVideo(url) {
@@ -122,24 +145,34 @@
 
   // ── LIST VIEW ──
   function _renderList(mc) {
-    const filtered = _filtered();
-    const catObj   = CATEGORIES.find(c => c.id === _selectedCategory) || CATEGORIES[0];
-    const me       = _author();
+    const filtered    = _filtered();
+    const allCats     = _getDynCats();
+    const catObj      = allCats.find(c => c.id === _selectedCategory) || allCats[0];
+    const me          = _author();
+    const canManage   = _canManageCats();
 
     const counts = {};
     _articles.forEach(a => { if (a.status !== 'archived') counts[a.category] = (counts[a.category]||0)+1; });
 
-    const catNav = CATEGORIES.map(c => {
-      const cnt = c.id==='all'     ? _articles.filter(a=>a.status!=='archived').length
-                : c.id==='favoris' ? _articles.filter(a=>(a.likes||[]).includes(me)).length
-                : c.id==='archives'? _articles.filter(a=>a.status==='archived').length
+    const catNav = allCats.map(c => {
+      const cnt = c.id==='all'      ? _articles.filter(a=>a.status!=='archived').length
+                : c.id==='favoris'  ? _articles.filter(a=>(a.likes||[]).includes(me)).length
+                : c.id==='archives' ? _articles.filter(a=>a.status==='archived').length
                 : (counts[c.id]||0);
-      return `<button class="bl-cat-item${_selectedCategory===c.id?' active':''}" onclick="MX.Pages.Bible._setCat('${c.id}')">
-        <i class="fas ${c.icon}" style="color:${c.color};width:16px;text-align:center"></i>
-        <span class="bl-cat-label">${MX.esc(c.l)}</span>
+      const editBtn = (canManage && !c.virtual)
+        ? `<button class="bl-cat-edit" title="Modifier" onclick="event.stopPropagation();MX.Pages.Bible._openCatModal('${MX.esc(c.id)}')"><i class="fas fa-pen"></i></button>`
+        : '';
+      return `<button class="bl-cat-item${_selectedCategory===c.id?' active':''}" onclick="MX.Pages.Bible._setCat('${MX.esc(c.id)}')">
+        <i class="fas ${MX.esc(c.icon)}" style="color:${MX.esc(c.color)};width:16px;text-align:center;flex-shrink:0"></i>
+        <span class="bl-cat-label">${MX.esc(c.name)}</span>
         ${cnt>0?`<span class="bl-cat-count">${cnt}</span>`:''}
+        ${editBtn}
       </button>`;
     }).join('');
+
+    const addCatBtn = canManage
+      ? `<button class="bl-cat-add" onclick="MX.Pages.Bible._openCatModal(null)"><i class="fas fa-plus"></i> Nouvelle catégorie</button>`
+      : '';
 
     const tags = _allTags();
     const tagCloud = tags.length ? `<div class="bl-sidebar-sec"><div class="bl-sidebar-title">Tags populaires</div><div class="bl-tag-cloud">
@@ -178,6 +211,7 @@
             <div class="bl-sidebar-sec">
               <div class="bl-sidebar-title">Catégories</div>
               <nav class="bl-cat-nav">${catNav}</nav>
+              ${addCatBtn}
             </div>
             ${tagCloud}
           </aside>
@@ -185,7 +219,7 @@
           <div class="bl-content">
             <div class="bl-content-head">
               <div class="bl-result-info">
-                <span class="bl-cat-cur"><i class="fas ${catObj.icon}" style="color:${catObj.color}"></i> ${MX.esc(catObj.l)}</span>
+                <span class="bl-cat-cur"><i class="fas ${MX.esc(catObj.icon)}" style="color:${MX.esc(catObj.color)}"></i> ${MX.esc(catObj.name)}</span>
                 <span class="bl-result-count">${filtered.length} article${filtered.length!==1?'s':''}</span>
               </div>
               ${_selectedTag?`<button class="bl-tag active" onclick="MX.Pages.Bible._setTag(null)" title="Effacer le filtre tag"><i class="fas fa-times"></i> #${MX.esc(_selectedTag)}</button>`:''}
@@ -199,7 +233,7 @@
   }
 
   function _articleCard(a) {
-    const cat    = CATEGORIES.find(c=>c.id===a.category);
+    const cat    = _getDynCats().find(c=>c.id===a.category);
     const type   = CONTENT_TYPES.find(t=>t.id===a.type);
     const status = STATUS_META[a.status] || STATUS_META.draft;
     const video  = _parseVideo(a.videoUrl);
@@ -218,7 +252,7 @@
       ${thumb}
       <div class="bl-card-body">
         <div class="bl-card-meta">
-          ${cat?`<span class="bl-cat-badge" style="color:${cat.color}"><i class="fas ${cat.icon}"></i> ${MX.esc(cat.l)}</span>`:''}
+          ${cat&&!cat.virtual?`<span class="bl-cat-badge" style="color:${MX.esc(cat.color)}"><i class="fas ${MX.esc(cat.icon)}"></i> ${MX.esc(cat.name)}</span>`:''}
           ${type?`<span class="bl-type-badge"><i class="fas ${type.icon}"></i> ${MX.esc(type.l)}</span>`:''}
           <span class="bl-status-badge ${status.cls}"><i class="fas ${status.icon}"></i> ${status.l}</span>
         </div>
@@ -245,7 +279,7 @@
     const a = _currentArticle;
     if (!a) { _view='list'; _renderList(mc); return; }
 
-    const cat    = CATEGORIES.find(c=>c.id===a.category);
+    const cat    = _getDynCats().find(c=>c.id===a.category);
     const type   = CONTENT_TYPES.find(t=>t.id===a.type);
     const status = STATUS_META[a.status] || STATUS_META.draft;
     const video  = _parseVideo(a.videoUrl);
@@ -300,7 +334,7 @@
 
         <div class="bl-detail-header">
           <div class="bl-detail-badges">
-            ${cat?`<span class="bl-cat-badge lg" style="color:${cat.color}"><i class="fas ${cat.icon}"></i> ${MX.esc(cat.l)}</span>`:''}
+            ${cat&&!cat.virtual?`<span class="bl-cat-badge lg" style="color:${MX.esc(cat.color)}"><i class="fas ${MX.esc(cat.icon)}"></i> ${MX.esc(cat.name)}</span>`:''}
             ${type?`<span class="bl-type-badge lg"><i class="fas ${type.icon}"></i> ${MX.esc(type.l)}</span>`:''}
             <span class="bl-status-badge ${status.cls}"><i class="fas ${status.icon}"></i> ${status.l}</span>
           </div>
@@ -363,8 +397,8 @@
     const a    = _currentArticle || {};
     const isNew = !a.id;
 
-    const catOpts = CATEGORIES.filter(c=>!['all','favoris','archives'].includes(c.id))
-      .map(c=>`<option value="${c.id}"${a.category===c.id?' selected':''}>${MX.esc(c.l)}</option>`).join('');
+    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const catOpts = sorted.map(c=>`<option value="${MX.esc(c.id)}"${a.category===c.id?' selected':''}>${MX.esc(c.name)}</option>`).join('');
     const typeOpts = CONTENT_TYPES
       .map(t=>`<option value="${t.id}"${a.type===t.id?' selected':''}>${MX.esc(t.l)}</option>`).join('');
     const statusOpts = Object.entries(STATUS_META)
@@ -486,9 +520,11 @@
 
     const byCat = {};
     _articles.forEach(a=>{ byCat[a.category]=(byCat[a.category]||0)+1; });
-    const catStats = CATEGORIES.filter(c=>!['all','favoris'].includes(c.id)&&(byCat[c.id]||0)>0)
+
+    const catStats = _categories
+      .filter(c=>(byCat[c.id]||0)>0)
       .sort((a,b)=>(byCat[b.id]||0)-(byCat[a.id]||0))
-      .map(c=>`<div class="bl-stat-row"><i class="fas ${c.icon}" style="color:${c.color};width:16px;text-align:center"></i><span>${MX.esc(c.l)}</span><span class="bl-stat-val">${byCat[c.id]||0}</span></div>`).join('');
+      .map(c=>`<div class="bl-stat-row"><i class="fas ${MX.esc(c.icon)}" style="color:${MX.esc(c.color)};width:16px;text-align:center"></i><span>${MX.esc(c.name)}</span><span class="bl-stat-val">${byCat[c.id]||0}</span></div>`).join('');
 
     const byAuthor = {};
     _articles.forEach(a=>{ byAuthor[a.authorName||'Anonyme']=(byAuthor[a.authorName||'Anonyme']||0)+1; });
@@ -512,6 +548,21 @@
     }).join('');
 
     const pendingList = _articles.filter(a=>a.status==='pending');
+
+    // Gestion catégories (admin/responsable seulement)
+    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const catMgmtRows = sorted.map((c, idx) => `
+      <div class="bl-cat-mgmt-row">
+        <div class="bl-cat-mgmt-arrows">
+          ${idx > 0 ? `<button class="bl-cat-ord-btn" title="Monter" onclick="MX.Pages.Bible._moveCatUp('${MX.esc(c.id)}')"><i class="fas fa-chevron-up"></i></button>` : '<span class="bl-cat-ord-btn" style="visibility:hidden"></span>'}
+          ${idx < sorted.length-1 ? `<button class="bl-cat-ord-btn" title="Descendre" onclick="MX.Pages.Bible._moveCatDown('${MX.esc(c.id)}')"><i class="fas fa-chevron-down"></i></button>` : '<span class="bl-cat-ord-btn" style="visibility:hidden"></span>'}
+        </div>
+        <i class="fas ${MX.esc(c.icon)}" style="color:${MX.esc(c.color)};width:16px;text-align:center;flex-shrink:0"></i>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(c.name)}</span>
+        ${c.description ? `<span style="font-size:11px;color:var(--text3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${MX.esc(c.description)}</span>` : ''}
+        <span class="bl-stat-val">${byCat[c.id]||0} art.</span>
+        <button class="bl-cat-edit-btn" title="Modifier" onclick="MX.Pages.Bible._openCatModal('${MX.esc(c.id)}')"><i class="fas fa-pen"></i></button>
+      </div>`).join('');
 
     mc.innerHTML = `
       <div class="ph bl-admin-page">
@@ -551,6 +602,14 @@
             <div class="bl-stats-list">${recent||'<div style="color:var(--text3);font-size:13px">Aucune activité</div>'}</div>
           </div>
         </div>
+
+        <div class="stt-card">
+          <div class="stt-card-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span><i class="fas fa-tags"></i> Gestion des catégories (${_categories.length})</span>
+            <button class="bl-cat-add-sm" onclick="MX.Pages.Bible._openCatModal(null)"><i class="fas fa-plus"></i> Nouvelle</button>
+          </div>
+          <div class="bl-cat-mgmt-list">${catMgmtRows||'<div style="color:var(--text3);font-size:13px;padding:8px 0">Aucune catégorie</div>'}</div>
+        </div>
       </div>`;
   }
 
@@ -559,7 +618,18 @@
     const mc = document.getElementById('main-content');
     if (!mc) return;
 
-    // Lazy start listener
+    if (!_unsubCategories) {
+      _unsubCategories = MX.DB.listenBibleCategories(list => {
+        if (list.length === 0 && !_migrationDone) {
+          _migrateDefaultCategories();
+        } else {
+          _migrationDone = true;
+          _categories = list;
+          if (MX.state.currentPage === 'documents') render();
+        }
+      });
+    }
+
     if (!_unsubArticles) {
       _unsubArticles = MX.DB.listenBibleArticles(list => {
         _articles = list;
@@ -776,12 +846,219 @@
 
   function _showAdmin() { _view='admin'; render(); }
 
+  // ── CATEGORY MANAGEMENT ──
+  const _CAT_ICON_PRESETS = [
+    'fa-bolt','fa-gears','fa-robot','fa-droplet','fa-wind','fa-clipboard-list',
+    'fa-screwdriver-wrench','fa-lightbulb','fa-film','fa-book','fa-globe',
+    'fa-fire-flame-curved','fa-snowflake','fa-car','fa-bed','fa-lock',
+    'fa-box','fa-utensils','fa-broom','fa-wifi','fa-building','fa-wrench',
+    'fa-shield-halved','fa-plug','fa-water','fa-fan','fa-temperature-high',
+    'fa-swimming-pool','fa-spa','fa-key',
+  ];
+
+  const _CAT_COLOR_PRESETS = [
+    '#FDE047','#94A3B8','#60A5FA','#38BDF8','#A78BFA','#4ADE80',
+    '#FB923C','#F472B6','#F87171','#34D399','#22D3EE','#FBBF24',
+    '#E879F9','#2DD4BF','#F97316','#8B5CF6','#EC4899','#06B6D4',
+    '#84CC16','#EF4444',
+  ];
+
+  function _openCatModal(id) {
+    const cat  = id ? _categories.find(c => c.id === id) : null;
+    const isNew = !cat;
+    const defIcon  = cat ? (cat.icon  || 'fa-folder') : 'fa-folder';
+    const defColor = cat ? (cat.color || '#60A5FA')   : '#60A5FA';
+
+    const iconPresets = _CAT_ICON_PRESETS.map(ic =>
+      `<button class="bl-icon-preset${defIcon===ic?' active':''}" title="${ic}" onclick="MX.Pages.Bible._pickCatIcon('${ic}')"><i class="fas ${ic}"></i></button>`
+    ).join('');
+
+    const colorPresets = _CAT_COLOR_PRESETS.map(col =>
+      `<button class="bl-color-preset${defColor===col?' active':''}" style="background:${col}" title="${col}" onclick="MX.Pages.Bible._pickCatColor('${col}')"></button>`
+    ).join('');
+
+    const body = `<div style="display:flex;flex-direction:column;gap:14px">
+      <div class="form-group">
+        <label>Nom *</label>
+        <input id="bl-cat-name" class="fi" type="text" placeholder="ex: Piscine, Chaufferie, Parking…" value="${MX.esc(cat?cat.name:'')}">
+      </div>
+      <div class="form-group">
+        <label>Icône</label>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <div class="bl-cat-icon-preview" id="bl-cat-icon-prev"><i class="fas ${MX.esc(defIcon)}" style="color:${MX.esc(defColor)}"></i></div>
+          <input id="bl-cat-icon" class="fi" type="text" placeholder="fa-bolt, fa-fire…" value="${MX.esc(defIcon)}" oninput="MX.Pages.Bible._previewCatIcon(this.value)" style="flex:1">
+        </div>
+        <div class="bl-icon-presets">${iconPresets}</div>
+      </div>
+      <div class="form-group">
+        <label>Couleur</label>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <input id="bl-cat-color" type="color" value="${MX.esc(defColor)}" oninput="MX.Pages.Bible._previewCatColor(this.value)" style="width:36px;height:32px;border:none;background:none;cursor:pointer;padding:0;border-radius:4px">
+          <span id="bl-cat-color-txt" style="font-size:12px;color:var(--text2);font-family:var(--ffm)">${MX.esc(defColor)}</span>
+        </div>
+        <div class="bl-color-presets">${colorPresets}</div>
+      </div>
+      <div class="form-group">
+        <label>Description <span style="color:var(--text3);font-weight:400">(optionnel)</span></label>
+        <input id="bl-cat-desc" class="fi" type="text" placeholder="Décrit le contenu de cette catégorie…" value="${MX.esc(cat?cat.description||'':'')}">
+      </div>
+    </div>`;
+
+    MX.showModal({
+      title: isNew ? 'Nouvelle catégorie' : 'Modifier la catégorie',
+      body,
+      actions: [
+        ...(cat ? [{ label: 'Supprimer', cls: 'danger', fn: () => _deleteCat(id) }] : []),
+        { label: 'Annuler', cls: 'cancel' },
+        { label: isNew ? 'Créer' : 'Enregistrer', cls: 'confirm', fn: () => _saveCat(id) },
+      ]
+    });
+  }
+
+  function _previewCatIcon(icon) {
+    const prev  = document.getElementById('bl-cat-icon-prev');
+    const color = document.getElementById('bl-cat-color')?.value || '#60A5FA';
+    if (prev) prev.innerHTML = `<i class="fas ${MX.esc(icon)}" style="color:${MX.esc(color)}"></i>`;
+  }
+
+  function _pickCatIcon(icon) {
+    const inp = document.getElementById('bl-cat-icon');
+    if (inp) inp.value = icon;
+    _previewCatIcon(icon);
+    document.querySelectorAll('.bl-icon-preset').forEach(b => b.classList.toggle('active', b.title === icon));
+  }
+
+  function _previewCatColor(color) {
+    const txt = document.getElementById('bl-cat-color-txt');
+    if (txt) txt.textContent = color;
+    const prev = document.getElementById('bl-cat-icon-prev');
+    if (prev) {
+      const icon = document.getElementById('bl-cat-icon')?.value || 'fa-folder';
+      prev.innerHTML = `<i class="fas ${MX.esc(icon)}" style="color:${MX.esc(color)}"></i>`;
+    }
+  }
+
+  function _pickCatColor(color) {
+    const inp = document.getElementById('bl-cat-color');
+    if (inp) inp.value = color;
+    _previewCatColor(color);
+    document.querySelectorAll('.bl-color-preset').forEach(b => b.classList.toggle('active', b.title === color));
+  }
+
+  async function _saveCat(id) {
+    const name  = (document.getElementById('bl-cat-name')?.value  || '').trim();
+    const icon  = (document.getElementById('bl-cat-icon')?.value  || '').trim() || 'fa-folder';
+    const color = (document.getElementById('bl-cat-color')?.value || '#60A5FA');
+    const desc  = (document.getElementById('bl-cat-desc')?.value  || '').trim();
+
+    if (!name) { MX.toast('Le nom est obligatoire', true); return; }
+
+    const maxOrder = _categories.reduce((m, c) => Math.max(m, c.order || 0), -1);
+
+    try {
+      if (id) {
+        await MX.DB.updateBibleCategory(id, { name, icon, color, description: desc });
+        MX.toast('Catégorie mise à jour ✓');
+      } else {
+        await MX.DB.addBibleCategory({ name, icon, color, description: desc, order: maxOrder + 1, createdBy: _author() });
+        MX.toast('Catégorie créée ✓');
+      }
+      MX.closeModal();
+    } catch(e) {
+      MX.toast('Erreur: ' + e.message, true);
+    }
+  }
+
+  async function _deleteCat(id) {
+    const cat = _categories.find(c => c.id === id);
+    if (!cat) return;
+    try {
+      const count = await MX.DB.countBibleCategoryArticles(id);
+      if (count > 0) {
+        const others = _categories.filter(c => c.id !== id);
+        const opts   = others.map(c => `<option value="${MX.esc(c.id)}">${MX.esc(c.name)}</option>`).join('');
+        MX.showModal({
+          title: 'Catégorie non vide',
+          sub: `<span style="color:var(--orange)">${count} article${count>1?'s':''} utilisent cette catégorie.</span> Choisissez où les déplacer avant de supprimer.`,
+          body: others.length
+            ? `<div class="form-group"><label>Déplacer les articles vers</label><select class="fi" id="bl-cat-move-to"><option value="">— Choisir —</option>${opts}</select></div>`
+            : `<p style="color:var(--red);font-size:13px;margin:0">Aucune autre catégorie disponible. Créez-en une d'abord.</p>`,
+          actions: others.length
+            ? [
+                { label: 'Déplacer et supprimer', cls: 'danger', fn: () => _doMoveCatAndDelete(id) },
+                { label: 'Annuler', cls: 'cancel' }
+              ]
+            : [{ label: 'Fermer', cls: 'cancel' }]
+        });
+      } else {
+        MX.showModal(
+          `Supprimer "${MX.esc(cat.name)}" ?`,
+          'La catégorie sera définitivement supprimée.',
+          [
+            { label: 'Supprimer', cls: 'danger', fn: async () => {
+              try {
+                await MX.DB.deleteBibleCategory(id);
+                if (_selectedCategory === id) _selectedCategory = 'all';
+                MX.toast('Catégorie supprimée');
+              } catch(e) { MX.toast('Erreur: ' + e.message, true); }
+            }},
+            { label: 'Annuler', cls: 'cancel' }
+          ]
+        );
+      }
+    } catch(e) {
+      MX.toast('Erreur: ' + e.message, true);
+    }
+  }
+
+  async function _doMoveCatAndDelete(fromId) {
+    const toId = document.getElementById('bl-cat-move-to')?.value;
+    if (!toId) { MX.toast('Sélectionnez une catégorie de destination', true); return; }
+    try {
+      const n = await MX.DB.moveBibleCategoryArticles(fromId, toId);
+      await MX.DB.deleteBibleCategory(fromId);
+      if (_selectedCategory === fromId) _selectedCategory = 'all';
+      MX.closeModal();
+      MX.toast(`${n} article${n>1?'s':''} déplacé${n>1?'s':''}. Catégorie supprimée.`);
+    } catch(e) {
+      MX.toast('Erreur: ' + e.message, true);
+    }
+  }
+
+  async function _moveCatUp(id) {
+    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const idx = sorted.findIndex(c => c.id === id);
+    if (idx <= 0) return;
+    const ca = sorted[idx], cb = sorted[idx - 1];
+    try {
+      await Promise.all([
+        MX.DB.updateBibleCategory(ca.id, { order: cb.order || 0 }),
+        MX.DB.updateBibleCategory(cb.id, { order: ca.order || 0 }),
+      ]);
+    } catch(e) { MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  async function _moveCatDown(id) {
+    const sorted = [..._categories].sort((a, b) => (a.order||0) - (b.order||0));
+    const idx = sorted.findIndex(c => c.id === id);
+    if (idx < 0 || idx >= sorted.length - 1) return;
+    const ca = sorted[idx], cb = sorted[idx + 1];
+    try {
+      await Promise.all([
+        MX.DB.updateBibleCategory(ca.id, { order: cb.order || 0 }),
+        MX.DB.updateBibleCategory(cb.id, { order: ca.order || 0 }),
+      ]);
+    } catch(e) { MX.toast('Erreur: ' + e.message, true); }
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
+
   function _destroy() {
-    if (_unsubArticles) { _unsubArticles(); _unsubArticles = null; }
-    if (_unsubComments) { _unsubComments(); _unsubComments = null; }
+    if (_unsubArticles)   { _unsubArticles();   _unsubArticles   = null; }
+    if (_unsubComments)   { _unsubComments();   _unsubComments   = null; }
+    if (_unsubCategories) { _unsubCategories(); _unsubCategories = null; }
   }
 
   window.MX.Pages.Bible = {
@@ -792,6 +1069,9 @@
     _confirmDelete, _setStatus, _toggleLike,
     _submitComment, _deleteComment,
     _addLink, _removeLink, _addTag, _removeTag,
-    _previewVideo, _showAdmin
+    _previewVideo, _showAdmin,
+    _openCatModal, _saveCat, _deleteCat, _doMoveCatAndDelete,
+    _previewCatIcon, _pickCatIcon, _previewCatColor, _pickCatColor,
+    _moveCatUp, _moveCatDown,
   };
 })();
