@@ -6563,6 +6563,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   transition: all var(--t);
 }
 .bl-cat-item:hover .bl-cat-edit { display: flex; }
+@media (hover: none) { .bl-cat-item .bl-cat-edit { display: flex; } }
 .bl-cat-edit:hover { border-color: var(--cyan-border); color: var(--cyan); background: var(--cyan-dim); }
 
 .bl-cat-add {

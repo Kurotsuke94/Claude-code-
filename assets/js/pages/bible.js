@@ -195,7 +195,7 @@
             </div>
           </div>
           <div class="bl-header-actions">
-            ${_canAdmin()?`<button class="bl-admin-btn" onclick="MX.Pages.Bible._showAdmin()"><i class="fas fa-chart-bar"></i> <span class="bl-btn-label">Tableau de bord</span></button>`:''}
+            ${_canManageCats()?`<button class="bl-admin-btn" onclick="MX.Pages.Bible._showAdmin()"><i class="fas fa-chart-bar"></i> <span class="bl-btn-label">Tableau de bord</span></button>`:''}
             ${_canEdit()?`<button class="primary-btn bl-new-btn" onclick="MX.Pages.Bible._newArticle()"><i class="fas fa-plus"></i> <span class="bl-btn-label">Nouvel article</span></button>`:''}
           </div>
         </div>
@@ -996,10 +996,10 @@
     try {
       const count = await MX.DB.countBibleCategoryArticles(id);
       if (count === 0) {
-        MX.showModal(
-          `Supprimer "${cat.name}" ?`,
-          'Aucun article dans cette catégorie. La suppression est irréversible.',
-          [
+        MX.showModal({
+          title: `Supprimer "${cat.name}" ?`,
+          sub: 'Aucun article dans cette catégorie.',
+          actions: [
             { label: 'Supprimer', cls: 'danger', fn: async () => {
               try {
                 await MX.DB.deleteBibleCategory(id);
@@ -1007,9 +1007,10 @@
                 MX.toast('Catégorie supprimée');
               } catch(e) { MX.toast('Erreur: ' + e.message, true); }
             }},
-            { label: 'Annuler', cls: 'cancel' }
+            { label: 'Archiver à la place', cls: 'confirm', fn: () => _archiveCat(id) },
+            { label: 'Annuler', cls: 'cancel' },
           ]
-        );
+        });
       } else {
         const others = _categories.filter(c => c.id !== id && !c.archived);
         const opts   = others.map(c => `<option value="${MX.esc(c.id)}">${MX.esc(c.name)}</option>`).join('');
