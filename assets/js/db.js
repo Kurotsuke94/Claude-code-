@@ -968,6 +968,31 @@
     await batch.commit();
   }
 
+  // ── ROLES (MÉTIERS) ──
+  const R_ROLES = () => db.collection('roles');
+
+  function listenRoles(cb) {
+    return R_ROLES().orderBy('order').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  async function addRole(data) {
+    const { id: specId, ...rest } = data;
+    const payload = { ...rest, createdAt: FV.serverTimestamp() };
+    if (specId) {
+      const ref  = R_ROLES().doc(specId);
+      const snap = await ref.get();
+      if (!snap.exists) await ref.set(payload);
+      return specId;
+    }
+    const ref = await R_ROLES().add(payload);
+    return ref.id;
+  }
+
+  async function updateRole(id, data) { await R_ROLES().doc(id).update(data); }
+  async function deleteRole(id)       { await R_ROLES().doc(id).delete(); }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -1014,5 +1039,6 @@
     listenNotifications, createNotification,
     markNotificationRead, markAllNotificationsRead,
     deleteNotification, archiveNotification,
+    listenRoles, addRole, updateRole, deleteRole,
   };
 })();

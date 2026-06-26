@@ -36,8 +36,20 @@
   }
 
   // ── USER IDENTITY (PIN) ──
+  function isResponsable() {
+    const cu = window.MX.state.currentUser;
+    return !!cu && (cu.rank === 'responsable' || cu.role === 'responsable');
+  }
+
   function setCurrentUser(user) {
-    window.MX.state.currentUser = user ? { id: user.id, name: user.name, role: user.role || "technicien", color: user.color || null } : null;
+    window.MX.state.currentUser = user ? {
+      id:     user.id,
+      name:   user.name,
+      role:   user.role   || "technicien",
+      rank:   user.rank   || (user.role === 'responsable' ? 'responsable' : 'utilisateur'),
+      roleId: user.roleId || null,
+      color:  user.color  || null,
+    } : null;
     if (user) localStorage.setItem("mx_user", JSON.stringify(window.MX.state.currentUser));
     else      localStorage.removeItem("mx_user");
     localStorage.removeItem("mx_worker"); // clean up old key
@@ -305,7 +317,7 @@
   window.MX = window.MX || {};
   window.MX.Auth = {
     login, logout, requireAdmin, showLogin, hideLogin, cancelLogin,
-    isAdmin, canSeeAll, onLogin, onLogout,
+    isAdmin, canSeeAll, isResponsable, onLogin, onLogout,
     setCurrentUser, clearCurrentUser, promptLogin,
     showUserPicker, hidePicker, selectUser, confirmPin, backToPicker, skipPicker,
     updateSidebarFooter

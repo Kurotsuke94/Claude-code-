@@ -91,6 +91,7 @@
     if (id === "today-cl")     return Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
+    if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
@@ -297,6 +298,7 @@
       let aItems = "";
       // Items visible to both Responsable and Admin
       [
+        { fn:"MX.showPage('equipe')",             icon:"fa-users-gear",          l:"Gestion Équipe",    act: cur==="equipe" },
         { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Utilisateurs",      act: cur==="utilisateurs" },
         { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",     act: false },
         { fn:"MX.showAdminTab('badges-admin')",   icon:"fa-medal",               l:"Gestion Badges",    act: false },
@@ -762,7 +764,14 @@
           }
         } catch(e) {}
       }
-      if (state.currentPage === "admin") MX.Pages.Admin.render();
+      if (state.currentPage === "admin")  MX.Pages.Admin.render();
+      if (state.currentPage === "equipe") MX.Pages.Equipe && MX.Pages.Equipe.render();
+    });
+
+    DB.listenRoles(list => {
+      state.roles = list;
+      buildNav();
+      if (state.currentPage === "equipe") MX.Pages.Equipe && MX.Pages.Equipe.render();
     });
 
     DB.listenLogs(list => {
