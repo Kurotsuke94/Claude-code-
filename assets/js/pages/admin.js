@@ -142,7 +142,7 @@
 
     h += `</div>`;
     el.innerHTML = h;
-    if (aTab === "superadmin" && isAdmin) _hotelLoadForm();
+    if (aTab === "superadmin" && isAdmin) { _hotelLoadForm(); _verLoad(); }
   }
 
   // ── TASKS ──
@@ -1725,6 +1725,35 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
         </div>
       </div>
 
+      <!-- GESTION DES VERSIONS -->
+      <div class="sadmin-card">
+        <div class="sadmin-card-head"><i class="fas fa-rocket"></i> Gestion des versions</div>
+        <div class="sadmin-card-body" style="padding:16px">
+          <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Publiez une nouvelle version. Les utilisateurs verront la notification au prochain chargement.</p>
+          <div class="hotel-fi-grid" style="margin-bottom:14px">
+            <div class="hotel-fi-row"><label class="hotel-fi-label">📦 Numéro de version</label>
+              <input type="text" id="vf-ver" class="fi hotel-fi" placeholder="1.0.31" value="">
+            </div>
+            <div class="hotel-fi-row"><label class="hotel-fi-label">📅 Date de publication</label>
+              <input type="date" id="vf-date" class="fi hotel-fi" value="">
+            </div>
+            <div class="hotel-fi-row"><label class="hotel-fi-label">🎨 Emoji</label>
+              <input type="text" id="vf-emoji" class="fi hotel-fi" placeholder="🚀" value="" maxlength="4">
+            </div>
+            <div class="hotel-fi-row"><label class="hotel-fi-label">📝 Titre</label>
+              <input type="text" id="vf-title" class="fi hotel-fi" placeholder="Nouvelle fonctionnalité" value="">
+            </div>
+          </div>
+          <div class="hotel-fi-row" style="margin-bottom:14px"><label class="hotel-fi-label">📋 Notes (une ligne = un changement)</label>
+            <textarea id="vf-notes" class="fi hotel-fi" rows="5" placeholder="Ajout de la fonctionnalité X&#10;Correction du bug Y&#10;Amélioration de Z" style="resize:vertical;font-family:var(--ffs);font-size:13px;line-height:1.6"></textarea>
+          </div>
+          <button class="primary-btn" style="width:100%" onclick="MX.Pages.Admin._verSave()">
+            <i class="fas fa-rocket"></i> Publier cette version
+          </button>
+          <div id="ver-admin-history" style="margin-top:16px"></div>
+        </div>
+      </div>
+
     </div>`;
   }
 
@@ -1797,6 +1826,58 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     integrity: "Vérifier l'intégrité Firestore"
   };
 
+  async function _verLoad() {
+    try {
+      const data = await MX.DB.getVersions();
+      const cl = (data && data.changelog) ? data.changelog : (window.MX.CHANGELOG || []);
+      const latest = cl[0] || {};
+      const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+      set('vf-ver',   latest.ver   || '');
+      set('vf-date',  latest.date  || '');
+      set('vf-emoji', latest.emoji || '');
+      set('vf-title', latest.title || '');
+      const notes = document.getElementById('vf-notes');
+      if (notes) notes.value = (latest.changes || []).join('\n');
+
+      const hist = document.getElementById('ver-admin-history');
+      if (hist && cl.length > 0) {
+        hist.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Historique</div>` +
+          cl.map((e, i) => `<div style="display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:12px;font-weight:700;color:var(--cyan);flex-shrink:0">${e.emoji || '📦'} v${MX.esc(e.ver)}</span>
+            <span style="font-size:11px;color:var(--text3);flex-shrink:0">${MX.esc(e.date || '')}</span>
+            <span style="font-size:12px;color:var(--text2)">${MX.esc(e.title || '')}</span>
+            ${i === 0 ? '<span class="sadmin-live-badge" style="margin-left:auto"><i class="fas fa-circle" style="font-size:7px"></i> Actuelle</span>' : ''}
+          </div>`).join('');
+      }
+    } catch(e) { /* silent */ }
+  }
+
+  async function _verSave() {
+    const g = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const ver   = g('vf-ver');
+    const date  = g('vf-date');
+    const emoji = g('vf-emoji') || '📦';
+    const title = g('vf-title');
+    const notes = g('vf-notes');
+    if (!ver) { MX.toast('Numéro de version requis', 'error'); return; }
+
+    const changes = notes.split('\n').map(l => l.trim()).filter(Boolean);
+    const newEntry = { ver, date, emoji, title, changes };
+
+    const existing = (window.MX.CHANGELOG || []).filter(e => e.ver !== ver);
+    const newLog = [newEntry, ...existing];
+    window.MX.CHANGELOG = newLog;
+    if (window.MX.appVer !== undefined) window.MX.appVer = ver;
+
+    try {
+      await MX.DB.saveVersions({ changelog: newLog });
+      MX.toast('Version publiée ✓', 'success');
+      _verLoad();
+    } catch(e) {
+      MX.toast('Erreur lors de la publication : ' + (e.message || e), 'error');
+    }
+  }
+
   async function _dbRepair(type) {
     const label = _DB_REPAIR_LABELS[type] || type;
     MX.modal({
@@ -1857,6 +1938,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     _bdgSearch, _bdgUpdCount, _bdgModeChange,
     clearJournal,
     _hotelLoadForm, _hotelSaveInfo,
+    _verLoad, _verSave,
     _dbRepair
   };
 })();

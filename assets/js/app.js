@@ -375,8 +375,9 @@
       </div>`;
     }
 
-    const seen   = _getMsgsSeen();
-    const unread = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
+    const seen      = _getMsgsSeen();
+    const unread    = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
+    const _hasNewVer = localStorage.getItem('mx_last_ver') !== _APP_VER;
 
     el.innerHTML = `
       <div class="dh-week" id="dh-week-label">
@@ -384,6 +385,10 @@
         ${MX.esc(state.weekLabel || MX.mkWeekLabel())}
       </div>
       <div class="dh-spacer"></div>
+      ${_hasNewVer ? `<button class="dh-btn dh-ver-btn" id="dh-ver-badge" onclick="MX.Updates.showModal()" title="Nouvelle version disponible">
+        <i class="fas fa-rocket"></i>
+        <span class="nav-badge show" style="background:var(--cyan);color:#0C0C0E;font-size:9px;font-weight:800">NEW</span>
+      </button>` : ''}
       <button class="dh-btn" onclick="MX.showPage('msgs')" title="Messages">
         <i class="fas fa-bell"></i>
         <span class="nav-badge${unread ? ' show' : ''}" id="dh-bell-badge">${unread > 9 ? '9+' : unread || ''}</span>
@@ -443,8 +448,56 @@
     _updBadges();
   }
 
+  // ── CHANGELOG ──
+  window.MX.CHANGELOG = [
+    {
+      ver: '1.0.31', date: '2026-06-26', emoji: '🚀',
+      title: 'Système de gestion des versions',
+      changes: [
+        'Notification automatique lors d\'une nouvelle version',
+        'Section "Nouveautés" dans Paramètres avec historique complet',
+        'Badge "Nouvelle version" dans la barre supérieure',
+        'Bannière PWA de mise à jour améliorée',
+        'Gestion des versions dans Super Admin (Firestore)',
+      ]
+    },
+    {
+      ver: '1.0.30', date: '2026-06-20', emoji: '📊',
+      title: 'Dashboard ultrawide & cockpit redesign',
+      changes: [
+        'Grille cockpit responsive (mobile → 2560px+)',
+        'Fil d\'activité enrichi avec missions et messages',
+        'Indicateurs d\'évolution des consommations (▲/▼)',
+        'KPIs adaptés aux écrans 2560px et 3200px+',
+        'Suppression des limitations de largeur ultrawide',
+      ]
+    },
+    {
+      ver: '1.0.29', date: '2026-06-10', emoji: '🏨',
+      title: 'Configuration hôtel & maintenance BDD',
+      changes: [
+        'Panel Super Admin avec fiche hôtel complète (14 champs)',
+        'Sélecteurs de couleur pour l\'identité visuelle',
+        'Outils de maintenance Base de Données (5 opérations)',
+        'Suppression du fond industriel/blueprint',
+        'Fonctions getHotelConfig / saveHotelConfig en Firestore',
+      ]
+    },
+    {
+      ver: '1.0.28', date: '2026-05-15', emoji: '⭐',
+      title: 'Badges professionnels & présence temps réel',
+      changes: [
+        'Système de badges professionnels assignables',
+        'Indicateur de présence en temps réel',
+        'Heartbeat de présence toutes les 2 minutes',
+        'Affichage des badges dans le header utilisateur',
+      ]
+    },
+  ];
+  window.MX.appVer = "1.0.31";
+
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.30";
+  const _APP_VER = "1.0.31";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -863,6 +916,8 @@
         if (_swHadController) _showSwUpdateBar();
       });
     }
+
+    MX.Updates.init();
   }
 
   function _showSwUpdateBar() {
@@ -1010,6 +1065,81 @@
   }
 
   window.MX.primaryBadge = _primaryBadge;
+
+  // ── VERSION UPDATES MODULE ──
+  window.MX.Updates = (function() {
+    function init() {
+      if (localStorage.getItem('mx_last_ver') !== _APP_VER) {
+        buildDeskHeader();
+        setTimeout(showModal, 2500);
+      }
+    }
+
+    function showModal() {
+      if (document.getElementById('ver-modal-overlay')) return;
+      const cl = window.MX.CHANGELOG || [];
+      const latest = cl[0] || {};
+      const changesList = (latest.changes || []).map(c =>
+        `<li class="vcl-change-item"><i class="fas fa-check" style="color:var(--cyan);font-size:10px;margin-right:8px"></i>${MX.esc(c)}</li>`
+      ).join('');
+
+      const overlay = document.createElement('div');
+      overlay.id = 'ver-modal-overlay';
+      overlay.className = 'ver-modal-overlay';
+      overlay.innerHTML = `<div class="ver-modal">
+        <div style="text-align:center;margin-bottom:22px">
+          <div style="font-size:32px;margin-bottom:10px">🚀</div>
+          <div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1.2">Nouvelle version disponible</div>
+          <div style="font-size:13px;color:var(--cyan);margin-top:6px;font-weight:700;letter-spacing:0.5px">Maintix v${_APP_VER}</div>
+        </div>
+        ${latest.title ? `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text2)">${MX.esc(latest.title)}</div>` : ''}
+        ${changesList ? `<ul class="vcl-changes-list">${changesList}</ul>` : ''}
+        <div class="ver-modal-actions">
+          <button class="primary-btn" style="width:100%" onclick="MX.Updates._goNouveautes()">
+            <i class="fas fa-scroll"></i> Voir les nouveautés
+          </button>
+          <button class="sec-btn" style="width:100%;margin-top:8px" onclick="MX.Updates._doUpdate()">
+            <i class="fas fa-rotate"></i> Mettre à jour maintenant
+          </button>
+          <button class="ver-modal-later" onclick="MX.Updates.dismiss()">Plus tard</button>
+        </div>
+      </div>`;
+      overlay.addEventListener('click', e => { if (e.target === overlay) MX.Updates.dismiss(); });
+      document.body.appendChild(overlay);
+    }
+
+    function markSeen() {
+      localStorage.setItem('mx_last_ver', _APP_VER);
+      const badge = document.getElementById('dh-ver-badge');
+      if (badge) badge.remove();
+    }
+
+    function dismiss() {
+      const el = document.getElementById('ver-modal-overlay');
+      if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 200); }
+    }
+
+    function _goNouveautes() {
+      dismiss();
+      markSeen();
+      window._settingsTab = 'nouveautes';
+      MX.showPage('settings');
+    }
+
+    function _doUpdate() {
+      dismiss();
+      markSeen();
+      if ('caches' in window) {
+        caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
+          window.location.reload(true);
+        });
+      } else {
+        window.location.reload(true);
+      }
+    }
+
+    return { init, showModal, markSeen, dismiss, _goNouveautes, _doUpdate };
+  })();
 
   window.MX.badgeBorder = function(userName) {
     const b = _primaryBadge(userName);

@@ -32,7 +32,7 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v75";
+const CACHE  = "maintix-v76";
 const SHELL  = [
   "/",
   "/index.html",
@@ -56,11 +56,11 @@ const SHELL  = [
   "/assets/icons/favicon-32.png",
   "/assets/icons/favicon-48.png",
   "/assets/css/variables.css",
-  "/assets/css/variables.css?v=72",
+  "/assets/css/variables.css?v=76",
   "/assets/css/main.css",
-  "/assets/css/main.css?v=72",
+  "/assets/css/main.css?v=76",
   "/assets/css/components.css",
-  "/assets/css/components.css?v=72",
+  "/assets/css/components.css?v=76",
   "/assets/fontawesome/css/all.min.css",
   "/assets/fontawesome/webfonts/fa-solid-900.woff2",
   "/assets/fontawesome/webfonts/fa-regular-400.woff2",

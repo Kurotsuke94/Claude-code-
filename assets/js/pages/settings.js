@@ -24,7 +24,8 @@
     { id: 'application',   icon: 'fa-sliders',         l: 'Application' },
     { id: 'permissions',   icon: 'fa-lock',            l: 'Permissions', adminOnly: true },
     { id: 'journal',       icon: 'fa-clock-rotate-left', l: 'Journal' },
-    { id: 'apropos',       icon: 'fa-circle-info',    l: 'À propos' },
+    { id: 'nouveautes',    icon: 'fa-rocket',           l: 'Nouveautés' },
+    { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
   ];
 
   // ── AVATAR CANVAS CROP ──
@@ -842,7 +843,7 @@
   }
 
   function _renderApropos() {
-    const ver = '1.0.30';
+    const ver = '1.0.31';
     const isOnline = navigator.onLine;
     const users = MX.state.users || [];
     const lastSync = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';
@@ -902,6 +903,42 @@
       </div>`;
   }
 
+  // ── NOUVEAUTÉS ──
+  function _renderNouveautes() {
+    if (window.MX && MX.Updates) MX.Updates.markSeen();
+    const cl = (window.MX && MX.CHANGELOG) ? MX.CHANGELOG : [];
+    const ver = (window.MX && MX.appVer) ? MX.appVer : '1.0.31';
+
+    const entriesHtml = cl.map((e, i) => `
+      <div class="vcl-hist-entry${i === 0 ? ' vcl-hist-entry-latest' : ''}">
+        <div class="vcl-hist-head">
+          <span class="vcl-hist-ver">${e.emoji || '📦'} v${MX.esc(e.ver)}</span>
+          <span class="vcl-hist-date">${MX.esc(e.date || '')}</span>
+          ${i === 0 ? '<span class="stt-badge stt-badge-green" style="margin-left:6px">Actuelle</span>' : ''}
+        </div>
+        ${e.title ? `<div class="vcl-hist-title">${MX.esc(e.title)}</div>` : ''}
+        <ul class="vcl-changes-list">
+          ${(e.changes || []).map(c => `<li class="vcl-change-item"><i class="fas fa-check" style="color:var(--cyan);font-size:10px;margin-right:8px"></i>${MX.esc(c)}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('');
+
+    return `
+      <div class="stt-section-head"><i class="fas fa-rocket"></i> Nouveautés Maintix</div>
+      <div class="stt-card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <div style="width:44px;height:44px;border-radius:12px;background:var(--cyan-dim);border:1px solid var(--cyan-border);display:flex;align-items:center;justify-content:center;color:var(--cyan);font-size:18px;flex-shrink:0">
+            <i class="fas fa-rocket"></i>
+          </div>
+          <div>
+            <div style="font-size:15px;font-weight:700">Version actuelle : v${MX.esc(ver)}</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:2px">Historique complet des mises à jour</div>
+          </div>
+        </div>
+        ${entriesHtml || '<div style="color:var(--text3);font-size:13px;padding:8px 0">Aucune information disponible</div>'}
+      </div>`;
+  }
+
   // ── SECTION SWITCHER ──
   function _showSection(id) {
     _section = id;
@@ -920,6 +957,7 @@
       application:   _renderApplication,
       permissions:   _renderPermissions,
       journal:       _renderJournal,
+      nouveautes:    _renderNouveautes,
       apropos:       _renderApropos,
     };
     content.innerHTML = (renderers[id] || (() => ''))();
@@ -969,6 +1007,10 @@
   function renderPage() {
     const mc = document.getElementById('main-content');
     if (!mc) return;
+    if (window._settingsTab) {
+      _section = window._settingsTab;
+      window._settingsTab = null;
+    }
     const isAdmin = MX.Auth.isAdmin && MX.Auth.isAdmin();
 
     const navItems = SECTIONS.filter(s => !s.adminOnly || isAdmin).map(s => `
