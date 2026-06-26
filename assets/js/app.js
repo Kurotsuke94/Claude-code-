@@ -764,14 +764,12 @@
           }
         } catch(e) {}
       }
-      if (state.currentPage === "admin")  MX.Pages.Admin.render();
-      if (state.currentPage === "equipe") MX.Pages.Equipe && MX.Pages.Equipe.render();
+      if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
     DB.listenRoles(list => {
       state.roles = list;
       buildNav();
-      if (state.currentPage === "equipe") MX.Pages.Equipe && MX.Pages.Equipe.render();
     });
 
     DB.listenLogs(list => {

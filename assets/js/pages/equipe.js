@@ -8,7 +8,7 @@
   let _searchQ    = '';
   let _migDone    = false;
 
-  // ── DEFAULT MÉTIERS (migration) ──
+  // ── DEFAULT MÉTIERS (migration idempotente) ──
   const _DEFAULT_ROLES = [
     {
       id: 'technicien-maintenance', name: 'Technicien Maintenance',
@@ -40,9 +40,9 @@
 
   // ── CRÉNEAUX ──
   const SHIFTS = [
-    { id: 'matin',   l: 'Matin',   icon: 'fa-sun',       color: '#FDE047' },
-    { id: 'journee', l: 'Journée', icon: 'fa-cloud-sun',  color: '#94A3B8' },
-    { id: 'soir',    l: 'Soir',    icon: 'fa-moon',      color: '#818CF8' },
+    { id: 'matin',   l: 'Matin',   icon: 'fa-sun',      color: '#FDE047' },
+    { id: 'journee', l: 'Journée', icon: 'fa-cloud-sun', color: '#94A3B8' },
+    { id: 'soir',    l: 'Soir',    icon: 'fa-moon',     color: '#818CF8' },
   ];
 
   // ── RANGS ──
@@ -51,7 +51,7 @@
     responsable: { l: 'Responsable', icon: 'fa-user-tie', cls: 'eq-rank--resp' },
   };
 
-  // ── PERMISSIONS ──
+  // ── ACCÈS ──
   function _canManage() { return MX.Auth.isAdmin() || MX.Auth.canSeeAll(); }
   function _isAdmin()   { return MX.Auth.isAdmin(); }
 
@@ -60,72 +60,116 @@
     if (_migDone) return;
     _migDone = true;
     for (const r of _DEFAULT_ROLES) {
-      try { await MX.DB.addRole({ id: r.id, name: r.name, icon: r.icon, color: r.color, order: r.order, permissions: r.permissions, description: r.description, createdBy: 'migration' }); }
-      catch(e) { /* ignore */ }
+      try {
+        await MX.DB.addRole({
+          id: r.id, name: r.name, icon: r.icon, color: r.color,
+          order: r.order, permissions: r.permissions,
+          description: r.description, createdBy: 'migration',
+        });
+      } catch(e) { /* idempotent — ignore if already exists */ }
     }
   }
 
   // ── HELPERS ──
-  function _initials(name) { return (name || '?').substring(0, 2).toUpperCase(); }
-  function _userRoleObj(u) { return _roles.find(r => r.id === u.roleId) || null; }
-  function _userRankKey(u) { return u.rank || (u.role === 'responsable' ? 'responsable' : 'utilisateur'); }
+  function _str(v)      { return (v != null && typeof v === 'string') ? v : (v != null ? String(v) : ''); }
+  function _initials(n) { return _str(n).substring(0, 2).toUpperCase() || '?'; }
+  function _userRoleObj(u) { return _roles.find(r => r.id === _str(u.roleId)) || null; }
+  function _userRankKey(u) {
+    if (_str(u.rank))                       return _str(u.rank);
+    if (_str(u.role) === 'responsable')     return 'responsable';
+    return 'utilisateur';
+  }
 
   // ── RENDER ──
   function render() {
     const mc = document.getElementById('main-content');
     if (!mc) return;
 
+    // Listeners propres à la page équipe
     if (!_unsubRoles) {
       _unsubRoles = MX.DB.listenRoles(list => {
+        if (!Array.isArray(list)) { console.warn('[Equipe] listenRoles: résultat invalide', list); return; }
         if (list.length === 0 && !_migDone) {
           _migrateDefaultRoles();
         } else {
           _migDone = true;
           _roles = list;
           MX.state.roles = list;
-          if (MX.state.currentPage === 'equipe') render();
+          if (MX.state.currentPage === 'equipe') _safeRender();
         }
       });
     }
     if (!_unsubUsers) {
       _unsubUsers = MX.DB.listenUsers(list => {
+        if (!Array.isArray(list)) { console.warn('[Equipe] listenUsers: résultat invalide', list); return; }
         _users = list;
-        if (MX.state.currentPage === 'equipe') render();
+        if (MX.state.currentPage === 'equipe') _safeRender();
       });
     }
 
-    _renderMain(mc);
+    _safeRender();
+  }
+
+  function _safeRender() {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    try {
+      _renderMain(mc);
+    } catch(e) {
+      console.error('[Equipe] Erreur de rendu:', e);
+      mc.innerHTML = `
+        <div class="ph eq-page">
+          <div class="eq-header">
+            <div class="eq-header-info">
+              <div class="eq-title"><i class="fas fa-users-gear"></i> Gestion Équipe</div>
+            </div>
+          </div>
+          <div class="eq-empty" style="padding:48px 16px">
+            <i class="fas fa-triangle-exclamation" style="color:var(--red);opacity:1"></i>
+            <div style="color:var(--text1);font-weight:600">Erreur de chargement</div>
+            <div style="color:var(--text3);font-size:12px;max-width:300px">${MX.esc(e.message || 'Erreur inconnue')}</div>
+            <button class="primary-btn" onclick="MX.Pages.Equipe.render()" style="margin-top:8px"><i class="fas fa-rotate-right"></i> Réessayer</button>
+          </div>
+        </div>`;
+    }
   }
 
   function _renderMain(mc) {
-    const canManage  = _canManage();
-    const isAdmin    = _isAdmin();
+    const canManage   = _canManage();
     const sortedRoles = [..._roles].sort((a, b) => (a.order || 0) - (b.order || 0));
 
     // Compte membres par métier
     const memberCounts = {};
     _users.forEach(u => {
-      const rid = u.roleId || '';
+      const rid = _str(u.roleId);
       if (rid) memberCounts[rid] = (memberCounts[rid] || 0) + 1;
     });
 
     // Cards métiers
-    const rolesHtml = sortedRoles.map(r => _roleCard(r, memberCounts[r.id] || 0, canManage)).join('');
+    const rolesHtml = sortedRoles.map(r => {
+      try { return _roleCard(r, memberCounts[r.id] || 0, canManage); }
+      catch(e) { console.warn('[Equipe] Erreur carte métier', r, e); return ''; }
+    }).join('');
 
     // Filtrage membres
     let filtered = [..._users];
-    if (_filterRole) filtered = filtered.filter(u => u.roleId === _filterRole);
-    if (_searchQ)    filtered = filtered.filter(u => (u.name || '').toLowerCase().includes(_searchQ.toLowerCase()));
+    if (_filterRole) filtered = filtered.filter(u => _str(u.roleId) === _filterRole);
+    if (_searchQ)    filtered = filtered.filter(u => _str(u.name).toLowerCase().includes(_searchQ.toLowerCase()));
     filtered.sort((a, b) => {
       const order = { responsable: 0, utilisateur: 1 };
       const ra = order[_userRankKey(a)] ?? 2;
       const rb = order[_userRankKey(b)] ?? 2;
-      return ra !== rb ? ra - rb : (a.name || '').localeCompare(b.name || '');
+      return ra !== rb ? ra - rb : _str(a.name).localeCompare(_str(b.name));
     });
 
     // Dropdown filtre métier
     const roleFilterOpts = `<option value="">Tous les métiers</option>` +
       sortedRoles.map(r => `<option value="${MX.esc(r.id)}"${_filterRole === r.id ? ' selected' : ''}>${MX.esc(r.name)}</option>`).join('');
+
+    const membersHtml = filtered.map(u => {
+      try { return _memberCard(u, canManage); }
+      catch(e) { console.warn('[Equipe] Utilisateur invalide ignoré', u, e); return ''; }
+    }).join('');
 
     mc.innerHTML = `
       <div class="ph eq-page">
@@ -157,7 +201,7 @@
             </div>
           </div>
           <div class="eq-members">
-            ${filtered.length ? filtered.map(u => _memberCard(u, canManage)).join('') : `<div class="eq-empty"><i class="fas fa-user-slash"></i><div>Aucun membre trouvé</div></div>`}
+            ${membersHtml || `<div class="eq-empty"><i class="fas fa-user-slash"></i><div>Aucun membre trouvé</div></div>`}
           </div>
         </div>
 
@@ -165,8 +209,10 @@
   }
 
   function _roleCard(r, count, canManage) {
-    const perms = r.permissions || [];
-    const shown = perms.slice(0, 5).map(pid => {
+    const perms   = Array.isArray(r.permissions) ? r.permissions : [];
+    const color   = _str(r.color) || '#60A5FA';
+    const icon    = _str(r.icon)  || 'fa-briefcase';
+    const shown   = perms.slice(0, 5).map(pid => {
       const p = ALL_PERMS.find(x => x.id === pid);
       return p ? `<span class="eq-perm-chip" title="${MX.esc(p.l)}"><i class="fas ${MX.esc(p.icon)}"></i></span>` : '';
     }).join('');
@@ -174,10 +220,10 @@
     return `
       <div class="eq-role-card">
         <div class="eq-role-top">
-          <div class="eq-role-icon" style="background:${MX.esc(r.color)}22;color:${MX.esc(r.color)}"><i class="fas ${MX.esc(r.icon || 'fa-briefcase')}"></i></div>
+          <div class="eq-role-icon" style="background:${MX.esc(color)}22;color:${MX.esc(color)}"><i class="fas ${MX.esc(icon)}"></i></div>
           <div class="eq-role-info">
-            <div class="eq-role-name">${MX.esc(r.name)}</div>
-            ${r.description ? `<div class="eq-role-desc">${MX.esc(r.description)}</div>` : ''}
+            <div class="eq-role-name">${MX.esc(_str(r.name) || '—')}</div>
+            ${r.description ? `<div class="eq-role-desc">${MX.esc(_str(r.description))}</div>` : ''}
           </div>
         </div>
         <div class="eq-role-perms">${shown}${more}</div>
@@ -185,8 +231,8 @@
           <span class="eq-role-count"><i class="fas fa-users"></i> ${count} membre${count !== 1 ? 's' : ''}</span>
           ${canManage ? `
             <div class="eq-role-acts">
-              <button class="eq-icon-btn" title="Modifier" onclick="MX.Pages.Equipe._openRoleModal('${MX.esc(r.id)}')"><i class="fas fa-pen"></i></button>
-              <button class="eq-icon-btn eq-icon-btn--danger" title="Supprimer" onclick="MX.Pages.Equipe._deleteRole('${MX.esc(r.id)}')"><i class="fas fa-trash"></i></button>
+              <button class="eq-icon-btn" title="Modifier" onclick="MX.Pages.Equipe._openRoleModal('${MX.esc(_str(r.id))}')"><i class="fas fa-pen"></i></button>
+              <button class="eq-icon-btn eq-icon-btn--danger" title="Supprimer" onclick="MX.Pages.Equipe._deleteRole('${MX.esc(_str(r.id))}')"><i class="fas fa-trash"></i></button>
             </div>` : ''}
         </div>
       </div>`;
@@ -196,18 +242,22 @@
     const roleObj  = _userRoleObj(u);
     const rankKey  = _userRankKey(u);
     const rankInfo = RANKS[rankKey] || RANKS.utilisateur;
-    const shiftObj = SHIFTS.find(s => s.id === (u.shift || ''));
-    const nc = MX.userColors ? MX.userColors(u.name || '') : { bg: '#2D2D2D', fg: '#FFF' };
-    const bg = u.color || nc.bg;
-    const fg = u.color ? MX._contrastColor(u.color) : nc.fg;
-    const statusOn = u.status !== 'inactif';
+    const shiftObj = SHIFTS.find(s => s.id === _str(u.shift));
+    let bg = '#3B82F6', fg = '#FFFFFF';
+    try {
+      const nc = MX.userColors ? MX.userColors(_str(u.name)) : { bg: MX.avatarBg ? MX.avatarBg(_str(u.name)) : '#3B82F6', fg: '#FFF' };
+      bg = _str(u.color) || (nc && _str(nc.bg)) || '#3B82F6';
+      fg = _str(u.color) ? (MX._contrastColor ? MX._contrastColor(_str(u.color)) : '#FFF') : ((nc && _str(nc.fg)) || '#FFF');
+    } catch(e) { /* keep defaults */ }
+    const statusOn = _str(u.status) !== 'inactif';
+    const uid = _str(u.id);
     return `
       <div class="eq-member-card">
-        <div class="eq-member-avatar" style="background:${bg};color:${fg}">${_initials(u.name)}</div>
+        <div class="eq-member-avatar" style="background:${MX.esc(bg)};color:${MX.esc(fg)}">${_initials(u.name)}</div>
         <div class="eq-member-body">
-          <div class="eq-member-name">${MX.esc(u.name || '—')}</div>
+          <div class="eq-member-name">${MX.esc(_str(u.name) || '—')}</div>
           <div class="eq-member-chips">
-            ${roleObj ? `<span class="eq-chip eq-chip--role" style="color:${MX.esc(roleObj.color)};border-color:${MX.esc(roleObj.color)}40"><i class="fas ${MX.esc(roleObj.icon)}"></i> ${MX.esc(roleObj.name)}</span>` : ''}
+            ${roleObj ? `<span class="eq-chip eq-chip--role" style="color:${MX.esc(_str(roleObj.color)||'')};border-color:${MX.esc(_str(roleObj.color)||'')}40"><i class="fas ${MX.esc(_str(roleObj.icon)||'fa-briefcase')}"></i> ${MX.esc(_str(roleObj.name))}</span>` : ''}
             <span class="eq-chip ${rankInfo.cls}"><i class="fas ${rankInfo.icon}"></i> ${rankInfo.l}</span>
             ${shiftObj ? `<span class="eq-chip eq-chip--shift" style="color:${shiftObj.color}"><i class="fas ${shiftObj.icon}"></i> ${shiftObj.l}</span>` : ''}
           </div>
@@ -215,26 +265,26 @@
         <div class="eq-member-right">
           <span class="eq-status-dot ${statusOn ? 'eq-status-dot--on' : 'eq-status-dot--off'}" title="${statusOn ? 'Actif' : 'Inactif'}"></span>
           ${canManage ? `
-            <button class="eq-icon-btn" title="Modifier" onclick="MX.Pages.Equipe._openUserModal('${MX.esc(u.id)}')"><i class="fas fa-pen"></i></button>
-            <button class="eq-icon-btn eq-icon-btn--danger" title="Supprimer" onclick="MX.Pages.Equipe._deleteUser('${MX.esc(u.id)}')"><i class="fas fa-trash"></i></button>
+            <button class="eq-icon-btn" title="Modifier" onclick="MX.Pages.Equipe._openUserModal('${MX.esc(uid)}')"><i class="fas fa-pen"></i></button>
+            <button class="eq-icon-btn eq-icon-btn--danger" title="Supprimer" onclick="MX.Pages.Equipe._deleteUser('${MX.esc(uid)}')"><i class="fas fa-trash"></i></button>
           ` : ''}
         </div>
       </div>`;
   }
 
   // ── SEARCH / FILTER ──
-  function _onSearch(q)      { _searchQ = q;   _renderMain(document.getElementById('main-content')); }
-  function _onFilterRole(v)  { _filterRole = v || null; _renderMain(document.getElementById('main-content')); }
+  function _onSearch(q)     { _searchQ = q || '';    _safeRender(); }
+  function _onFilterRole(v) { _filterRole = v || null; _safeRender(); }
 
   // ── RÔLE (MÉTIER) CRUD ──
   function _openRoleModal(id) {
     const role  = id ? _roles.find(r => r.id === id) : null;
     const isNew = !role;
-    const defIcon  = role?.icon  || 'fa-briefcase';
-    const defColor = role?.color || '#60A5FA';
+    const defIcon  = _str(role?.icon)  || 'fa-briefcase';
+    const defColor = _str(role?.color) || '#60A5FA';
 
     const permsGrid = ALL_PERMS.map(p => {
-      const on = role ? (role.permissions || []).includes(p.id) : true;
+      const on = role ? (Array.isArray(role.permissions) && role.permissions.includes(p.id)) : true;
       return `<label class="eq-perm-label">
         <input type="checkbox" name="eq-perm" value="${p.id}"${on ? ' checked' : ''}>
         <span><i class="fas ${p.icon}"></i> ${MX.esc(p.l)}</span>
@@ -244,7 +294,7 @@
     const body = `<div style="display:flex;flex-direction:column;gap:14px">
       <div class="form-group">
         <label>Nom du métier *</label>
-        <input id="eq-rn" class="fi" type="text" placeholder="ex : Plombier, Électricien, Peintre…" value="${MX.esc(role?.name || '')}">
+        <input id="eq-rn" class="fi" type="text" placeholder="ex : Plombier, Électricien, Peintre…" value="${MX.esc(_str(role?.name))}">
       </div>
       <div style="display:flex;gap:10px">
         <div class="form-group" style="flex:1">
@@ -258,7 +308,7 @@
       </div>
       <div class="form-group">
         <label>Description <span style="font-weight:400;color:var(--text3)">(optionnel)</span></label>
-        <input id="eq-rd" class="fi" type="text" placeholder="Rôle et responsabilités…" value="${MX.esc(role?.description || '')}">
+        <input id="eq-rd" class="fi" type="text" placeholder="Rôle et responsabilités…" value="${MX.esc(_str(role?.description))}">
       </div>
       <div class="form-group">
         <label>Accès aux modules</label>
@@ -287,13 +337,8 @@
     try {
       const existing = id ? _roles.find(r => r.id === id) : null;
       const payload  = { name, icon, color, description: desc, permissions: perms, order: existing ? (existing.order ?? _roles.length) : _roles.length };
-      if (id) {
-        await MX.DB.updateRole(id, payload);
-        MX.toast('Métier mis à jour');
-      } else {
-        await MX.DB.addRole(payload);
-        MX.toast('Métier créé');
-      }
+      if (id) { await MX.DB.updateRole(id, payload); MX.toast('Métier mis à jour'); }
+      else    { await MX.DB.addRole(payload); MX.toast('Métier créé'); }
       MX.closeModal();
     } catch(e) { MX.toast('Erreur : ' + e.message, true); }
   }
@@ -301,14 +346,14 @@
   function _deleteRole(id) {
     const role  = _roles.find(r => r.id === id);
     if (!role) return;
-    const count = _users.filter(u => u.roleId === id).length;
+    const count = _users.filter(u => _str(u.roleId) === id).length;
     if (count > 0) {
       MX.closeModal();
       MX.showModal('Métier non vide', `Ce métier est assigné à ${count} membre${count > 1 ? 's' : ''}. Réassignez-les avant de supprimer.`, [{ label: 'Fermer', cls: 'cancel' }]);
       return;
     }
     MX.closeModal();
-    MX.showModal(`Supprimer "${role.name}" ?`, 'Ce métier sera définitivement supprimé.', [
+    MX.showModal(`Supprimer "${_str(role.name)}" ?`, 'Ce métier sera définitivement supprimé.', [
       { label: 'Supprimer', cls: 'danger', fn: async () => {
         try { await MX.DB.deleteRole(id); MX.toast('Métier supprimé'); }
         catch(e) { MX.toast('Erreur : ' + e.message, true); }
@@ -319,16 +364,16 @@
 
   // ── UTILISATEUR CRUD ──
   function _openUserModal(id) {
-    const user  = id ? _users.find(u => u.id === id) : null;
-    const isNew = !user;
-    const isAdmin  = _isAdmin();
-    const defRank  = user ? _userRankKey(user) : 'utilisateur';
-    const defRoleId = user?.roleId || '';
-    const defShift  = user?.shift  || '';
+    const user    = id ? _users.find(u => u.id === id) : null;
+    const isNew   = !user;
+    const isAdmin = _isAdmin();
+    const defRank   = user ? _userRankKey(user) : 'utilisateur';
+    const defRoleId = _str(user?.roleId);
+    const defShift  = _str(user?.shift);
 
     const sortedRoles = [..._roles].sort((a, b) => (a.order || 0) - (b.order || 0));
     const roleOpts  = `<option value="">— Choisir un métier —</option>` +
-      sortedRoles.map(r => `<option value="${MX.esc(r.id)}"${defRoleId === r.id ? ' selected' : ''}>${MX.esc(r.name)}</option>`).join('');
+      sortedRoles.map(r => `<option value="${MX.esc(r.id)}"${defRoleId === r.id ? ' selected' : ''}>${MX.esc(_str(r.name))}</option>`).join('');
     const shiftOpts = `<option value="">— Créneau —</option>` +
       SHIFTS.map(s => `<option value="${s.id}"${defShift === s.id ? ' selected' : ''}>${s.l}</option>`).join('');
     const rankOpts  = `<option value="utilisateur"${defRank === 'utilisateur' ? ' selected' : ''}>Utilisateur</option>` +
@@ -337,7 +382,7 @@
     const body = `<div style="display:flex;flex-direction:column;gap:14px">
       <div class="form-group">
         <label>Nom *</label>
-        <input id="eq-un" class="fi" type="text" placeholder="Prénom ou pseudonyme" value="${MX.esc(user?.name || '')}">
+        <input id="eq-un" class="fi" type="text" placeholder="Prénom ou pseudonyme" value="${MX.esc(_str(user?.name))}">
       </div>
       <div class="form-group">
         <label>${isNew ? 'Code PIN *' : 'Nouveau PIN <span style="font-weight:400;color:var(--text3)">(laisser vide = inchangé)</span>'}</label>
@@ -357,7 +402,7 @@
       </div>
       <div class="form-group">
         <label>Couleur avatar</label>
-        <input id="eq-uc" type="color" value="${MX.esc(user?.color || '#3B82F6')}" style="width:46px;height:38px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px">
+        <input id="eq-uc" type="color" value="${MX.esc(_str(user?.color) || '#3B82F6')}" style="width:46px;height:38px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px">
       </div>
     </div>`;
 
@@ -388,13 +433,8 @@
         role: rank === 'responsable' ? 'responsable' : 'technicien',
       };
       if (pinRaw) payload.pin = await MX.hashPin(pinRaw);
-      if (id) {
-        await MX.DB.updateUser(id, payload);
-        MX.toast('Membre mis à jour');
-      } else {
-        await MX.DB.addUser({ ...payload, status: 'actif' });
-        MX.toast('Membre ajouté');
-      }
+      if (id) { await MX.DB.updateUser(id, payload); MX.toast('Membre mis à jour'); }
+      else    { await MX.DB.addUser({ ...payload, status: 'actif' }); MX.toast('Membre ajouté'); }
       MX.closeModal();
     } catch(e) { MX.toast('Erreur : ' + e.message, true); }
   }
@@ -403,7 +443,7 @@
     const user = _users.find(u => u.id === id);
     if (!user) return;
     MX.closeModal();
-    MX.showModal(`Supprimer "${user.name}" ?`, 'Ce membre sera définitivement supprimé de l\'équipe.', [
+    MX.showModal(`Supprimer "${_str(user.name)}" ?`, 'Ce membre sera définitivement supprimé de l\'équipe.', [
       { label: 'Supprimer', cls: 'danger', fn: async () => {
         try { await MX.DB.deleteUser(id); MX.toast('Membre supprimé'); }
         catch(e) { MX.toast('Erreur : ' + e.message, true); }
@@ -415,6 +455,7 @@
   function _destroy() {
     if (_unsubRoles) { _unsubRoles(); _unsubRoles = null; }
     if (_unsubUsers) { _unsubUsers(); _unsubUsers = null; }
+    _migDone = false;
   }
 
   window.MX        = window.MX        || {};
