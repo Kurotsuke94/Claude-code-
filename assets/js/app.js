@@ -21,7 +21,7 @@
     { id: "badges",        icon: "fa-medal",          l: "Badges",          noBot: true },
     { id: "notifs",        icon: "fa-bell",            l: "Notifications", noBot: true },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
-    { id: "org-resp",      icon: "fa-clipboard-list", l: "Organisation Resp.", respOnly: true },
+    { id: "org-resp",      icon: "fa-users",          l: "Organisation Responsable", respOnly: true },
   ];
 
   const BIBLE_CATS = [
@@ -227,6 +227,13 @@
     DAYS.forEach(d => { clItems += _item(d.id, "fa-calendar-day", d.l, { sub: true, pct: _dayPct(d.id) }); });
     h += _sec("sx-card--violet", "fa-list-check", "📋 Check-lists", "Tâches quotidiennes", "toggleNavCl", _clOpen, clItems);
 
+    // ── Section 2: ORGANISATION RESPONSABLE (respOnly) ──
+    if (canAll) {
+      h += `<div class="sx-standalone">`;
+      h += _item("org-resp", "fa-users", "👥 Organisation Responsable");
+      h += `</div>`;
+    }
+
     // ── Section 3: RESSOURCES ──
     const bibAct = cur === "documents" || cur.startsWith("bible-");
     let resItems = _item("orders", "fa-box", "Stock & Commandes");
@@ -277,7 +284,6 @@
       let aItems = "";
       // Items visible to both Responsable and Admin
       [
-        { fn:"MX.showPage('org-resp')",           icon:"fa-clipboard-list",      l:"Organisation Resp.",act: cur==="org-resp" },
         { fn:"MX.showPage('equipe')",             icon:"fa-users-gear",          l:"Gestion Équipe",    act: cur==="equipe" },
         { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Utilisateurs",      act: cur==="utilisateurs" },
         { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",     act: false },
@@ -316,6 +322,7 @@
     bot += `<button class="bn${resIds.includes(cur)?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-folder-open"></i><span>Ressources</span></button>`;
     bot += `<button class="bn${cur==="parametres"?" active":""}" data-page="parametres" onclick="MX.showPage('parametres')"><div class="bn-bar"></div><i class="fas fa-gear"></i><span>Paramètres</span></button>`;
     if (canAll) {
+      bot += `<button class="bn${cur==="org-resp"?" active":""}" data-page="org-resp" onclick="MX.showPage('org-resp')"><div class="bn-bar"></div><i class="fas fa-users"></i><span>Organisation</span></button>`;
       bot += `<button class="bn${cur==="utilisateurs"?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
     }
     bot += `</div>`;

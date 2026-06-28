@@ -4018,6 +4018,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* ── Paramètres standalone item ── */
 .sx-params { padding: 6px 0 2px; }
 
+/* ── Standalone nav item (e.g. Organisation Responsable) ── */
+.sx-standalone { padding: 3px 8px 1px; }
+
 /* ── MOBILE SIDEBAR (≤900px) ── */
 @media (max-width: 900px) {
   .sx-item     { min-height: 44px; padding: 11px 14px; font-size: 13px; }
