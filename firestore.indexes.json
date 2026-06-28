@@ -1,4 +1,21 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "org_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "weekKey",  "order": "ASCENDING" },
+        { "fieldPath": "order",    "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "org_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "weekKey",  "order": "ASCENDING" },
+        { "fieldPath": "isDefault","order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

@@ -67,29 +67,33 @@
 
   // ── SEED ──
   async function _seedWeek(weekKey) {
-    const snap = await db.collection('org_tasks').where('weekKey', '==', weekKey).limit(1).get();
-    if (!snap.empty) return;
-    const name = _currentUserName();
-    const batch = db.batch();
-    // Seed default recurring tasks
-    DEFAULT_ORG_TASKS.forEach((t, i) => {
-      batch.set(db.collection('org_tasks').doc(), {
-        ...t,
-        weekKey,
-        done: false,
-        doneBy: null,
-        doneAt: null,
-        comment: null,
-        archivedFromActive: false,
-        createdBy: name,
-        createdAt: FV.serverTimestamp(),
-        order: i,
-        isDefault: true,
+    try {
+      const snap = await db.collection('org_tasks').where('weekKey', '==', weekKey).limit(1).get();
+      if (!snap.empty) return;
+      const name = _currentUserName();
+      const batch = db.batch();
+      DEFAULT_ORG_TASKS.forEach((t, i) => {
+        batch.set(db.collection('org_tasks').doc(), {
+          ...t,
+          weekKey,
+          done: false,
+          doneBy: null,
+          doneAt: null,
+          comment: null,
+          archivedFromActive: false,
+          createdBy: name,
+          createdAt: FV.serverTimestamp(),
+          order: i,
+          isDefault: true,
+        });
       });
-    });
-    await batch.commit();
+      await batch.commit();
+    } catch(e) {
+      console.warn('[OrgResp] seed init:', e.message);
+      return;
+    }
 
-    // Carry over previous week's custom recurring tasks
+    // Carry over previous week's custom recurring tasks (requires composite index weekKey+isDefault)
     try {
       const prevDate = new Date();
       prevDate.setDate(prevDate.getDate() - 7);
@@ -103,6 +107,7 @@
         .filter(t => t.type === 'hebdomadaire');
       if (recurring.length > 0) {
         const batch2 = db.batch();
+        const name = _currentUserName();
         const baseOrder = DEFAULT_ORG_TASKS.length;
         recurring.forEach((t, i) => {
           batch2.set(db.collection('org_tasks').doc(), {
@@ -124,22 +129,87 @@
         });
         await batch2.commit();
       }
-    } catch (e) {
-      console.warn('[OrgResp] carry-over recurring:', e);
+    } catch(e) {
+      console.warn('[OrgResp] carry-over recurring (index requis weekKey+isDefault):', e.message);
+    }
+  }
+
+  // ── FIRESTORE ERROR HANDLER ──
+  function _onFirestoreError(err, ctx) {
+    const isIndex = err.code === 'failed-precondition' || (err.message && err.message.includes('index'));
+    const linkMatch = err.message && err.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+    const link = linkMatch ? linkMatch[0] : null;
+
+    console.error(`[Maintix] Firestore erreur (${ctx}):`, err.message || err);
+    if (isIndex) {
+      console.warn(
+        '[Maintix] Firestore index manquant :\n' +
+        '  Collection : org_tasks\n' +
+        '  Champs     : weekKey, order (ou isDefault)\n' +
+        (link ? '  Lien       : ' + link : '  → Déployez firestore.indexes.json via Firebase CLI')
+      );
+    }
+
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+
+    if (isIndex) {
+      mc.innerHTML = `<div class="or-page">
+        <div class="or-header">
+          <div class="or-header-left">
+            <div class="or-title">Organisation Responsable</div>
+          </div>
+        </div>
+        <div class="or-empty" style="gap:12px;padding:40px 20px">
+          <i class="fas fa-database" style="font-size:36px;color:var(--orange)"></i>
+          <div style="font-size:15px;font-weight:700;color:var(--text1)">Configuration Firestore incomplète</div>
+          <div style="font-size:13px;color:var(--text2);text-align:center;max-width:340px">
+            Un index Firestore doit être créé sur la collection <code>org_tasks</code>.<br>
+            Déployez <strong>firestore.indexes.json</strong> via la Firebase CLI.
+          </div>
+          ${link ? `<a href="${link}" target="_blank" rel="noopener" class="or-sec-btn" style="margin-top:4px">
+            <i class="fas fa-external-link-alt"></i> Créer l'index →
+          </a>` : ''}
+          <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()" style="margin-top:4px">
+            <i class="fas fa-rotate-right"></i> Réessayer
+          </button>
+        </div>
+      </div>`;
+    } else {
+      mc.innerHTML = `<div class="or-page">
+        <div class="or-empty" style="padding:40px 20px">
+          <i class="fas fa-triangle-exclamation" style="color:var(--red)"></i>
+          <div>Erreur Firestore (${ctx}) : ${MX.esc(err.message || String(err))}</div>
+          <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()" style="margin-top:8px">
+            <i class="fas fa-rotate-right"></i> Réessayer
+          </button>
+        </div>
+      </div>`;
     }
   }
 
   // ── SUBSCRIPTION ──
+  // Uses .where('weekKey') only (single-field, no composite index needed).
+  // Sorting by 'order' is done client-side to avoid requiring a composite index
+  // before firestore.indexes.json is deployed.
   function _subscribe(weekKey) {
     if (_unsub) { _unsub(); _unsub = null; }
-    _unsub = db.collection('org_tasks')
-      .where('weekKey', '==', weekKey)
-      .orderBy('order')
-      .onSnapshot(snap => {
-        _tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (!_inHistory) _doRender();
-      });
-    _seedWeek(weekKey).catch(e => console.error('[OrgResp] seed:', e));
+    try {
+      _unsub = db.collection('org_tasks')
+        .where('weekKey', '==', weekKey)
+        .onSnapshot(
+          snap => {
+            _tasks = snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+            if (!_inHistory) _doRender();
+          },
+          err => { _onFirestoreError(err, 'subscribe'); }
+        );
+    } catch(e) {
+      _onFirestoreError(e, 'subscribe-setup');
+    }
+    _seedWeek(weekKey).catch(e => console.warn('[OrgResp] seed:', e.message));
   }
 
   // ── ENTRY POINT ──
@@ -189,7 +259,7 @@
 
     // Alert
     if (_tasks.length === 0) {
-      h += `<div class="or-alert or-alert--info"><i class="fas fa-spinner fa-spin"></i> Chargement…</div>`;
+      h += `<div class="or-alert or-alert--info"><i class="fas fa-circle-info"></i> Aucune tâche disponible pour cette semaine.</div>`;
     } else if (todo.length > 0) {
       h += `<div class="or-alert"><i class="fas fa-triangle-exclamation"></i> <strong>${todo.length} tâche${todo.length > 1 ? 's' : ''}</strong> encore à réaliser cette semaine</div>`;
     } else {
@@ -469,7 +539,34 @@
       h += `</div>`;
       mc.innerHTML = h;
     } catch(e) {
-      mc.innerHTML = `<div class="or-page"><div class="or-empty"><i class="fas fa-triangle-exclamation"></i><div>Erreur: ${MX.esc(e.message)}</div></div></div>`;
+      console.error('[OrgResp] renderHistory:', e.message || e);
+      const isIndex = e.code === 'failed-precondition' || (e.message && e.message.includes('index'));
+      const linkMatch = e.message && e.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+      const link = linkMatch ? linkMatch[0] : null;
+      if (isIndex) {
+        console.warn('[Maintix] Firestore index manquant :\n  Collection : org_tasks\n  Champs     : weekKey (in)\n' + (link ? '  Lien       : ' + link : ''));
+      }
+      mc.innerHTML = `<div class="or-page">
+        <div class="or-header">
+          <div class="or-header-left"><div class="or-title">Historique</div></div>
+          <div class="or-header-right">
+            <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()">
+              <i class="fas fa-arrow-left"></i> Retour
+            </button>
+          </div>
+        </div>
+        <div class="or-empty" style="gap:12px;padding:40px 20px">
+          <i class="fas fa-${isIndex ? 'database' : 'triangle-exclamation'}" style="color:var(--${isIndex ? 'orange' : 'red'})"></i>
+          <div style="font-weight:700">${isIndex ? 'Index Firestore manquant' : 'Erreur de chargement'}</div>
+          <div style="font-size:13px;color:var(--text2);text-align:center;max-width:320px">
+            ${isIndex
+              ? 'Déployez <strong>firestore.indexes.json</strong> via la Firebase CLI pour activer l\'historique.'
+              : MX.esc(e.message || String(e))
+            }
+          </div>
+          ${link ? `<a href="${link}" target="_blank" rel="noopener" class="or-sec-btn"><i class="fas fa-external-link-alt"></i> Créer l'index →</a>` : ''}
+        </div>
+      </div>`;
     }
   }
 
