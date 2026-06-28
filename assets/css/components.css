@@ -7400,3 +7400,78 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .or-radio input[type="radio"] { display: none; }
 .or-radio:hover      { border-color: var(--cyan); color: var(--text1); }
 .or-radio--on        { border-color: var(--cyan); background: rgba(0,194,209,.08); color: var(--cyan); font-weight: 700; }
+
+/* ─── ORG-RESP V3 KANBAN ─── */
+.or-page:has(.or-kanban) { max-width: none; }
+.or-header-right     { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Progress bar (V3 wrapper) */
+.or-progress-bar     { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+
+/* Kanban board */
+.or-kanban           { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; padding-bottom: 12px; -webkit-overflow-scrolling: touch; }
+
+/* Kanban column */
+.or-kcol             { flex: 1; min-width: 280px; max-width: 380px; display: flex; flex-direction: column; background: var(--bg2); border-radius: 12px; border: 1px solid var(--border1); overflow: hidden; }
+.or-kcol-hdr         { display: flex; align-items: center; gap: 7px; padding: 11px 13px; border-bottom: 1px solid var(--border1); }
+.or-kcol-dot         { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.or-kcol-label       { font-size: 11px; font-weight: 700; color: var(--text1); flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: .06em; }
+.or-kcol-cnt         { font-size: 11px; font-weight: 700; background: var(--bg4); color: var(--text3); border-radius: 10px; padding: 1px 7px; min-width: 22px; text-align: center; }
+.or-kcol-add         { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: transparent; border: 1px solid var(--border2); color: var(--text3); font-size: 10px; cursor: pointer; transition: all .15s; flex-shrink: 0; }
+.or-kcol-add:hover   { background: var(--bg4); color: var(--text1); border-color: var(--border3); }
+.or-kcol-body        { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-height: 80px; }
+.or-kcol-empty       { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 12px; color: var(--text3); font-size: 12px; text-align: center; }
+
+/* Kanban card */
+.or-kcard            { background: var(--bg); border: 1px solid var(--border1); border-radius: 10px; padding: 11px 12px; display: flex; flex-direction: column; gap: 7px; transition: border-color .15s, box-shadow .15s; }
+.or-kcard:hover      { border-color: var(--border3); box-shadow: 0 2px 10px rgba(0,0,0,.1); }
+.or-kcard--done      { opacity: .68; }
+.or-kcard-tags       { display: flex; flex-wrap: wrap; gap: 5px; }
+.or-kcard-title      { font-size: 13px; font-weight: 600; color: var(--text1); line-height: 1.35; }
+.or-kcard-desc       { font-size: 11px; color: var(--text3); line-height: 1.4; }
+.or-kcard-comment    { font-size: 11px; color: var(--text2); font-style: italic; border-left: 2px solid var(--border2); padding-left: 7px; }
+.or-kcard-foot       { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 7px; border-top: 1px solid var(--border); }
+.or-kcard-assign     { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.or-kcard-actions    { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+
+/* Inline badges */
+.or-badge            { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 8px; letter-spacing: .02em; vertical-align: middle; }
+.or-badge--type-uni  { background: rgba(139,92,246,.12); color: #A78BFA; }
+.or-badge--type-rec  { background: rgba(16,185,129,.12); color: #10B981; }
+.or-badge--type-men  { background: rgba(96,165,250,.12); color: #60A5FA; }
+
+/* Action buttons */
+.or-btn-primary, .or-btn-secondary { display: inline-flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; font-family: var(--ffs); cursor: pointer; border: 1px solid; white-space: nowrap; transition: all .15s; -webkit-tap-highlight-color: transparent; }
+.or-btn-primary      { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+.or-btn-primary:hover { opacity: .88; }
+.or-btn-secondary    { background: var(--bg3); color: var(--text2); border-color: var(--border2); }
+.or-btn-secondary:hover { background: var(--bg4); color: var(--text1); }
+
+/* Icon buttons */
+.or-icon-btn         { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid var(--border2); background: transparent; color: var(--text3); font-size: 11px; cursor: pointer; transition: all .15s; -webkit-tap-highlight-color: transparent; }
+.or-icon-btn:hover   { background: var(--bg3); color: var(--text1); }
+.or-icon-btn:active  { transform: scale(.88); }
+.or-icon-btn--edit:hover { color: var(--cyan); border-color: rgba(0,194,209,.5); background: rgba(0,194,209,.08); }
+.or-icon-btn--del:hover  { color: #EF4444; border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.08); }
+.or-icon-btn--play:hover { color: #3B82F6; border-color: rgba(59,130,246,.5); background: rgba(59,130,246,.08); }
+.or-icon-btn--ok     { border-color: rgba(16,185,129,.3); color: #10B981; }
+.or-icon-btn--ok:hover   { color: #10B981; border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.08); }
+
+/* Empty state (full section) */
+.or-empty-state      { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 20px; color: var(--text3); font-size: 13px; text-align: center; }
+.or-empty-state i    { font-size: 32px; opacity: .4; }
+
+/* Type pills (form selector) */
+.or-type-pills       { display: flex; gap: 6px; flex-wrap: wrap; }
+.or-type-pill        { display: flex; align-items: center; padding: 6px 10px; border-radius: 8px; border: 1.5px solid var(--border2); background: var(--bg3); cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text2); transition: all .15s; user-select: none; }
+.or-type-pill:hover  { border-color: var(--cyan); color: var(--text1); }
+.or-type-pill--on    { border-color: var(--cyan); background: rgba(0,194,209,.08); color: var(--cyan); font-weight: 700; }
+
+/* Form label class */
+.or-form-lbl         { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 4px; }
+
+/* Mobile: stack columns */
+@media (max-width: 680px) {
+  .or-kanban         { flex-direction: column; }
+  .or-kcol           { min-width: 0; max-width: none; }
+}
