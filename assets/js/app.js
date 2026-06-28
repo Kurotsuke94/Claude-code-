@@ -234,8 +234,15 @@
       if (o.dynBadge) r += `<span class="sx-dyn-badge" id="sxdb_${o.dynBadge}"></span>`;
       return `<button class="${cls}"${id ? ` data-page="${id}"` : ""} onclick="${fn}" title="${label}"><i class="fas ${icon} sx-ico${act ? " sx-ico--on" : ""}"></i><span class="sx-lbl">${label}</span>${r}</button>`;
     }
-    function _sec(cardCls, icon, title, sub, fn, open, items) {
-      return `<div class="sx-sec"><button class="sx-card ${cardCls}" onclick="MX.${fn}()" title="${title}"><span class="sx-card-ico"><i class="fas ${icon}"></i></span><div class="sx-card-txt"><div class="sx-card-ttl">${title}</div><div class="sx-card-sub">${sub}</div></div><i class="fas fa-chevron-${open ? "up" : "down"} sx-card-chev"></i></button>${open ? `<div class="sx-body">${items}</div>` : ""}</div>`;
+    function _group(icon, icoCls, label, key, toggleFn, open, items) {
+      return `<div class="sx-group">
+    <button class="sx-group-hdr${open ? ' sx-group-hdr--open' : ''}" onclick="MX.${toggleFn}()" title="${label}">
+      <i class="fas fa-chevron-right sx-group-chev"></i>
+      <span class="sx-group-ico ${icoCls}"><i class="fas ${icon}"></i></span>
+      <span class="sx-group-lbl">${label}</span>
+    </button>
+    ${open ? `<div class="sx-group-body">${items}</div>` : ''}
+  </div>`;
     }
 
     let h = "";
@@ -277,7 +284,7 @@
     plngItems += _item("planning-week",  "fa-calendar-week",  "Semaine",         { sub: true, fn: "MX.showPlanningView('week')",                 matchPages: [] });
     plngItems += _item("planning",       "fa-calendar",       "Calendrier",      { sub: true, fn: "MX.showPlanningView('month')",                matchPages: plngPages });
     plngItems += _item("planning-conge", "fa-umbrella-beach", "Congés & Absences", { sub: true, fn: "MX.showPlanningView('month','CP')",         matchPages: [] });
-    h += _sec("sx-card--cyan", "fa-calendar-days", "📅 Planning", "Horaires & absences", "toggleNavPlng", _plngOpen, plngItems);
+    h += _group("fa-calendar-days", "sx-group-ico--blue", "📅 Planning", "plng", "toggleNavPlng", _plngOpen, plngItems);
 
     // ── 🔧 Maintenance ──
     const clPages = ["today-cl", ...DAYS.map(d => d.id)];
@@ -287,14 +294,14 @@
       maintItems += _item("interventions", "fa-wrench",        "Interventions",        { sub: true, dynBadge: "int" });
       maintItems += _item("org-resp",      "fa-users-gear",    "Organisation Resp.",   { sub: true });
     }
-    h += _sec("sx-card--violet", "fa-screwdriver-wrench", "🔧 Maintenance", "Checklists & interventions", "toggleNavMaint", _maintOpen, maintItems);
+    h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems);
 
     // ── 📦 Gestion ──
     let gestItems = "";
     gestItems += _item("orders",        "fa-box",            "Stock",                { sub: true, dynBadge: "stock" });
     gestItems += _item("documents",     "fa-book",           "Ressources / Bible",   { sub: true });
     gestItems += _item("consommations", "fa-droplet",        "Consommations",        { sub: true, fn: "MX.showCsoTab('dashboard')" });
-    h += _sec("sx-card--blue", "fa-cube", "📦 Gestion", "Stock, docs & conso", "toggleNavGest", _gestOpen, gestItems);
+    h += _group("fa-cube", "sx-group-ico--cyan", "📦 Gestion", "gest", "toggleNavGest", _gestOpen, gestItems);
 
     // ── 📊 Analyses ──
     let anlyItems = "";
@@ -307,7 +314,7 @@
     ].forEach(t => {
       anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
     });
-    h += _sec("sx-card--teal", "fa-chart-bar", "📊 Analyses", "Données & exportations", "toggleNavAnly", _anlyOpen, anlyItems);
+    h += _group("fa-chart-bar", "sx-group-ico--green", "📊 Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems);
 
     // ── ⚙️ Administration (respOnly) ──
     if (canAll) {
@@ -324,9 +331,7 @@
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('pin')" title="Codes PIN"><i class="fas fa-key sx-ico"></i><span class="sx-lbl">Codes PIN & Accès</span></button>`;
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('absences')" title="Absences"><i class="fas fa-umbrella-beach sx-ico"></i><span class="sx-lbl">Absences</span></button>`;
       }
-      const cardCls = isAdmin ? "sx-card--premium sx-card--adminsuper" : "sx-card--premium";
-      const adminSub = isAdmin ? "Config. avancée" : "Gestion & supervision";
-      h += _sec(cardCls, "fa-shield-halved", "⚙️ Administration", adminSub, "toggleNavAdmin", _adminOpen, aItems);
+      h += _group("fa-shield-halved", "sx-group-ico--orange", "⚙️ Administration", "adm", "toggleNavAdmin", _adminOpen, aItems);
     }
 
     // ── Paramètres (standalone) ──
