@@ -21,14 +21,7 @@
     { id: "badges",        icon: "fa-medal",          l: "Badges",          noBot: true },
     { id: "notifs",        icon: "fa-bell",            l: "Notifications", noBot: true },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
-    { id: "resp-plan",     icon: "fa-clipboard-check",l: "Checklist Resp.",  respOnly: true },
-    { id: "resp-lundi",    icon: "fa-circle-dot",     l: "Lundi",           respOnly: true, respDay: "lundi" },
-    { id: "resp-mardi",    icon: "fa-circle-dot",     l: "Mardi",           respOnly: true, respDay: "mardi" },
-    { id: "resp-mercredi", icon: "fa-circle-dot",     l: "Mercredi",        respOnly: true, respDay: "mercredi" },
-    { id: "resp-jeudi",    icon: "fa-circle-dot",     l: "Jeudi",           respOnly: true, respDay: "jeudi" },
-    { id: "resp-vendredi", icon: "fa-circle-dot",     l: "Vendredi",        respOnly: true, respDay: "vendredi" },
-    { id: "resp-samedi",   icon: "fa-circle-dot",     l: "Sam",             respOnly: true, respDay: "samedi" },
-    { id: "resp-dimanche", icon: "fa-circle-dot",     l: "Dim",             respOnly: true, respDay: "dimanche" },
+    { id: "org-resp",      icon: "fa-clipboard-list", l: "Organisation Resp.", respOnly: true },
   ];
 
   const BIBLE_CATS = [
@@ -87,13 +80,12 @@
     if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
-    if (id === "resp-plan")    return Pages.RespPlan.render();
+    if (id === "org-resp")      return Pages.OrgResp ? Pages.OrgResp.render() : null;
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
     if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
-    if (id.startsWith("resp-")) return Pages.RespPlan.renderDay(id.slice(5));
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -198,11 +190,6 @@
       });
       return t ? Math.round(d / t * 100) : 0;
     }
-    function _respPct(dayId) {
-      const dt = (state.respTasks || []).filter(t => t.dayId === dayId);
-      const dn = dt.filter(t => !!state.checks["resp_" + t.id]).length;
-      return dt.length ? Math.round(dn / dt.length * 100) : 0;
-    }
     function _cls(pct) { return pct >= 80 ? "done" : pct >= 40 ? "warn" : "low"; }
     function _bar(pct, id) {
       const c = _cls(pct);
@@ -239,14 +226,6 @@
     let clItems = _item("today-cl", "fa-star", "Aujourd'hui", { pct: _dayPct(todayId) });
     DAYS.forEach(d => { clItems += _item(d.id, "fa-calendar-day", d.l, { sub: true, pct: _dayPct(d.id) }); });
     h += _sec("sx-card--violet", "fa-list-check", "📋 Check-lists", "Tâches quotidiennes", "toggleNavCl", _clOpen, clItems);
-
-    // ── Section 2: CHECK-LISTS RESPONSABLE (respOnly) ──
-    if (canAll) {
-      const totRT = (state.respTasks || []).length;
-      let rItems = _item("resp-plan", "fa-clipboard-check", "Vue d'ensemble", { count: totRT + " tâches" });
-      DAYS.forEach(d => { rItems += _item("resp-"+d.id, "fa-calendar-day", d.l, { sub: true, pct: _respPct(d.id) }); });
-      h += _sec("sx-card--violet sx-card--resp", "fa-clipboard-check", "📋 Check-lists Resp.", "Planning responsable", "toggleNavRspCl", _respClOpen, rItems);
-    }
 
     // ── Section 3: RESSOURCES ──
     const bibAct = cur === "documents" || cur.startsWith("bible-");
@@ -298,6 +277,7 @@
       let aItems = "";
       // Items visible to both Responsable and Admin
       [
+        { fn:"MX.showPage('org-resp')",           icon:"fa-clipboard-list",      l:"Organisation Resp.",act: cur==="org-resp" },
         { fn:"MX.showPage('equipe')",             icon:"fa-users-gear",          l:"Gestion Équipe",    act: cur==="equipe" },
         { fn:"MX.showPage('utilisateurs')",       icon:"fa-users",               l:"Utilisateurs",      act: cur==="utilisateurs" },
         { fn:"MX.showAdminTab('bible-admin')",    icon:"fa-book-open",           l:"Gestion Bible",     act: false },
@@ -451,10 +431,6 @@
       const pct = t ? Math.round(d / t * 100) : 0;
       _upd(day.id, pct);
       if (day.id === todayId) _upd("today-cl", pct);
-
-      const dt   = (state.respTasks || []).filter(t => t.dayId === day.id);
-      const rpct = dt.length ? Math.round(dt.filter(t => !!state.checks["resp_" + t.id]).length / dt.length * 100) : 0;
-      _upd("resp-" + day.id, rpct);
     });
 
     _updBadges();
@@ -720,9 +696,6 @@
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
       if (state.currentPage === "home")      MX.Pages.Home.render();
       if (state.currentPage === "orders")    MX.Pages.Orders.render();
-      if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
-      if (state.currentPage && state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
-        MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
     });
 
     DB.listenAllTasks((dayId, sl, items) => {
@@ -791,14 +764,6 @@
       if (state.currentPage === "admin") MX.Pages.Admin.render();
     });
 
-    DB.listenRespTasks(list => {
-      state.respTasks = list;
-      updateNavProgress();
-      if (state.currentPage === "resp-plan") MX.Pages.RespPlan.render();
-      if (state.currentPage && state.currentPage.startsWith("resp-") && state.currentPage !== "resp-plan")
-        MX.Pages.RespPlan.renderDay(state.currentPage.slice(5));
-    });
-
     DB.listenAnnouncements(list => {
       MX.Notifs._checkAnnouncements(list);
       state.announcements = list;
@@ -840,7 +805,6 @@
       else if (cp === 'utilisateurs') { Pages.Admin && Pages.Admin.render(); }
       else if (cp === 'consommations') { Pages.Conso && Pages.Conso.render(); }
       else if (MX.DAYS && MX.DAYS.find(d => d.id === cp)) { Pages.Checklist && Pages.Checklist.render(cp); }
-      else if (cp && cp.startsWith('resp-')) { Pages.RespPlan && Pages.RespPlan.renderDay(cp.slice(5)); }
     });
 
     DB.listenPresence(count => {
