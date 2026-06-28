@@ -7041,3 +7041,38 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* Future-day card in week day grid */
 .cl-day--future     { border-color: rgba(139,92,246,.25) !important; background: rgba(139,92,246,.05) !important; }
+
+/* ── ORG-RESP COMPACT CARDS ── */
+.or-card             { background: var(--bg2); border: 1px solid var(--border1); border-radius: 10px; padding: 10px 12px; transition: border-color var(--t); }
+.or-card:hover       { border-color: var(--border2); }
+.or-card--done       { opacity: .75; }
+
+.or-card-meta        { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.or-card-assign      { font-size: 10px; color: var(--text3); display: flex; align-items: center; gap: 3px; }
+
+.or-card-row         { display: flex; align-items: center; gap: 8px; }
+.or-card-title       { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.or-card-title--done { color: var(--text3); text-decoration: line-through; text-decoration-color: var(--text3); }
+.or-card-desc        { font-size: 11px; color: var(--text3); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.or-card-done-meta   { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+.or-card-actions     { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.or-act-btn          { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text3); font-size: 12px; cursor: pointer; transition: all var(--t); -webkit-tap-highlight-color: transparent; }
+.or-act-btn:hover    { background: var(--bg4); color: var(--text1); border-color: var(--border3); }
+.or-act-btn:active   { transform: scale(.91); }
+.or-act-btn--edit:hover { color: var(--cyan); border-color: rgba(0,194,209,.4); background: rgba(0,194,209,.08); }
+.or-act-btn--del:hover  { color: var(--red);  border-color: rgba(239,68,68,.4);  background: rgba(239,68,68,.08); }
+.or-act-btn--ok:hover   { color: var(--green);border-color: rgba(16,185,129,.4); background: rgba(16,185,129,.08); }
+
+/* Empty section (within todo/done sections) */
+.or-empty-sec        { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text3); padding: 12px 0 20px; }
+
+/* Loading state */
+.or-loading          { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text3); padding: 40px 20px; justify-content: center; }
+
+/* ── ORG-RESP FORM (modal) ── */
+.or-form             { display: flex; flex-direction: column; gap: 10px; padding: 2px 0; }
+.or-form-row         { display: flex; flex-direction: column; gap: 4px; }
+.or-form-row label   { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; }
+.or-form-2col        { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .or-form-2col { grid-template-columns: 1fr; } }
