@@ -993,6 +993,18 @@
   async function updateRole(id, data) { await R_ROLES().doc(id).update(data); }
   async function deleteRole(id)       { await R_ROLES().doc(id).delete(); }
 
+  // ── WEEKLY CHECKS (historical archive per week) ──
+  const R_WC = () => db.collection('weekly_checks');
+
+  async function getWeeklyChecks(weekKey) {
+    const snap = await R_WC().doc(weekKey).get();
+    return snap.exists ? snap.data() : null;
+  }
+
+  async function saveWeeklyChecks(weekKey, data) {
+    await R_WC().doc(weekKey).set({ ...data, savedAt: FV.serverTimestamp() });
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -1040,5 +1052,6 @@
     markNotificationRead, markAllNotificationsRead,
     deleteNotification, archiveNotification,
     listenRoles, addRole, updateRole, deleteRole,
+    getWeeklyChecks, saveWeeklyChecks,
   };
 })();

@@ -511,7 +511,398 @@
     } catch(e) { MX.toast("Erreur", true); }
   }
 
+  // ── ROLE-BASED ENTRY POINT ──
+  function renderForRole() {
+    if (MX.Auth.canSeeAll()) {
+      const now = new Date();
+      renderMonthly(now.getFullYear(), now.getMonth());
+    } else {
+      renderWeekly();
+    }
+  }
+
+  // ── WEEK / DATE HELPERS ──
+  function _isoWk(d) {
+    const t = new Date(d); t.setHours(0,0,0,0);
+    t.setDate(t.getDate() + 4 - (t.getDay() || 7));
+    const y0 = new Date(t.getFullYear(), 0, 1);
+    return { y: t.getFullYear(), n: Math.ceil(((t - y0) / 86400000 + 1) / 7) };
+  }
+  function _weekKey(d) {
+    const wk = _isoWk(d);
+    return `${wk.y}_W${String(wk.n).padStart(2,'0')}`;
+  }
+  function _jsDayId(jsDay) {
+    return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][jsDay];
+  }
+  function _getMonthWeeks(year, month) {
+    const last = new Date(year, month + 1, 0);
+    const rows = [];
+    const start = new Date(year, month, 1);
+    const jd = start.getDay() || 7;
+    let curr = new Date(start);
+    curr.setDate(curr.getDate() - jd + 1);
+    curr.setHours(0,0,0,0);
+    while (curr <= last) {
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(curr); d.setDate(d.getDate() + i);
+        days.push({ date: new Date(d), dayId: _jsDayId(d.getDay()), inMonth: d.getMonth() === month && d.getFullYear() === year });
+      }
+      rows.push({ weekKey: _weekKey(curr), days });
+      curr.setDate(curr.getDate() + 7);
+    }
+    return rows;
+  }
+
+  // ── MONTHLY VIEW MODULE STATE ──
+  let _mvY = null, _mvM = null, _mvD = {};
+
+  // ── TECHNICIEN WEEKLY VIEW ──
+  function renderWeekly() {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { state, DAYS, getDaySlots, esc } = MX;
+    const cu = state.currentUser;
+    const todayId = MX.todayId ? MX.todayId() : (DAYS[0] && DAYS[0].id);
+
+    const dayStats = DAYS.map(day => {
+      let dt = 0, dd = 0;
+      (getDaySlots(day.id) || []).forEach(sl => {
+        const tasks = state.tasks[`${day.id}_${sl}`] || [];
+        const asn = (day.id === todayId && state.dailyClaims && state.dailyClaims[sl])
+          ? (state.dailyClaims[sl].name || state.assignments[`${day.id}_${sl}`] || '')
+          : (state.assignments[`${day.id}_${sl}`] || '');
+        if (!cu || asn === cu.name) {
+          tasks.forEach(t => { dt++; if (state.checks[`${day.id}_${sl}_${t.id}`]) dd++; });
+        }
+      });
+      return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : -1 };
+    });
+
+    const wTotal = dayStats.reduce((s, d) => s + d.dt, 0);
+    const wDone  = dayStats.reduce((s, d) => s + d.dd, 0);
+    const wPct   = wTotal ? Math.round(wDone / wTotal * 100) : 0;
+    const wPctC  = wPct >= 80 ? 'var(--green)' : wPct >= 40 ? 'var(--orange)' : 'var(--red)';
+
+    const nc = cu ? MX.userColors(cu.name) : null;
+    const bg = cu ? (cu.color || nc.bg) : 'var(--bg4)';
+    const fg = cu ? (cu.color ? MX._contrastColor(cu.color) : nc.fg) : 'var(--text3)';
+
+    let h = `<div class="ph">
+      <div class="ph-eye">${esc(state.weekLabel || 'Semaine en cours')}</div>
+      <div class="ph-row">
+        <div>
+          <div class="ph-title">Ma semaine</div>
+          <div class="ph-sub">${wDone} / ${wTotal} tâches complétées</div>
+        </div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${wPctC}">${wPct}%</div>
+      </div>
+      <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${wPct}%"></div></div></div>
+    </div>
+    <div class="page-body" style="max-width:760px">`;
+
+    if (cu) {
+      h += `<div class="cl-user-banner">
+        <span class="cl-user-av" style="background:${bg};color:${fg}">${esc(cu.name.substring(0,2).toUpperCase())}</span>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600">${esc(cu.name)}</div>
+          <div style="font-size:11px;color:var(--text2)">Technicien · créneaux assignés uniquement</div>
+        </div>
+        <button onclick="MX.Auth.clearCurrentUser()" style="font-size:11px;color:var(--cyan);background:none;border:none;cursor:pointer;padding:4px 8px;font-family:var(--ffs)">Changer</button>
+      </div>`;
+    }
+
+    h += `<div class="cl-week-grid">`;
+    dayStats.forEach(({ day, dt, dd, pct }) => {
+      const isT = day.id === todayId;
+      const pctC = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
+      let cls = 'cl-week-day';
+      if (isT) cls += ' cl-day--today';
+      if (pct < 0)       cls += ' cl-day--empty';
+      else if (pct >= 100) cls += ' cl-day--done';
+      else if (pct > 0)  cls += ' cl-day--prog';
+      else               cls += ' cl-day--todo';
+
+      h += `<div class="${cls}" onclick="MX.showPage('${esc(day.id)}')">
+        <div class="cl-day-name">${esc(day.l)}</div>
+        ${isT ? '<div class="cl-day-today-b">Auj.</div>' : ''}
+        ${pct >= 0
+          ? `<div class="cl-day-pct" style="color:${pctC}">${pct}%</div>
+             <div class="cl-day-counts">${dd}/${dt}</div>
+             <div class="cl-day-bar-t"><div class="cl-day-bar-f" style="width:${pct}%;background:${pctC}"></div></div>`
+          : `<div class="cl-day-noasn">—</div>`}
+      </div>`;
+    });
+    h += `</div>`;
+
+    const todayDayL = ((DAYS.find(d => d.id === todayId) || {}).l) || 'Aujourd\'hui';
+    const todaySt = dayStats.find(d => d.day.id === todayId);
+    const todayP  = todaySt ? todaySt.pct : -1;
+    const todayPC = todayP >= 100 ? 'var(--green)' : todayP >= 50 ? 'var(--orange)' : 'var(--red)';
+
+    h += `<div style="margin-top:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:10px">Accès rapide — ${esc(todayDayL)}</div>
+      <button onclick="MX.showPage('${esc(todayId)}')" class="cl-quick-btn" style="border-color:var(--cyan-border);background:var(--cyan-dim);color:var(--cyan)">
+        <i class="fas fa-list-check"></i> Voir mes tâches d'aujourd'hui
+        ${todayP >= 0 ? `<span style="margin-left:auto;font-size:13px;font-weight:700;color:${todayPC}">${todayP}%</span>` : ''}
+      </button>
+    </div>
+    </div>`;
+    mc.innerHTML = h;
+  }
+
+  // ── RESPONSABLE / ADMIN MONTHLY VIEW ──
+  async function renderMonthly(year, month) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    _mvY = year; _mvM = month;
+    const MNAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+    mc.innerHTML = `<div class="ph"><div class="ph-eye">Vue mensuelle</div>
+      <div class="ph-row"><div><div class="ph-title">${MNAMES[month]} ${year}</div></div></div></div>
+      <div class="page-body" style="max-width:940px;text-align:center;padding:40px 0">
+        <i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--text3)"></i>
+        <div style="margin-top:12px;font-size:13px;color:var(--text3)">Chargement des données…</div>
+      </div>`;
+
+    const currKey = _weekKey(new Date());
+    const weeks = _getMonthWeeks(year, month);
+
+    await Promise.all(
+      weeks.filter(w => w.weekKey !== currKey).map(w =>
+        MX.DB.getWeeklyChecks(w.weekKey)
+          .then(data => { if (data) _mvD[w.weekKey] = data; })
+          .catch(() => {})
+      )
+    );
+
+    _renderMonthlyHtml(year, month, weeks, currKey);
+  }
+
+  function _renderMonthlyHtml(year, month, weeks, currKey) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { state, DAYS, getDaySlots, esc } = MX;
+    const MNAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+    const prevM = month === 0 ? {y:year-1,m:11} : {y:year,m:month-1};
+    const nextM = month === 11 ? {y:year+1,m:0} : {y:year,m:month+1};
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    let mTotal = 0, mDone = 0, mLate = 0;
+    const uStats = {};
+
+    weeks.forEach(w => {
+      const isCurr = w.weekKey === currKey;
+      const wd  = isCurr ? null : _mvD[w.weekKey];
+      const chk = isCurr ? state.checks      : (wd ? (wd.checks      || {}) : null);
+      const tsk = isCurr ? state.tasks       : (wd ? (wd.tasks       || {}) : null);
+      const asn = isCurr ? state.assignments : (wd ? (wd.assignments || {}) : null);
+      if (!chk || !tsk) return;
+      w.days.forEach(({ dayId, inMonth, date }) => {
+        if (!inMonth) return;
+        getDaySlots(dayId).forEach(sl => {
+          const who = asn ? (asn[`${dayId}_${sl}`] || '') : '';
+          (tsk[`${dayId}_${sl}`] || []).forEach(t => {
+            mTotal++;
+            const done = !!(chk[`${dayId}_${sl}_${t.id}`]);
+            if (done) mDone++;
+            else if (date < today) mLate++;
+            if (who) {
+              if (!uStats[who]) uStats[who] = {total:0,done:0};
+              uStats[who].total++;
+              if (done) uStats[who].done++;
+            }
+          });
+        });
+      });
+    });
+
+    const rate  = mTotal ? Math.round(mDone / mTotal * 100) : 0;
+    const rateC = rate >= 80 ? 'var(--green)' : rate >= 40 ? 'var(--orange)' : 'var(--red)';
+    const ranking = Object.entries(uStats)
+      .map(([name, s]) => ({ name, ...s, pct: s.total ? Math.round(s.done/s.total*100) : 0 }))
+      .sort((a,b) => b.pct - a.pct || b.done - a.done);
+
+    let h = `<div class="ph">
+      <div class="ph-eye">Vue mensuelle responsable</div>
+      <div class="ph-row">
+        <div><div class="ph-title">Check-lists</div><div class="ph-sub">${MNAMES[month]} ${year}</div></div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${rateC}">${rate}%</div>
+      </div>
+      <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${rate}%"></div></div></div>
+    </div>
+    <div class="page-body" style="max-width:940px">
+
+    <div class="cl-month-nav">
+      <button class="cl-month-btn" onclick="MX.Pages.Checklist.renderMonthly(${prevM.y},${prevM.m})"><i class="fas fa-chevron-left"></i></button>
+      <div class="cl-month-title">${MNAMES[month]} ${year}</div>
+      <button class="cl-month-btn" onclick="MX.Pages.Checklist.renderMonthly(${nextM.y},${nextM.m})"><i class="fas fa-chevron-right"></i></button>
+    </div>
+
+    <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+      <div class="stat-card"><div class="stat-n g">${mDone}</div><div class="stat-l">Faites</div></div>
+      <div class="stat-card"><div class="stat-n b">${mTotal}</div><div class="stat-l">Total</div></div>
+      <div class="stat-card"><div class="stat-n r">${mLate}</div><div class="stat-l">En retard</div></div>
+      <div class="stat-card"><div class="stat-n" style="color:${rateC}">${rate}%</div><div class="stat-l">Taux</div></div>
+    </div>
+
+    <div class="cl-month-cal">
+      <div class="cl-cal-header">
+        ${DAYS.map(d => `<div class="cl-cal-hcell">${esc(d.l.substring(0,3))}</div>`).join('')}
+      </div>`;
+
+    weeks.forEach(w => {
+      const isCurr = w.weekKey === currKey;
+      const wd  = isCurr ? null : _mvD[w.weekKey];
+      const chk = isCurr ? state.checks : (wd ? (wd.checks || {}) : null);
+      const tsk = isCurr ? state.tasks  : (wd ? (wd.tasks  || {}) : null);
+
+      h += `<div class="cl-cal-week${isCurr ? ' cl-cal-week--curr' : ''}">`;
+      if (isCurr) h += `<div class="cl-cal-week-badge">Semaine en cours</div>`;
+
+      w.days.forEach(({ dayId, inMonth, date }) => {
+        if (!inMonth) { h += `<div class="cl-cal-cell cl-cal-cell--out"></div>`; return; }
+        const isT    = date.toDateString() === today.toDateString();
+        const isPast = date < today;
+        const dn     = date.getDate();
+
+        if (!chk || !tsk) {
+          h += `<div class="cl-cal-cell cl-cal-cell--nodata${isT ? ' cl-cal-cell--today' : ''}">
+            <span class="cl-cal-dn">${dn}</span><span class="cl-cal-nd">─</span></div>`;
+          return;
+        }
+
+        let dt = 0, dd = 0;
+        getDaySlots(dayId).forEach(sl => {
+          (tsk[`${dayId}_${sl}`] || []).forEach(t => {
+            dt++;
+            if (chk[`${dayId}_${sl}_${t.id}`]) dd++;
+          });
+        });
+
+        const pct = dt ? Math.round(dd / dt * 100) : -1;
+        let dotC = '', cls = 'cl-cal-cell';
+        if (isT) cls += ' cl-cal-cell--today';
+        if (pct < 0)      cls += ' cl-cal-cell--notasks';
+        else if (pct >= 100) { cls += ' cl-cal-cell--done'; dotC = 'var(--green)'; }
+        else if (pct > 0)    { cls += ' cl-cal-cell--prog'; dotC = 'var(--orange)'; }
+        else if (isPast)     { cls += ' cl-cal-cell--late'; dotC = 'var(--red)'; }
+        else                 { cls += ' cl-cal-cell--todo'; }
+
+        const cfn = isCurr ? ` onclick="MX.showPage('${esc(dayId)}')" style="cursor:pointer"` : '';
+        h += `<div class="${cls}"${cfn}>
+          <span class="cl-cal-dn">${dn}</span>
+          ${pct >= 0 ? `<div class="cl-cal-dot" style="${dotC ? 'background:' + dotC : ''}"></div><span class="cl-cal-pct">${pct}%</span>` : ''}
+        </div>`;
+      });
+      h += `</div>`;
+    });
+
+    h += `</div>`; // end cl-month-cal
+
+    // Current week quick-access
+    const cwk = weeks.find(w => w.weekKey === currKey);
+    if (cwk) {
+      h += `<div style="margin-top:20px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:10px">
+          <i class="fas fa-bolt" style="color:var(--orange);margin-right:4px"></i>Semaine en cours — Accès rapide
+        </div>
+        <div class="cl-week-quick">`;
+      cwk.days.filter(d => d.inMonth).forEach(({ dayId, date }) => {
+        const dObj = DAYS.find(d => d.id === dayId);
+        let dt = 0, dd = 0;
+        getDaySlots(dayId).forEach(sl => {
+          (state.tasks[`${dayId}_${sl}`] || []).forEach(t => {
+            dt++;
+            if (state.checks[`${dayId}_${sl}_${t.id}`]) dd++;
+          });
+        });
+        const pct = dt ? Math.round(dd / dt * 100) : -1;
+        const pctC = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
+        const isT = date.toDateString() === today.toDateString();
+        h += `<button class="cl-quick-btn${isT ? ' cl-quick-btn--today' : ''}" onclick="MX.showPage('${esc(dayId)}')">
+          <i class="fas fa-calendar-day" style="opacity:.6;font-size:11px"></i>
+          ${esc((dObj || {}).l || dayId)}
+          ${pct >= 0 ? `<span style="margin-left:auto;font-size:11px;font-weight:700;color:${pctC}">${pct}%</span>` : ''}
+        </button>`;
+      });
+      h += `</div></div>`;
+    }
+
+    // Ranking per user
+    if (ranking.length) {
+      h += `<div style="margin-top:24px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:12px">
+          <i class="fas fa-trophy" style="color:var(--orange);margin-right:6px"></i>Classement ${MNAMES[month]}
+        </div>
+        <div class="cl-ranking">`;
+      ranking.forEach(({ name, total, done, pct }, i) => {
+        const nc    = MX.userColors ? MX.userColors(name) : {bg:'var(--bg4)',fg:'var(--text1)'};
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`;
+        const pctC  = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
+        h += `<div class="cl-rank-row">
+          <span class="cl-rank-pos">${medal}</span>
+          <span class="cl-rank-av" style="background:${nc.bg};color:${nc.fg}">${esc(name.substring(0,2).toUpperCase())}</span>
+          <div class="cl-rank-info">
+            <div class="cl-rank-name">${esc(name)}</div>
+            <div class="cl-rank-bar"><div class="cl-rank-bar-fill" style="width:${pct}%;background:${pctC}"></div></div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;min-width:52px">
+            <div style="font-size:14px;font-weight:700;color:${pctC}">${pct}%</div>
+            <div style="font-size:10px;color:var(--text3)">${done}/${total}</div>
+          </div>
+        </div>`;
+      });
+      h += `</div></div>`;
+    }
+
+    // Archive button (admin only)
+    if (MX.Auth.isAdmin()) {
+      h += `<div class="cl-archive-hint">
+        <i class="fas fa-cloud-arrow-up" style="color:var(--text3);flex-shrink:0"></i>
+        <span style="flex:1;font-size:12px;color:var(--text2)">Archiver la semaine en cours pour la conserver dans l'historique mensuel.</span>
+        <button onclick="MX.Pages.Checklist._archiveCurrentWeek()"
+          style="padding:7px 12px;border:1.5px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);white-space:nowrap;display:flex;align-items:center;gap:5px;flex-shrink:0">
+          <i class="fas fa-archive"></i> Archiver
+        </button>
+      </div>`;
+    }
+
+    h += `</div>`;
+    mc.innerHTML = h;
+  }
+
+  async function _archiveCurrentWeek() {
+    const { state, DAYS, getDaySlots } = MX;
+    const key = _weekKey(new Date());
+    const tasksSnap = {}, chksSnap = {};
+    DAYS.forEach(day => {
+      (getDaySlots(day.id) || []).forEach(sl => {
+        const k = `${day.id}_${sl}`;
+        tasksSnap[k] = state.tasks[k] || [];
+        (state.tasks[k] || []).forEach(t => {
+          const ck = `${k}_${t.id}`;
+          if (state.checks[ck]) chksSnap[ck] = true;
+        });
+      });
+    });
+    try {
+      await MX.DB.saveWeeklyChecks(key, {
+        weekKey:     key,
+        weekLabel:   state.weekLabel || key,
+        checks:      chksSnap,
+        tasks:       tasksSnap,
+        assignments: state.assignments || {}
+      });
+      _mvD[key] = { checks: chksSnap, tasks: tasksSnap, assignments: state.assignments || {} };
+      MX.toast('Semaine archivée ✓');
+      if (_mvY !== null) renderMonthly(_mvY, _mvM !== null ? _mvM : new Date().getMonth());
+    } catch(e) {
+      MX.toast('Erreur lors de l\'archivage', true);
+    }
+  }
+
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _archiveCurrentWeek };
 })();
