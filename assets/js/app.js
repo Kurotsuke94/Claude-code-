@@ -235,7 +235,7 @@
     }
 
     // ── Section 3: RESSOURCES ──
-    const bibAct = cur === "documents" || cur.startsWith("bible-");
+    const bibAct = cur === "documents" || (cur && cur.startsWith("bible-"));
     let resItems = _item("orders", "fa-box", "Stock & Commandes");
     resItems    += _item("fournisseurs", "fa-truck", "Fournisseurs");
     resItems    += `<button class="sx-item${bibAct?" active":""}" data-page="documents" onclick="MX.showPage('documents')"><i class="fas fa-book sx-ico${bibAct?" sx-ico--on":""}"></i><span class="sx-lbl">Bible Maintix</span><i class="fas fa-chevron-${_bibleOpen?"up":"down"} sx-chev" onclick="MX.toggleNavBible(event)" style="pointer-events:auto"></i></button>`;

@@ -133,7 +133,21 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // App shell — cache first
+  // Versioned JS/CSS — network first (always get fresh code), cache as offline fallback
+  if (/\.(js|css)\?v=/.test(url.href)) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res && res.status === 200 && res.type === "basic") {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // App shell (icons, fonts, etc.) — cache first
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
