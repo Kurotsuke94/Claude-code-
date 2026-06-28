@@ -10,8 +10,9 @@
     { code:'4',   name:'Soir',      color:'#EF4444', textColor:'#ffffff', start:'13:00', end:'21:33', bold:false, order:3 },
     { code:'RH',  name:'Repos',     color:'#22C55E', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:4 },
     { code:'CP',  name:'Congé',     color:'#F97316', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:5 },
-    { code:'JFL', name:'J.Férié',   color:'#F97316', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:6 },
-    { code:'EXT', name:'Extérieur', color:'#FFFFFF', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:7 },
+    { code:'RTT', name:'RTT',       color:'#A78BFA', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:6 },
+    { code:'JFL', name:'J.Férié',   color:'#F97316', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:7 },
+    { code:'EXT', name:'Extérieur', color:'#FFFFFF', textColor:'#1a1a1a', start:'',      end:'',      bold:true,  order:8 },
   ];
 
   const DAY_LABELS  = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -134,6 +135,11 @@
   }
 
   function _setView(v) { _view = v; _selected.clear(); _loadAndRender(); }
+
+  function _setViewExternal(view, shiftFilter) {
+    if (view) _view = view;
+    if (shiftFilter !== undefined) _filterShift = shiftFilter;
+  }
 
   // ── DATA LOADING ──
 
@@ -581,19 +587,20 @@
     return h;
   }
 
-  // ── SIDEBAR (légende + actions) ──
+  // ── SIDEBAR (légende + actions + événements) ──
 
   function _renderSidebar(canEdit, isAdmin) {
     const shifts = _shifts();
+    const esc    = MX.esc;
     let h = `<div class="plng-legend">
-      <div class="plng-legend-title">Légende</div>`;
+      <div class="plng-legend-title">Légende des codes</div>`;
 
     shifts.forEach(s => {
       const nb = s.color === '#FFFFFF';
       h += `<div class="plng-legend-row">
-        <span class="plng-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';border:1px solid var(--border2)' : ''}">${MX.esc(s.code)}</span>
+        <span class="plng-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';border:1px solid var(--border2)' : ''}">${esc(s.code)}</span>
         <div class="plng-legend-info">
-          <span class="plng-legend-name">${MX.esc(s.name)}</span>
+          <span class="plng-legend-name">${esc(s.name)}</span>
           ${s.start ? `<span class="plng-legend-time">${s.start} – ${s.end}</span>` : ''}
         </div>
       </div>`;
@@ -610,12 +617,56 @@
         <div class="plng-legend-title">Actions rapides</div>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RH')"><i class="fas fa-moon"></i> Absence / Repos</button>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('CP')"><i class="fas fa-plane-departure"></i> Congé payé</button>
+        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RTT')"><i class="fas fa-calendar-xmark"></i> RTT</button>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('JFL')"><i class="fas fa-star"></i> Jour férié</button>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openAutoGenModal()"><i class="fas fa-wand-magic-sparkles"></i> Horaire récurrent</button>
         <div class="plng-legend-sep"></div>
         <button class="plng-qa-btn plng-qa-export" onclick="MX.Pages.Planning._exportCsv()"><i class="fas fa-file-excel"></i> Export Excel</button>
-        <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-file-pdf"></i> Export PDF</button>
+        <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-file-pdf"></i> Exporter PDF</button>
         <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-print"></i> Imprimer</button>`;
+    }
+
+    // ── Prochains événements (CP / RTT / RH / JFL next 14 days) ──
+    const todayStr = _todayStr();
+    const upcoming = [];
+    const entries  = _entries();
+    const users    = _users();
+    const ABSENCE_CODES = new Set(['CP','RTT','RH','JFL']);
+    const ABSENCE_LABELS = { CP: 'Congé payé', RTT: 'RTT', RH: 'Repos', JFL: 'Jour férié' };
+    const ABSENCE_ICONS  = { CP: 'fa-plane-departure', RTT: 'fa-calendar-xmark', RH: 'fa-moon', JFL: 'fa-star' };
+    for (let i = 0; i <= 14; i++) {
+      const d = new Date(todayStr + 'T00:00:00');
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      users.forEach(u => {
+        const e = entries[u.id + '_' + dateStr];
+        if (e && ABSENCE_CODES.has(e.shiftCode)) {
+          upcoming.push({ dateStr, userName: u.name, code: e.shiftCode });
+        }
+      });
+    }
+    upcoming.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    const upSlice = upcoming.slice(0, 8);
+
+    h += `<div class="plng-legend-sep"></div>
+      <div class="plng-legend-title">Prochains événements</div>`;
+    if (upSlice.length === 0) {
+      h += `<div class="plng-events-empty"><i class="fas fa-calendar-check"></i> Aucun événement à venir</div>`;
+    } else {
+      upSlice.forEach(ev => {
+        const d2   = new Date(ev.dateStr + 'T00:00:00');
+        const dLbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()];
+        const shift = _shiftByCode(ev.code);
+        const chipColor = shift ? shift.color : '#9CA3AF';
+        const chipText  = shift ? shift.textColor : '#1a1a1a';
+        h += `<div class="plng-event-row">
+          <span class="plng-event-chip" style="background:${chipColor};color:${chipText}">${esc(ev.code)}</span>
+          <div class="plng-event-info">
+            <span class="plng-event-name">${esc(ev.userName)}</span>
+            <span class="plng-event-date">${esc(dLbl)}</span>
+          </div>
+        </div>`;
+      });
     }
 
     h += `</div>`;
@@ -1174,7 +1225,7 @@
   window.MX.Pages       = window.MX.Pages || {};
   window.MX.Pages.Planning = {
     render: renderPage,
-    _prev, _next, _today, _setView,
+    _prev, _next, _today, _setView, _setViewExternal,
     _setFilterUser, _setFilterShift,
     _cellMouseDown,
     _applyCodeToSelected, _clearCodeFromSelected, _clearSelection,
