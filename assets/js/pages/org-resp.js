@@ -10,10 +10,12 @@
     { title: 'Contrôle chambres PMR',               category: 'hébergement',   description: '', type: 'hebdomadaire' },
   ];
 
-  let _tasks    = [];
-  let _unsub    = null;
-  let _weekKey  = null;
+  let _tasks     = [];
+  let _unsub     = null;
+  let _weekKey   = null;
   let _inHistory = false;
+  let _dragId    = null;
+  let _dragOver  = null;
 
   // ── HELPERS ──
   function _isoWk(d) {
@@ -49,23 +51,29 @@
   }
   function _catColor(cat) {
     const m = {
-      'sécurité':      'var(--red)',
-      'réglementaire': 'var(--orange)',
-      'stock':         'var(--jour)',
-      'administratif': 'var(--cyan)',
+      'sécurité':      '#EF4444',
+      'réglementaire': '#F59E0B',
+      'stock':         '#3B82F6',
+      'administratif': '#06B6D4',
       'hébergement':   '#8B5CF6',
     };
-    return m[cat] || 'var(--text3)';
+    return m[cat] || '#6B7280';
   }
-  function _prioColor(prio) {
-    if (prio === 'urgente') return 'var(--red)';
-    if (prio === 'haute')   return 'var(--orange)';
-    return 'var(--text3)';
+  function _catIcon(cat) {
+    const m = {
+      'sécurité':      'fa-shield-halved',
+      'réglementaire': 'fa-scale-balanced',
+      'stock':         'fa-boxes-stacked',
+      'administratif': 'fa-file-lines',
+      'hébergement':   'fa-bed',
+    };
+    return m[cat] || 'fa-tag';
   }
-  function _prioIcon(prio) {
-    if (prio === 'urgente') return '🔴';
-    if (prio === 'haute')   return '🟠';
-    return '';
+  function _prioConfig(prio) {
+    if (prio === 'critique') return { label: 'Critique', color: '#DC2626', bg: 'rgba(220,38,38,.15)',  icon: '🚨' };
+    if (prio === 'urgente')  return { label: 'Urgente',  color: '#EF4444', bg: 'rgba(239,68,68,.12)',  icon: '🔴' };
+    if (prio === 'haute')    return { label: 'Haute',    color: '#F59E0B', bg: 'rgba(245,158,11,.12)', icon: '🟠' };
+    return null;
   }
   function _currentUserName() {
     const cu = MX.state.currentUser;
@@ -89,37 +97,19 @@
     const isIndex = err.code === 'failed-precondition' || (err.message && err.message.includes('index'));
     const linkMatch = err.message && err.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
     const link = linkMatch ? linkMatch[0] : null;
-
     console.error(`[Maintix] Firestore erreur (${ctx}):`, err.message || err);
-    if (isIndex) {
-      console.warn(
-        '[Maintix] Firestore index manquant :\n' +
-        '  Collection : org_tasks\n' +
-        '  Champs     : weekKey, order (ou isDefault)\n' +
-        (link ? '  Lien       : ' + link : '  → Déployez firestore.indexes.json via Firebase CLI')
-      );
-    }
-
     const mc = document.getElementById('main-content');
     if (!mc) return;
-
     mc.innerHTML = `<div class="or-page">
-      <div class="or-header">
-        <div class="or-header-left"><div class="or-title">Organisation Responsable</div></div>
-      </div>
+      <div class="or-header"><div class="or-header-left"><div class="or-title">Organisation Responsable</div></div></div>
       <div class="or-empty" style="gap:12px;padding:40px 20px">
-        <i class="fas fa-${isIndex ? 'database' : 'triangle-exclamation'}" style="font-size:36px;color:var(--${isIndex ? 'orange' : 'red'})"></i>
-        <div style="font-size:15px;font-weight:700;color:var(--text1)">${isIndex ? 'Configuration Firestore incomplète' : 'Erreur Firestore'}</div>
+        <i class="fas fa-${isIndex ? 'database' : 'triangle-exclamation'}" style="font-size:36px;color:var(--${isIndex?'orange':'red'})"></i>
+        <div style="font-size:15px;font-weight:700">${isIndex ? 'Index Firestore manquant' : 'Erreur Firestore'}</div>
         <div style="font-size:13px;color:var(--text2);text-align:center;max-width:340px">
-          ${isIndex
-            ? 'Un index Firestore doit être créé sur <code>org_tasks</code>.<br>Déployez <strong>firestore.indexes.json</strong> via la Firebase CLI.'
-            : MX.esc(err.message || String(err))
-          }
+          ${isIndex ? 'Déployez <strong>firestore.indexes.json</strong> via Firebase CLI.' : MX.esc(err.message || String(err))}
         </div>
-        ${link ? `<a href="${link}" target="_blank" rel="noopener" class="or-sec-btn" style="margin-top:4px"><i class="fas fa-external-link-alt"></i> Créer l'index →</a>` : ''}
-        <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()" style="margin-top:4px">
-          <i class="fas fa-rotate-right"></i> Réessayer
-        </button>
+        ${link ? `<a href="${link}" target="_blank" rel="noopener" class="or-sec-btn"><i class="fas fa-external-link-alt"></i> Créer l'index →</a>` : ''}
+        <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()"><i class="fas fa-rotate-right"></i> Réessayer</button>
       </div>
     </div>`;
   }
@@ -140,43 +130,32 @@
         });
       });
       await batch.commit();
-    } catch(e) {
-      console.warn('[OrgResp] seed init:', e.message);
-      return;
-    }
+    } catch(e) { console.warn('[OrgResp] seed init:', e.message); return; }
 
-    // Carry over previous week's custom recurring tasks
     try {
-      const prevDate = new Date();
-      prevDate.setDate(prevDate.getDate() - 7);
-      const prevKey = _getWeekKey(prevDate);
+      const prevDate = new Date(); prevDate.setDate(prevDate.getDate() - 7);
+      const prevKey  = _getWeekKey(prevDate);
       const prevSnap = await db.collection('org_tasks')
-        .where('weekKey', '==', prevKey)
-        .where('isDefault', '==', false)
-        .get();
+        .where('weekKey', '==', prevKey).where('isDefault', '==', false).get();
       const recurring = prevSnap.docs.map(d => d.data()).filter(t => t.type === 'hebdomadaire');
       if (recurring.length > 0) {
-        const batch2 = db.batch();
         const name = _currentUserName();
-        const baseOrder = DEFAULT_ORG_TASKS.length;
+        const b2   = db.batch();
         recurring.forEach((t, i) => {
-          batch2.set(db.collection('org_tasks').doc(), {
+          b2.set(db.collection('org_tasks').doc(), {
             title: t.title, description: t.description || '', category: t.category || 'autre',
             type: 'hebdomadaire', weekKey, done: false, doneBy: null, doneAt: null,
             comment: null, archivedFromActive: false, assignedTo: t.assignedTo || null,
             priority: t.priority || 'normale', createdBy: t.createdBy || name,
-            createdAt: FV.serverTimestamp(), order: baseOrder + i, isDefault: false,
+            createdAt: FV.serverTimestamp(), order: DEFAULT_ORG_TASKS.length + i, isDefault: false,
           });
         });
-        await batch2.commit();
+        await b2.commit();
       }
-    } catch(e) {
-      console.warn('[OrgResp] carry-over (index requis weekKey+isDefault):', e.message);
-    }
+    } catch(e) { console.warn('[OrgResp] carry-over:', e.message); }
   }
 
   // ── SUBSCRIPTION ──
-  // No .orderBy() on Firestore — sort client-side to avoid composite index requirement.
   function _subscribe(weekKey) {
     if (_unsub) { _unsub(); _unsub = null; }
     try {
@@ -189,11 +168,9 @@
               .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
             if (!_inHistory) _doRender();
           },
-          err => { _onFirestoreError(err, 'subscribe'); }
+          err => _onFirestoreError(err, 'subscribe')
         );
-    } catch(e) {
-      _onFirestoreError(e, 'subscribe-setup');
-    }
+    } catch(e) { _onFirestoreError(e, 'subscribe-setup'); }
     _seedWeek(weekKey).catch(e => console.warn('[OrgResp] seed:', e.message));
   }
 
@@ -209,7 +186,6 @@
     _subscribe(_weekKey);
   }
 
-  // ── MAIN RENDER ──
   function _doRender() {
     const mc = document.getElementById('main-content');
     if (!mc) return;
@@ -220,143 +196,265 @@
     }
   }
 
+  // ── BADGES ──
   function _typeBadge(type) {
     if (type === 'unique') return `<span class="or-type-badge or-type-badge--uni">📌 Unique</span>`;
     return `<span class="or-type-badge or-type-badge--heb">🔄 Récurrente</span>`;
   }
 
-  function _renderMain(mc) {
-    const todo    = _tasks.filter(t => !t.done && !t.archivedFromActive);
-    const done    = _tasks.filter(t =>  t.done && !t.archivedFromActive);
-    const allDone = _tasks.filter(t =>  t.done);
+  // ── STATS PANEL ──
+  function _renderStats(todo, done) {
+    const total   = todo.length + done.length;
+    const recCnt  = _tasks.filter(t => !t.archivedFromActive && t.type === 'hebdomadaire').length;
+    const pct     = total ? Math.round(done.length / total * 100) : 0;
+    const pctC    = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
 
-    const byUser = {};
-    allDone.forEach(t => { const n = t.doneBy || '?'; byUser[n] = (byUser[n] || 0) + 1; });
+    return `<div class="or-stats">
+      <div class="or-stat or-stat--todo">
+        <div class="or-stat-ico"><i class="fas fa-circle-dot"></i></div>
+        <div><div class="or-stat-n">${todo.length}</div><div class="or-stat-l">À faire</div></div>
+      </div>
+      <div class="or-stat or-stat--done">
+        <div class="or-stat-ico"><i class="fas fa-circle-check"></i></div>
+        <div><div class="or-stat-n">${done.length}</div><div class="or-stat-l">Réalisées</div></div>
+      </div>
+      <div class="or-stat or-stat--rec">
+        <div class="or-stat-ico"><i class="fas fa-rotate"></i></div>
+        <div><div class="or-stat-n">${recCnt}</div><div class="or-stat-l">Récurrentes</div></div>
+      </div>
+      <div class="or-stat or-stat--total">
+        <div class="or-stat-ico"><i class="fas fa-list-check"></i></div>
+        <div><div class="or-stat-n">${total}</div><div class="or-stat-l">Total</div></div>
+      </div>
+    </div>
+    <div class="or-progress">
+      <div class="or-progress-track"><div class="or-progress-fill" style="width:${pct}%;background:${pctC}"></div></div>
+      <div class="or-progress-lbl" style="color:${pctC}">${pct}% complété</div>
+    </div>`;
+  }
+
+  // ── MAIN RENDER ──
+  function _renderMain(mc) {
+    const todo = _tasks.filter(t => !t.done && !t.archivedFromActive);
+    const done = _tasks.filter(t =>  t.done && !t.archivedFromActive);
 
     let h = `<div class="or-page">`;
 
-    // Header
     h += `<div class="or-header">
       <div class="or-header-left">
-        <div class="or-title">Organisation Responsable</div>
+        <div class="or-title"><i class="fas fa-users" style="color:var(--cyan);font-size:17px;margin-right:8px"></i>Organisation Responsable</div>
         <div class="or-week-label">${_weekLabel(_weekKey)}</div>
       </div>
       <div class="or-header-right">
         <button class="or-sec-btn" onclick="MX.Pages.OrgResp.renderHistory()">
-          <i class="fas fa-clock-rotate-left"></i> Historique
+          <i class="fas fa-clock-rotate-left"></i><span class="or-btn-lbl"> Historique</span>
+        </button>
+        <button class="or-sec-btn or-sec-btn--primary" onclick="MX.Pages.OrgResp.openAdd()">
+          <i class="fas fa-plus"></i><span class="or-btn-lbl"> Ajouter</span>
         </button>
       </div>
     </div>`;
 
-    // Alert
-    if (_tasks.length === 0) {
-      h += `<div class="or-alert or-alert--info"><i class="fas fa-circle-info"></i> Aucune tâche disponible pour cette semaine.</div>`;
-    } else if (todo.length > 0) {
-      h += `<div class="or-alert"><i class="fas fa-triangle-exclamation"></i> <strong>${todo.length} tâche${todo.length > 1 ? 's' : ''}</strong> encore à réaliser cette semaine</div>`;
-    } else {
-      h += `<div class="or-alert or-alert--ok"><i class="fas fa-circle-check"></i> Toutes les tâches sont réalisées cette semaine !</div>`;
-    }
-
-    // Répartition
-    if (allDone.length > 0) {
-      const maxC = Math.max(...Object.values(byUser), 1);
-      h += `<div class="or-rep">
-        <div class="or-rep-title">Répartition cette semaine</div>`;
-      Object.entries(byUser).sort((a, b) => b[1] - a[1]).forEach(([name, cnt]) => {
-        const col = _ucolor(name);
-        const pct = Math.round(cnt / maxC * 100);
-        h += `<div class="or-rep-row">
-          <div class="or-rep-av" style="background:${col}">${_initials(name)}</div>
-          <div class="or-rep-info">
-            <div class="or-rep-name">${MX.esc(name)}</div>
-            <div class="or-rep-bar"><div class="or-rep-bar-fill" style="width:${pct}%;background:${col}"></div></div>
-          </div>
-          <div class="or-rep-count">${cnt}</div>
-        </div>`;
-      });
-      h += `</div>`;
-    }
+    h += _renderStats(todo, done);
 
     // À FAIRE
-    h += `<div class="or-sec-title">À FAIRE <span class="or-sec-badge">${todo.length}</span></div>`;
+    h += `<div class="or-section">
+      <div class="or-sec-hd">
+        <div class="or-sec-title"><span class="or-sec-dot or-sec-dot--todo"></span>À FAIRE <span class="or-sec-badge">${todo.length}</span></div>
+        ${todo.length > 0 ? '<div class="or-sec-hint"><i class="fas fa-grip-vertical" style="font-size:10px;margin-right:4px"></i>Glisser pour réordonner</div>' : ''}
+      </div>`;
+
     if (todo.length === 0) {
-      h += `<div class="or-empty-sec"><i class="fas fa-circle-check" style="color:var(--green)"></i> Aucune tâche en attente</div>`;
+      h += `<div class="or-empty-sec">
+        <i class="fas fa-circle-check" style="color:var(--green);font-size:22px"></i>
+        <div>Toutes les tâches sont réalisées !</div>
+      </div>`;
     } else {
-      h += `<div class="or-list">`;
+      h += `<div class="or-list" id="or-todo-list">`;
       todo.forEach(t => { h += _todoCard(t); });
       h += `</div>`;
     }
+    h += `</div>`;
 
     // RÉALISÉES
     if (done.length > 0) {
-      h += `<div class="or-sec-title">RÉALISÉES <span class="or-sec-badge or-sec-badge--done">${done.length}</span></div>`;
-      h += `<div class="or-list">`;
+      h += `<div class="or-section">
+        <div class="or-sec-hd">
+          <div class="or-sec-title"><span class="or-sec-dot or-sec-dot--done"></span>RÉALISÉES <span class="or-sec-badge or-sec-badge--done">${done.length}</span></div>
+        </div>
+        <div class="or-list">`;
       done.forEach(t => { h += _doneCard(t); });
-      h += `</div>`;
+      h += `</div></div>`;
     }
 
     h += `</div>`;
     h += `<button class="or-fab" onclick="MX.Pages.OrgResp.openAdd()" title="Ajouter une tâche"><i class="fas fa-plus"></i></button>`;
 
     mc.innerHTML = h;
+    _initDragDrop();
   }
 
-  // ── CARD TEMPLATES ──
+  // ── CARD: À FAIRE ──
   function _todoCard(t) {
-    const col     = _catColor(t.category);
-    const prioClr = _prioColor(t.priority);
-    const prioIco = _prioIcon(t.priority);
-    const asgn    = t.assignedTo ? `<span class="or-card-assign"><i class="fas fa-user" style="font-size:9px"></i> ${MX.esc(t.assignedTo)}</span>` : '';
-    return `<div class="or-card">
-      <div class="or-card-meta">
-        <span class="or-cat" style="background:${col}22;color:${col}">${MX.esc(t.category || 'autre')}</span>
-        ${_typeBadge(t.type)}
-        ${asgn}
-        ${prioIco ? `<span style="font-size:11px;color:${prioClr};font-weight:600">${prioIco} ${MX.esc(t.priority)}</span>` : ''}
-      </div>
-      <div class="or-card-row">
+    const col    = _catColor(t.category);
+    const catIco = _catIcon(t.category);
+    const prio   = _prioConfig(t.priority);
+    const aCol   = _ucolor(t.assignedTo || '');
+
+    return `<div class="or-card" draggable="true" data-id="${t.id}" id="orc-${t.id}">
+      <div class="or-drag-handle"><i class="fas fa-grip-vertical"></i></div>
+      <div class="or-card-inner">
+        <div class="or-card-badges">
+          <span class="or-cat-badge" style="background:${col}18;color:${col};border-color:${col}35">
+            <i class="fas ${catIco}"></i> ${MX.esc(t.category || 'autre')}
+          </span>
+          ${_typeBadge(t.type)}
+          ${prio ? `<span class="or-prio-badge" style="background:${prio.bg};color:${prio.color}">${prio.icon} ${prio.label}</span>` : ''}
+        </div>
         <div class="or-card-title">${MX.esc(t.title)}</div>
-        <div class="or-card-actions">
-          <button class="or-act-btn or-act-btn--edit"  onclick="MX.Pages.OrgResp.openEdit('${t.id}')"   title="Modifier"><i class="fas fa-pen"></i></button>
-          <button class="or-act-btn or-act-btn--del"   onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
-          <button class="or-act-btn or-act-btn--ok"    onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Valider"><i class="fas fa-check"></i></button>
+        ${t.description ? `<div class="or-card-desc">${MX.esc(t.description)}</div>` : ''}
+        <div class="or-card-foot">
+          <div class="or-card-assign">
+            ${t.assignedTo
+              ? `<span class="or-av" style="background:${aCol}">${_initials(t.assignedTo)}</span>
+                 <span class="or-av-name">${MX.esc(t.assignedTo)}</span>`
+              : `<span class="or-av-none"><i class="fas fa-user-slash"></i> Non assigné</span>`
+            }
+          </div>
+          <div class="or-card-actions">
+            <button class="or-act-btn or-act-btn--edit" onclick="MX.Pages.OrgResp.openEdit('${t.id}')"     title="Modifier"><i class="fas fa-pen"></i></button>
+            <button class="or-act-btn or-act-btn--del"  onclick="MX.Pages.OrgResp.openDelete('${t.id}')"   title="Supprimer"><i class="fas fa-trash"></i></button>
+            <button class="or-act-btn or-act-btn--ok"   onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Valider"><i class="fas fa-check"></i></button>
+          </div>
         </div>
       </div>
-      ${t.description ? `<div class="or-card-desc">${MX.esc(t.description)}</div>` : ''}
     </div>`;
   }
 
+  // ── CARD: RÉALISÉE ──
   function _doneCard(t) {
     const col = _ucolor(t.doneBy || '');
     const dt  = t.doneAt ? _fmtDT(t.doneAt) : '';
     return `<div class="or-card or-card--done">
-      <div class="or-card-row">
-        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
-          <div class="or-done-av" style="background:${col};flex-shrink:0">${_initials(t.doneBy || '?')}</div>
-          <div style="min-width:0">
-            <div class="or-card-title or-card-title--done">${MX.esc(t.title)} ${_typeBadge(t.type)}</div>
-            <div class="or-card-done-meta">
-              Par <strong>${MX.esc(t.doneBy || '?')}</strong>${dt ? ` — ${dt}` : ''}
-              ${t.comment ? ` — <em>"${MX.esc(t.comment)}"</em>` : ''}
-            </div>
-          </div>
+      <div class="or-done-row">
+        <span class="or-av or-av--done" style="background:${col}">${_initials(t.doneBy || '?')}</span>
+        <div class="or-done-info">
+          <div class="or-card-title or-card-title--done">${MX.esc(t.title)}</div>
+          <div class="or-done-meta">${MX.esc(t.doneBy || '?')}${dt ? ` · ${dt}` : ''}${t.comment ? ` · "${MX.esc(t.comment)}"` : ''}</div>
         </div>
-        <button class="or-act-btn" onclick="MX.Pages.OrgResp.unvalidate('${t.id}')" title="Annuler la validation"><i class="fas fa-rotate-left"></i></button>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          ${_typeBadge(t.type)}
+          <button class="or-act-btn" onclick="MX.Pages.OrgResp.unvalidate('${t.id}')" title="Annuler"><i class="fas fa-rotate-left"></i></button>
+        </div>
       </div>
     </div>`;
   }
 
-  // ── MODAL FORM HELPERS ──
+  // ── DRAG & DROP ──
+  function _initDragDrop() {
+    const list = document.getElementById('or-todo-list');
+    if (!list) return;
+
+    list.addEventListener('dragstart', e => {
+      const card = e.target.closest('[data-id]');
+      if (!card) return;
+      _dragId = card.dataset.id;
+      requestAnimationFrame(() => card.classList.add('or-card--dragging'));
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    list.addEventListener('dragend', () => {
+      list.querySelectorAll('.or-card--dragging, .or-card--drag-over').forEach(c => {
+        c.classList.remove('or-card--dragging', 'or-card--drag-over');
+      });
+      _dragId = null; _dragOver = null;
+    });
+
+    list.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const card = e.target.closest('[data-id]');
+      if (!card || card.dataset.id === _dragId) return;
+      if (_dragOver !== card.dataset.id) {
+        list.querySelectorAll('.or-card--drag-over').forEach(c => c.classList.remove('or-card--drag-over'));
+        card.classList.add('or-card--drag-over');
+        _dragOver = card.dataset.id;
+      }
+    });
+
+    list.addEventListener('drop', e => {
+      e.preventDefault();
+      if (_dragId && _dragOver && _dragId !== _dragOver) _reorderTasks(_dragId, _dragOver);
+    });
+
+    // Touch support for mobile
+    let _tCard = null, _tY = 0;
+    list.addEventListener('touchstart', e => {
+      const handle = e.target.closest('.or-drag-handle');
+      if (!handle) return;
+      const card = handle.closest('[data-id]');
+      if (!card) return;
+      _tCard = card; _dragId = card.dataset.id; _tY = e.touches[0].clientY;
+      card.classList.add('or-card--dragging');
+    }, { passive: true });
+
+    list.addEventListener('touchmove', e => {
+      if (!_tCard) return;
+      e.preventDefault();
+      const ty = e.touches[0].clientY;
+      const cards = [...list.querySelectorAll('[data-id]:not(.or-card--dragging)')];
+      list.querySelectorAll('.or-card--drag-over').forEach(c => c.classList.remove('or-card--drag-over'));
+      let target = null;
+      cards.forEach(c => {
+        const r = c.getBoundingClientRect();
+        if (ty >= r.top && ty <= r.bottom) target = c;
+      });
+      if (target) { target.classList.add('or-card--drag-over'); _dragOver = target.dataset.id; }
+    }, { passive: false });
+
+    list.addEventListener('touchend', () => {
+      if (_tCard && _dragId && _dragOver && _dragId !== _dragOver) _reorderTasks(_dragId, _dragOver);
+      if (_tCard) _tCard.classList.remove('or-card--dragging');
+      list.querySelectorAll('.or-card--drag-over').forEach(c => c.classList.remove('or-card--drag-over'));
+      _tCard = null; _dragId = null; _dragOver = null;
+    });
+  }
+
+  async function _reorderTasks(fromId, toId) {
+    const todo    = _tasks.filter(t => !t.done && !t.archivedFromActive);
+    const fromIdx = todo.findIndex(t => t.id === fromId);
+    const toIdx   = todo.findIndex(t => t.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const reordered = [...todo];
+    const [moved]   = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    reordered.forEach((t, i) => { t.order = i; });
+
+    const rest  = _tasks.filter(t => t.done || t.archivedFromActive);
+    _tasks = [...reordered, ...rest];
+    _doRender();
+
+    try {
+      const batch = db.batch();
+      reordered.forEach((t, i) => batch.update(db.collection('org_tasks').doc(t.id), { order: i }));
+      await batch.commit();
+    } catch(e) { MX.toast('Erreur lors du tri', true); }
+  }
+
+  // ── FORM ──
   function _taskFormBody(defaults) {
-    const d = defaults || {};
+    const d    = defaults || {};
+    const prio = d.priority || 'normale';
+    const type = d.type || 'hebdomadaire';
     return `<div class="or-form">
       <div class="or-form-row">
         <label>Titre *</label>
-        <input id="or-f-title" class="fi" value="${MX.esc(d.title || '')}" placeholder="Nom de la tâche">
+        <input id="or-f-title" class="fi" value="${MX.esc(d.title || '')}" placeholder="Nom de la tâche" maxlength="150">
       </div>
       <div class="or-form-row">
         <label>Description</label>
-        <input id="or-f-desc" class="fi" value="${MX.esc(d.description || '')}" placeholder="Détails optionnels">
+        <input id="or-f-desc" class="fi" value="${MX.esc(d.description || '')}" placeholder="Détails optionnels" maxlength="300">
       </div>
       <div class="or-form-2col">
         <div class="or-form-row">
@@ -376,45 +474,53 @@
         <div class="or-form-row">
           <label>Priorité</label>
           <select id="or-f-prio" class="fi">
-            <option value="normale"${(d.priority||'normale')==='normale'?' selected':''}>Normale</option>
-            <option value="haute"${d.priority==='haute'?' selected':''}>🟠 Haute</option>
-            <option value="urgente"${d.priority==='urgente'?' selected':''}>🔴 Urgente</option>
+            <option value="normale"${prio==='normale'?' selected':''}>Normale</option>
+            <option value="haute"${prio==='haute'?' selected':''}>🟠 Haute</option>
+            <option value="urgente"${prio==='urgente'?' selected':''}>🔴 Urgente</option>
+            <option value="critique"${prio==='critique'?' selected':''}>🚨 Critique</option>
           </select>
         </div>
         <div class="or-form-row">
           <label>Type</label>
-          <select id="or-f-type" class="fi">
-            <option value="hebdomadaire"${(d.type||'hebdomadaire')==='hebdomadaire'?' selected':''}>🔄 Récurrente</option>
-            <option value="unique"${d.type==='unique'?' selected':''}>📌 Unique</option>
-          </select>
+          <div class="or-type-radios">
+            <label class="or-radio${type==='hebdomadaire'?' or-radio--on':''}">
+              <input type="radio" name="or-f-type" value="hebdomadaire" ${type==='hebdomadaire'?'checked':''} onchange="this.closest('.or-type-radios').querySelectorAll('.or-radio').forEach(l=>l.classList.remove('or-radio--on'));this.closest('.or-radio').classList.add('or-radio--on')">
+              🔄 Récurrente
+            </label>
+            <label class="or-radio${type==='unique'?' or-radio--on':''}">
+              <input type="radio" name="or-f-type" value="unique" ${type==='unique'?'checked':''} onchange="this.closest('.or-type-radios').querySelectorAll('.or-radio').forEach(l=>l.classList.remove('or-radio--on'));this.closest('.or-radio').classList.add('or-radio--on')">
+              📌 Unique
+            </label>
+          </div>
         </div>
       </div>
     </div>`;
   }
 
   function _readForm() {
+    const typeEl = document.querySelector('input[name="or-f-type"]:checked');
     return {
-      title:      (document.getElementById('or-f-title')?.value || '').trim(),
-      description:(document.getElementById('or-f-desc')?.value  || '').trim(),
-      assignedTo: document.getElementById('or-f-assign')?.value || null,
-      category:   document.getElementById('or-f-cat')?.value    || 'autre',
-      priority:   document.getElementById('or-f-prio')?.value   || 'normale',
-      type:       document.getElementById('or-f-type')?.value   || 'hebdomadaire',
+      title:       (document.getElementById('or-f-title')?.value  || '').trim(),
+      description: (document.getElementById('or-f-desc')?.value   || '').trim(),
+      assignedTo:  document.getElementById('or-f-assign')?.value  || null,
+      category:    document.getElementById('or-f-cat')?.value     || 'autre',
+      priority:    document.getElementById('or-f-prio')?.value    || 'normale',
+      type:        typeEl ? typeEl.value : 'hebdomadaire',
     };
   }
 
-  // ── ADD TASK ──
+  // ── ADD ──
   function openAdd() {
     MX.showModal({
       title:   'Nouvelle tâche',
-      sub:     'Ajouter une tâche pour cette semaine',
+      sub:     _weekLabel(_weekKey),
       body:    _taskFormBody(),
       actions: [
-        { label: 'Ajouter', cls: 'primary-btn', fn: () => _doAdd() },
+        { label: 'Créer', cls: 'primary-btn', fn: () => _doAdd() },
         { label: 'Annuler', cls: 'cancel' }
       ]
     });
-    setTimeout(() => { const el = document.getElementById('or-f-title'); if (el) el.focus(); }, 50);
+    setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
   }
 
   async function _doAdd() {
@@ -431,30 +537,27 @@
         done: false, doneBy: null, doneAt: null, comment: null,
         archivedFromActive: false,
         createdBy: name, createdAt: FV.serverTimestamp(),
-        order: _tasks.length, isDefault: false,
+        order: _tasks.filter(t => !t.done && !t.archivedFromActive).length, isDefault: false,
       });
       MX.syncEnd();
-      MX.toast('Tâche ajoutée ✓');
-    } catch(e) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + e.message, true);
-    }
+      MX.toast('Tâche créée ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
-  // ── EDIT TASK ──
+  // ── EDIT ──
   function openEdit(taskId) {
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
     MX.showModal({
       title:   'Modifier la tâche',
-      sub:     '',
+      sub:     MX.esc(t.title),
       body:    _taskFormBody(t),
       actions: [
         { label: 'Enregistrer', cls: 'primary-btn', fn: () => _doEdit(taskId) },
-        { label: 'Annuler',     cls: 'cancel' }
+        { label: 'Annuler', cls: 'cancel' }
       ]
     });
-    setTimeout(() => { const el = document.getElementById('or-f-title'); if (el) el.focus(); }, 50);
+    setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
   }
 
   async function _doEdit(taskId) {
@@ -464,31 +567,31 @@
     MX.syncStart();
     try {
       await db.collection('org_tasks').doc(taskId).update({
-        title:       data.title,
-        description: data.description,
-        assignedTo:  data.assignedTo || null,
-        category:    data.category,
-        priority:    data.priority,
-        type:        data.type,
+        title: data.title, description: data.description,
+        assignedTo: data.assignedTo || null, category: data.category,
+        priority: data.priority, type: data.type,
       });
       MX.syncEnd();
       MX.toast('Tâche modifiée ✓');
-    } catch(e) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + e.message, true);
-    }
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
-  // ── DELETE TASK ──
+  // ── DELETE ──
   function openDelete(taskId) {
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
     MX.showModal({
-      title:   'Supprimer la tâche',
-      sub:     MX.esc(t.title),
-      body:    `<div style="font-size:13px;color:var(--text2);padding:4px 0">Cette tâche sera définitivement supprimée. Cette action est irréversible.</div>`,
+      title: 'Supprimer la tâche',
+      sub:   MX.esc(t.title),
+      body:  `<div style="display:flex;align-items:flex-start;gap:12px;padding:4px 0">
+        <i class="fas fa-triangle-exclamation" style="color:var(--red);font-size:20px;margin-top:2px;flex-shrink:0"></i>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Cette tâche sera <strong style="color:var(--red)">définitivement supprimée</strong>.<br>
+          Cette action est irréversible.
+        </div>
+      </div>`,
       actions: [
-        { label: 'Supprimer', cls: 'primary-btn', fn: () => _doDelete(taskId) },
+        { label: 'Supprimer', cls: 'danger-btn', fn: () => _doDelete(taskId) },
         { label: 'Annuler',   cls: 'cancel' }
       ]
     });
@@ -501,26 +604,28 @@
       await db.collection('org_tasks').doc(taskId).delete();
       MX.syncEnd();
       MX.toast('Tâche supprimée');
-    } catch(e) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + e.message, true);
-    }
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
   // ── VALIDATE ──
   function openValidate(taskId) {
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
+    const isRec = t.type !== 'unique';
     MX.showModal({
-      title:   'Valider la tâche',
-      sub:     MX.esc(t.title),
-      body:    `<div style="margin-bottom:4px">
-        <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px">Commentaire (optionnel)</label>
-        <textarea id="or-val-cmt" class="fi" style="min-height:64px;resize:vertical" placeholder="Tout était OK, rien à signaler…"></textarea>
+      title: 'Valider la tâche',
+      sub:   MX.esc(t.title),
+      body:  `<div>
+        <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:6px">Commentaire (optionnel)</label>
+        <textarea id="or-val-cmt" class="fi" style="min-height:72px;resize:vertical" placeholder="Tout était OK, rien à signaler…"></textarea>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:8px;padding:8px 10px;background:${isRec?'rgba(0,194,209,.07)':'var(--bg3)'};border-radius:8px;font-size:12px;color:var(--text2)">
+          <i class="fas ${isRec?'fa-rotate':'fa-archive'}" style="color:${isRec?'var(--cyan)':'var(--text3)'}"></i>
+          ${isRec ? 'Tâche récurrente — recréée automatiquement la semaine suivante' : 'Tâche unique — archivée après validation'}
+        </div>
       </div>`,
       actions: [
-        { label: 'Valider',  cls: 'primary-btn', fn: () => _doValidate(taskId) },
-        { label: 'Annuler',  cls: 'cancel' }
+        { label: 'Valider', cls: 'primary-btn', fn: () => _doValidate(taskId) },
+        { label: 'Annuler', cls: 'cancel' }
       ]
     });
   }
@@ -532,15 +637,12 @@
     MX.closeModal();
     MX.syncStart();
     try {
-      const update = { done: true, doneBy: name, doneAt: FV.serverTimestamp(), comment: comment || null };
+      const update = { done: true, doneBy: name, doneAt: FV.serverTimestamp(), comment };
       if (task && task.type === 'unique') update.archivedFromActive = true;
       await db.collection('org_tasks').doc(taskId).update(update);
       MX.syncEnd();
       MX.toast('Tâche validée ✓');
-    } catch(e) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + e.message, true);
-    }
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
   async function unvalidate(taskId) {
@@ -551,10 +653,7 @@
       });
       MX.syncEnd();
       MX.toast('Validation annulée');
-    } catch(e) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + e.message, true);
-    }
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
   // ── HISTORY ──
@@ -562,17 +661,14 @@
     _inHistory = true;
     const mc = document.getElementById('main-content');
     if (!mc) return;
-    mc.innerHTML = `<div class="or-page"><div class="or-loading"><i class="fas fa-spinner fa-spin"></i> Chargement de l'historique…</div></div>`;
-
+    mc.innerHTML = `<div class="or-page"><div class="or-loading"><i class="fas fa-spinner fa-spin"></i> Chargement…</div></div>`;
     try {
       const weeks = [];
-      const now   = new Date();
+      const now = new Date();
       for (let i = 0; i < 8; i++) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i * 7);
+        const d = new Date(now); d.setDate(d.getDate() - i * 7);
         weeks.push(_getWeekKey(d));
       }
-
       const snap = await db.collection('org_tasks').where('weekKey', 'in', weeks).get();
       const byWeek = {};
       snap.docs.forEach(d => {
@@ -581,81 +677,59 @@
         byWeek[data.weekKey].push({ id: d.id, ...data });
       });
 
-      let h = `<div class="or-page">`;
-      h += `<div class="or-header">
-        <div class="or-header-left">
-          <div class="or-title">Historique</div>
-          <div class="or-week-label">8 dernières semaines</div>
-        </div>
-        <div class="or-header-right">
-          <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()">
-            <i class="fas fa-arrow-left"></i> Retour
-          </button>
-        </div>
-      </div>`;
+      let h = `<div class="or-page">
+        <div class="or-header">
+          <div class="or-header-left">
+            <div class="or-title">Historique</div>
+            <div class="or-week-label">8 dernières semaines</div>
+          </div>
+          <div class="or-header-right">
+            <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()"><i class="fas fa-arrow-left"></i><span class="or-btn-lbl"> Retour</span></button>
+          </div>
+        </div>`;
 
       let hasAny = false;
       weeks.forEach(wk => {
-        const tasks    = (byWeek[wk] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
-        const total    = tasks.length;
-        const doneCnt  = tasks.filter(t => t.done).length;
+        const tasks   = (byWeek[wk] || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const total   = tasks.length;
+        const doneCnt = tasks.filter(t => t.done).length;
         if (total === 0) return;
         hasAny = true;
-
-        const pct    = total ? Math.round(doneCnt / total * 100) : 0;
+        const pct    = Math.round(doneCnt / total * 100);
         const isCur  = wk === _weekKey;
         const pctCls = pct >= 80 ? 'or-hist-bar-fill--done' : pct >= 40 ? 'or-hist-bar-fill--prog' : '';
-
-        h += `<div class="or-hist-week${isCur ? ' or-hist-week--current' : ''}" onclick="MX.Pages.OrgResp._histToggle('${wk}')">
+        h += `<div class="or-hist-week${isCur?' or-hist-week--current':''}" onclick="MX.Pages.OrgResp._histToggle('${wk}')">
           <div class="or-hist-row">
-            <div class="or-hist-wlabel">${_weekLabel(wk)}${isCur ? ' <span class="or-hist-cur">en cours</span>' : ''}</div>
+            <div class="or-hist-wlabel">${_weekLabel(wk)}${isCur?' <span class="or-hist-cur">en cours</span>':''}</div>
             <div class="or-hist-stat">${doneCnt}/${total} — ${pct}%</div>
           </div>
           <div class="or-hist-bar"><div class="or-hist-bar-fill ${pctCls}" style="width:${pct}%"></div></div>
         </div>
         <div class="or-hist-detail" id="or-hd-${wk}" style="display:none">`;
-
         tasks.forEach(t => {
-          const asgn = t.assignedTo ? ` · <span style="color:var(--text3)">↗ ${MX.esc(t.assignedTo)}</span>` : '';
-          h += `<div class="or-hist-task${t.done ? ' or-hist-task--done' : ''}">
-            <i class="fas fa-${t.done ? 'circle-check' : 'circle'}" style="color:${t.done ? 'var(--green)' : 'var(--text3)'}"></i>
+          const asgn = t.assignedTo ? ` · <span style="color:var(--cyan)">↗ ${MX.esc(t.assignedTo)}</span>` : '';
+          h += `<div class="or-hist-task${t.done?' or-hist-task--done':''}">
+            <i class="fas fa-${t.done?'circle-check':'circle'}" style="color:${t.done?'var(--green)':'var(--text3)'}"></i>
             <div class="or-hist-task-body">
               <div class="or-hist-task-title">${MX.esc(t.title)} ${_typeBadge(t.type)}${asgn}</div>
-              ${t.done && t.doneBy ? `<div class="or-hist-task-meta">Par <strong>${MX.esc(t.doneBy)}</strong>${t.doneAt ? ` — ${_fmtDT(t.doneAt)}` : ''}${t.comment ? ` — "${MX.esc(t.comment)}"` : ''}</div>` : ''}
+              ${t.done&&t.doneBy?`<div class="or-hist-task-meta">Par <strong>${MX.esc(t.doneBy)}</strong>${t.doneAt?` — ${_fmtDT(t.doneAt)}`:''}${t.comment?` — "${MX.esc(t.comment)}"`:''}</div>`:''}
             </div>
           </div>`;
         });
-
         h += `</div>`;
       });
 
-      if (!hasAny) {
-        h += `<div class="or-empty"><i class="fas fa-clock-rotate-left"></i><div>Aucun historique disponible</div></div>`;
-      }
-
+      if (!hasAny) h += `<div class="or-empty"><i class="fas fa-clock-rotate-left"></i><div>Aucun historique disponible</div></div>`;
       h += `</div>`;
       mc.innerHTML = h;
     } catch(e) {
-      console.error('[OrgResp] renderHistory:', e.message || e);
-      const isIndex  = e.code === 'failed-precondition' || (e.message && e.message.includes('index'));
-      const linkMatch = e.message && e.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
-      const link = linkMatch ? linkMatch[0] : null;
-      if (isIndex) console.warn('[Maintix] Index manquant org_tasks (weekKey in)' + (link ? '\n  Lien: ' + link : ''));
+      console.error('[OrgResp] history:', e);
       mc.innerHTML = `<div class="or-page">
         <div class="or-header">
           <div class="or-header-left"><div class="or-title">Historique</div></div>
-          <div class="or-header-right">
-            <button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()"><i class="fas fa-arrow-left"></i> Retour</button>
-          </div>
+          <div class="or-header-right"><button class="or-sec-btn" onclick="MX.Pages.OrgResp.render()"><i class="fas fa-arrow-left"></i> Retour</button></div>
         </div>
-        <div class="or-empty" style="gap:12px;padding:40px 20px">
-          <i class="fas fa-${isIndex ? 'database' : 'triangle-exclamation'}" style="color:var(--${isIndex ? 'orange' : 'red'})"></i>
-          <div style="font-weight:700">${isIndex ? 'Index Firestore manquant' : 'Erreur de chargement'}</div>
-          <div style="font-size:13px;color:var(--text2);text-align:center;max-width:320px">
-            ${isIndex ? 'Déployez <strong>firestore.indexes.json</strong> via la Firebase CLI.' : MX.esc(e.message || String(e))}
-          </div>
-          ${link ? `<a href="${link}" target="_blank" rel="noopener" class="or-sec-btn"><i class="fas fa-external-link-alt"></i> Créer l'index →</a>` : ''}
-        </div>
+        <div class="or-empty"><i class="fas fa-triangle-exclamation" style="color:var(--red)"></i><div>Erreur de chargement</div></div>
       </div>`;
     }
   }
