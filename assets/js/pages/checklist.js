@@ -1455,25 +1455,55 @@
 
   function _addFutureTask(weekKey, dayId, slot) {
     const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
-    document.getElementById('m-title').textContent = 'Nouvelle tâche';
-    document.getElementById('m-sub').innerHTML = `<div style="font-size:12px;color:var(--text3);margin-bottom:6px">${MX.esc(SLOT_LABELS[slot] || slot)} · ${MX.esc(_weekLabel(weekKey))}</div>`;
-    document.getElementById('m-body').innerHTML = `<input id="ft-add-text" class="fi" placeholder="Nom de la tâche" maxlength="150" style="width:100%">`;
-    document.getElementById('m-actions').innerHTML = `
-      <button class="modal-btn confirm" onclick="MX.Pages.Checklist._doAddFutureTask('${MX.esc(weekKey)}','${MX.esc(dayId)}','${MX.esc(slot)}')">
-        <i class="fas fa-plus"></i> Ajouter
-      </button>
-      <button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>`;
-    document.getElementById('modal-bg').classList.add('show');
-    setTimeout(() => document.getElementById('ft-add-text')?.focus(), 50);
+    const day  = MX.DAYS.find(d => d.id === dayId);
+    const users = (MX.state.users || []);
+    const userOpts = `<option value="">— Non assigné —</option>` +
+      users.map(u => `<option value="${MX.esc(u.name)}">${MX.esc(u.name)}</option>`).join('');
+
+    MX.showModal({
+      title: 'Nouvelle tâche',
+      sub:   `${MX.esc((day || {}).l || dayId)} · ${MX.esc(SLOT_LABELS[slot] || slot)} · ${MX.esc(_weekLabel(weekKey))}`,
+      body:  `<div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Titre *</label>
+          <input id="ft-title" class="fi" placeholder="Nom de la tâche" maxlength="150" style="width:100%">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Description</label>
+          <input id="ft-desc" class="fi" placeholder="Détails optionnels" maxlength="300" style="width:100%">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Assignation</label>
+            <select id="ft-assign" class="fi">${userOpts}</select>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Type</label>
+            <select id="ft-type" class="fi">
+              <option value="hebdomadaire">🔄 Récurrente</option>
+              <option value="unique">📌 Unique</option>
+            </select>
+          </div>
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Ajouter', cls: 'primary-btn', fn: () => _doAddFutureTask(weekKey, dayId, slot) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+    setTimeout(() => document.getElementById('ft-title')?.focus(), 50);
   }
 
   async function _doAddFutureTask(weekKey, dayId, slot) {
-    const text = (document.getElementById('ft-add-text')?.value || '').trim();
-    if (!text) { MX.toast('Le texte est obligatoire', true); return; }
+    const text   = (document.getElementById('ft-title')?.value  || '').trim();
+    if (!text) { MX.toast('Le titre est obligatoire', true); return; }
+    const desc   = (document.getElementById('ft-desc')?.value   || '').trim();
+    const assign = document.getElementById('ft-assign')?.value  || '';
+    const type   = document.getElementById('ft-type')?.value    || 'hebdomadaire';
     MX.closeModal();
     if (!_mvD[weekKey]) _mvD[weekKey] = { tasks: {}, checks: {}, assignments: {} };
     const existing = (_mvD[weekKey].tasks || {})[`${dayId}_${slot}`] || [];
-    const newItem  = { id: MX.uuid(), text, order: existing.length };
+    const newItem  = { id: MX.uuid(), text, description: desc || null, assignedTo: assign || null, type, order: existing.length };
     const newItems = [...existing, newItem];
     MX.syncStart();
     try {
@@ -1532,5 +1562,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _doAddFutureTask, _deleteFutureTask };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask };
 })();
