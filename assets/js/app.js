@@ -276,12 +276,18 @@
       }
       return `<button class="${cls}"${id ? ` data-page="${id}"` : ""} onclick="${fn}" title="${label}"><i class="fas ${icon} sx-ico${act ? " sx-ico--on" : ""}"></i><span class="sx-lbl">${label}</span>${r}${star}</button>`;
     }
-    function _group(icon, icoCls, label, key, toggleFn, open, items) {
+    function _group(icon, icoCls, label, key, toggleFn, open, items, favId, favLabel) {
+      let star = '';
+      if (favId) {
+        const isFav = _getFavs().some(f => f.id === favId);
+        star = `<span class="sx-fav-star${isFav ? ' sx-fav-star--on' : ''}" onclick="event.stopPropagation();MX.toggleFav('${favId}','${favLabel || favId}')" title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}"><i class="fas fa-star"></i></span>`;
+      }
       return `<div class="sx-group">
     <button class="sx-group-hdr${open ? ' sx-group-hdr--open' : ''}" onclick="MX.${toggleFn}()" title="${label}">
       <i class="fas fa-chevron-right sx-group-chev"></i>
       <span class="sx-group-ico ${icoCls}"><i class="fas ${icon}"></i></span>
       <span class="sx-group-lbl">${label}</span>
+      ${star}
     </button>
     ${open ? `<div class="sx-group-body">${items}</div>` : ''}
   </div>`;
@@ -296,7 +302,7 @@
 
     // ── 🏠 Accueil (standalone) ──
     h += `<div class="sx-top">`;
-    h += _item("home", "fa-house", "Accueil");
+    h += _item("home", "fa-house", "Accueil", { favable: true });
     h += _item("msgs", "fa-comments", "Messages", { badge: true, favable: true });
     h += `</div>`;
 
@@ -328,7 +334,7 @@
     plngItems += _item("planning-week",  "fa-calendar-week",  "Semaine",          { sub: true, fn: "MX.showPlanningView('week')",          matchPages: [] });
     plngItems += _item("planning",       "fa-calendar",       "Calendrier",       { sub: true, fn: "MX.showPlanningView('month')",         matchPages: plngPages, favable: true });
     plngItems += _item("planning-conge", "fa-umbrella-beach", "Congés & Absences",{ sub: true, fn: "MX.showPlanningView('month','CP')",   matchPages: [] });
-    h += _group("fa-calendar-days", "sx-group-ico--blue", "📅 Planning", "plng", "toggleNavPlng", _plngOpen, plngItems);
+    h += _group("fa-calendar-days", "sx-group-ico--blue", "📅 Planning", "plng", "toggleNavPlng", _plngOpen, plngItems, "planning", "Planning");
 
     // ── 🔧 Maintenance ──
     const clPages = ["today-cl", ...DAYS.map(d => d.id)];
@@ -338,14 +344,14 @@
       maintItems += _item("interventions", "fa-wrench",        "Interventions",        { sub: true, dynBadge: "int", favable: true });
       maintItems += _item("org-resp",      "fa-users-gear",    "Organisation Resp.",   { sub: true, favable: true });
     }
-    h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems);
+    h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems, "today-cl", "Checklists");
 
     // ── 📦 Gestion ──
     let gestItems = "";
     gestItems += _item("orders",        "fa-box",            "Stock",                { sub: true, dynBadge: "stock", favable: true });
     gestItems += _item("documents",     "fa-book",           "Ressources / Bible",   { sub: true, favable: true });
     gestItems += _item("consommations", "fa-droplet",        "Consommations",        { sub: true, fn: "MX.showCsoTab('dashboard')", favable: true });
-    h += _group("fa-cube", "sx-group-ico--cyan", "📦 Gestion", "gest", "toggleNavGest", _gestOpen, gestItems);
+    h += _group("fa-cube", "sx-group-ico--cyan", "📦 Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
 
     // ── 📊 Analyses ──
     let anlyItems = "";
@@ -358,7 +364,7 @@
     ].forEach(t => {
       anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
     });
-    h += _group("fa-chart-bar", "sx-group-ico--green", "📊 Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems);
+    h += _group("fa-chart-bar", "sx-group-ico--green", "📊 Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Consommations");
 
     // ── ⚙️ Administration (respOnly) ──
     if (canAll) {
@@ -375,7 +381,7 @@
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('pin')" title="Codes PIN"><i class="fas fa-key sx-ico"></i><span class="sx-lbl">Codes PIN & Accès</span></button>`;
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('absences')" title="Absences"><i class="fas fa-umbrella-beach sx-ico"></i><span class="sx-lbl">Absences</span></button>`;
       }
-      h += _group("fa-shield-halved", "sx-group-ico--orange", "⚙️ Administration", "adm", "toggleNavAdmin", _adminOpen, aItems);
+      h += _group("fa-shield-halved", "sx-group-ico--orange", "⚙️ Administration", "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Administration");
     }
 
     // ── Paramètres (standalone) ──
