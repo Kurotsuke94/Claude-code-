@@ -395,22 +395,17 @@
     const sidebar = document.getElementById("sidebar");
     if (sidebar) sidebar.classList.toggle("sx-compact", _compact);
 
-    // ── Bottom nav ──
+    // ── Bottom nav (mobile) — exactly 5 items ──
     const dayIds = DAYS.map(d => d.id);
     const allCl  = ["today-cl", ...dayIds];
-    const resCur = ["orders","documents","consommations","interventions"].includes(cur);
+    const drawerPages = ["orders","documents","consommations","interventions","org-resp","utilisateurs","equipe","parametres"];
+    const drawerAct   = drawerPages.includes(cur);
     let bot = `<div class="bottom-nav-inner">`;
     bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
     bot += `<button class="bn${cur==="msgs"?" active":""}" data-page="msgs" onclick="MX.showPage('msgs')"><div class="bn-bar"></div><i class="fas fa-comments"></i><span class="nav-badge" id="bnb_msgs"></span><span>Messages</span></button>`;
     bot += `<button class="bn${cur==="planning"?" active":""}" data-page="planning" onclick="MX.showPage('planning')"><div class="bn-bar"></div><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
     bot += `<button class="bn${allCl.includes(cur)?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Checklists</span></button>`;
-    bot += `<button class="bn${resCur?" active":""}" onclick="MX.showPage('orders')"><div class="bn-bar"></div><i class="fas fa-cube"></i><span>Gestion</span></button>`;
-    if (canAll) {
-      bot += `<button class="bn${cur==="org-resp"?" active":""}" data-page="org-resp" onclick="MX.showPage('org-resp')"><div class="bn-bar"></div><i class="fas fa-users"></i><span>Organisation</span></button>`;
-      bot += `<button class="bn${cur==="utilisateurs"||cur==="equipe"?" active":""}" onclick="MX.showPage('utilisateurs')"><div class="bn-bar"></div><i class="fas fa-shield-halved"></i><span>Admin</span></button>`;
-    } else {
-      bot += `<button class="bn${cur==="parametres"?" active":""}" data-page="parametres" onclick="MX.showPage('parametres')"><div class="bn-bar"></div><i class="fas fa-gear"></i><span>Paramètres</span></button>`;
-    }
+    bot += `<button class="bn${drawerAct?" active":""}" onclick="MX.openMobileDrawer()"><div class="bn-bar"></div><i class="fas fa-grip"></i><span>Plus</span></button>`;
     bot += `</div>`;
     botNav.innerHTML = bot;
 
@@ -1541,11 +1536,88 @@
     return b ? (b.border || b.color || null) : null;
   };
 
-  window.MX.buildNav          = buildNav;
-  window.MX.buildDeskHeader   = buildDeskHeader;
-  window.MX.updateNavProgress = updateNavProgress;
-  window.MX.updateAnnBanner   = updateAnnBanner;
-  window.MX.renderStatusBar   = renderStatusBar;
+  // ── MOBILE DRAWER ──
+  function openMobileDrawer() {
+    closeMobileDrawer();
+    const { state } = MX;
+    const cu    = state.currentUser;
+    const admin = state.adminUser;
+    const canAll = MX.Auth.canSeeAll();
+    const name  = cu ? (cu.name || cu.id || '') : (admin ? (admin.email || 'Admin') : '');
+    const role  = cu ? (cu.role || '') : (admin ? 'Admin' : '');
+    const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+
+    const favs = _getFavs();
+    let favsHtml = '';
+    if (favs.length > 0) {
+      favsHtml = `<div class="mob-drw-favs">`;
+      favs.forEach(function(f) {
+        const fInfo = NAV_INFO[f.id] || {};
+        favsHtml += `<button class="mob-drw-fav" onclick="MX.closeMobileDrawer();MX.showPage('${f.id}')"><i class="fas ${fInfo.icon || 'fa-circle'}"></i><span>${f.label}</span></button>`;
+      });
+      favsHtml += `</div>`;
+    } else {
+      favsHtml = `<div class="mob-drw-fav-empty">Épinglez des modules avec ⭐ dans le menu principal</div>`;
+    }
+
+    const navItems = [
+      { id: 'orders',        icon: 'fa-box',           label: 'Stock' },
+      { id: 'documents',     icon: 'fa-book',          label: 'Ressources' },
+      { id: 'consommations', icon: 'fa-droplet',       label: 'Consommations' },
+      { id: 'parametres',    icon: 'fa-gear',          label: 'Paramètres' },
+    ];
+    if (canAll) {
+      navItems.splice(3, 0,
+        { id: 'org-resp',      icon: 'fa-users-gear',    label: 'Organisation' },
+        { id: 'utilisateurs',  icon: 'fa-shield-halved', label: 'Administration' }
+      );
+    }
+    const gridHtml = navItems.map(function(item) {
+      return `<button class="mob-drw-item" onclick="MX.closeMobileDrawer();MX.showPage('${item.id}')"><i class="fas ${item.icon}"></i><span>${item.label}</span></button>`;
+    }).join('');
+
+    const html = `<div class="mob-drw" id="mob-drw">
+      <div class="mob-drw-overlay" onclick="MX.closeMobileDrawer()"></div>
+      <div class="mob-drw-panel">
+        <div class="mob-drw-handle"></div>
+        <div class="mob-drw-profile">
+          <div class="mob-drw-avatar">${initials}</div>
+          <div class="mob-drw-userinfo">
+            <div class="mob-drw-username">${name || 'Utilisateur'}</div>
+            ${role ? `<div class="mob-drw-userrole">${role}</div>` : ''}
+          </div>
+        </div>
+        <div class="mob-drw-section">
+          <div class="mob-drw-section-title"><i class="fas fa-star"></i>Accès Rapide</div>
+          ${favsHtml}
+        </div>
+        <div class="mob-drw-section">
+          <div class="mob-drw-section-title"><i class="fas fa-grip" style="color:var(--text3)"></i>Navigation</div>
+          <div class="mob-drw-grid">${gridHtml}</div>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    requestAnimationFrame(function() {
+      const drw = document.getElementById('mob-drw');
+      if (drw) drw.classList.add('mob-drw--open');
+    });
+  }
+
+  function closeMobileDrawer() {
+    const drw = document.getElementById('mob-drw');
+    if (!drw) return;
+    drw.classList.remove('mob-drw--open');
+    setTimeout(function() { if (drw.parentNode) drw.parentNode.removeChild(drw); }, 310);
+  }
+
+  window.MX.buildNav           = buildNav;
+  window.MX.buildDeskHeader    = buildDeskHeader;
+  window.MX.updateNavProgress  = updateNavProgress;
+  window.MX.updateAnnBanner    = updateAnnBanner;
+  window.MX.renderStatusBar    = renderStatusBar;
+  window.MX.openMobileDrawer   = openMobileDrawer;
+  window.MX.closeMobileDrawer  = closeMobileDrawer;
 
   document.addEventListener("DOMContentLoaded", init);
 })();

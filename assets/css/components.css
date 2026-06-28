@@ -4323,7 +4323,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 @media (max-width: 900px) {
-  #sidebar.sx-compact { width: 100% !important; }
+  #sidebar.sx-compact { display: none !important; }
 }
 
 /* ══════════════════════════════════════════════════════
@@ -7491,3 +7491,113 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .or-kanban         { flex-direction: column; }
   .or-kcol           { min-width: 0; max-width: none; }
 }
+
+/* ══════════════════════════════════════════════════════
+   MOBILE DRAWER (bottom sheet — Plus menu)
+══════════════════════════════════════════════════════ */
+.mob-drw {
+  position: fixed; inset: 0;
+  z-index: 1200;
+  display: flex; align-items: flex-end;
+  pointer-events: none;
+}
+.mob-drw--open { pointer-events: auto; }
+
+.mob-drw-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0);
+  transition: background 0.28s ease;
+}
+.mob-drw--open .mob-drw-overlay { background: rgba(0,0,0,0.65); }
+
+.mob-drw-panel {
+  position: relative; z-index: 1;
+  width: 100%;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  max-height: 88vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.mob-drw--open .mob-drw-panel { transform: translateY(0); }
+
+.mob-drw-handle {
+  width: 36px; height: 4px;
+  background: var(--border2); border-radius: 2px;
+  margin: 12px auto 4px;
+}
+
+/* Profile row */
+.mob-drw-profile {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.mob-drw-avatar {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--cyan), #0e9cb0);
+  color: #fff; font-size: 16px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.mob-drw-userinfo { min-width: 0; }
+.mob-drw-username {
+  font-weight: 600; font-size: 15px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mob-drw-userrole {
+  font-size: 12px; color: var(--text3); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Sections */
+.mob-drw-section {
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mob-drw-section:last-child { border-bottom: none; padding-bottom: 4px; }
+.mob-drw-section-title {
+  font-size: 11px; font-weight: 700;
+  color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.mob-drw-section-title i { font-size: 10px; color: #F59E0B; }
+
+/* Favorites list */
+.mob-drw-favs { display: flex; flex-direction: column; gap: 4px; }
+.mob-drw-fav {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg3); border: none;
+  color: var(--text); font-size: 14px; font-family: var(--ffs);
+  cursor: pointer; text-align: left; width: 100%;
+  transition: background 0.12s;
+}
+.mob-drw-fav:active { background: var(--bg4); }
+.mob-drw-fav i { font-size: 15px; color: var(--cyan); width: 18px; text-align: center; flex-shrink: 0; }
+.mob-drw-fav-empty {
+  font-size: 12px; color: var(--text3); padding: 2px 0 4px;
+  font-style: italic;
+}
+
+/* Navigation grid */
+.mob-drw-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+}
+.mob-drw-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 14px 8px;
+  background: var(--bg3); border: none; border-radius: 12px;
+  color: var(--text2); font-size: 11px; font-family: var(--ffs);
+  cursor: pointer; text-align: center;
+  transition: background 0.12s, color 0.12s;
+  min-height: 68px; justify-content: center;
+}
+.mob-drw-item:active { background: var(--bg4); color: var(--text); }
+.mob-drw-item i { font-size: 20px; color: var(--cyan); margin-bottom: 1px; }
