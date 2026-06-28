@@ -1005,6 +1005,24 @@
     await R_WC().doc(weekKey).set({ ...data, savedAt: FV.serverTimestamp() });
   }
 
+  async function deleteWeeklyChecks(weekKey) {
+    await R_WC().doc(weekKey).delete();
+  }
+
+  async function updateWeeklyTasks(weekKey, dayId, slot, items) {
+    await R_WC().doc(weekKey).update({ [`tasks.${dayId}_${slot}`]: items });
+  }
+
+  async function promoteWeeklyToActive(tasksData) {
+    const batch = db.batch();
+    Object.entries(tasksData).forEach(([key, items]) => {
+      batch.set(db.collection('tasks').doc(key), { items });
+    });
+    batch.set(db.collection('config').doc('checks'), {});
+    batch.set(db.collection('config').doc('assignments'), {});
+    await batch.commit();
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -1052,6 +1070,6 @@
     markNotificationRead, markAllNotificationsRead,
     deleteNotification, archiveNotification,
     listenRoles, addRole, updateRole, deleteRole,
-    getWeeklyChecks, saveWeeklyChecks,
+    getWeeklyChecks, saveWeeklyChecks, deleteWeeklyChecks, updateWeeklyTasks, promoteWeeklyToActive,
   };
 })();

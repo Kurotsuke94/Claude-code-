@@ -7018,3 +7018,23 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .or-type-badge      { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: .02em; vertical-align: middle; }
 .or-type-badge--heb { background: rgba(16,185,129,.13); color: #10B981; border: 1px solid rgba(16,185,129,.25); }
 .or-type-badge--uni { background: rgba(139,92,246,.13); color: #A78BFA; border: 1px solid rgba(139,92,246,.25); }
+
+/* ── WEEK SLOTS (Responsable/Admin checklist view) ── */
+.cl-wslots          { display: flex; flex-direction: column; gap: 10px; }
+.cl-wslot           { background: var(--bg2); border: 1px solid var(--border1); border-radius: 12px; overflow: hidden; cursor: pointer; transition: border-color .18s, box-shadow .18s; }
+.cl-wslot:hover     { border-color: var(--cyan-border); box-shadow: 0 0 0 1px var(--cyan-border); }
+.cl-wslot--curr     { border-color: var(--cyan-border); box-shadow: 0 0 0 1px var(--cyan-border); background: var(--cyan-dim); }
+.cl-wslot--future   { border-color: var(--border2); opacity: .85; }
+.cl-wslot--arch     { border-color: var(--border); opacity: .7; }
+.cl-wslot-header    { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px; gap: 12px; }
+.cl-wslot-label     { font-size: 14px; font-weight: 700; color: var(--text1); font-family: var(--ffm); }
+.cl-wslot-sub       { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.cl-wslot-status    { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 10px; white-space: nowrap; letter-spacing: .04em; }
+.cl-wslot-status--curr   { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan-border); }
+.cl-wslot-status--future { background: rgba(139,92,246,.12); color: #A78BFA; border: 1px solid rgba(139,92,246,.28); }
+.cl-wslot-status--arch   { background: var(--bg4); color: var(--text3); border: 1px solid var(--border2); }
+.cl-wslot-bar       { height: 4px; background: var(--bg4); margin: 0 16px 12px; border-radius: 3px; overflow: hidden; }
+.cl-wslot-bar-fill  { height: 100%; border-radius: 3px; transition: width .4s; }
+
+/* Future-day card in week day grid */
+.cl-day--future     { border-color: rgba(139,92,246,.25) !important; background: rgba(139,92,246,.05) !important; }

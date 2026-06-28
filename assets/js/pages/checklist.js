@@ -514,8 +514,7 @@
   // ── ROLE-BASED ENTRY POINT ──
   function renderForRole() {
     if (MX.Auth.canSeeAll()) {
-      const now = new Date();
-      renderMonthly(now.getFullYear(), now.getMonth());
+      renderWeekSlots();
     } else {
       renderWeekly();
     }
@@ -531,6 +530,10 @@
   function _weekKey(d) {
     const wk = _isoWk(d);
     return `${wk.y}_W${String(wk.n).padStart(2,'0')}`;
+  }
+  function _weekLabel(wk) {
+    const p = wk.split('_W');
+    return `Semaine ${parseInt(p[1], 10)} — ${p[0]}`;
   }
   function _jsDayId(jsDay) {
     return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][jsDay];
@@ -557,6 +560,8 @@
 
   // ── MONTHLY VIEW MODULE STATE ──
   let _mvY = null, _mvM = null, _mvD = {};
+  // ── WEEK SYSTEM STATE ──
+  let _wsCurrentKey = null;
 
   // ── TECHNICIEN WEEKLY VIEW ──
   function renderWeekly() {
@@ -937,9 +942,7 @@
     const pct  = total ? Math.round(done / total * 100) : 0;
     const pctC = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
 
-    const backFn = (_mvY !== null && _mvM !== null)
-      ? `MX.Pages.Checklist.renderMonthly(${_mvY},${_mvM !== null ? _mvM : new Date().getMonth()})`
-      : `MX.Pages.Checklist.renderForRole()`;
+    const backFn = `MX.Pages.Checklist._showWeekDayGrid('${weekKey}')`;
 
     let h = `<div class="ph">
       <div class="ph-eye">${esc(wLabel)}</div>
@@ -1044,6 +1047,459 @@
     }
   }
 
+  // ── WEEK SYSTEM: SEED / ROTATE / ENSURE ──
+
+  async function _seedFutureWeek(weekKey) {
+    const { state, DAYS, getDaySlots } = MX;
+    const tasksSnap = {};
+    DAYS.forEach(day => {
+      (getDaySlots(day.id) || []).forEach(sl => {
+        const k = `${day.id}_${sl}`;
+        tasksSnap[k] = (state.tasks[k] || []).map(t => ({ id: t.id, text: t.text, order: t.order }));
+      });
+    });
+    const doc = {
+      weekKey, weekLabel: _weekLabel(weekKey), status: 'future',
+      tasks: tasksSnap, checks: {}, assignments: {},
+    };
+    await MX.DB.saveWeeklyChecks(weekKey, doc);
+    _mvD[weekKey] = doc;
+  }
+
+  async function _runWeekRotation(oldKey, currKey) {
+    const { state, DAYS, getDaySlots } = MX;
+
+    // 1. Archive old current week if not already saved
+    const existingArchive = await MX.DB.getWeeklyChecks(oldKey);
+    if (!existingArchive || existingArchive.status === 'future') {
+      const tasksSnap = {}, chksSnap = {};
+      DAYS.forEach(day => {
+        (getDaySlots(day.id) || []).forEach(sl => {
+          const k = `${day.id}_${sl}`;
+          tasksSnap[k] = (state.tasks[k] || []);
+          (state.tasks[k] || []).forEach(t => {
+            const ck = `${k}_${t.id}`;
+            if (state.checks[ck]) chksSnap[ck] = true;
+          });
+        });
+      });
+      await MX.DB.saveWeeklyChecks(oldKey, {
+        weekKey: oldKey, weekLabel: _weekLabel(oldKey), status: 'archive',
+        checks: chksSnap, tasks: tasksSnap, assignments: state.assignments || {},
+      });
+      _mvD[oldKey] = { checks: chksSnap, tasks: tasksSnap, assignments: state.assignments || {}, weekLabel: _weekLabel(oldKey) };
+    }
+
+    // 2. Promote current week (use W+1 future doc tasks if available)
+    const futureDoc = _mvD[currKey] || await MX.DB.getWeeklyChecks(currKey);
+    if (futureDoc && futureDoc.tasks && Object.keys(futureDoc.tasks).length > 0) {
+      await MX.DB.promoteWeeklyToActive(futureDoc.tasks);
+      await MX.DB.deleteWeeklyChecks(currKey);
+      delete _mvD[currKey];
+    } else {
+      // No future prepared — reset checks/assignments only
+      const batch = firebase.firestore().batch();
+      batch.set(firebase.firestore().collection('config').doc('checks'), {});
+      batch.set(firebase.firestore().collection('config').doc('assignments'), {});
+      await batch.commit();
+    }
+
+    // 3. Update week label in config
+    try {
+      const wNum = parseInt(currKey.split('_W')[1], 10);
+      await firebase.firestore().collection('config').doc('week').set({ label: _weekLabel(currKey), num: wNum });
+    } catch(e) { console.warn('[Checklist] week label update:', e); }
+  }
+
+  async function _ensureWeekSystem() {
+    const currKey = _weekKey(new Date());
+    if (_wsCurrentKey === currKey) return;
+
+    // Detect and run week rotation
+    const storedKey = localStorage.getItem('mx_cl_wk');
+    if (storedKey && storedKey !== currKey) {
+      try { await _runWeekRotation(storedKey, currKey); } catch(e) { console.error('[Checklist] rotation:', e); }
+    }
+
+    // Seed missing future weeks W+1, W+2, W+3
+    const now = new Date();
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date(now); d.setDate(d.getDate() + i * 7);
+      const wk = _weekKey(d);
+      if (!_mvD[wk]) {
+        try {
+          const existing = await MX.DB.getWeeklyChecks(wk);
+          if (existing) { _mvD[wk] = existing; }
+          else { await _seedFutureWeek(wk); }
+        } catch(e) { console.warn('[Checklist] seed W+' + i + ':', e); }
+      }
+    }
+
+    // Prune archives beyond 4 (past weeks only)
+    try {
+      const snap = await firebase.firestore().collection('weekly_checks').get();
+      const archives = snap.docs.map(d => d.id).filter(id => id < currKey).sort();
+      if (archives.length > 4) {
+        const toDel = archives.slice(0, archives.length - 4);
+        await Promise.all(toDel.map(wk => MX.DB.deleteWeeklyChecks(wk)));
+        toDel.forEach(wk => { delete _mvD[wk]; });
+      }
+    } catch(e) { console.warn('[Checklist] prune archives:', e); }
+
+    _wsCurrentKey = currKey;
+    localStorage.setItem('mx_cl_wk', currKey);
+  }
+
+  // ── 8-WEEK SLOTS OVERVIEW (Responsable / Admin) ──
+
+  async function renderWeekSlots() {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    _inHistory = false;
+
+    mc.innerHTML = `<div class="ph">
+      <div class="ph-eye">Vue d'ensemble</div>
+      <div class="ph-row"><div><div class="ph-title">Semaines</div>
+      <div class="ph-sub">Chargement…</div></div></div></div>
+      <div class="page-body" style="max-width:760px;text-align:center;padding:36px 0">
+        <i class="fas fa-spinner fa-spin" style="font-size:22px;color:var(--text3)"></i>
+        <div style="margin-top:12px;font-size:13px;color:var(--text3)">Initialisation des semaines…</div>
+      </div>`;
+
+    await _ensureWeekSystem();
+
+    const currKey = _weekKey(new Date());
+    const slots = [];
+    const now = new Date();
+    for (let i = -4; i <= 3; i++) {
+      const d = new Date(now); d.setDate(d.getDate() + i * 7);
+      const wk = _weekKey(d);
+      if (wk !== currKey && !_mvD[wk]) {
+        try { const data = await MX.DB.getWeeklyChecks(wk); if (data) _mvD[wk] = data; } catch(e) {}
+      }
+      slots.push({ wk, offset: i });
+    }
+    _renderWeekSlotsHtml(slots, currKey);
+  }
+
+  function _renderWeekSlotsHtml(slots, currKey) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { state, DAYS, getDaySlots, esc } = MX;
+
+    let totalW = 0, doneW = 0;
+    const currSlot = slots.find(s => s.wk === currKey);
+    if (currSlot) {
+      DAYS.forEach(day => {
+        (getDaySlots(day.id) || []).forEach(sl => {
+          const k = `${day.id}_${sl}`;
+          (state.tasks[k] || []).forEach(t => {
+            totalW++;
+            if (state.checks[`${k}_${t.id}`]) doneW++;
+          });
+        });
+      });
+    }
+    const wPct = totalW ? Math.round(doneW / totalW * 100) : 0;
+    const wPctC = wPct >= 80 ? 'var(--green)' : wPct >= 40 ? 'var(--orange)' : 'var(--red)';
+
+    let h = `<div class="ph">
+      <div class="ph-eye">Vue d'ensemble</div>
+      <div class="ph-row">
+        <div><div class="ph-title">Check-lists</div><div class="ph-sub">4 archives · semaine en cours · 3 à venir</div></div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${wPctC}">${wPct}%</div>
+      </div>
+      <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${wPct}%"></div></div></div>
+    </div>
+    <div class="page-body" style="max-width:760px">
+    <div class="cl-wslots">`;
+
+    slots.reverse().forEach(({ wk, offset }) => {
+      const isCurr   = wk === currKey;
+      const isFuture = offset > 0;
+      const data = isCurr ? null : (_mvD[wk] || null);
+      const chk  = isCurr ? state.checks : (data ? (data.checks || {}) : {});
+      const tsk  = isCurr ? state.tasks  : (data ? (data.tasks  || {}) : {});
+
+      let total = 0, done = 0;
+      DAYS.forEach(day => {
+        (getDaySlots(day.id) || []).forEach(sl => {
+          const k = `${day.id}_${sl}`;
+          (tsk[k] || []).forEach(t => {
+            total++;
+            if (chk[`${k}_${t.id}`]) done++;
+          });
+        });
+      });
+      const pct  = total ? Math.round(done / total * 100) : (isFuture ? -1 : 0);
+      const pctC = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
+      const wLabel = (data && data.weekLabel) || _weekLabel(wk);
+
+      let statusLabel, statusCls;
+      if (isCurr)        { statusLabel = 'En cours'; statusCls = 'cl-wslot-status--curr'; }
+      else if (isFuture) { statusLabel = 'À venir';  statusCls = 'cl-wslot-status--future'; }
+      else               { statusLabel = 'Archive';  statusCls = 'cl-wslot-status--arch'; }
+
+      h += `<div class="cl-wslot${isCurr?' cl-wslot--curr':isFuture?' cl-wslot--future':' cl-wslot--arch'}" onclick="MX.Pages.Checklist._showWeekDayGrid('${esc(wk)}')">
+        <div class="cl-wslot-header">
+          <div>
+            <div class="cl-wslot-label">${esc(wLabel)}</div>
+            <div class="cl-wslot-sub">${
+              isFuture  ? `${total} tâche${total!==1?'s':''} programmée${total!==1?'s':''}` :
+              isCurr    ? `${done}/${total} complétées${pct>=0?' · '+pct+'%':''}` :
+                          `${done}/${total}${pct>=0?' · '+pct+'%':' — aucune donnée'}`
+            }</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="cl-wslot-status ${statusCls}">${statusLabel}</span>
+            <i class="fas fa-chevron-right" style="color:var(--text3);font-size:11px"></i>
+          </div>
+        </div>
+        ${!isFuture && pct >= 0 ? `<div class="cl-wslot-bar"><div class="cl-wslot-bar-fill" style="width:${pct}%;background:${pctC}"></div></div>` : ''}
+      </div>`;
+    });
+
+    h += `</div>`;
+
+    if (MX.Auth.isAdmin()) {
+      h += `<div class="cl-archive-hint" style="margin-top:16px">
+        <i class="fas fa-cloud-arrow-up" style="color:var(--text3);flex-shrink:0"></i>
+        <span style="flex:1;font-size:12px;color:var(--text2)">Archiver manuellement la semaine en cours.</span>
+        <button onclick="MX.Pages.Checklist._archiveCurrentWeek()"
+          style="padding:7px 12px;border:1.5px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);white-space:nowrap;display:flex;align-items:center;gap:5px;flex-shrink:0">
+          <i class="fas fa-archive"></i> Archiver
+        </button>
+      </div>`;
+    }
+
+    h += `</div>`;
+    mc.innerHTML = h;
+  }
+
+  // ── WEEK DAY GRID (any week) ──
+
+  async function _showWeekDayGrid(weekKey) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { esc } = MX;
+    const wLabel = (_mvD[weekKey] && _mvD[weekKey].weekLabel) || _weekLabel(weekKey);
+    mc.innerHTML = `<div class="ph">
+      <div class="ph-eye">${esc(wLabel)}</div>
+      <div class="ph-row"><div><div class="ph-title">Chargement…</div></div></div></div>
+      <div class="page-body" style="text-align:center;padding:36px 0">
+        <i class="fas fa-spinner fa-spin" style="font-size:20px;color:var(--text3)"></i>
+      </div>`;
+
+    const currKey = _weekKey(new Date());
+    if (weekKey !== currKey && !_mvD[weekKey]) {
+      try { const data = await MX.DB.getWeeklyChecks(weekKey); if (data) _mvD[weekKey] = data; } catch(e) {}
+    }
+    _renderWeekDayGrid(weekKey);
+  }
+
+  function _renderWeekDayGrid(weekKey) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { state, DAYS, getDaySlots, esc } = MX;
+
+    const currKey  = _weekKey(new Date());
+    const isCurr   = weekKey === currKey;
+    const isFuture = weekKey > currKey;
+    const data  = isCurr ? null : (_mvD[weekKey] || null);
+    const chk   = isCurr ? state.checks : (data ? (data.checks || {}) : {});
+    const tsk   = isCurr ? state.tasks  : (data ? (data.tasks  || {}) : {});
+    const wLabel = (data && data.weekLabel) || _weekLabel(weekKey);
+    const today  = new Date(); today.setHours(0, 0, 0, 0);
+    const todayId = MX.todayId ? MX.todayId() : '';
+
+    let totalW = 0, doneW = 0;
+    const dayStats = DAYS.map(day => {
+      let dt = 0, dd = 0;
+      (getDaySlots(day.id) || []).forEach(sl => {
+        const k = `${day.id}_${sl}`;
+        (tsk[k] || []).forEach(t => { totalW++; dt++; if (chk[`${k}_${t.id}`]) { doneW++; dd++; } });
+      });
+      return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : (isFuture ? -2 : -1) };
+    });
+
+    const pctW = totalW ? Math.round(doneW / totalW * 100) : 0;
+    const pctC = pctW >= 80 ? 'var(--green)' : pctW >= 40 ? 'var(--orange)' : 'var(--red)';
+
+    let h = `<div class="ph">
+      <div class="ph-eye">${esc(wLabel)}</div>
+      <div class="ph-row">
+        <div>
+          <div class="ph-title">${isCurr ? 'Semaine en cours' : isFuture ? 'Semaine à venir' : 'Archive'}</div>
+          <div class="ph-sub">${isFuture ? totalW + ' tâche' + (totalW!==1?'s':'') + ' programmée' + (totalW!==1?'s':'') : doneW + ' / ' + totalW + ' complétées'}</div>
+        </div>
+        ${!isFuture ? `<div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pctC}">${pctW}%</div>` : ''}
+      </div>
+      ${!isFuture ? `<div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${pctW}%"></div></div></div>` : ''}
+    </div>
+    <div class="page-body" style="max-width:760px">
+
+    <button onclick="MX.Pages.Checklist.renderWeekSlots()"
+      style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
+      <i class="fas fa-arrow-left"></i> Toutes les semaines
+    </button>
+
+    ${isFuture ? `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
+      <i class="fas fa-wand-sparkles" style="color:#A78BFA"></i>
+      <span>Semaine à venir — cliquez sur un jour pour configurer les tâches</span>
+    </div>` : ''}
+
+    <div class="cl-week-grid">`;
+
+    dayStats.forEach(({ day, dt, dd, pct }) => {
+      const isT  = isCurr && day.id === todayId;
+      const pC   = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
+      let cls    = 'cl-week-day';
+      if (isT)          cls += ' cl-day--today';
+      else if (pct === -2) cls += ' cl-day--future';
+      else if (pct < 0) cls += ' cl-day--empty';
+      else if (pct >= 100) cls += ' cl-day--done';
+      else if (pct > 0) cls += ' cl-day--prog';
+      else              cls += ' cl-day--todo';
+
+      const fn = isCurr
+        ? `MX.showPage('${esc(day.id)}')`
+        : isFuture
+          ? `MX.Pages.Checklist._showFutureDay('${esc(weekKey)}','${esc(day.id)}')`
+          : `MX.Pages.Checklist._showHistDay('${esc(weekKey)}','${esc(day.id)}')`;
+
+      h += `<div class="${cls}" onclick="${fn}">
+        <div class="cl-day-name">${esc(day.l)}</div>
+        ${isT ? '<div class="cl-day-today-b">Auj.</div>' : ''}
+        ${pct >= 0
+          ? `<div class="cl-day-pct" style="color:${pC}">${pct}%</div>
+             <div class="cl-day-counts">${dd}/${dt}</div>
+             <div class="cl-day-bar-t"><div class="cl-day-bar-f" style="width:${pct}%;background:${pC}"></div></div>`
+          : `<div class="cl-day-noasn">${dt > 0 ? dt + ' tâche' + (dt > 1 ? 's' : '') : '—'}</div>`}
+      </div>`;
+    });
+
+    h += `</div></div>`;
+    mc.innerHTML = h;
+  }
+
+  // ── FUTURE WEEK DAY VIEW ──
+
+  function _showFutureDay(weekKey, dayId) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { DAYS, getDaySlots, esc } = MX;
+    const data  = _mvD[weekKey] || null;
+    const tsk   = data ? (data.tasks || {}) : {};
+    const day   = DAYS.find(d => d.id === dayId);
+    const wLabel = (data && data.weekLabel) || _weekLabel(weekKey);
+    const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+    const slots = getDaySlots(dayId);
+
+    let h = `<div class="ph">
+      <div class="ph-eye">${esc(wLabel)}</div>
+      <div class="ph-row"><div>
+        <div class="ph-title">${esc((day || {}).l || dayId)}</div>
+        <div class="ph-sub">Configuration · Semaine à venir</div>
+      </div></div>
+    </div>
+    <div class="page-body" style="max-width:760px">
+
+    <button onclick="MX.Pages.Checklist._showWeekDayGrid('${esc(weekKey)}')"
+      style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
+      <i class="fas fa-arrow-left"></i> Retour à la semaine
+    </button>
+
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
+      <i class="fas fa-circle-info" style="color:#A78BFA"></i>
+      <span>Configurez les tâches pour ce jour — elles seront actives à partir de ${esc(wLabel)}.</span>
+    </div>`;
+
+    slots.forEach(sl => {
+      const tasks = tsk[`${dayId}_${sl}`] || [];
+      h += `<div class="slot-card" style="margin-bottom:12px">
+        <div class="slot-head">
+          <div class="ch-ico"><i class="fas ${_slotIcon(sl)}"></i></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}</div>
+            <div class="slot-dl">${tasks.length} tâche${tasks.length!==1?'s':''}</div>
+          </div>
+          <button onclick="MX.Pages.Checklist._addFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}')"
+            style="padding:6px 10px;border:1px solid var(--cyan-border);border-radius:7px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;gap:5px">
+            <i class="fas fa-plus"></i> Ajouter
+          </button>
+        </div>`;
+
+      if (!tasks.length) {
+        h += `<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px">
+          <i class="fas fa-circle-plus" style="opacity:.3;font-size:20px;display:block;margin-bottom:4px"></i>
+          Aucune tâche — cliquez sur Ajouter
+        </div>`;
+      } else {
+        tasks.forEach(t => {
+          h += `<div class="trow" style="cursor:default">
+            <div class="tcb" style="opacity:.25"><i class="fas fa-circle"></i></div>
+            <span class="ttext">${esc(t.text || t.id)}</span>
+            <button onclick="MX.Pages.Checklist._deleteFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}','${esc(t.id)}')"
+              style="padding:4px 8px;border:none;background:var(--red-dim);color:var(--red);border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>`;
+        });
+      }
+      h += `</div>`;
+    });
+
+    h += `</div>`;
+    mc.innerHTML = h;
+  }
+
+  function _addFutureTask(weekKey, dayId, slot) {
+    const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+    document.getElementById('m-title').textContent = 'Nouvelle tâche';
+    document.getElementById('m-sub').innerHTML = `<div style="font-size:12px;color:var(--text3);margin-bottom:6px">${MX.esc(SLOT_LABELS[slot] || slot)} · ${MX.esc(_weekLabel(weekKey))}</div>`;
+    document.getElementById('m-body').innerHTML = `<input id="ft-add-text" class="fi" placeholder="Nom de la tâche" maxlength="150" style="width:100%">`;
+    document.getElementById('m-actions').innerHTML = `
+      <button class="modal-btn confirm" onclick="MX.Pages.Checklist._doAddFutureTask('${MX.esc(weekKey)}','${MX.esc(dayId)}','${MX.esc(slot)}')">
+        <i class="fas fa-plus"></i> Ajouter
+      </button>
+      <button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>`;
+    document.getElementById('modal-bg').classList.add('show');
+    setTimeout(() => document.getElementById('ft-add-text')?.focus(), 50);
+  }
+
+  async function _doAddFutureTask(weekKey, dayId, slot) {
+    const text = (document.getElementById('ft-add-text')?.value || '').trim();
+    if (!text) { MX.toast('Le texte est obligatoire', true); return; }
+    MX.closeModal();
+    if (!_mvD[weekKey]) _mvD[weekKey] = { tasks: {}, checks: {}, assignments: {} };
+    const existing = (_mvD[weekKey].tasks || {})[`${dayId}_${slot}`] || [];
+    const newItem  = { id: MX.uuid(), text, order: existing.length };
+    const newItems = [...existing, newItem];
+    MX.syncStart();
+    try {
+      await MX.DB.updateWeeklyTasks(weekKey, dayId, slot, newItems);
+      if (!_mvD[weekKey].tasks) _mvD[weekKey].tasks = {};
+      _mvD[weekKey].tasks[`${dayId}_${slot}`] = newItems;
+      MX.syncEnd();
+      MX.toast('Tâche ajoutée ✓');
+      _showFutureDay(weekKey, dayId);
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  async function _deleteFutureTask(weekKey, dayId, slot, taskId) {
+    if (!_mvD[weekKey]) return;
+    const existing = (_mvD[weekKey].tasks || {})[`${dayId}_${slot}`] || [];
+    const newItems = existing.filter(t => t.id !== taskId);
+    MX.syncStart();
+    try {
+      await MX.DB.updateWeeklyTasks(weekKey, dayId, slot, newItems);
+      _mvD[weekKey].tasks[`${dayId}_${slot}`] = newItems;
+      MX.syncEnd();
+      MX.toast('Tâche supprimée');
+      _showFutureDay(weekKey, dayId);
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
   async function _archiveCurrentWeek() {
     const { state, DAYS, getDaySlots } = MX;
     const key = _weekKey(new Date());
@@ -1076,5 +1532,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _doAddFutureTask, _deleteFutureTask };
 })();
