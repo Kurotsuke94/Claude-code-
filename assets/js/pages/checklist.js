@@ -789,7 +789,12 @@
         else if (isPast)     { cls += ' cl-cal-cell--late'; dotC = 'var(--red)'; }
         else                 { cls += ' cl-cal-cell--todo'; }
 
-        const cfn = isCurr ? ` onclick="MX.showPage('${esc(dayId)}')" style="cursor:pointer"` : '';
+        let cfn = '';
+        if (isCurr) {
+          cfn = ` onclick="MX.showPage('${esc(dayId)}')" style="cursor:pointer"`;
+        } else if (isPast) {
+          cfn = ` onclick="MX.Pages.Checklist._showHistDay('${esc(w.weekKey)}','${esc(dayId)}')" style="cursor:pointer"`;
+        }
         h += `<div class="${cls}"${cfn}>
           <span class="cl-cal-dn">${dn}</span>
           ${pct >= 0 ? `<div class="cl-cal-dot" style="${dotC ? 'background:' + dotC : ''}"></div><span class="cl-cal-pct">${pct}%</span>` : ''}
@@ -872,6 +877,173 @@
     mc.innerHTML = h;
   }
 
+  // ── SLOT ICON HELPER ──
+  function _slotIcon(sl) {
+    return sl === 'matin' ? 'fa-sun' : sl === 'soir' ? 'fa-moon' : 'fa-cloud-sun';
+  }
+
+  // ── HISTORICAL DAY VIEW (Responsable / Admin only) ──
+  async function _showHistDay(weekKey, dayId) {
+    if (!MX.Auth.canSeeAll()) return;
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { DAYS, esc } = MX;
+    const day = DAYS.find(d => d.id === dayId);
+    const wLabel = (_mvD[weekKey] && _mvD[weekKey].weekLabel) || weekKey.replace('_W', ' S');
+
+    mc.innerHTML = `<div class="ph">
+      <div class="ph-eye">${esc(wLabel)}</div>
+      <div class="ph-row"><div><div class="ph-title">${esc((day || {}).l || dayId)}</div>
+      <div class="ph-sub">Chargement de l'historique…</div></div></div></div>
+      <div class="page-body" style="max-width:760px;text-align:center;padding:40px 0">
+        <i class="fas fa-spinner fa-spin" style="font-size:20px;color:var(--text3)"></i>
+      </div>`;
+
+    if (!_mvD[weekKey]) {
+      try {
+        const data = await MX.DB.getWeeklyChecks(weekKey);
+        if (data) _mvD[weekKey] = data;
+      } catch(e) {
+        const mc2 = document.getElementById('main-content');
+        if (mc2) mc2.innerHTML += `<div style="color:var(--red);padding:20px;text-align:center">Erreur de chargement</div>`;
+        return;
+      }
+    }
+
+    _renderHistDay(weekKey, dayId);
+  }
+
+  function _renderHistDay(weekKey, dayId) {
+    const mc = document.getElementById('main-content');
+    if (!mc) return;
+    const { DAYS, getDaySlots, esc } = MX;
+    const day   = DAYS.find(d => d.id === dayId);
+    const data  = _mvD[weekKey] || null;
+    const wLabel = (data && data.weekLabel) ? data.weekLabel : weekKey.replace('_W', ' Sem.');
+    const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+
+    const chk  = (data && data.checks)      || {};
+    const tsk  = (data && data.tasks)       || {};
+    const asn  = (data && data.assignments) || {};
+    const slots = getDaySlots(dayId);
+
+    let total = 0, done = 0;
+    slots.forEach(sl => {
+      (tsk[`${dayId}_${sl}`] || []).forEach(t => {
+        total++;
+        if (chk[`${dayId}_${sl}_${t.id}`]) done++;
+      });
+    });
+    const pct  = total ? Math.round(done / total * 100) : 0;
+    const pctC = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
+
+    const backFn = (_mvY !== null && _mvM !== null)
+      ? `MX.Pages.Checklist.renderMonthly(${_mvY},${_mvM !== null ? _mvM : new Date().getMonth()})`
+      : `MX.Pages.Checklist.renderForRole()`;
+
+    let h = `<div class="ph">
+      <div class="ph-eye">${esc(wLabel)}</div>
+      <div class="ph-row">
+        <div>
+          <div class="ph-title">${esc((day || {}).l || dayId)}</div>
+          <div class="ph-sub">${done} / ${total} tâches complétées — historique</div>
+        </div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pctC}">${pct}%</div>
+      </div>
+      <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div></div>
+    </div>
+    <div class="page-body" style="max-width:760px">
+
+    <button onclick="${backFn}" style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
+      <i class="fas fa-arrow-left"></i> Retour au calendrier
+    </button>
+
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
+      <i class="fas fa-clock-rotate-left" style="color:var(--cyan)"></i>
+      <span>Données archivées · ${esc(wLabel)}</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--text3)">Cliquez pour corriger</span>
+    </div>
+
+    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+      <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Faites</div></div>
+      <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
+      <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
+    </div>`;
+
+    if (!data) {
+      h += `<div style="text-align:center;padding:40px 20px;color:var(--text3)">
+        <i class="fas fa-box-archive" style="font-size:32px;opacity:.3;margin-bottom:12px;display:block"></i>
+        <div style="font-size:14px;font-weight:600;color:var(--text2)">Aucune donnée archivée</div>
+        <div style="font-size:12px;margin-top:6px">Cette semaine n'a pas encore été archivée.</div>
+      </div>`;
+    } else {
+      slots.forEach(sl => {
+        const tasks = tsk[`${dayId}_${sl}`] || [];
+        if (!tasks.length) return;
+        const slAsn  = asn[`${dayId}_${sl}`] || '';
+        const slDone = tasks.filter(t => !!(chk[`${dayId}_${sl}_${t.id}`])).length;
+        const slPct  = tasks.length ? Math.round(slDone / tasks.length * 100) : 0;
+        const slC    = slPct >= 80 ? 'var(--green)' : slPct >= 40 ? 'var(--orange)' : 'var(--red)';
+
+        h += `<div class="slot-card" style="margin-bottom:12px">
+          <div class="slot-head">
+            <div class="ch-ico"><i class="fas ${_slotIcon(sl)}"></i></div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}</div>
+              ${slAsn ? `<div class="slot-dl">${esc(slAsn)}</div>` : ''}
+            </div>
+            <div class="slot-pct" style="background:${slC}22;color:${slC}">${slPct}%</div>
+          </div>`;
+
+        tasks.forEach(t => {
+          const key       = `${dayId}_${sl}_${t.id}`;
+          const isChecked = !!(chk[key]);
+          h += `<div class="trow ${isChecked ? 'done' : ''}" id="htr_${esc(key)}"
+            onclick="MX.Pages.Checklist._toggleHistCheck('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}','${esc(t.id)}')"
+            style="cursor:pointer">
+            <div class="tcb ${isChecked ? 'on' : ''}">${isChecked ? '<i class="fas fa-check"></i>' : ''}</div>
+            <span class="ttext">${esc(t.text || t.id)}</span>
+          </div>`;
+        });
+
+        h += `</div>`;
+      });
+    }
+
+    h += `</div>`;
+    mc.innerHTML = h;
+  }
+
+  async function _toggleHistCheck(weekKey, dayId, slot, taskId) {
+    if (!MX.Auth.canSeeAll()) return MX.toast('Accès réservé aux responsables', true);
+    const key = `${dayId}_${slot}_${taskId}`;
+    if (!_mvD[weekKey]) _mvD[weekKey] = { checks: {}, tasks: {}, assignments: {} };
+    const prevChk = _mvD[weekKey].checks || {};
+    const newVal  = !prevChk[key];
+    _mvD[weekKey].checks = { ...prevChk, [key]: newVal };
+
+    // Optimistic UI
+    const row = document.getElementById('htr_' + key);
+    if (row) {
+      row.classList.toggle('done', newVal);
+      const cb = row.querySelector('.tcb');
+      if (cb) { cb.classList.toggle('on', newVal); cb.innerHTML = newVal ? '<i class="fas fa-check"></i>' : ''; }
+    }
+
+    MX.syncStart();
+    try {
+      await MX.DB.saveWeeklyChecks(weekKey, _mvD[weekKey]);
+      MX.syncEnd();
+      const actor = (MX.state.currentUser && MX.state.currentUser.name) || (MX.state.adminUser && MX.state.adminUser.email) || 'responsable';
+      MX.DB.addLog({ workerName: actor, action: newVal ? 'check' : 'uncheck', taskText: `[Historique ${weekKey}] ${taskId}`, dayId, slot }).catch(() => {});
+    } catch(e) {
+      _mvD[weekKey].checks = { ...prevChk, [key]: !newVal };
+      MX.syncFail();
+      MX.toast('Erreur de synchronisation', true);
+      _renderHistDay(weekKey, dayId);
+    }
+  }
+
   async function _archiveCurrentWeek() {
     const { state, DAYS, getDaySlots } = MX;
     const key = _weekKey(new Date());
@@ -904,5 +1076,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _archiveCurrentWeek };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek };
 })();
