@@ -17,12 +17,12 @@
     slots.forEach(sl => {
       const tasks = state.tasks[`${dayId}_${sl}`] || [];
       const asn   = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
-      if (canAll || !worker || asn === worker) {
-        tasks.forEach(t => {
+      tasks.forEach(t => {
+        if (canAll || !worker || asn === worker || t.assignedTo === worker) {
           total++;
           if (state.checks[`${dayId}_${sl}_${t.id}`]) done++;
-        });
-      }
+        }
+      });
     });
     const pct = total ? Math.round(done / total * 100) : 0;
 
@@ -578,8 +578,13 @@
         const asn = (day.id === todayId && state.dailyClaims && state.dailyClaims[sl])
           ? (state.dailyClaims[sl].name || state.assignments[`${day.id}_${sl}`] || '')
           : (state.assignments[`${day.id}_${sl}`] || '');
-        if (!cu || asn === cu.name) {
-          tasks.forEach(t => { dt++; if (state.checks[`${day.id}_${sl}_${t.id}`]) dd++; });
+        if (!cu || asn === cu.name || tasks.some(t => t.assignedTo === cu.name)) {
+          tasks.forEach(t => {
+            if (!cu || asn === cu.name || t.assignedTo === cu.name) {
+              dt++;
+              if (state.checks[`${day.id}_${sl}_${t.id}`]) dd++;
+            }
+          });
         }
       });
       return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : -1 };
@@ -1348,6 +1353,12 @@
       <span>Semaine à venir — cliquez sur un jour pour configurer les tâches</span>
     </div>` : ''}
 
+    ${MX.Auth.canSeeAll() && (isCurr || isFuture) ? `
+    <button onclick="MX.Pages.Checklist._addFutureTask('${esc(weekKey)}',null,null)"
+      style="width:100%;padding:10px 14px;margin-bottom:16px;border:1.5px solid var(--cyan-border);border-radius:10px;background:var(--cyan-dim);color:var(--cyan);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:8px">
+      <i class="fas fa-plus"></i> Ajouter une tâche
+    </button>` : ''}
+
     <div class="cl-week-grid">`;
 
     dayStats.forEach(({ day, dt, dd, pct }) => {
@@ -1435,14 +1446,33 @@
           Aucune tâche — cliquez sur Ajouter
         </div>`;
       } else {
+        const PRIO_COLOR = { critique: 'var(--red)', haute: 'var(--orange)', faible: 'var(--text3)' };
+        const PRIO_LABEL = { critique: '🔴 Critique', haute: '🟠 Haute', faible: '⚪ Faible' };
         tasks.forEach(t => {
-          h += `<div class="trow" style="cursor:default">
-            <div class="tcb" style="opacity:.25"><i class="fas fa-circle"></i></div>
-            <span class="ttext">${esc(t.text || t.id)}</span>
-            <button onclick="MX.Pages.Checklist._deleteFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}','${esc(t.id)}')"
-              style="padding:4px 8px;border:none;background:var(--red-dim);color:var(--red);border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0">
-              <i class="fas fa-trash"></i>
-            </button>
+          const nc = t.assignedTo ? MX.userColors(t.assignedTo) : null;
+          h += `<div class="trow" style="flex-direction:column;align-items:stretch;gap:4px;cursor:default;padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="tcb" style="opacity:.25;flex-shrink:0"><i class="fas fa-circle"></i></div>
+              <span class="ttext" style="flex:1">${esc(t.text || t.id)}</span>
+              <button onclick="MX.Pages.Checklist._deleteFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}','${esc(t.id)}')"
+                style="padding:4px 8px;border:none;background:var(--red-dim);color:var(--red);border-radius:6px;cursor:pointer;font-size:11px;flex-shrink:0">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding-left:32px;flex-wrap:wrap">
+              ${t.assignedTo && nc
+                ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)"><span style="width:18px;height:18px;border-radius:5px;background:${nc.bg};color:${nc.fg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(t.assignedTo.substring(0,2).toUpperCase())}</span>👤 ${esc(t.assignedTo)}</span>`
+                : `<span style="font-size:11px;color:var(--text3)">Non assigné</span>`
+              }
+              ${t.type === 'unique'
+                ? `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(99,102,241,.12);color:#818CF8;font-weight:600">📌 Unique</span>`
+                : `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(0,194,209,.08);color:var(--cyan);font-weight:600">🔄 Récurrente</span>`
+              }
+              ${t.priority && t.priority !== 'normale'
+                ? `<span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;color:${PRIO_COLOR[t.priority] || 'var(--text2)'}">${PRIO_LABEL[t.priority] || t.priority}</span>`
+                : ''
+              }
+            </div>
           </div>`;
         });
       }
@@ -1454,16 +1484,29 @@
   }
 
   function _addFutureTask(weekKey, dayId, slot) {
-    const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
-    const day  = MX.DAYS.find(d => d.id === dayId);
+    if (!MX.Auth.canSeeAll()) return MX.toast('Accès réservé aux responsables', true);
+    const { DAYS, esc } = MX;
     const users = (MX.state.users || []);
+
     const userOpts = `<option value="">— Non assigné —</option>` +
-      users.map(u => `<option value="${MX.esc(u.name)}">${MX.esc(u.name)}</option>`).join('');
+      users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('');
+
+    const dayOpts = DAYS.map(d =>
+      `<option value="${esc(d.id)}"${d.id === dayId ? ' selected' : ''}>${esc(d.l)}</option>`
+    ).join('');
+
+    const SLOT_DEFS = [['matin','🌅 Matin'],['journee','☀️ Journée'],['soir','🌙 Soir']];
+    const slotOpts = SLOT_DEFS.map(([k,l]) =>
+      `<option value="${k}"${k === slot ? ' selected' : ''}>${l}</option>`
+    ).join('');
+
+    const currKey = _weekKey(new Date());
+    const sub = weekKey === currKey ? 'Semaine en cours' : esc(_weekLabel(weekKey));
 
     MX.showModal({
       title: 'Nouvelle tâche',
-      sub:   `${MX.esc((day || {}).l || dayId)} · ${MX.esc(SLOT_LABELS[slot] || slot)} · ${MX.esc(_weekLabel(weekKey))}`,
-      body:  `<div style="display:flex;flex-direction:column;gap:10px">
+      sub,
+      body: `<div style="display:flex;flex-direction:column;gap:12px">
         <div>
           <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Titre *</label>
           <input id="ft-title" class="fi" placeholder="Nom de la tâche" maxlength="150" style="width:100%">
@@ -1474,45 +1517,93 @@
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Assignation</label>
-            <select id="ft-assign" class="fi">${userOpts}</select>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Jour</label>
+            <select id="ft-day" class="fi">${dayOpts}</select>
           </div>
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Type</label>
-            <select id="ft-type" class="fi">
-              <option value="hebdomadaire">🔄 Récurrente</option>
-              <option value="unique">📌 Unique</option>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Période</label>
+            <select id="ft-slot" class="fi">${slotOpts}</select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Technicien assigné</label>
+          <select id="ft-assign" class="fi">${userOpts}</select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:6px">Type</label>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label id="ft-type-rec-lbl" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--cyan);background:rgba(0,194,209,.08);border-radius:8px;cursor:pointer;font-size:12px;color:var(--cyan);font-weight:500">
+                <input type="radio" name="ft-type" value="hebdomadaire" checked style="accent-color:var(--cyan)" onchange="document.getElementById('ft-type-rec-lbl').style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--cyan);background:rgba(0,194,209,.08);border-radius:8px;cursor:pointer;font-size:12px;color:var(--cyan);font-weight:500';document.getElementById('ft-type-uni-lbl').style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--border2);background:var(--bg3);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text1);font-weight:500'">
+                🔄 Récurrente
+              </label>
+              <label id="ft-type-uni-lbl" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--border2);background:var(--bg3);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text1);font-weight:500">
+                <input type="radio" name="ft-type" value="unique" style="accent-color:var(--cyan)" onchange="document.getElementById('ft-type-uni-lbl').style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--cyan);background:rgba(0,194,209,.08);border-radius:8px;cursor:pointer;font-size:12px;color:var(--cyan);font-weight:500';document.getElementById('ft-type-rec-lbl').style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--border2);background:var(--bg3);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text1);font-weight:500'">
+                📌 Unique
+              </label>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Priorité</label>
+            <select id="ft-priority" class="fi">
+              <option value="normale">🔵 Normale</option>
+              <option value="faible">⚪ Faible</option>
+              <option value="haute">🟠 Haute</option>
+              <option value="critique">🔴 Critique</option>
             </select>
           </div>
         </div>
       </div>`,
       actions: [
-        { label: 'Ajouter', cls: 'primary-btn', fn: () => _doAddFutureTask(weekKey, dayId, slot) },
+        { label: 'Créer', cls: 'primary-btn', fn: () => _doAddFutureTask(weekKey) },
         { label: 'Annuler', cls: 'cancel' }
       ]
     });
     setTimeout(() => document.getElementById('ft-title')?.focus(), 50);
   }
 
-  async function _doAddFutureTask(weekKey, dayId, slot) {
-    const text   = (document.getElementById('ft-title')?.value  || '').trim();
+  async function _doAddFutureTask(weekKey) {
+    const text     = (document.getElementById('ft-title')?.value   || '').trim();
     if (!text) { MX.toast('Le titre est obligatoire', true); return; }
-    const desc   = (document.getElementById('ft-desc')?.value   || '').trim();
-    const assign = document.getElementById('ft-assign')?.value  || '';
-    const type   = document.getElementById('ft-type')?.value    || 'hebdomadaire';
+    const desc     = (document.getElementById('ft-desc')?.value    || '').trim();
+    const assign   = document.getElementById('ft-assign')?.value   || '';
+    const dayId    = document.getElementById('ft-day')?.value      || ((MX.DAYS[0] && MX.DAYS[0].id) || 'lundi');
+    const slot     = document.getElementById('ft-slot')?.value     || 'matin';
+    const priority = document.getElementById('ft-priority')?.value || 'normale';
+    const typeEl   = document.querySelector('input[name="ft-type"]:checked');
+    const type     = typeEl ? typeEl.value : 'hebdomadaire';
     MX.closeModal();
-    if (!_mvD[weekKey]) _mvD[weekKey] = { tasks: {}, checks: {}, assignments: {} };
-    const existing = (_mvD[weekKey].tasks || {})[`${dayId}_${slot}`] || [];
-    const newItem  = { id: MX.uuid(), text, description: desc || null, assignedTo: assign || null, type, order: existing.length };
+
+    const currKey = _weekKey(new Date());
+    const isCurr  = weekKey === currKey;
+    const key     = `${dayId}_${slot}`;
+    const existing = isCurr
+      ? (MX.state.tasks[key] || [])
+      : ((_mvD[weekKey] && _mvD[weekKey].tasks && _mvD[weekKey].tasks[key]) || []);
+    const newItem = { id: MX.uuid(), text, order: existing.length };
+    if (desc)               newItem.description = desc;
+    if (assign)             newItem.assignedTo  = assign;
+    if (type)               newItem.type        = type;
+    if (priority)           newItem.priority    = priority;
     const newItems = [...existing, newItem];
+
     MX.syncStart();
     try {
-      await MX.DB.updateWeeklyTasks(weekKey, dayId, slot, newItems);
-      if (!_mvD[weekKey].tasks) _mvD[weekKey].tasks = {};
-      _mvD[weekKey].tasks[`${dayId}_${slot}`] = newItems;
-      MX.syncEnd();
-      MX.toast('Tâche ajoutée ✓');
-      _showFutureDay(weekKey, dayId);
+      if (isCurr) {
+        await MX.DB.setTasks(dayId, slot, newItems);
+        MX.state.tasks[key] = newItems;
+        MX.syncEnd();
+        MX.toast('Tâche ajoutée ✓');
+        MX.showPage(dayId);
+      } else {
+        if (!_mvD[weekKey]) _mvD[weekKey] = { tasks: {}, checks: {}, assignments: {} };
+        await MX.DB.updateWeeklyTasks(weekKey, dayId, slot, newItems);
+        if (!_mvD[weekKey].tasks) _mvD[weekKey].tasks = {};
+        _mvD[weekKey].tasks[key] = newItems;
+        MX.syncEnd();
+        MX.toast('Tâche ajoutée ✓');
+        _showFutureDay(weekKey, dayId);
+      }
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 

@@ -42,10 +42,11 @@
       }
     }
 
+    const perAssignee = task.assignedTo && task.assignedTo !== assigneeName ? task.assignedTo : null;
     return `<div class="trow ${isChecked ? 'done' : ''}" id="tr_${esc(task.id)}" ${click}>
       <div class="tcb ${isChecked ? 'on' : ''}"><i class="fas fa-check"></i></div>
       <span class="ttext">${esc(task.text)}</span>
-      ${assigneeName ? `<span class="twho" style="background:${avatarBg(assigneeName)};color:${avatarFg(assigneeName)}">${esc(assigneeName)}</span>` : ''}
+      ${perAssignee ? `<span class="twho" style="background:${avatarBg(perAssignee)};color:${avatarFg(perAssignee)}" title="Assigné à ${esc(perAssignee)}">👤 ${esc(perAssignee)}</span>` : assigneeName ? `<span class="twho" style="background:${avatarBg(assigneeName)};color:${avatarFg(assigneeName)}">${esc(assigneeName)}</span>` : ''}
       ${noteEl}
       ${transferEl}
     </div>`;

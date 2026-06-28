@@ -7,15 +7,21 @@
     // Effective assignment: daily claim for today, weekly assignment for other days
     const effectiveAsn = isToday ? ((dailyClaim && dailyClaim.name) || "") : (assignment || "");
 
-    // Visibility filter: unclaimed today slots always visible (any technicien can claim)
-    if (workerFilter && !MX.Auth.canSeeAll() && effectiveAsn !== workerFilter && !(isToday && !effectiveAsn)) return '';
+    // Visibility filter: show if slot is assigned to worker OR any task is assigned to worker
+    const hasPerTaskForWorker = workerFilter && tasks.some(t => t.assignedTo === workerFilter);
+    if (workerFilter && !MX.Auth.canSeeAll() && effectiveAsn !== workerFilter && !hasPerTaskForWorker && !(isToday && !effectiveAsn)) return '';
+
+    // When filtering by worker, only show tasks assigned to them (unless slot-level assignment matches)
+    const visibleTasks = (workerFilter && !MX.Auth.canSeeAll() && effectiveAsn !== workerFilter)
+      ? tasks.filter(t => t.assignedTo === workerFilter)
+      : tasks;
 
     const canTransfer = !!(cu && !MX.Auth.isAdmin());
     const transfers   = state.transfers || [];
 
     let done = 0;
-    tasks.forEach(t => { if (checks[`${dayId}_${slot}_${t.id}`]) done++; });
-    const pct   = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+    visibleTasks.forEach(t => { if (checks[`${dayId}_${slot}_${t.id}`]) done++; });
+    const pct   = visibleTasks.length ? Math.round(done / visibleTasks.length * 100) : 0;
     const level = alertLevel(slot, pct, state.alerts);
 
     let h = `<div class="slot-card">
@@ -23,7 +29,7 @@
         <div class="ch-ico ${s.c}">${s.e}</div>
         <div style="flex:1">
           <div style="font-size:14px;font-weight:700">${s.l}</div>
-          <div class="slot-dl">${done}/${tasks.length} tâches</div>
+          <div class="slot-dl">${done}/${visibleTasks.length} tâches</div>
           <span class="slot-chip ${level}">
             <i class="fas fa-${level==='ok'?'check':level==='warn'?'triangle-exclamation':'circle-exclamation'}"></i>
             ${level==='ok'?'En ordre':level==='warn'?'Attention':'Urgent'}
@@ -48,7 +54,7 @@
       h += `<div class="arow"><span class="arow-lbl">Assigné à</span>${chipHtml(assignment)}</div>`;
     }
 
-    tasks.forEach(t => {
+    visibleTasks.forEach(t => {
       const tr = transfers.find(x =>
         x.taskId === t.id && x.dayId === dayId && x.slot === slot &&
         (x.status === "pending" || x.status === "accepted")
@@ -62,7 +68,7 @@
       });
     });
 
-    if (!tasks.length) {
+    if (!visibleTasks.length) {
       h += `<div style="padding:20px;text-align:center;font-size:13px;color:var(--text3)">Aucune tâche configurée</div>`;
     }
 
