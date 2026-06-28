@@ -4246,6 +4246,21 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .sx-fav-rm:hover { color: var(--red); background: rgba(239,68,68,0.15); }
 #sidebar.sx-compact .sx-fav-row { padding-right: 0; }
 
+/* Star counts / empty state */
+.sx-quick-star      { color: #F59E0B !important; font-size: 9px; }
+.sx-quick-cnt       { margin-left: auto; font-size: 9px; font-weight: 700; color: var(--text3); background: var(--bg3); border-radius: 6px; padding: 1px 5px; }
+.sx-quick-empty     { padding: 3px 4px 5px; }
+.sx-quick-empty .sx-lbl { font-size: 10px; color: var(--text3); font-style: italic; opacity: .7; }
+
+/* Fav star toggle on nav items */
+.sx-fav-star        { flex-shrink: 0; margin-left: auto; padding: 2px 3px; color: var(--text3); font-size: 9px; opacity: 0; transition: opacity .12s, color .12s; line-height: 1; cursor: pointer; border-radius: 3px; }
+.sx-item:hover .sx-fav-star { opacity: .5; }
+.sx-fav-star:hover  { opacity: 1 !important; color: #F59E0B; background: rgba(245,158,11,.12); }
+.sx-fav-star--on    { opacity: 1 !important; color: #F59E0B; }
+#sidebar.sx-compact .sx-fav-star { display: none; }
+#sidebar.sx-compact .sx-quick-cnt,
+#sidebar.sx-compact .sx-quick-empty { display: none; }
+
 /* ══════════════════════════════════════════════════════
    SIDEBAR COMPACT MODE
 ══════════════════════════════════════════════════════ */

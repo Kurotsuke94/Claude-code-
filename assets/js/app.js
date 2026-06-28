@@ -164,37 +164,74 @@
 
   // ── FAVORITES (Accès Rapide) ──
   const NAV_INFO = {
-    'home':          { icon: 'fa-house',              l: 'Accueil' },
-    'msgs':          { icon: 'fa-comments',            l: 'Messages' },
-    'planning':      { icon: 'fa-calendar-days',       l: 'Planning' },
-    'today-cl':      { icon: 'fa-list-check',          l: 'Checklists' },
-    'org-resp':      { icon: 'fa-users',               l: 'Organisation' },
-    'orders':        { icon: 'fa-box',                 l: 'Stock' },
-    'documents':     { icon: 'fa-book',                l: 'Bibliothèque' },
-    'consommations': { icon: 'fa-droplet',             l: 'Consommations' },
-    'interventions': { icon: 'fa-wrench',              l: 'Interventions' },
-    'utilisateurs':  { icon: 'fa-users',               l: 'Utilisateurs' },
-    'equipe':        { icon: 'fa-users-gear',          l: 'Équipe' },
-    'badges':        { icon: 'fa-medal',               l: 'Badges' },
+    'home':          { icon: 'fa-house',           l: 'Accueil' },
+    'msgs':          { icon: 'fa-comments',        l: 'Messages' },
+    'planning':      { icon: 'fa-calendar-days',   l: 'Planning' },
+    'today-cl':      { icon: 'fa-list-check',      l: 'Checklists' },
+    'org-resp':      { icon: 'fa-users-gear',      l: 'Organisation' },
+    'orders':        { icon: 'fa-box',             l: 'Stock' },
+    'documents':     { icon: 'fa-book',            l: 'Bibliothèque' },
+    'consommations': { icon: 'fa-droplet',         l: 'Consommations' },
+    'interventions': { icon: 'fa-wrench',          l: 'Interventions' },
+    'utilisateurs':  { icon: 'fa-users',           l: 'Utilisateurs' },
+    'equipe':        { icon: 'fa-users-gear',      l: 'Équipe' },
+    'badges':        { icon: 'fa-medal',           l: 'Badges' },
   };
 
-  function _favKey() {
-    const cu = MX.state.currentUser || MX.state.adminUser;
-    const name = cu ? (cu.name || cu.email || 'default') : 'default';
-    return 'mx_favs_' + name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  let _favsCache = null;
+
+  function _userId() {
+    const cu = MX.state.currentUser;
+    const ad = MX.state.adminUser;
+    if (cu) return (cu.name || cu.id || 'user').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    if (ad) return (ad.email || 'admin').split('@')[0].replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    return null;
+  }
+  function _favLsKey() { return 'mx_favs_' + (_userId() || 'default'); }
+  function _getFavsLocal() {
+    try { return JSON.parse(localStorage.getItem(_favLsKey()) || '[]'); } catch(e) { return []; }
   }
   function _getFavs() {
-    try { return JSON.parse(localStorage.getItem(_favKey()) || '[]'); } catch(e) { return []; }
+    return _favsCache !== null ? _favsCache : _getFavsLocal();
   }
-  function _setFavs(arr) {
-    localStorage.setItem(_favKey(), JSON.stringify(arr));
+  async function _loadFavsFromFirestore() {
+    const uid = _userId();
+    if (!uid) { _favsCache = _getFavsLocal(); return; }
+    try {
+      const doc = await db.collection('user_prefs').doc(uid).get();
+      const data = doc.exists ? doc.data() : null;
+      _favsCache = (data && Array.isArray(data.favs)) ? data.favs : _getFavsLocal();
+    } catch(e) {
+      console.warn('[Favs] load:', e.message);
+      _favsCache = _getFavsLocal();
+    }
   }
+  async function _saveFavsToFirestore(arr) {
+    localStorage.setItem(_favLsKey(), JSON.stringify(arr));
+    const uid = _userId();
+    if (!uid) return;
+    try {
+      await db.collection('user_prefs').doc(uid).set({ favs: arr }, { merge: true });
+    } catch(e) { console.warn('[Favs] save:', e.message); }
+  }
+
   window.MX.toggleFav = function(pageId, label) {
-    const favs = _getFavs();
-    const idx = favs.findIndex(f => f.id === pageId);
-    if (idx >= 0) favs.splice(idx, 1);
-    else favs.push({ id: pageId, label: label });
-    _setFavs(favs);
+    const favs = _getFavs().slice();
+    const idx  = favs.findIndex(f => f.id === pageId);
+    if (idx >= 0) {
+      favs.splice(idx, 1);
+    } else {
+      if (favs.length >= 4) { MX.toast('Maximum 4 favoris atteint'); return; }
+      favs.push({ id: pageId, label });
+    }
+    _favsCache = favs;
+    buildNav();
+    _saveFavsToFirestore(favs);
+  };
+
+  window.MX.reloadFavs = async function() {
+    _favsCache = null;
+    await _loadFavsFromFirestore();
     buildNav();
   };
 
@@ -230,9 +267,14 @@
       const cls = ["sx-item", o.sub ? "sx-sub" : "", act ? "active" : ""].filter(Boolean).join(" ");
       const fn  = o.fn || `MX.showPage('${id}')`;
       let r = "";
-      if (o.badge)  r += `<span class="sx-badge" id="sxb_${id}"></span>`;
+      if (o.badge)    r += `<span class="sx-badge" id="sxb_${id}"></span>`;
       if (o.dynBadge) r += `<span class="sx-dyn-badge" id="sxdb_${o.dynBadge}"></span>`;
-      return `<button class="${cls}"${id ? ` data-page="${id}"` : ""} onclick="${fn}" title="${label}"><i class="fas ${icon} sx-ico${act ? " sx-ico--on" : ""}"></i><span class="sx-lbl">${label}</span>${r}</button>`;
+      let star = '';
+      if (o.favable && id) {
+        const isFav = _getFavs().some(f => f.id === id);
+        star = `<span class="sx-fav-star${isFav ? ' sx-fav-star--on' : ''}" onclick="event.stopPropagation();MX.toggleFav('${id}','${label}')" title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}"><i class="fas fa-star"></i></span>`;
+      }
+      return `<button class="${cls}"${id ? ` data-page="${id}"` : ""} onclick="${fn}" title="${label}"><i class="fas ${icon} sx-ico${act ? " sx-ico--on" : ""}"></i><span class="sx-lbl">${label}</span>${r}${star}</button>`;
     }
     function _group(icon, icoCls, label, key, toggleFn, open, items) {
       return `<div class="sx-group">
@@ -255,14 +297,14 @@
     // ── 🏠 Accueil (standalone) ──
     h += `<div class="sx-top">`;
     h += _item("home", "fa-house", "Accueil");
-    h += _item("msgs", "fa-comments", "Messages", { badge: true });
+    h += _item("msgs", "fa-comments", "Messages", { badge: true, favable: true });
     h += `</div>`;
 
     // ── ⭐ Accès Rapide (favorites) ──
     const favs = _getFavs();
+    h += `<div class="sx-quick">`;
+    h += `<div class="sx-quick-hdr"><i class="fas fa-star sx-quick-star"></i><span class="sx-lbl">Accès Rapide</span>${favs.length > 0 ? `<span class="sx-quick-cnt">${favs.length}/4</span>` : ''}</div>`;
     if (favs.length > 0) {
-      h += `<div class="sx-quick">`;
-      h += `<div class="sx-quick-hdr"><i class="fas fa-star"></i><span class="sx-lbl">Accès Rapide</span></div>`;
       favs.forEach(f => {
         const fInfo = NAV_INFO[f.id] || {};
         const fAct  = cur === f.id;
@@ -271,36 +313,38 @@
             <i class="fas ${fInfo.icon || "fa-circle"} sx-ico${fAct ? " sx-ico--on" : ""}"></i>
             <span class="sx-lbl">${f.label}</span>
           </button>
-          <span class="sx-fav-rm" onclick="MX.toggleFav('${f.id}','${f.label}')" title="Retirer"><i class="fas fa-times"></i></span>
+          <span class="sx-fav-rm" onclick="MX.toggleFav('${f.id}','${f.label}')" title="Retirer des favoris"><i class="fas fa-times"></i></span>
         </div>`;
       });
-      h += `</div>`;
+    } else {
+      h += `<div class="sx-quick-empty"><span class="sx-lbl">Cliquez ⭐ sur un module pour l'épingler</span></div>`;
     }
+    h += `</div>`;
 
     // ── 📅 Planning ──
     const plngPages = ["planning"];
     let plngItems = "";
-    plngItems += _item("planning-today", "fa-sun",            "Aujourd'hui",     { sub: true, fn: "MX.showPlanningView('day')",                  matchPages: [] });
-    plngItems += _item("planning-week",  "fa-calendar-week",  "Semaine",         { sub: true, fn: "MX.showPlanningView('week')",                 matchPages: [] });
-    plngItems += _item("planning",       "fa-calendar",       "Calendrier",      { sub: true, fn: "MX.showPlanningView('month')",                matchPages: plngPages });
-    plngItems += _item("planning-conge", "fa-umbrella-beach", "Congés & Absences", { sub: true, fn: "MX.showPlanningView('month','CP')",         matchPages: [] });
+    plngItems += _item("planning-today", "fa-sun",            "Aujourd'hui",       { sub: true, fn: "MX.showPlanningView('day')",           matchPages: [] });
+    plngItems += _item("planning-week",  "fa-calendar-week",  "Semaine",          { sub: true, fn: "MX.showPlanningView('week')",          matchPages: [] });
+    plngItems += _item("planning",       "fa-calendar",       "Calendrier",       { sub: true, fn: "MX.showPlanningView('month')",         matchPages: plngPages, favable: true });
+    plngItems += _item("planning-conge", "fa-umbrella-beach", "Congés & Absences",{ sub: true, fn: "MX.showPlanningView('month','CP')",   matchPages: [] });
     h += _group("fa-calendar-days", "sx-group-ico--blue", "📅 Planning", "plng", "toggleNavPlng", _plngOpen, plngItems);
 
     // ── 🔧 Maintenance ──
     const clPages = ["today-cl", ...DAYS.map(d => d.id)];
     let maintItems = "";
-    maintItems += _item("today-cl",      "fa-list-check",     "Checklists",           { sub: true, matchPages: clPages });
+    maintItems += _item("today-cl",      "fa-list-check",     "Checklists",           { sub: true, matchPages: clPages, favable: true });
     if (canAll) {
-      maintItems += _item("interventions", "fa-wrench",        "Interventions",        { sub: true, dynBadge: "int" });
-      maintItems += _item("org-resp",      "fa-users-gear",    "Organisation Resp.",   { sub: true });
+      maintItems += _item("interventions", "fa-wrench",        "Interventions",        { sub: true, dynBadge: "int", favable: true });
+      maintItems += _item("org-resp",      "fa-users-gear",    "Organisation Resp.",   { sub: true, favable: true });
     }
     h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems);
 
     // ── 📦 Gestion ──
     let gestItems = "";
-    gestItems += _item("orders",        "fa-box",            "Stock",                { sub: true, dynBadge: "stock" });
-    gestItems += _item("documents",     "fa-book",           "Ressources / Bible",   { sub: true });
-    gestItems += _item("consommations", "fa-droplet",        "Consommations",        { sub: true, fn: "MX.showCsoTab('dashboard')" });
+    gestItems += _item("orders",        "fa-box",            "Stock",                { sub: true, dynBadge: "stock", favable: true });
+    gestItems += _item("documents",     "fa-book",           "Ressources / Bible",   { sub: true, favable: true });
+    gestItems += _item("consommations", "fa-droplet",        "Consommations",        { sub: true, fn: "MX.showCsoTab('dashboard')", favable: true });
     h += _group("fa-cube", "sx-group-ico--cyan", "📦 Gestion", "gest", "toggleNavGest", _gestOpen, gestItems);
 
     // ── 📊 Analyses ──
@@ -920,11 +964,13 @@
 
     MX.Auth.onLogin(() => {
       buildDeskHeader();
+      MX.reloadFavs();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
       setTimeout(() => MX.showNotifOnboarding && MX.showNotifOnboarding(), 1500);
     });
     MX.Auth.onLogout(() => {
+      _favsCache = null;
       buildDeskHeader();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
@@ -952,6 +998,7 @@
 
     _lastSyncTime = new Date();
     renderStatusBar();
+    await _loadFavsFromFirestore().catch(() => {});
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
     MX.showPage(_urlPage && NAV.some(n => n && n.id === _urlPage) ? _urlPage : "home");
