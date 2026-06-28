@@ -2,12 +2,12 @@
   const FV = firebase.firestore.FieldValue;
 
   const DEFAULT_ORG_TASKS = [
-    { title: 'Contrôle carnets sécurité',          category: 'sécurité',      description: '' },
-    { title: 'Vérification registre piscine',       category: 'réglementaire', description: '' },
-    { title: 'Contrôle stock EPI',                  category: 'stock',         description: '' },
-    { title: 'Contrôle affichages réglementaires',  category: 'réglementaire', description: '' },
-    { title: 'Vérification contrats prestataires',  category: 'administratif', description: '' },
-    { title: 'Contrôle chambres PMR',               category: 'hébergement',   description: '' },
+    { title: 'Contrôle carnets sécurité',          category: 'sécurité',      description: '', type: 'hebdomadaire' },
+    { title: 'Vérification registre piscine',       category: 'réglementaire', description: '', type: 'hebdomadaire' },
+    { title: 'Contrôle stock EPI',                  category: 'stock',         description: '', type: 'hebdomadaire' },
+    { title: 'Contrôle affichages réglementaires',  category: 'réglementaire', description: '', type: 'hebdomadaire' },
+    { title: 'Vérification contrats prestataires',  category: 'administratif', description: '', type: 'hebdomadaire' },
+    { title: 'Contrôle chambres PMR',               category: 'hébergement',   description: '', type: 'hebdomadaire' },
   ];
 
   let _tasks   = [];
@@ -71,6 +71,7 @@
     if (!snap.empty) return;
     const name = _currentUserName();
     const batch = db.batch();
+    // Seed default recurring tasks
     DEFAULT_ORG_TASKS.forEach((t, i) => {
       batch.set(db.collection('org_tasks').doc(), {
         ...t,
@@ -79,6 +80,7 @@
         doneBy: null,
         doneAt: null,
         comment: null,
+        archivedFromActive: false,
         createdBy: name,
         createdAt: FV.serverTimestamp(),
         order: i,
@@ -86,6 +88,45 @@
       });
     });
     await batch.commit();
+
+    // Carry over previous week's custom recurring tasks
+    try {
+      const prevDate = new Date();
+      prevDate.setDate(prevDate.getDate() - 7);
+      const prevKey = _getWeekKey(prevDate);
+      const prevSnap = await db.collection('org_tasks')
+        .where('weekKey', '==', prevKey)
+        .where('isDefault', '==', false)
+        .get();
+      const recurring = prevSnap.docs
+        .map(d => d.data())
+        .filter(t => t.type === 'hebdomadaire');
+      if (recurring.length > 0) {
+        const batch2 = db.batch();
+        const baseOrder = DEFAULT_ORG_TASKS.length;
+        recurring.forEach((t, i) => {
+          batch2.set(db.collection('org_tasks').doc(), {
+            title: t.title,
+            description: t.description || '',
+            category: t.category || 'autre',
+            type: 'hebdomadaire',
+            weekKey,
+            done: false,
+            doneBy: null,
+            doneAt: null,
+            comment: null,
+            archivedFromActive: false,
+            createdBy: t.createdBy || name,
+            createdAt: FV.serverTimestamp(),
+            order: baseOrder + i,
+            isDefault: false,
+          });
+        });
+        await batch2.commit();
+      }
+    } catch (e) {
+      console.warn('[OrgResp] carry-over recurring:', e);
+    }
   }
 
   // ── SUBSCRIPTION ──
@@ -124,11 +165,12 @@
   }
 
   function _renderMain(mc) {
-    const todo  = _tasks.filter(t => !t.done);
-    const done  = _tasks.filter(t =>  t.done);
+    const todo  = _tasks.filter(t => !t.done && !t.archivedFromActive);
+    const done  = _tasks.filter(t =>  t.done && !t.archivedFromActive);
+    const allDone = _tasks.filter(t => t.done);
 
     const byUser = {};
-    done.forEach(t => { const n = t.doneBy || '?'; byUser[n] = (byUser[n] || 0) + 1; });
+    allDone.forEach(t => { const n = t.doneBy || '?'; byUser[n] = (byUser[n] || 0) + 1; });
 
     let h = `<div class="or-page">`;
 
@@ -155,7 +197,7 @@
     }
 
     // Répartition
-    if (done.length > 0) {
+    if (allDone.length > 0) {
       const maxC = Math.max(...Object.values(byUser), 1);
       h += `<div class="or-rep">
         <div class="or-rep-title">Répartition cette semaine</div>`;
@@ -198,11 +240,19 @@
     mc.innerHTML = h;
   }
 
+  function _typeBadge(type) {
+    if (type === 'unique') return `<span class="or-type-badge or-type-badge--uni">📌 Unique</span>`;
+    return `<span class="or-type-badge or-type-badge--heb">🔄 Récurrente</span>`;
+  }
+
   function _todoCard(t) {
     const col = _catColor(t.category);
     return `<div class="or-todo-card">
       <div class="or-todo-left">
-        <span class="or-cat" style="background:${col}22;color:${col}">${MX.esc(t.category || '')}</span>
+        <div class="or-todo-badges">
+          <span class="or-cat" style="background:${col}22;color:${col}">${MX.esc(t.category || '')}</span>
+          ${_typeBadge(t.type)}
+        </div>
         <div class="or-todo-title">${MX.esc(t.title)}</div>
         ${t.description ? `<div class="or-todo-desc">${MX.esc(t.description)}</div>` : ''}
       </div>
@@ -218,7 +268,7 @@
     return `<div class="or-done-card">
       <div class="or-done-av" style="background:${col}">${_initials(t.doneBy || '?')}</div>
       <div class="or-done-body">
-        <div class="or-done-title">${MX.esc(t.title)}</div>
+        <div class="or-done-title">${MX.esc(t.title)} ${_typeBadge(t.type)}</div>
         <div class="or-done-meta">Réalisé par <strong>${MX.esc(t.doneBy || '?')}</strong>${dt ? ` — ${dt}` : ''}</div>
         ${t.comment ? `<div class="or-done-comment">"${MX.esc(t.comment)}"</div>` : ''}
       </div>
@@ -245,14 +295,17 @@
   }
 
   async function _doValidate(taskId) {
+    const task    = _tasks.find(x => x.id === taskId);
     const name    = _currentUserName();
     const comment = (document.getElementById('or-val-cmt')?.value || '').trim() || null;
     MX.closeModal();
     MX.syncStart();
     try {
-      await db.collection('org_tasks').doc(taskId).update({
+      const update = {
         done: true, doneBy: name, doneAt: FV.serverTimestamp(), comment: comment || null,
-      });
+      };
+      if (task && task.type === 'unique') update.archivedFromActive = true;
+      await db.collection('org_tasks').doc(taskId).update(update);
       MX.syncEnd();
       MX.toast('Tâche validée ✓');
     } catch(e) {
@@ -265,7 +318,7 @@
     MX.syncStart();
     try {
       await db.collection('org_tasks').doc(taskId).update({
-        done: false, doneBy: null, doneAt: null, comment: null,
+        done: false, doneBy: null, doneAt: null, comment: null, archivedFromActive: false,
       });
       MX.syncEnd();
       MX.toast('Validation annulée');
@@ -304,6 +357,13 @@
             <option value="autre">Autre</option>
           </select>
         </div>
+        <div>
+          <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Type</label>
+          <select id="or-add-type" class="fi">
+            <option value="hebdomadaire">🔄 Récurrente (se réinitialise chaque semaine)</option>
+            <option value="unique">📌 Unique (disparaît une fois validée)</option>
+          </select>
+        </div>
       </div>`
     );
     setTimeout(() => { const el = document.getElementById('or-add-title'); if (el) el.focus(); }, 50);
@@ -314,14 +374,16 @@
     if (!title) { MX.toast('Le titre est obligatoire', true); return; }
     const desc = (document.getElementById('or-add-desc')?.value || '').trim();
     const cat  = document.getElementById('or-add-cat')?.value || 'autre';
+    const type = document.getElementById('or-add-type')?.value || 'hebdomadaire';
     const name = _currentUserName();
     MX.closeModal();
     MX.syncStart();
     try {
       await db.collection('org_tasks').add({
-        title, description: desc, category: cat,
+        title, description: desc, category: cat, type,
         weekKey: _weekKey,
         done: false, doneBy: null, doneAt: null, comment: null,
+        archivedFromActive: false,
         createdBy: name,
         createdAt: FV.serverTimestamp(),
         order: _tasks.length,
@@ -395,7 +457,7 @@
           h += `<div class="or-hist-task${t.done ? ' or-hist-task--done' : ''}">
             <i class="fas fa-${t.done ? 'circle-check' : 'circle'}" style="color:${t.done ? 'var(--green)' : 'var(--text3)'}"></i>
             <div class="or-hist-task-body">
-              <div class="or-hist-task-title">${MX.esc(t.title)}</div>
+              <div class="or-hist-task-title">${MX.esc(t.title)} ${_typeBadge(t.type)}</div>
               ${t.done && t.doneBy ? `<div class="or-hist-task-meta">Par <strong>${MX.esc(t.doneBy)}</strong>${t.doneAt ? ` — ${_fmtDT(t.doneAt)}` : ''}</div>` : ''}
             </div>
           </div>`;

@@ -7012,3 +7012,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .or-hist-task-body  { flex: 1; min-width: 0; }
 .or-hist-task-title { font-size: 13px; font-weight: 600; color: var(--text1); }
 .or-hist-task-meta  { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+/* Type badges */
+.or-todo-badges     { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.or-type-badge      { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: .02em; vertical-align: middle; }
+.or-type-badge--heb { background: rgba(16,185,129,.13); color: #10B981; border: 1px solid rgba(16,185,129,.25); }
+.or-type-badge--uni { background: rgba(139,92,246,.13); color: #A78BFA; border: 1px solid rgba(139,92,246,.25); }
