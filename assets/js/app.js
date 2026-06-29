@@ -61,6 +61,7 @@
     const navItem = NAV.find(n => n && n.id === id);
     const title   = id === "today-cl"
       ? (MX.DAYS.find(d => d.id === MX.todayId())?.l || "Aujourd'hui")
+      : id === "mes-missions" ? "Mes missions"
       : (navItem?.l || "Maintix");
     document.getElementById("topbar-title").textContent = title;
     document.querySelectorAll(".sx-item[data-page],.bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
@@ -81,6 +82,7 @@
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
     if (id === "org-resp")      return Pages.OrgResp ? Pages.OrgResp.render() : null;
+    if (id === "mes-missions")  return Pages.MesMissions ? Pages.MesMissions.render() : (Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : null);
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
@@ -172,6 +174,7 @@
     'msgs':          { icon: 'fa-comments',        l: 'Messages' },
     'planning':      { icon: 'fa-calendar-days',   l: 'Planning' },
     'today-cl':      { icon: 'fa-list-check',      l: 'Checklists' },
+    'mes-missions':  { icon: 'fa-list-check',      l: 'Mes missions' },
     'org-resp':      { icon: 'fa-users-gear',      l: 'Organisation' },
     'orders':        { icon: 'fa-box',             l: 'Stock' },
     'documents':     { icon: 'fa-book',            l: 'Bibliothèque' },
@@ -341,14 +344,14 @@
     h += _group("fa-calendar-days", "sx-group-ico--blue", "📅 Planning", "plng", "toggleNavPlng", _plngOpen, plngItems, "planning", "Planning");
 
     // ── 🔧 Maintenance ──
-    const clPages = ["today-cl", ...DAYS.map(d => d.id)];
+    const clPages = ["today-cl", "mes-missions", ...DAYS.map(d => d.id)];
     let maintItems = "";
-    maintItems += _item("today-cl",      "fa-list-check",     "Checklists",           { sub: true, matchPages: clPages, favable: true });
+    maintItems += _item("mes-missions",  "fa-list-check",     "Mes missions",         { sub: true, matchPages: clPages, favable: true });
     if (canAll) {
       maintItems += _item("interventions", "fa-wrench",        "Interventions",        { sub: true, dynBadge: "int", favable: true });
       maintItems += _item("org-resp",      "fa-users-gear",    "Organisation Resp.",   { sub: true, favable: true });
     }
-    h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems, "today-cl", "Checklists");
+    h += _group("fa-screwdriver-wrench", "sx-group-ico--violet", "🔧 Maintenance", "maint", "toggleNavMaint", _maintOpen, maintItems, "mes-missions", "Mes missions");
 
     // ── 📦 Gestion ──
     let gestItems = "";
@@ -402,14 +405,14 @@
 
     // ── Bottom nav (mobile) — exactly 5 items ──
     const dayIds = DAYS.map(d => d.id);
-    const allCl  = ["today-cl", ...dayIds];
+    const allCl  = ["today-cl", "mes-missions", ...dayIds];
     const drawerPages = ["orders","documents","consommations","interventions","org-resp","utilisateurs","equipe","parametres"];
     const drawerAct   = drawerPages.includes(cur);
     let bot = `<div class="bottom-nav-inner">`;
     bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
     bot += `<button class="bn${cur==="msgs"?" active":""}" data-page="msgs" onclick="MX.showPage('msgs')"><div class="bn-bar"></div><i class="fas fa-comments"></i><span class="nav-badge" id="bnb_msgs"></span><span>Messages</span></button>`;
     bot += `<button class="bn${cur==="planning"?" active":""}" data-page="planning" onclick="MX.showPage('planning')"><div class="bn-bar"></div><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
-    bot += `<button class="bn${allCl.includes(cur)?" active":""}" onclick="MX.showPage('today-cl')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Checklists</span></button>`;
+    bot += `<button class="bn${allCl.includes(cur)?" active":""}" onclick="MX.showPage('mes-missions')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Checklists</span></button>`;
     bot += `<button class="bn${drawerAct?" active":""}" onclick="MX.openMobileDrawer()"><div class="bn-bar"></div><i class="fas fa-grip"></i><span>Plus</span></button>`;
     bot += `</div>`;
     botNav.innerHTML = bot;
@@ -800,6 +803,7 @@
       state.checks = data;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
+      if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
       if (state.currentPage === "home")      MX.Pages.Home.render();
       if (state.currentPage === "orders")    MX.Pages.Orders.render();
     });
@@ -807,9 +811,10 @@
     DB.listenAllTasks((dayId, sl, items) => {
       state.tasks[`${dayId}_${sl}`] = items;
       updateNavProgress();
-      if (state.currentPage === dayId)   MX.Pages.Checklist.render(dayId);
-      if (state.currentPage === "home")  MX.Pages.Home.render();
-      if (state.currentPage === "admin") MX.Pages.Admin.render();
+      if (state.currentPage === dayId)             MX.Pages.Checklist.render(dayId);
+      if (state.currentPage === "mes-missions")    Pages.MesMissions && Pages.MesMissions.render();
+      if (state.currentPage === "home")            MX.Pages.Home.render();
+      if (state.currentPage === "admin")           MX.Pages.Admin.render();
     });
 
     DB.listenProducts(list => {
@@ -860,6 +865,7 @@
       state.transfers = list;
       updateNavProgress();
       if (MX.DAYS.find(d => d.id === state.currentPage)) MX.Pages.Checklist.render(state.currentPage);
+      if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
     });
 
     DB.listenMissions(list => {
@@ -945,6 +951,7 @@
       if (tid && (state.currentPage === "today-cl" || state.currentPage === tid)) {
         MX.Pages.Checklist.render(tid);
       }
+      if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
     });
 
     // ── Planning suggestions for today ──
@@ -1020,7 +1027,7 @@
     await _loadFavsFromFirestore().catch(() => {});
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
-    MX.showPage(_urlPage && NAV.some(n => n && n.id === _urlPage) ? _urlPage : "home");
+    MX.showPage(_urlPage && (NAV.some(n => n && n.id === _urlPage) || _urlPage === "mes-missions") ? _urlPage : "home");
 
     // Presence heartbeat every 2 minutes
     setInterval(() => {
