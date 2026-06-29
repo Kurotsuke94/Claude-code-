@@ -57,6 +57,9 @@
     if (_prevPage === 'documents' && id !== 'documents') {
       MX.Pages.Bible && MX.Pages.Bible._destroy && MX.Pages.Bible._destroy();
     }
+    if (_prevPage === 'planning' && id !== 'planning') {
+      MX.Pages.Planning && MX.Pages.Planning._destroy && MX.Pages.Planning._destroy();
+    }
     if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
     const navItem = NAV.find(n => n && n.id === id);
     const navInfo = NAV_INFO[id] || {};
@@ -605,6 +608,13 @@
   let _pendingSaves  = 0;
   let _isOffline     = !navigator.onLine;
 
+  // Diagnostic counters (dev panel)
+  window.MX._dbReads  = 0;
+  window.MX._dbWrites = 0;
+  window.MX._avgSyncMs = 0;
+  let _syncSamples = 0;
+  let _syncStart   = 0;
+
   window.addEventListener('online',  () => { _isOffline = false; renderStatusBar(); MX.toast('🟢 Connexion rétablie — données synchronisées'); });
   window.addEventListener('offline', () => { _isOffline = true;  renderStatusBar(); MX.toast('⚠️ Mode hors ligne', true); });
 
@@ -621,18 +631,37 @@
     };
   })());
 
-  window.MX.syncStart = function () { _pendingSaves++; renderStatusBar(); };
+  window.MX.syncStart = function () {
+    _pendingSaves++;
+    if (_pendingSaves === 1) _syncStart = performance.now();
+    window.MX._dbWrites++;
+    renderStatusBar();
+  };
   window.MX.syncEnd   = function () {
     _pendingSaves = Math.max(0, _pendingSaves - 1);
     _lastSyncTime = new Date();
+    MX.state._lastSync = _lastSyncTime.getTime();
+    if (_pendingSaves === 0 && _syncStart > 0) {
+      const elapsed = performance.now() - _syncStart;
+      _syncSamples++;
+      window.MX._avgSyncMs = window.MX._avgSyncMs + (elapsed - window.MX._avgSyncMs) / _syncSamples;
+      _syncStart = 0;
+    }
     renderStatusBar();
   };
   window.MX.syncFail  = function (retryFn) {
     _pendingSaves = Math.max(0, _pendingSaves - 1);
+    _syncStart = 0;
     renderStatusBar();
     if (retryFn) {
       MX.toast('🔴 Échec de synchronisation', true);
     }
+  };
+  window.MX.snapshotReceived = function () {
+    window.MX._dbReads++;
+    _lastSyncTime = new Date();
+    MX.state._lastSync = _lastSyncTime.getTime();
+    renderStatusBar();
   };
 
   function _fmtTime(d) {
@@ -642,7 +671,6 @@
 
   function renderStatusBar() {
     const el = document.getElementById("status-bar");
-    if (!el) return;
     const t = _fmtTime(_lastSyncTime);
     const n = _presenceCount;
     const usersLabel = n + " utilisateur" + (n !== 1 ? "s" : "") + " connecté" + (n !== 1 ? "s" : "");
@@ -656,14 +684,31 @@
       syncItem = `<span class="sb-item"><i class="fas fa-cloud-arrow-up" style="color:var(--green)"></i> Synchronisé à ${t}</span>`;
     }
 
-    el.innerHTML =
-      `<span class="sb-item"><span class="sb-dot${_isOffline ? ' sb-dot-red' : ''}"></span>${_isOffline ? 'Hors ligne' : 'Serveur opérationnel'}</span>` +
-      `<span class="sb-sep">│</span>` +
-      syncItem +
-      `<span class="sb-sep">│</span>` +
-      `<span class="sb-item" id="sb-users"><i class="fas fa-users"></i> ${usersLabel}</span>` +
-      `<span class="sb-sep">│</span>` +
-      `<span class="sb-item sb-ver"><i class="fas fa-rocket"></i> Maintix v${_APP_VER}</span>`;
+    if (el) {
+      el.innerHTML =
+        `<span class="sb-item"><span class="sb-dot${_isOffline ? ' sb-dot-red' : ''}"></span>${_isOffline ? 'Hors ligne' : 'Serveur opérationnel'}</span>` +
+        `<span class="sb-sep">│</span>` +
+        syncItem +
+        `<span class="sb-sep">│</span>` +
+        `<span class="sb-item" id="sb-users"><i class="fas fa-users"></i> ${usersLabel}</span>` +
+        `<span class="sb-sep">│</span>` +
+        `<span class="sb-item sb-ver"><i class="fas fa-rocket"></i> Maintix v${_APP_VER}</span>`;
+    }
+
+    // Mobile topbar sync dot
+    const dot = document.getElementById("topbar-sync-dot");
+    if (dot) {
+      if (_isOffline) {
+        dot.className = "topbar-sync-dot topbar-sync-offline";
+        dot.title = "Hors ligne";
+      } else if (_pendingSaves > 0) {
+        dot.className = "topbar-sync-dot topbar-sync-pending";
+        dot.title = "Synchronisation en cours…";
+      } else {
+        dot.className = "topbar-sync-dot topbar-sync-ok";
+        dot.title = "Synchronisé à " + t;
+      }
+    }
   }
 
   // ── ANN BANNER ──

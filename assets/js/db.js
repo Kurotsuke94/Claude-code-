@@ -682,6 +682,21 @@
     return map;
   }
 
+  function listenPlanningEntries(yms, cb) {
+    // yms: array of "YYYY-MM" strings to listen to (1 or 2 for cross-month week view)
+    const unsubs = yms.map(ym =>
+      R_PLAN_ENT().where('ym', '==', ym).onSnapshot(snap => {
+        const map = {};
+        snap.docs.forEach(d => {
+          const data = d.data();
+          map[`${data.userId}_${data.date}`] = data;
+        });
+        cb(ym, map);
+      })
+    );
+    return () => unsubs.forEach(u => u());
+  }
+
   async function setPlanningEntry(userId, dateStr, shiftCode) {
     const user = (window.MX.state.users || []).find(u => u.id === userId);
     const ym = dateStr.slice(0, 7);
@@ -1048,7 +1063,7 @@
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
     listenOrders, addOrder, updateOrderStatus, deleteOrder,
-    listenPlanningShifts, loadPlanningMonth, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
+    listenPlanningShifts, loadPlanningMonth, listenPlanningEntries, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,

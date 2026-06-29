@@ -856,7 +856,7 @@
           <div>
             <div style="font-size:18px;font-weight:800;letter-spacing:-0.5px">Maintix</div>
             <div style="font-size:12px;color:var(--text3)">Gestion de maintenance industrielle</div>
-            <div style="margin-top:4px"><span class="stt-badge stt-badge-green">v${ver}</span></div>
+            <div style="margin-top:4px"><span class="stt-badge stt-badge-green" style="cursor:pointer;user-select:none" onclick="MX.Pages.Settings._diagVersionTap()" title="Appuyez 5× pour ouvrir le diagnostic">v${ver}</span></div>
           </div>
         </div>
         <div class="stt-info-list">
@@ -939,6 +939,93 @@
       </div>`;
   }
 
+  // ── DIAGNOSTIC PANEL ──
+  let _diagTaps = 0, _diagTimer = null;
+
+  function _diagVersionTap() {
+    _diagTaps++;
+    clearTimeout(_diagTimer);
+    _diagTimer = setTimeout(() => { _diagTaps = 0; }, 2000);
+    if (_diagTaps >= 5) {
+      _diagTaps = 0;
+      _showSection('diagnostic');
+    }
+  }
+
+  function _renderDiagnostic() {
+    const cu = MX.state.currentUser || MX.state.adminUser;
+    const userName = cu ? (cu.name || cu.email || '—') : 'Invité';
+    const isOnline = navigator.onLine;
+    const lastSync = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleTimeString('fr-FR') : '—';
+
+    // Count active onSnapshot listeners (tracked in DB if available)
+    let listenerCount = '—';
+    if (window.MX && MX.DB && MX.DB._listenerCount !== undefined) {
+      listenerCount = MX.DB._listenerCount;
+    } else if (window.MX && MX._snapshotCount !== undefined) {
+      listenerCount = MX._snapshotCount;
+    }
+
+    const reads  = (window.MX && MX._dbReads)  || 0;
+    const writes = (window.MX && MX._dbWrites) || 0;
+    const avgSync = (window.MX && MX._avgSyncMs) ? MX._avgSyncMs.toFixed(0) + ' ms' : '—';
+
+    const firestoreState = isOnline ? 'Connecté' : 'Hors ligne';
+    const ua = navigator.userAgent;
+    const isMob = /Mobi|Android/i.test(ua) ? 'Mobile' : 'Desktop';
+
+    return `
+      <div class="stt-section-head"><i class="fas fa-bug"></i> Diagnostic développeur <span class="stt-badge stt-badge-green" style="margin-left:8px;font-size:10px">DEV</span></div>
+      <div class="stt-card" style="font-family:var(--ffm);font-size:12px">
+        <div class="stt-info-list">
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-user"></i> Utilisateur connecté</span>
+            <span class="stt-info-val">${MX.esc(userName)}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-database"></i> État Firestore</span>
+            <span class="stt-info-val" style="color:${isOnline ? 'var(--green)' : 'var(--red)'}">
+              <i class="fas fa-circle" style="font-size:8px"></i> ${firestoreState}
+            </span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-rotate"></i> Dernière synchronisation</span>
+            <span class="stt-info-val">${lastSync}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-stopwatch"></i> Temps de sync moyen</span>
+            <span class="stt-info-val">${avgSync}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-tower-broadcast"></i> Listeners actifs</span>
+            <span class="stt-info-val">${listenerCount}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-arrow-down"></i> Lectures Firestore</span>
+            <span class="stt-info-val">${reads}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-arrow-up"></i> Écritures Firestore</span>
+            <span class="stt-info-val">${writes}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-mobile-screen"></i> Type d'appareil</span>
+            <span class="stt-info-val">${isMob}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-wifi"></i> Connexion</span>
+            <span class="stt-info-val">${(navigator.connection && navigator.connection.effectiveType) || '—'}</span>
+          </div>
+        </div>
+        <button class="stt-btn" style="margin-top:12px" onclick="MX.Pages.Settings._refreshDiag()">
+          <i class="fas fa-refresh"></i> Actualiser
+        </button>
+        <button class="stt-btn" style="margin-top:8px;background:var(--red-dim);color:var(--red);border-color:var(--red)" onclick="if(confirm('Réinitialiser les compteurs ?')){if(window.MX){MX._dbReads=0;MX._dbWrites=0;}MX.Pages.Settings._refreshDiag();}">
+          <i class="fas fa-trash"></i> Réinitialiser les compteurs
+        </button>
+      </div>`;
+  }
+
   // ── SECTION SWITCHER ──
   function _showSection(id) {
     _section = id;
@@ -959,6 +1046,7 @@
       journal:       _renderJournal,
       nouveautes:    _renderNouveautes,
       apropos:       _renderApropos,
+      diagnostic:    _renderDiagnostic,
     };
     content.innerHTML = (renderers[id] || (() => ''))();
   }
@@ -1060,5 +1148,7 @@
     _cropRotate: (deg) => { _cropRot = (_cropRot + deg + 360) % 360; _renderCropCanvas(); },
     _cropZoom:   (val) => { _cropScale = parseInt(val, 10) / 100; _renderCropCanvas(); },
     _avatarHtml,
+    _diagVersionTap,
+    _refreshDiag: () => _showSection('diagnostic'),
   };
 })();

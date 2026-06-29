@@ -36,6 +36,10 @@
   let _dragRect             = null;       // {startUid, startDate, endUid, endDate}
   let _tableMouseUpHandler  = null;
 
+  // Real-time listener state
+  let _plnUnsubEntries = null;  // unsubscribe fn for current onSnapshot listener(s)
+  let _plnMergedMaps   = {};    // ym → {key: entry} — merged across all listened months
+
   // ── HELPERS ──
 
   function _shifts() {
@@ -141,35 +145,61 @@
     if (shiftFilter !== undefined) _filterShift = shiftFilter;
   }
 
-  // ── DATA LOADING ──
+  // ── DATA LOADING (real-time) ──
 
-  async function _loadAndRender() {
-    if (_loading) return;
-    _loading = true;
-    try {
-      if (_view === 'week') {
-        const days = _weekDays(_day);
-        const d0   = new Date(days[0] + 'T00:00:00');
-        const d6   = new Date(days[6] + 'T00:00:00');
-        const p1   = MX.DB.loadPlanningMonth(d0.getFullYear(), d0.getMonth());
-        if (d0.getMonth() !== d6.getMonth()) {
-          const [m1, m2] = await Promise.all([p1, MX.DB.loadPlanningMonth(d6.getFullYear(), d6.getMonth())]);
-          MX.state.planningEntries = Object.assign({}, m1, m2);
-        } else {
-          MX.state.planningEntries = await p1;
-        }
-      } else if (_view === 'day') {
-        const d = new Date(_day + 'T00:00:00');
-        MX.state.planningEntries = await MX.DB.loadPlanningMonth(d.getFullYear(), d.getMonth());
-      } else {
-        MX.state.planningEntries = await MX.DB.loadPlanningMonth(_year, _month);
-      }
-    } catch (e) {
-      MX.toast('Erreur chargement planning', true);
-    } finally {
-      _loading = false;
+  function _getViewYMs() {
+    if (_view === 'week') {
+      const days = _weekDays(_day);
+      const d0 = new Date(days[0] + 'T00:00:00');
+      const d6 = new Date(days[6] + 'T00:00:00');
+      const ym0 = d0.getFullYear() + '-' + String(d0.getMonth() + 1).padStart(2, '0');
+      const ym6 = d6.getFullYear() + '-' + String(d6.getMonth() + 1).padStart(2, '0');
+      return ym0 === ym6 ? [ym0] : [ym0, ym6];
+    } else if (_view === 'day') {
+      const d = new Date(_day + 'T00:00:00');
+      return [d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')];
+    } else {
+      return [_year + '-' + String(_month + 1).padStart(2, '0')];
     }
-    render();
+  }
+
+  function _loadAndRender() {
+    const yms = _getViewYMs();
+    const ymsKey = yms.join(',');
+
+    // Tear down previous listener if months changed
+    if (_plnUnsubEntries) {
+      _plnUnsubEntries._ymsKey !== ymsKey && _teardownPlanningListener();
+    }
+
+    if (!_plnUnsubEntries) {
+      _plnMergedMaps = {};
+      _loading = true;
+      let firstSnapshot = true;
+
+      const unsub = MX.DB.listenPlanningEntries(yms, function (ym, map) {
+        _plnMergedMaps[ym] = map;
+        // Merge all listened months into planningEntries
+        MX.state.planningEntries = Object.assign({}, ...(Object.values(_plnMergedMaps)));
+        if (window.MX && MX.snapshotReceived) MX.snapshotReceived();
+        if (firstSnapshot) {
+          firstSnapshot = false;
+          _loading = false;
+        }
+        render();
+      });
+
+      unsub._ymsKey = ymsKey;
+      _plnUnsubEntries = unsub;
+      render(); // show spinner while waiting for first snapshot
+    } else {
+      render();
+    }
+  }
+
+  function _teardownPlanningListener() {
+    if (_plnUnsubEntries) { _plnUnsubEntries(); _plnUnsubEntries = null; }
+    _plnMergedMaps = {};
   }
 
   // ── SELECTION SYSTEM ──
@@ -1225,6 +1255,7 @@
   window.MX.Pages       = window.MX.Pages || {};
   window.MX.Pages.Planning = {
     render: renderPage,
+    _destroy: _teardownPlanningListener,
     _prev, _next, _today, _setView, _setViewExternal,
     _setFilterUser, _setFilterShift,
     _cellMouseDown,

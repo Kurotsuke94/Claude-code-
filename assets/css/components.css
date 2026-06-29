@@ -8047,3 +8047,37 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   opacity: 0.45;
   flex-shrink: 0;
 }
+
+/* ── TOPBAR SYNC DOT (mobile) ── */
+.topbar-sync-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 2px;
+  background: #22c55e;
+  box-shadow: 0 0 5px rgba(34,197,94,0.6);
+  animation: sbPulse 3s ease-in-out infinite;
+  transition: background 0.2s;
+}
+.topbar-sync-ok {
+  background: #22c55e;
+  box-shadow: 0 0 5px rgba(34,197,94,0.6);
+  animation: sbPulse 3s ease-in-out infinite;
+}
+.topbar-sync-pending {
+  background: var(--cyan);
+  box-shadow: 0 0 5px rgba(0,245,212,0.5);
+  animation: sbPulse 0.8s ease-in-out infinite;
+}
+.topbar-sync-offline {
+  background: var(--orange);
+  box-shadow: 0 0 5px rgba(251,146,60,0.7);
+  animation: sbPulseRed 1.5s ease-in-out infinite;
+}
+@media (min-width: 901px) {
+  /* Desktop: status bar is visible, hide topbar dot (topbar is hidden on desktop anyway) */
+  .topbar-sync-dot { display: none; }
+}
