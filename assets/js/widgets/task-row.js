@@ -49,8 +49,12 @@
       const curVal  = task.assignedTo || '';
       const dispVal = curVal || (suggs[0] || '');
       const isSugg  = !curVal && suggs.length > 0;
+      // Only show techs from planning; keep currently-assigned if not in planning; fall back to all if no data
+      const availableUsers = suggs.length > 0
+        ? users.filter(u => suggs.includes(u.name) || u.name === curVal)
+        : users;
       const opts    = `<option value="">— Non assigné —</option>` +
-        users.map(u => `<option value="${esc(u.name)}"${u.name === dispVal ? ' selected' : ''}>${esc(u.name)}</option>`).join('');
+        availableUsers.map(u => `<option value="${esc(u.name)}"${u.name === dispVal ? ' selected' : ''}>${esc(u.name)}</option>`).join('');
 
       return `<div class="trow ${isChecked ? 'done' : ''}" id="tr_${esc(task.id)}" style="flex-direction:column;align-items:stretch;cursor:default;padding:0;gap:0">
         <div ${click} style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px 4px 12px">

@@ -964,6 +964,13 @@
   function _getPlanSuggestions(weekKey, dayId, slot) {
     const dateStr = _weekDayToDate(weekKey, dayId);
     const entries = (MX.state && MX.state.planningEntries) || {};
+
+    const codesForSlot = Object.keys(_SHIFT_SLOT).filter(k => _SHIFT_SLOT[k] === slot);
+    const planningDay  = Object.values(entries).filter(e => e.date === dateStr);
+    console.log('[Plan→Missions] Date mission', dateStr, '| slot:', slot);
+    console.log('[Plan→Missions] Code recherché', codesForSlot);
+    console.log('[Plan→Missions] Planning du jour', planningDay);
+
     const suggested = [];
     Object.values(entries).forEach(e => {
       if (e.date !== dateStr) return;
@@ -981,6 +988,8 @@
       }
       if (matchedSlot === slot && e.userName) suggested.push(e.userName);
     });
+
+    console.log('[Plan→Missions] Techniciens compatibles', suggested);
     return suggested;
   }
 
