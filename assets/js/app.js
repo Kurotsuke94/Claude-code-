@@ -610,6 +610,19 @@
   window.addEventListener('online',  () => { _isOffline = false; renderStatusBar(); MX.toast('🟢 Connexion rétablie — données synchronisées'); });
   window.addEventListener('offline', () => { _isOffline = true;  renderStatusBar(); MX.toast('⚠️ Mode hors ligne', true); });
 
+  // On resize between mobile and desktop: close sidebar + clear overlay to avoid stuck state
+  window.addEventListener('resize', (function() {
+    var _lastMob = window.innerWidth <= 900;
+    return function() {
+      var mob = window.innerWidth <= 900;
+      if (mob !== _lastMob) {
+        _lastMob = mob;
+        MX.closeSidebar();
+        buildNav();
+      }
+    };
+  })());
+
   window.MX.syncStart = function () { _pendingSaves++; renderStatusBar(); };
   window.MX.syncEnd   = function () {
     _pendingSaves = Math.max(0, _pendingSaves - 1);

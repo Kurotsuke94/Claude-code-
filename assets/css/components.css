@@ -4196,12 +4196,16 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   font-family: var(--ffs);
   font-weight: 500;
   color: var(--text3);
-  background: transparent;
+  background: var(--bg);   /* solid bg so it's never transparent over content */
   border: none;
   cursor: pointer;
   transition: color var(--t), background var(--t);
   border-bottom: 1px solid rgba(255,255,255,0.05);
   margin-bottom: 4px;
+  position: sticky;   /* always visible at the top of sidebar-nav */
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
 }
 .sx-compact-btn:hover { color: var(--text2); background: var(--bg3); }
 .sx-compact-btn i { font-size: 12px; flex-shrink: 0; }

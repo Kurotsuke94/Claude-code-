@@ -176,6 +176,7 @@ html, body {
   flex-shrink: 0;
   overflow: hidden;
   transition: transform var(--t);
+  position: relative;   /* required for z-index to take effect on desktop */
   z-index: 100;
 }
 .sidebar-header {
@@ -313,7 +314,9 @@ html, body {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.6);
   z-index: 99;
+  pointer-events: none;   /* never capture clicks when hidden */
 }
+.sidebar-overlay.show { pointer-events: auto; }
 
 /* ── MAIN WRAPPER ── */
 .main-wrapper {
