@@ -765,13 +765,15 @@ html, body {
   .page-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .ann-banner { margin: 6px 10px 2px; }
-  .modal { max-height: calc(92dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
+  /* overflow:hidden preserves flex layout — actions remain always visible */
+  .modal { max-height: calc(92dvh - env(safe-area-inset-bottom)); overflow: hidden; }
+  .modal-body { max-height: calc(70dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
 }
 /* C2 — modale utilisable en mode paysage (hauteur viewport réduite) */
 @media (max-height: 500px) {
   .modal {
     max-height: calc(95dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    overflow-y: auto;
+    overflow: hidden;
   }
   .modal-body { max-height: 40dvh; overflow-y: auto; }
 }

@@ -5864,11 +5864,11 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
    FORMULAIRES MODAUX — OPTIMISATION MOBILE
 ══════════════════════════════════════════════════════ */
 @media (max-width: 600px) {
-  /* Modal — occupe presque tout l'écran sur iPhone */
-  .modal { max-height: calc(96dvh - env(safe-area-inset-bottom)); }
+  /* Modal — overflow:hidden keeps actions always visible */
+  .modal { max-height: calc(96dvh - env(safe-area-inset-bottom)); overflow: hidden; }
 
   /* Corps du modal — scroll interne obligatoire */
-  .modal-body { max-height: calc(65dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
+  .modal-body { max-height: calc(68dvh - env(safe-area-inset-bottom)); overflow-y: auto; }
 
   /* Boutons — taille touch */
   .modal-btn { padding: 14px; font-size: 15px; min-height: 50px; }

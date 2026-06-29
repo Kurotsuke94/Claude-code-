@@ -234,22 +234,24 @@
   // ── MODAL ──
   function showModal(titleOrOpts, sub, actions) {
     const bodyEl = document.getElementById("m-body");
-    // Object-style call: showModal({ title, sub, body, actions })
+    // Object-style call: showModal({ title, sub, body, actions, noAutoClose })
     if (titleOrOpts && typeof titleOrOpts === 'object') {
       const o = titleOrOpts;
       document.getElementById("m-title").textContent = o.title || '';
       document.getElementById("m-sub").innerHTML = o.sub || '';
       if (bodyEl) bodyEl.innerHTML = o.body || '';
       const ac = document.getElementById("m-actions");
-      if (typeof o.actions === 'string') {
-        ac.innerHTML = o.actions;
-      } else if (Array.isArray(o.actions)) {
+      // Use o.actions if set; fall back to the `actions` parameter (3rd arg)
+      const actData = (o.actions !== undefined) ? o.actions : actions;
+      if (typeof actData === 'string') {
+        ac.innerHTML = actData;
+      } else if (Array.isArray(actData)) {
         ac.innerHTML = '';
-        o.actions.forEach(a => {
+        actData.forEach(a => {
           const b = document.createElement("button");
-          b.className  = "modal-btn " + (a.cls || "cancel");
-          b.textContent = a.label;
-          b.onclick = () => { closeModal(); if (a.fn) a.fn(); };
+          b.className = "modal-btn " + (a.cls || "cancel");
+          b.innerHTML = a.label;  // innerHTML for icon support
+          b.onclick = () => { if (!o.noAutoClose) closeModal(); if (a.fn) a.fn(); };
           ac.appendChild(b);
         });
       } else {
@@ -266,8 +268,8 @@
     ac.innerHTML = "";
     (actions || []).forEach(a => {
       const b = document.createElement("button");
-      b.className  = "modal-btn " + (a.cls || "cancel");
-      b.textContent = a.label;
+      b.className = "modal-btn " + (a.cls || "cancel");
+      b.innerHTML = a.label;  // innerHTML for icon support
       b.onclick = () => { closeModal(); if (a.fn) a.fn(); };
       ac.appendChild(b);
     });
