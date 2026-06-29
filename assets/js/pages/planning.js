@@ -18,6 +18,24 @@
   const DAY_LABELS  = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
   const MONTH_NAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
+  // Icon+label badges — never show a bare numeric/raw code to the end user
+  const CODE_BADGE = {
+    '1':  { emoji: '🟡', abbr: 'MAT',  label: 'MATIN'    },
+    '2':  { emoji: '🔵', abbr: 'JOU',  label: 'JOURNÉE'  },
+    '3':  { emoji: '🔷', abbr: 'A-M',  label: 'AP-MIDI'  },
+    '4':  { emoji: '🔴', abbr: 'SOIR', label: 'SOIR'     },
+    RH:   { emoji: '🟢', abbr: 'RH',   label: 'RH'       },
+    CP:   { emoji: '🟠', abbr: 'CP',   label: 'CONGÉ'    },
+    RTT:  { emoji: '🟣', abbr: 'RTT',  label: 'RTT'      },
+    JFL:  { emoji: '🟠', abbr: 'JFL',  label: 'J.FÉRIÉ'  },
+    EXT:  { emoji: '⚪', abbr: 'EXT',  label: 'EXTÉRIEUR'},
+  };
+  function _badgeFor(code) { return CODE_BADGE[code] || { emoji: '⚪', abbr: String(code || '').slice(0, 4), label: code || '' }; }
+
+  // Shift code → checklist task slot (codes 2 and 3 both feed the "journée" slot,
+  // matching checklist.js's _SHIFT_SLOT mapping — checklist only has 3 task slots)
+  const SHIFT_TO_TASKSLOT = { '1': 'matin', '2': 'journee', '3': 'journee', '4': 'soir' };
+
   // ── STATE ──
 
   let _view        = 'week';   // default: modern week card view
@@ -67,6 +85,131 @@
   }
 
   function _canEdit() { return MX.Auth.canSeeAll(); }
+
+  // ── MISSION DATA (real task counts, linked from Planning → Missions) ──
+
+  function _isoWk(d) {
+    const t = new Date(d); t.setHours(0, 0, 0, 0);
+    t.setDate(t.getDate() + 4 - (t.getDay() || 7));
+    const y0 = new Date(t.getFullYear(), 0, 1);
+    return { y: t.getFullYear(), n: Math.ceil(((t - y0) / 86400000 + 1) / 7) };
+  }
+  function _weekKeyOf(dateStr) {
+    const wk = _isoWk(new Date(dateStr + 'T00:00:00'));
+    return wk.y + '_W' + String(wk.n).padStart(2, '0');
+  }
+  function _dayIdOf(dateStr) {
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    return MX.DAYS[dow === 0 ? 6 : dow - 1].id;
+  }
+  function _currentWeekKey() { return _weekKeyOf(_todayStr()); }
+
+  let _weekDocCache   = {};   // weekKey -> { tasks: {dayId_slot: items[]}, checks: {...} }
+  let _weekDocPending = {};
+
+  function _ensureWeekDoc(weekKey) {
+    if (weekKey === _currentWeekKey()) return;          // live week: MX.state.tasks already has it
+    if (_weekDocCache[weekKey] || _weekDocPending[weekKey]) return;
+    _weekDocPending[weekKey] = true;
+    MX.DB.getWeeklyChecks(weekKey).then(doc => {
+      _weekDocCache[weekKey] = doc || {};
+      delete _weekDocPending[weekKey];
+      render();
+    }).catch(() => { delete _weekDocPending[weekKey]; });
+  }
+
+  function _tasksForSlot(dateStr, slot) {
+    if (!slot) return [];
+    const dayId = _dayIdOf(dateStr);
+    const wk    = _weekKeyOf(dateStr);
+    const key   = dayId + '_' + slot;
+    if (wk === _currentWeekKey()) return (MX.state.tasks && MX.state.tasks[key]) || [];
+    const doc = _weekDocCache[wk];
+    return (doc && doc.tasks && doc.tasks[key]) || [];
+  }
+
+  function _isTaskDone(dateStr, slot, taskId) {
+    const dayId = _dayIdOf(dateStr);
+    const wk    = _weekKeyOf(dateStr);
+    const key   = `${dayId}_${slot}_${taskId}`;
+    if (wk === _currentWeekKey()) return !!(MX.state.checks && MX.state.checks[key]);
+    const doc = _weekDocCache[wk];
+    return !!(doc && doc.checks && doc.checks[key]);
+  }
+
+  function _userTasksForDay(user, dateStr, shiftCode) {
+    const slot = SHIFT_TO_TASKSLOT[shiftCode];
+    if (!slot) return [];
+    return _tasksForSlot(dateStr, slot).filter(t => t.assignedTo === user.name);
+  }
+
+  function _userWeekTaskCount(user, days, entries) {
+    let n = 0;
+    days.forEach(ds => {
+      const e = entries[user.id + '_' + ds];
+      if (!e) return;
+      n += _userTasksForDay(user, ds, e.shiftCode).length;
+    });
+    return n;
+  }
+
+  function _weekUnassignedCount(days) {
+    let n = 0;
+    days.forEach(ds => {
+      MX.getDaySlots(_dayIdOf(ds)).forEach(slot => {
+        n += _tasksForSlot(ds, slot).filter(t => !t.assignedTo).length;
+      });
+    });
+    return n;
+  }
+
+  // ── MISSION DETAIL PANEL ──
+
+  function _openMissionPanel(userId, dateStr) {
+    const user = _users().find(u => u.id === userId);
+    if (!user) return;
+    const esc    = MX.esc;
+    const entry  = _entry(userId, dateStr);
+    const shift  = entry ? _shiftByCode(entry.shiftCode) : null;
+    const badge  = entry ? _badgeFor(entry.shiftCode) : null;
+    const slot   = entry ? SHIFT_TO_TASKSLOT[entry.shiftCode] : null;
+    const tasks  = slot ? _userTasksForDay(user, dateStr, entry.shiftCode) : [];
+    const d      = new Date(dateStr + 'T00:00:00');
+    const lbl    = DAY_LABELS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTH_NAMES[d.getMonth()];
+
+    MX.showModal('Missions — ' + esc(user.name), esc(lbl), []);
+    const body = document.getElementById('m-body') || document.getElementById('m-sub');
+    if (body) {
+      let bh = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        ${_avatar(user, 36)}
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px;color:var(--text1)">${esc(user.name)}</div>
+          <div style="font-size:11px;color:var(--text3)">${esc(lbl)}</div>
+        </div>
+        ${badge && shift ? `<span style="display:inline-flex;align-items:center;gap:6px;background:${shift.color};color:${shift.textColor};padding:6px 12px;border-radius:8px;font-weight:700;font-size:12px;white-space:nowrap">${badge.emoji} ${esc(badge.label)}</span>` : ''}
+      </div>`;
+
+      if (!slot) {
+        bh += `<div class="plng-events-empty"><i class="fas fa-circle-info"></i> Pas de poste travaillé ce jour</div>`;
+      } else if (!tasks.length) {
+        bh += `<div class="plng-events-empty"><i class="fas fa-inbox"></i> Aucune mission assignée</div>`;
+      } else {
+        bh += `<div style="font-size:10px;font-weight:700;letter-spacing:0.5px;color:var(--text3);margin-bottom:6px">MISSIONS</div>
+        <div style="display:flex;flex-direction:column;gap:6px">`;
+        tasks.forEach(t => {
+          const done = _isTaskDone(dateStr, slot, t.id);
+          bh += `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+            <i class="fas ${done ? 'fa-circle-check' : 'fa-triangle-exclamation'}" style="color:${done ? '#22C55E' : '#F97316'};flex-shrink:0"></i>
+            <span style="font-size:12.5px;color:var(--text1);flex:1">${esc(t.text)}</span>
+          </div>`;
+        });
+        bh += `</div>`;
+      }
+      body.innerHTML = bh;
+    }
+    const actEl = document.getElementById('m-actions');
+    if (actEl) actEl.innerHTML = `<button class="modal-btn cancel" onclick="MX.closeModal()">Fermer</button>`;
+  }
 
   function _isWeekend(dateStr) {
     const dow = new Date(dateStr + 'T00:00:00').getDay();
@@ -392,7 +535,7 @@
           return `<button class="plng-qshift" style="background:${s.color};color:${s.textColor};outline:${border}"
             onmousedown="event.preventDefault()" onclick="MX.Pages.Planning._applyCodeToSelected('${MX.esc(s.code)}')"
             title="${MX.esc(s.name)}${s.start ? ' · ' + s.start + '–' + s.end : ''}">
-            <span class="plng-qshift-code" style="font-weight:${s.bold ? 700 : 600}">${MX.esc(s.code)}</span>
+            <span class="plng-qshift-code" style="font-weight:${s.bold ? 700 : 600}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(s.code))}</span>
             ${s.start ? `<span class="plng-qshift-time">${s.start.replace(':','h')}–${s.end.replace(':','h')}</span>` : ''}
           </button>`;
         }).join('')}
@@ -473,8 +616,9 @@
 
         if (shift) {
           const needBorder = shift.color === '#FFFFFF';
-          h += `<div class="plng-cell-in" style="background:${shift.color};color:${shift.textColor}${needBorder ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
-            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600}">${esc(shift.code)}</span>
+          const badge = _badgeFor(entry.shiftCode);
+          h += `<div class="plng-cell-in" style="background:${shift.color};color:${shift.textColor}${needBorder ? ';border:1px solid rgba(0,0,0,0.15)' : ''}" title="${esc(badge.label)}">
+            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600};font-size:9px;white-space:nowrap">${badge.emoji}${esc(badge.abbr)}</span>
           </div>`;
         } else {
           h += `<div class="plng-cell-in plng-cell-empty-in"></div>`;
@@ -498,6 +642,8 @@
     const entries = _entries();
     const visible = _filterUser ? users.filter(u => u.id === _filterUser) : users;
 
+    _ensureWeekDoc(_weekKeyOf(days[0]));
+
     // ── Weekly stats ──
     const WORK_CODES = new Set(['1', '3', '4']);
     const activeTechs = new Set();
@@ -517,14 +663,16 @@
       dayCov[ds] = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
     });
 
-    // ── Stat cards ──
+    const totalSlots = users.length * days.length;
+
+    // ── Stat cards (icon + counter + % + glow + progress bar) ──
     const STAT_DEFS = [
-      { label: 'Actifs',    val: activeTechs.size,         icon: 'fa-users',          color: 'var(--cyan)',   border: 'rgba(0,245,212,0.2)',   key: null },
-      { label: 'Matins',    val: wStats['1'],               icon: 'fa-sun',            color: '#FDE047',       border: 'rgba(253,224,71,0.25)', key: '1'  },
-      { label: 'Journées',  val: wStats['3'],               icon: 'fa-cloud-sun',      color: '#3B82F6',       border: 'rgba(59,130,246,0.25)', key: '3'  },
-      { label: 'Soirs',     val: wStats['4'],               icon: 'fa-moon',           color: '#EF4444',       border: 'rgba(239,68,68,0.25)', key: '4'  },
-      { label: 'RH/Repos',  val: wStats.RH,                 icon: 'fa-couch',          color: '#22C55E',       border: 'rgba(34,197,94,0.25)', key: 'RH' },
-      { label: 'Congés',    val: wStats.CP + wStats.RTT,    icon: 'fa-plane-departure',color: '#F97316',       border: 'rgba(249,115,22,0.25)',key: null },
+      { label: 'Techniciens actifs', val: activeTechs.size,        max: users.length || 1, icon: 'fa-users',          color: 'var(--cyan)', key: null },
+      { label: 'Matins',             val: wStats['1'],             max: totalSlots || 1,    icon: 'fa-sun',            color: '#FDE047',     key: '1'  },
+      { label: 'Journées',          val: wStats['3'],             max: totalSlots || 1,    icon: 'fa-cloud-sun',      color: '#3B82F6',     key: '3'  },
+      { label: 'Soirs',              val: wStats['4'],             max: totalSlots || 1,    icon: 'fa-moon',           color: '#EF4444',     key: '4'  },
+      { label: 'RH / Repos',         val: wStats.RH,                max: totalSlots || 1,    icon: 'fa-couch',          color: '#22C55E',     key: 'RH' },
+      { label: 'Congés / RTT',       val: wStats.CP + wStats.RTT,  max: totalSlots || 1,    icon: 'fa-plane-departure',color: '#F97316',     key: null },
     ];
 
     let h = `<div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">`;
@@ -533,12 +681,19 @@
     h += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
     STAT_DEFS.forEach(sd => {
       const isActive = sd.key && _filterShift === sd.key;
-      h += `<div style="flex:1;min-width:80px;background:var(--bg2);border:1px solid ${isActive ? sd.color : sd.border};border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;transition:all 0.15s${sd.key ? ';cursor:pointer' : ''}"
-        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}"` : ''}>
-        <i class="fas ${sd.icon}" style="color:${sd.color};font-size:18px;flex-shrink:0"></i>
-        <div>
-          <div style="font-size:22px;font-weight:700;color:var(--text1);line-height:1;font-family:var(--ffm)">${sd.val}</div>
-          <div style="font-size:10px;color:var(--text3);font-weight:600;margin-top:2px;letter-spacing:0.3px">${esc(sd.label)}</div>
+      const pct = Math.round((sd.val / sd.max) * 100);
+      h += `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid ${isActive ? sd.color : 'var(--border)'};border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:all 0.18s;box-shadow:0 0 18px -6px ${sd.color}${sd.key ? ';cursor:pointer' : ''}"
+        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'"` : ''}>
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="fas ${sd.icon}" style="color:${sd.color};font-size:18px;flex-shrink:0"></i>
+          <div style="flex:1">
+            <div style="font-size:22px;font-weight:700;color:var(--text1);line-height:1;font-family:var(--ffm)">${sd.val}</div>
+            <div style="font-size:10px;color:var(--text3);font-weight:600;margin-top:2px;letter-spacing:0.3px">${esc(sd.label)}</div>
+          </div>
+          <div style="font-size:11px;font-weight:700;color:${sd.color}">${pct}%</div>
+        </div>
+        <div style="height:3px;border-radius:2px;background:var(--bg3);overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${sd.color};border-radius:2px;transition:width 0.3s"></div>
         </div>
       </div>`;
     });
@@ -573,13 +728,13 @@
         if (!has) return;
       }
 
-      const workDays = days.filter(ds => { const e = entries[user.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
-      const loadLabel = workDays === 0 ? '<span style="color:var(--text3)">Non planifié</span>'
-        : workDays <= 2 ? `<span style="color:#EF4444">${workDays}j · Faible</span>`
-        : workDays <= 4 ? `<span style="color:#F97316">${workDays}j · Moyen</span>`
-        : `<span style="color:#22C55E">${workDays}j · Chargé</span>`;
+      const taskCount = _userWeekTaskCount(user, days, entries);
+      const loadLabel = taskCount === 0 ? '<span style="color:var(--text3)">Aucune mission</span>'
+        : taskCount <= 4  ? `<span style="color:#EF4444">${taskCount} miss. · Faible</span>`
+        : taskCount <= 10 ? `<span style="color:#F97316">${taskCount} miss. · Moyen</span>`
+        : `<span style="color:#22C55E">${taskCount} miss. · Chargé</span>`;
 
-      h += `<div style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;min-width:500px">`;
+      h += `<div style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;min-width:560px;transition:box-shadow 0.18s" onmouseover="this.style.boxShadow='0 0 0 1px var(--cyan-border, rgba(0,245,212,0.3))'" onmouseout="this.style.boxShadow='none'">`;
 
       // Left: user info (fixed 188px)
       h += `<div style="width:188px;min-width:188px;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 12px;border-right:1px solid var(--border)">
@@ -602,6 +757,8 @@
         const isTd   = ds === today;
         const entry  = entries[user.id + '_' + ds];
         const shift  = entry ? _shiftByCode(entry.shiftCode) : null;
+        const badge  = entry ? _badgeFor(entry.shiftCode) : null;
+        const dayTasks = entry ? _userTasksForDay(user, ds, entry.shiftCode) : [];
         const selKey = user.id + '_' + ds;
         const isSel  = _selected.has(selKey);
         const isDim  = _filterShift && entry && entry.shiftCode !== _filterShift;
@@ -614,17 +771,19 @@
           + (isDim ? ' plng-dimmed' : '');
 
         h += `<div class="${cellClass}" data-uid="${esc(user.id)}" data-date="${ds}"
-          style="flex:1;height:54px;min-width:0;display:flex;align-items:center;justify-content:center;${isLast ? '' : 'border-right:1px solid var(--border);'}padding:4px;"
+          style="flex:1;height:64px;min-width:0;display:flex;align-items:center;justify-content:center;${isLast ? '' : 'border-right:1px solid var(--border);'}padding:4px;"
           ${canEdit ? `onmousedown="MX.Pages.Planning._cellMouseDown(event,'${esc(user.id)}','${ds}')"` : ''}>`;
 
         if (shift) {
           const nb = shift.color === '#FFFFFF';
-          h += `<div class="plng-cell-in" style="width:calc(100% - 4px);height:46px;border-radius:7px;background:${shift.color};color:${shift.textColor}${nb ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
-            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600};font-size:${shift.code.length > 2 ? '10px' : '12px'}">${esc(shift.code)}</span>
+          h += `<div class="plng-cell-in" style="width:calc(100% - 4px);height:56px;border-radius:10px;flex-direction:column;gap:1px;background:${shift.color};color:${shift.textColor}${nb ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
+            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600};font-size:10px;white-space:nowrap">${badge.emoji} ${esc(badge.abbr)}</span>
             ${shift.start ? `<span class="plng-cell-time">${shift.start}–${shift.end}</span>` : ''}
+            ${dayTasks.length ? `<span style="pointer-events:auto;cursor:pointer;font-size:8px;font-weight:700;margin-top:1px;display:inline-flex;align-items:center;gap:2px;background:rgba(0,0,0,0.18);border-radius:5px;padding:1px 5px"
+                onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${ds}')">${dayTasks.length} miss.<i class="fas fa-chevron-right" style="font-size:6px"></i></span>` : ''}
           </div>`;
         } else {
-          h += `<div class="plng-cell-in plng-cell-empty-in" style="width:calc(100% - 4px);height:46px;border-radius:7px"></div>`;
+          h += `<div class="plng-cell-in plng-cell-empty-in" style="width:calc(100% - 4px);height:56px;border-radius:10px"></div>`;
         }
 
         h += `</div>`;
@@ -643,11 +802,15 @@
     const entries = _entries();
     const visible = _filterUser ? users.filter(u => u.id === _filterUser) : users;
 
+    _ensureWeekDoc(_weekKeyOf(_day));
+
     let h = `<div class="plng-day-wrap">`;
 
     visible.forEach(user => {
       const entry = entries[user.id + '_' + _day];
       const shift = entry ? _shiftByCode(entry.shiftCode) : null;
+      const badge = entry ? _badgeFor(entry.shiftCode) : null;
+      const dayTasks = entry ? _userTasksForDay(user, _day, entry.shiftCode) : [];
       if (_filterShift && entry && entry.shiftCode !== _filterShift) return;
 
       h += `<div class="plng-day-row${canEdit ? ' plng-day-row-edit' : ''}"
@@ -658,12 +821,14 @@
       if (shift) {
         const nb = shift.color === '#FFFFFF';
         h += `<span style="display:inline-flex;align-items:center;gap:10px;background:${shift.color};color:${shift.textColor};padding:6px 14px;border-radius:8px;font-weight:${shift.bold?700:600}${nb?';border:1px solid rgba(0,0,0,0.15)':''}">
-          <span style="font-size:14px;font-family:var(--ffm)">${esc(shift.code)}</span>
+          <span style="font-size:16px">${badge.emoji}</span>
           <span>
-            <div style="font-size:12px;font-weight:600">${esc(shift.name)}</div>
+            <div style="font-size:12px;font-weight:600">${esc(badge.label)}</div>
             ${shift.start ? `<div style="font-size:10px;opacity:0.8">${shift.start} – ${shift.end}</div>` : ''}
           </span>
-        </span>`;
+        </span>
+        ${dayTasks.length ? `<span style="cursor:pointer;font-size:11px;font-weight:700;color:var(--cyan);display:inline-flex;align-items:center;gap:4px"
+            onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${_day}')">${dayTasks.length} mission${dayTasks.length>1?'s':''}<i class="fas fa-chevron-right" style="font-size:9px"></i></span>` : ''}`;
       } else {
         h += `<span class="plng-no-shift">${canEdit ? '<i class="fas fa-plus"></i> Assigner' : '—'}</span>`;
       }
@@ -691,7 +856,7 @@
     shifts.forEach(s => {
       const nb = s.color === '#FFFFFF';
       h += `<div class="plng-legend-row">
-        <span class="plng-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';border:1px solid var(--border2)' : ''}">${esc(s.code)}</span>
+        <span class="plng-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';border:1px solid var(--border2)' : ''}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(s.code))}</span>
         <div class="plng-legend-info">
           <span class="plng-legend-name">${esc(s.name)}</span>
           ${s.start ? `<span class="plng-legend-time">${s.start} – ${s.end}</span>` : ''}
@@ -719,33 +884,82 @@
         <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-print"></i> Imprimer</button>`;
     }
 
-    // ── Conflits de couverture (week view) ──
+    // ── Alertes & conflits (week view) ──
     if (_view === 'week') {
-      const WORK_CODES = ['1', '3', '4'];
-      const weekDays = _weekDays(_day);
-      const gaps = weekDays.filter(ds => {
+      const WORK_CODES = ['1', '2', '3', '4'];
+      const weekDays   = _weekDays(_day);
+      const gaps       = weekDays.filter(ds => {
         const dow = new Date(ds + 'T00:00:00').getDay();
         if (dow === 0 || dow === 6) return false;
         return !users.some(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.includes(e.shiftCode); });
       });
+      const unassigned     = _weekUnassignedCount(weekDays);
+      const overloadedUsers = users.filter(u => _userWeekTaskCount(u, weekDays, entries) > 12);
+
+      const totalAlerts = gaps.length + (unassigned > 0 ? 1 : 0) + overloadedUsers.length;
 
       h += `<div class="plng-legend-sep"></div>`;
-      if (gaps.length > 0) {
-        h += `<div class="plng-legend-title" style="color:#EF4444"><i class="fas fa-triangle-exclamation" style="margin-right:4px"></i>Alertes couverture</div>`;
+      if (totalAlerts === 0) {
+        h += `<div class="plng-legend-title" style="color:#22C55E"><i class="fas fa-circle-check" style="margin-right:4px"></i>Tout est en ordre</div>
+          <div class="plng-events-empty" style="color:#22C55E;font-size:11px"><i class="fas fa-check"></i> Couverture et missions OK</div>`;
+      } else {
+        h += `<div class="plng-legend-title" style="color:#EF4444"><i class="fas fa-triangle-exclamation" style="margin-right:4px"></i>Alertes (${totalAlerts})</div>`;
         gaps.forEach(ds => {
           const d2  = new Date(ds + 'T00:00:00');
           const lbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()].slice(0, 3) + '.';
           h += `<div class="plng-event-row" style="border-color:rgba(239,68,68,0.2)">
             <span class="plng-event-chip" style="background:#EF4444;color:#fff;min-width:22px"><i class="fas fa-xmark" style="font-size:10px"></i></span>
             <div class="plng-event-info">
-              <span class="plng-event-name" style="color:#EF4444">Aucune couverture</span>
+              <span class="plng-event-name" style="color:#EF4444">Absence non couverte</span>
               <span class="plng-event-date">${esc(lbl)}</span>
             </div>
           </div>`;
         });
-      } else {
-        h += `<div class="plng-legend-title" style="color:#22C55E"><i class="fas fa-circle-check" style="margin-right:4px"></i>Couverture OK</div>
-          <div class="plng-events-empty" style="color:#22C55E;font-size:11px"><i class="fas fa-check"></i> Tous les jours couverts</div>`;
+        overloadedUsers.forEach(u => {
+          const cnt = _userWeekTaskCount(u, weekDays, entries);
+          h += `<div class="plng-event-row" style="border-color:rgba(249,115,22,0.2)">
+            <span class="plng-event-chip" style="background:#F97316;color:#fff;min-width:22px"><i class="fas fa-fire" style="font-size:10px"></i></span>
+            <div class="plng-event-info">
+              <span class="plng-event-name" style="color:#F97316">${esc(u.name)} surchargé</span>
+              <span class="plng-event-date">${cnt} missions cette semaine</span>
+            </div>
+          </div>`;
+        });
+        if (unassigned > 0) {
+          h += `<div class="plng-event-row" style="border-color:rgba(59,130,246,0.2)">
+            <span class="plng-event-chip" style="background:#3B82F6;color:#fff;min-width:22px"><i class="fas fa-user-slash" style="font-size:10px"></i></span>
+            <div class="plng-event-info">
+              <span class="plng-event-name" style="color:#60A5FA">Missions non assignées</span>
+              <span class="plng-event-date">${unassigned} mission${unassigned > 1 ? 's' : ''} sans technicien</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      // ── Charge équipe (bar chart) ──
+      const workloads = users.map(u => ({
+        name: u.name,
+        count: _userWeekTaskCount(u, weekDays, entries),
+        workDays: weekDays.filter(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.includes(e.shiftCode); }).length,
+      })).filter(w => w.workDays > 0).sort((a, b) => b.count - a.count).slice(0, 8);
+
+      if (workloads.length > 0) {
+        const maxCount = Math.max(...workloads.map(w => w.count), 1);
+        h += `<div class="plng-legend-sep"></div>
+          <div class="plng-legend-title"><i class="fas fa-chart-bar" style="margin-right:4px;color:var(--cyan)"></i>Charge équipe</div>
+          <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">`;
+        workloads.forEach(w => {
+          const pct = Math.round((w.count / maxCount) * 100);
+          const col = w.count > 12 ? '#EF4444' : w.count > 7 ? '#F97316' : '#22C55E';
+          h += `<div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:10px;color:var(--text2);width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0" title="${esc(w.name)}">${esc(w.name.split(' ')[0])}</span>
+            <div style="flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:${col};border-radius:4px;transition:width 0.3s"></div>
+            </div>
+            <span style="font-size:10px;font-weight:700;color:${col};min-width:20px;text-align:right">${w.count}</span>
+          </div>`;
+        });
+        h += `</div>`;
       }
     }
 
@@ -779,7 +993,7 @@
         const chipColor = shift ? shift.color : '#9CA3AF';
         const chipText  = shift ? shift.textColor : '#1a1a1a';
         h += `<div class="plng-event-row">
-          <span class="plng-event-chip" style="background:${chipColor};color:${chipText}">${esc(ev.code)}</span>
+          <span class="plng-event-chip" style="background:${chipColor};color:${chipText}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(ev.code))}</span>
           <div class="plng-event-info">
             <span class="plng-event-name">${esc(ev.userName)}</span>
             <span class="plng-event-date">${esc(dLbl)}</span>
@@ -813,7 +1027,7 @@
         bh += `<button class="plng-picker-btn${active ? ' plng-picker-active' : ''}"
           style="background:${s.color};color:${s.textColor};border:2px solid ${active ? '#00F5D4' : 'transparent'}${nb ? ';outline:1px solid rgba(0,0,0,0.15)' : ''}"
           onclick="MX.Pages.Planning._applyShift('${esc(userId)}','${esc(dateStr)}','${esc(s.code)}')">
-          <div class="plng-picker-code" style="font-weight:${s.bold ? 700 : 600}">${esc(s.code)}</div>
+          <div class="plng-picker-code" style="font-weight:${s.bold ? 700 : 600}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(s.code))}</div>
           <div class="plng-picker-name">${esc(s.name)}</div>
           ${s.start ? `<div class="plng-picker-time">${s.start}–${s.end}</div>` : ''}
         </button>`;
@@ -1355,5 +1569,6 @@
     _openAutoGenModal, _confirmAutoGen,
     _openShiftMgmt, _addMgmtRow, _removeMgmtRow, _saveShiftMgmt,
     _exportCsv,
+    _openMissionPanel,
   };
 })();
