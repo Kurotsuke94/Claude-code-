@@ -41,6 +41,22 @@
     return !!cu && (cu.rank === 'responsable' || cu.role === 'responsable');
   }
 
+  // Permission check — works for role-system users (roleId) and legacy users
+  function can(module, action) {
+    if (isAdmin()) return true;
+    const cu = window.MX.state.currentUser;
+    if (!cu) return false;
+    if (cu.roleId) {
+      const role = (window.MX.state.roles || []).find(r => r.id === cu.roleId);
+      if (role && role.permissions) return !!(role.permissions[module] && role.permissions[module][action]);
+      return false;
+    }
+    // Legacy fallback: no roleId assigned → use old role field
+    if (cu.role === 'responsable') return module !== 'roles';
+    const TECH = { checklist: ['view','check'], planning: ['view'], counters: ['view','enter'], interventions: ['view'], messages: ['view','send'], resources: ['view'] };
+    return !!(TECH[module] && TECH[module].includes(action));
+  }
+
   function setCurrentUser(user) {
     window.MX.state.currentUser = user ? {
       id:     user.id,
@@ -269,7 +285,8 @@
       const nc       = MX.userColors ? MX.userColors(cu.name) : { bg: MX.avatarBg(cu.name), fg: MX.avatarFg(cu.name) };
       const bg       = cu.color || nc.bg;
       const fg       = cu.color ? _contrastColor(cu.color) : nc.fg;
-      const lbl      = cu.role === "responsable" ? "Responsable" : "Technicien";
+      const _cuRole  = (window.MX.state.roles || []).find(r => r.id === cu.roleId);
+      const lbl      = _cuRole ? (_cuRole.emoji ? _cuRole.emoji + ' ' + _cuRole.name : _cuRole.name) : (cu.role === "responsable" ? "Responsable" : "Technicien");
       const fullUser = (MX.state.users || []).find(u => u.id === cu.id) || cu;
       const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : "";
       const rUser    = (MX.state.rewardsUsers || {})[cu.name] || {};
@@ -317,7 +334,7 @@
   window.MX = window.MX || {};
   window.MX.Auth = {
     login, logout, requireAdmin, showLogin, hideLogin, cancelLogin,
-    isAdmin, canSeeAll, isResponsable, onLogin, onLogout,
+    isAdmin, canSeeAll, isResponsable, can, onLogin, onLogout,
     setCurrentUser, clearCurrentUser, promptLogin,
     showUserPicker, hidePicker, selectUser, confirmPin, backToPicker, skipPicker,
     updateSidebarFooter

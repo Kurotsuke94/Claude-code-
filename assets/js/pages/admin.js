@@ -7,6 +7,21 @@
   let _bibleStats     = null;
   let _biblePerms     = null;
   let _badgeModal     = null;
+  let _editRoleId     = null;   // id of role being edited, or '__new__' for creation
+  let _newRoleData    = {};     // buffer for the new-role form (not yet saved)
+
+  // ── ROLES — permission matrix definition ──
+  const PERM_MODULES = [
+    { id: 'checklist',     label: 'Checklists',        icon: 'fa-list-check',    actions: [{id:'view',label:'Voir'},{id:'check',label:'Valider'},{id:'edit',label:'Modifier'},{id:'delete',label:'Supprimer'}] },
+    { id: 'planning',      label: 'Planning',           icon: 'fa-calendar-days', actions: [{id:'view',label:'Voir'},{id:'edit',label:'Modifier'},{id:'assign',label:'Affecter'}] },
+    { id: 'counters',      label: 'Compteurs',          icon: 'fa-gauge-high',    actions: [{id:'view',label:'Voir'},{id:'enter',label:'Saisir'},{id:'edit',label:'Modifier'}] },
+    { id: 'interventions', label: 'Interventions',      icon: 'fa-wrench',        actions: [{id:'view',label:'Voir'},{id:'create',label:'Créer'},{id:'edit',label:'Modifier'}] },
+    { id: 'stock',         label: 'Stock / Commandes',  icon: 'fa-box',           actions: [{id:'view',label:'Voir'},{id:'edit',label:'Modifier'}] },
+    { id: 'messages',      label: 'Messages',           icon: 'fa-comments',      actions: [{id:'view',label:'Voir'},{id:'send',label:'Envoyer'},{id:'pin',label:'Épingler'}] },
+    { id: 'resources',     label: 'Ressources',         icon: 'fa-book',          actions: [{id:'view',label:'Voir'},{id:'edit',label:'Modifier'}] },
+    { id: 'consumption',   label: 'Consommations',      icon: 'fa-chart-bar',     actions: [{id:'view',label:'Voir'},{id:'edit',label:'Modifier'}] },
+    { id: 'users',         label: 'Utilisateurs',       icon: 'fa-users',         actions: [{id:'view',label:'Voir'},{id:'edit',label:'Modifier'},{id:'delete',label:'Supprimer'}] },
+  ];
 
   const _saveTimers = {};
   function _sched(key, fn, delay) {
@@ -80,6 +95,7 @@
       { id: "badges-admin",   label: "🏅 Badges"            },
       { id: "admin-journal",  label: "📜 Journal"           },
       { id: "users",          label: "👤 Utilisateurs",      adminOnly: true },
+      { id: "roles",          label: "🎭 Rôles",             adminOnly: true },
       { id: "absences",       label: "🏖 Absences",          adminOnly: true },
       { id: "pin",            label: "🔑 Accès",             adminOnly: true },
       { id: "superadmin",     label: "🏨 Hôtels",            adminOnly: true }
@@ -88,7 +104,7 @@
 
     if (aTab === "missions" || aTab === "orders") aTab = "tasks";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
-    if (isResp && (aTab === "users" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
+    if (isResp && (aTab === "users" || aTab === "roles" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -133,6 +149,7 @@
     if (aTab === "msgs")              h += renderMsgs();
     if (aTab === "logs")              h += renderLogs();
     if (aTab === "users"         && isAdmin)  h += renderUsers();
+    if (aTab === "roles"         && isAdmin)  h += renderRoles();
     if (aTab === "absences"      && isAdmin)  h += renderAbsences();
     if (aTab === "pin"           && isAdmin)  h += renderPin();
     if (aTab === "bible-admin")               h += renderBibleAdmin();
@@ -406,7 +423,7 @@
           <span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg4);color:${roleColor[role]||'var(--text2)'};font-family:var(--ffm)">${roleLabel[role]||role}</span>
           <button class="icon-btn del" style="width:30px;height:30px;margin-left:8px" onclick="MX.Pages.Admin.delUser('${esc(u.id)}')"><i class="fas fa-trash"></i></button>
         </div>
-        <div class="apgrid" style="grid-template-columns:1fr 1fr">
+        <div class="apgrid" style="grid-template-columns:1fr 1fr;grid-auto-rows:auto">
           <div>
             <div class="aplbl">Nom</div>
             <input class="fi fi-sm" value="${esc(u.name||'')}" oninput="MX.Pages.Admin.updUser('${esc(u.id)}','name',this.value)">
@@ -420,10 +437,17 @@
               style="font-family:var(--ffm);letter-spacing:4px">
           </div>
           <div>
-            <div class="aplbl">Rôle</div>
+            <div class="aplbl">Accès (héritage)</div>
             <select class="fi fi-sm" onchange="MX.Pages.Admin.updUser('${esc(u.id)}','role',this.value)">
-              <option value="technicien"  ${role==='technicien' ?'selected':''}>Technicien (tâches assignées)</option>
-              <option value="responsable" ${role==='responsable'?'selected':''}>Responsable (voit tout)</option>
+              <option value="technicien"  ${role==='technicien' ?'selected':''}>Technicien</option>
+              <option value="responsable" ${role==='responsable'?'selected':''}>Responsable</option>
+            </select>
+          </div>
+          <div>
+            <div class="aplbl">Métier (Rôle)</div>
+            <select class="fi fi-sm" onchange="MX.Pages.Admin.updUser('${esc(u.id)}','roleId',this.value)">
+              <option value="">— Aucun rôle —</option>
+              ${(MX.state.roles||[]).map(r=>`<option value="${esc(r.id)}" ${u.roleId===r.id?'selected':''}>${esc((r.emoji||'')+(r.emoji?' ':'')+r.name)}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -1920,6 +1944,185 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     }
   }
 
+  // ── RÔLES & PERMISSIONS ──
+
+  function _roleEditorHtml(role, isNew) {
+    const esc   = MX.esc;
+    const rid   = isNew ? '__new__' : role.id;
+    const perms = role.permissions || {};
+    let h = `<div style="border-top:1px solid var(--border);padding:16px 0 4px">
+      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:10px">IDENTITÉ DU MÉTIER</div>
+      <div class="apgrid" style="grid-template-columns:56px 1fr 1fr 46px;gap:10px;margin-bottom:16px;align-items:end">
+        <div>
+          <div class="aplbl">Emoji</div>
+          <input class="fi fi-sm" maxlength="2" value="${esc(role.emoji||'')}" style="text-align:center;font-size:18px;padding:0 4px"
+            oninput="MX.Pages.Admin._saveRoleMeta('${rid}','emoji',this.value)">
+        </div>
+        <div>
+          <div class="aplbl">Nom du métier</div>
+          <input class="fi fi-sm" placeholder="ex : Technicien" value="${esc(role.name||'')}"
+            oninput="MX.Pages.Admin._saveRoleMeta('${rid}','name',this.value)">
+        </div>
+        <div>
+          <div class="aplbl">Description</div>
+          <input class="fi fi-sm" placeholder="Courte description" value="${esc(role.description||'')}"
+            oninput="MX.Pages.Admin._saveRoleMeta('${rid}','description',this.value)">
+        </div>
+        <div>
+          <div class="aplbl">Couleur</div>
+          <input type="color" value="${esc(role.color||'#3B82F6')}"
+            oninput="MX.Pages.Admin._saveRoleMeta('${rid}','color',this.value)"
+            style="width:38px;height:34px;border:1px solid var(--border2);border-radius:8px;background:none;cursor:pointer;padding:2px">
+        </div>
+      </div>
+      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:10px">PERMISSIONS PAR MODULE</div>
+      <div class="perm-matrix">`;
+
+    PERM_MODULES.forEach(mod => {
+      const mp = perms[mod.id] || {};
+      h += `<div class="perm-row">
+        <div class="perm-module"><i class="fas ${mod.icon}"></i> ${esc(mod.label)}</div>
+        <div class="perm-actions">`;
+      mod.actions.forEach(act => {
+        const on = !!mp[act.id];
+        h += `<label class="perm-check${on?' perm-check--on':''}">
+          <input type="checkbox"${on?' checked':''}
+            onchange="MX.Pages.Admin._togglePerm('${rid}','${mod.id}','${act.id}',this.checked);this.closest('label').className='perm-check'+(this.checked?' perm-check--on':'')">
+          ${esc(act.label)}
+        </label>`;
+      });
+      h += `</div></div>`;
+    });
+
+    h += `</div>`;
+    if (isNew) {
+      h += `<div style="display:flex;gap:8px;margin-top:12px">
+        <button class="save-btn" style="flex:1" onclick="MX.Pages.Admin._confirmCreateRole()"><i class="fas fa-check"></i> Créer ce métier</button>
+        <button class="icon-btn" style="padding:0 14px" onclick="MX.Pages.Admin._cancelEditRole()">Annuler</button>
+      </div>`;
+    } else {
+      h += `<button class="icon-btn" style="margin-top:10px;width:100%;justify-content:center" onclick="MX.Pages.Admin._cancelEditRole()"><i class="fas fa-check"></i> Fermer l'éditeur</button>`;
+    }
+    h += `</div>`;
+    return h;
+  }
+
+  function renderRoles() {
+    const { state, esc } = MX;
+    const roles = state.roles || [];
+    let h = `<div class="info-note" style="margin-bottom:14px"><i class="fas fa-shield-halved"></i> Définissez les métiers de votre équipe. Chaque utilisateur peut se voir attribuer un rôle qui adapte les modules visibles et les actions autorisées.</div>`;
+
+    if (!roles.length && _editRoleId !== '__new__') {
+      h += `<div style="text-align:center;padding:24px 16px;color:var(--text3);font-size:13px"><i class="fas fa-inbox"></i><br><br>Aucun métier défini.<br>Créez votre premier rôle ci-dessous.</div>`;
+    }
+
+    roles.forEach(r => {
+      const isEditing  = _editRoleId === r.id;
+      const userCount  = (state.users || []).filter(u => u.roleId === r.id).length;
+      const colDot     = r.color || '#9CA3AF';
+      h += `<div class="apcard${isEditing?' apcard--active':''}" style="margin-bottom:8px">
+        <div class="aphd">
+          <span style="font-size:24px;line-height:1;width:32px;text-align:center;flex-shrink:0">${esc(r.emoji||'👤')}</span>
+          <div style="flex:1;min-width:0;margin-left:4px">
+            <div style="font-weight:700;font-size:13px;color:var(--text1);display:flex;align-items:center;gap:7px">
+              ${esc(r.name||'Rôle sans nom')}
+              <span style="width:8px;height:8px;border-radius:50%;background:${colDot};display:inline-block;flex-shrink:0"></span>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:1px">${userCount ? `${userCount} utilisateur${userCount>1?'s':''}` : 'Aucun utilisateur'}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="icon-btn" title="Modifier" onclick="MX.Pages.Admin._editRole('${esc(r.id)}')"><i class="fas fa-pen"></i></button>
+            <button class="icon-btn" title="Dupliquer" onclick="MX.Pages.Admin._dupRole('${esc(r.id)}')"><i class="fas fa-copy"></i></button>
+            <button class="icon-btn del" title="Supprimer" onclick="MX.Pages.Admin._delRole('${esc(r.id)}')"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+        ${isEditing ? _roleEditorHtml(r, false) : ''}
+      </div>`;
+    });
+
+    if (_editRoleId === '__new__') {
+      h += `<div class="apcard apcard--active" style="margin-bottom:12px">
+        <div class="aphd"><span style="font-size:22px">${esc(_newRoleData.emoji||'👤')}</span><span style="font-weight:700;font-size:13px;margin-left:8px;flex:1">${esc(_newRoleData.name||'Nouveau métier')}</span></div>
+        ${_roleEditorHtml(_newRoleData, true)}
+      </div>`;
+    }
+
+    if (_editRoleId !== '__new__') {
+      h += `<button class="dash-btn" onclick="MX.Pages.Admin._createRole()"><i class="fas fa-plus"></i> Créer un métier</button>`;
+    }
+    return h;
+  }
+
+  // Role CRUD helpers
+  function _editRole(id) {
+    _editRoleId = (_editRoleId === id) ? null : id;
+    render();
+  }
+
+  function _createRole() {
+    _editRoleId  = '__new__';
+    _newRoleData = { name: '', emoji: '👤', color: '#3B82F6', description: '', permissions: {}, order: (MX.state.roles || []).length };
+    render();
+  }
+
+  function _cancelEditRole() {
+    _editRoleId  = null;
+    _newRoleData = {};
+    render();
+  }
+
+  async function _confirmCreateRole() {
+    if (!_newRoleData.name || !_newRoleData.name.trim()) {
+      MX.toast && MX.toast('Saisissez un nom pour ce métier', true);
+      return;
+    }
+    await MX.DB.addRole({ ..._newRoleData });
+    _editRoleId  = null;
+    _newRoleData = {};
+    render();
+  }
+
+  async function _dupRole(id) {
+    const roles  = MX.state.roles || [];
+    const orig   = roles.find(r => r.id === id);
+    if (!orig) return;
+    const { id: _id, ...rest } = orig;
+    await MX.DB.addRole({ ...rest, name: orig.name + ' (copie)', order: roles.length });
+    render();
+  }
+
+  function _delRole(id) {
+    const roles   = MX.state.roles || [];
+    const role    = roles.find(r => r.id === id);
+    const inUse   = (MX.state.users || []).filter(u => u.roleId === id).length;
+    if (inUse > 0) {
+      MX.toast && MX.toast(`Impossible : ${inUse} utilisateur${inUse>1?'s utilisent':' utilise'} ce rôle`, true);
+      return;
+    }
+    if (!confirm(`Supprimer le métier "${role ? role.name : id}" ?`)) return;
+    MX.DB.deleteRole(id);
+    if (_editRoleId === id) _editRoleId = null;
+    render();
+  }
+
+  function _saveRoleMeta(rid, field, value) {
+    if (rid === '__new__') {
+      _newRoleData[field] = value;
+    } else {
+      MX.DB.updateRole(rid, { [field]: value });
+    }
+  }
+
+  function _togglePerm(rid, module, action, val) {
+    if (rid === '__new__') {
+      _newRoleData.permissions = _newRoleData.permissions || {};
+      _newRoleData.permissions[module] = _newRoleData.permissions[module] || {};
+      _newRoleData.permissions[module][action] = val;
+    } else {
+      MX.DB.updateRole(rid, { ['permissions.' + module + '.' + action]: val });
+    }
+  }
+
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.Admin = {
@@ -1939,6 +2142,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     clearJournal,
     _hotelLoadForm, _hotelSaveInfo,
     _verLoad, _verSave,
-    _dbRepair
+    _dbRepair,
+    _editRole, _createRole, _cancelEditRole, _confirmCreateRole, _dupRole, _delRole,
+    _saveRoleMeta, _togglePerm,
   };
 })();

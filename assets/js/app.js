@@ -272,6 +272,12 @@
     const cur    = state.currentPage || "";
     const canAll = MX.Auth.canSeeAll();
 
+    // Role-based nav filter: only apply when a PIN user has a roleId assigned
+    const _cu  = state.currentUser;
+    const _see = (!MX.Auth.isAdmin() && _cu && _cu.roleId)
+      ? (mod) => MX.Auth.can(mod, 'view')
+      : () => true;
+
     function _item(id, icon, label, opts) {
       const o   = opts || {};
       const act = cur === id || (o.matchPages && o.matchPages.includes(cur));
@@ -341,10 +347,10 @@
     const clPages = ["today-cl", "mes-missions", ...DAYS.map(d => d.id)];
     h += `<div class="sx-modules">`;
     h += `<div class="sx-mod-sep"><span class="sx-lbl">Modules</span></div>`;
-    h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages });
-    h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" });
-    h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" });
-    h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true });
+    if (_see('checklist'))    h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages });
+    if (_see('counters'))     h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" });
+    if (_see('interventions'))h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" });
+    if (_see('planning'))     h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true });
     h += `</div>`;
 
     // ── DIVIDER ──
@@ -352,23 +358,26 @@
 
     // ── 📦 Gestion ──
     let gestItems = "";
-    gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true });
-    gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true });
-    gestItems += _item("msgs",      "fa-comments", "Messages",    { sub: true, badge: true, favable: true });
-    h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
+    if (_see('stock'))     gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true });
+    if (_see('resources')) gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true });
+    if (_see('messages'))  gestItems += _item("msgs",      "fa-comments", "Messages",    { sub: true, badge: true, favable: true });
+    if (gestItems)
+      h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
 
     // ── 📊 Analyses ──
-    let anlyItems = "";
-    [
-      { tab: "dashboard", icon: "fa-gauge",       l: "Tableau de bord" },
-      { tab: "releves",   icon: "fa-camera",      l: "Relevés" },
-      { tab: "analyses",  icon: "fa-percent",     l: "Ratios" },
-      { tab: "alertes",   icon: "fa-bell",        l: "Alertes" },
-      { tab: "exports",   icon: "fa-file-export", l: "Exportations" },
-    ].forEach(t => {
-      anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
-    });
-    h += _group("fa-chart-bar", "sx-group-ico--green", "Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Analyses");
+    if (_see('counters') || _see('consumption')) {
+      let anlyItems = "";
+      [
+        { tab: "dashboard", icon: "fa-gauge",       l: "Tableau de bord" },
+        { tab: "releves",   icon: "fa-camera",      l: "Relevés" },
+        { tab: "analyses",  icon: "fa-percent",     l: "Ratios" },
+        { tab: "alertes",   icon: "fa-bell",        l: "Alertes" },
+        { tab: "exports",   icon: "fa-file-export", l: "Exportations" },
+      ].forEach(t => {
+        anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+      });
+      h += _group("fa-chart-bar", "sx-group-ico--green", "Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Analyses");
+    }
 
     // ── ⚙️ Administration (respOnly) ──
     if (canAll) {
@@ -441,7 +450,8 @@
       const nc  = MX.userColors(cu.name);
       const bg  = cu.color || nc.bg;
       const fg  = cu.color ? MX._contrastColor(cu.color) : nc.fg;
-      const lbl = cu.role === 'responsable' ? 'Responsable' : 'Technicien';
+      const _cuRoleDef = (MX.state.roles || []).find(r => r.id === cu.roleId);
+      const lbl = _cuRoleDef ? (_cuRoleDef.emoji ? _cuRoleDef.emoji + ' ' + _cuRoleDef.name : _cuRoleDef.name) : (cu.role === 'responsable' ? 'Responsable' : 'Technicien');
       const _dhBorder = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
       userHtml = `<div class="dh-user" onclick="MX.Auth.clearCurrentUser()">
         <div class="dh-avatar" style="background:${bg};color:${fg}${_dhBorder?';border:2px solid '+_dhBorder:''}">${MX.esc(cu.name.substring(0,2).toUpperCase())}</div>
