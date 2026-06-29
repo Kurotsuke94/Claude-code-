@@ -20,7 +20,7 @@
 
   // ── STATE ──
 
-  let _view        = 'month';
+  let _view        = 'week';   // default: modern week card view
   let _year        = new Date().getFullYear();
   let _month       = new Date().getMonth();
   let _day         = new Date().toISOString().slice(0, 10);
@@ -37,8 +37,8 @@
   let _tableMouseUpHandler  = null;
 
   // Real-time listener state
-  let _plnUnsubEntries = null;  // unsubscribe fn for current onSnapshot listener(s)
-  let _plnMergedMaps   = {};    // ym → {key: entry} — merged across all listened months
+  let _plnUnsubEntries = null;
+  let _plnMergedMaps   = {};
 
   // ── HELPERS ──
 
@@ -167,7 +167,6 @@
     const yms = _getViewYMs();
     const ymsKey = yms.join(',');
 
-    // Tear down previous listener if months changed
     if (_plnUnsubEntries) {
       _plnUnsubEntries._ymsKey !== ymsKey && _teardownPlanningListener();
     }
@@ -179,7 +178,6 @@
 
       const unsub = MX.DB.listenPlanningEntries(yms, function (ym, map) {
         _plnMergedMaps[ym] = map;
-        // Merge all listened months into planningEntries
         MX.state.planningEntries = Object.assign({}, ...(Object.values(_plnMergedMaps)));
         if (window.MX && MX.snapshotReceived) MX.snapshotReceived();
         if (firstSnapshot) {
@@ -191,7 +189,7 @@
 
       unsub._ymsKey = ymsKey;
       _plnUnsubEntries = unsub;
-      render(); // show spinner while waiting for first snapshot
+      render();
     } else {
       render();
     }
@@ -303,7 +301,6 @@
     _updateSelectionHighlight();
   }
 
-  // Attach drag-to-select on the rendered table
   function _attachTableEvents() {
     const wrap = document.querySelector('.plng-month-wrap');
     if (!wrap || !_canEdit()) return;
@@ -383,7 +380,7 @@
     return `<span class="plng-user-avatar" style="width:${sz}px;height:${sz}px;min-width:${sz}px;background:${c.bg};color:${c.fg};font-size:${Math.round(sz * 0.42)}px${border ? ';border:2px solid ' + border : ''}">${MX.esc(ltr)}</span>`;
   }
 
-  // ── QUICK BAR (shift assignment strip) ──
+  // ── QUICK BAR ──
 
   function _renderQuickBar(shifts) {
     const n = _selected.size;
@@ -409,7 +406,7 @@
     </div>`;
   }
 
-  // ── MONTH TABLE ──
+  // ── MONTH TABLE (unchanged) ──
 
   function _renderMonthTable(users, today, canEdit) {
     const days    = _daysInMonth(_year, _month);
@@ -493,90 +490,153 @@
     return h;
   }
 
-  // ── WEEK TABLE ──
+  // ── WEEK CARDS V2 ──
 
-  function _renderWeekTable(users, today, canEdit) {
+  function _renderWeekCards(users, today, canEdit) {
     const days    = _weekDays(_day);
     const esc     = MX.esc;
     const entries = _entries();
     const visible = _filterUser ? users.filter(u => u.id === _filterUser) : users;
 
-    let h = `<div class="plng-month-wrap"><table class="plng-month-tbl"><thead><tr>
-      <th class="plng-user-col-hd">Agent</th>`;
-
-    days.forEach(ds => {
-      const d   = new Date(ds + 'T00:00:00');
-      const dow = d.getDay();
-      const isWE    = dow === 0 || dow === 6;
-      const isToday = ds === today;
-      h += `<th class="plng-th-day plng-th-week${isWE ? ' plng-we' : ''}${isToday ? ' plng-today' : ''}">
-        <div class="plng-th-dow">${DAY_LABELS[dow]}</div>
-        <div class="plng-th-num">${d.getDate()}</div>
-        <div class="plng-th-mo">${MONTH_NAMES[d.getMonth()].slice(0, 3)}</div>
-      </th>`;
+    // ── Weekly stats ──
+    const WORK_CODES = new Set(['1', '3', '4']);
+    const activeTechs = new Set();
+    const wStats = { '1': 0, '3': 0, '4': 0, RH: 0, CP: 0, RTT: 0 };
+    users.forEach(u => {
+      days.forEach(ds => {
+        const e = entries[u.id + '_' + ds];
+        if (!e) return;
+        if (WORK_CODES.has(e.shiftCode)) activeTechs.add(u.id);
+        if (Object.prototype.hasOwnProperty.call(wStats, e.shiftCode)) wStats[e.shiftCode]++;
+      });
     });
 
-    h += `</tr></thead><tbody>`;
+    // ── Coverage per day ──
+    const dayCov = {};
+    days.forEach(ds => {
+      dayCov[ds] = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
+    });
+
+    // ── Stat cards ──
+    const STAT_DEFS = [
+      { label: 'Actifs',    val: activeTechs.size,         icon: 'fa-users',          color: 'var(--cyan)',   border: 'rgba(0,245,212,0.2)',   key: null },
+      { label: 'Matins',    val: wStats['1'],               icon: 'fa-sun',            color: '#FDE047',       border: 'rgba(253,224,71,0.25)', key: '1'  },
+      { label: 'Journées',  val: wStats['3'],               icon: 'fa-cloud-sun',      color: '#3B82F6',       border: 'rgba(59,130,246,0.25)', key: '3'  },
+      { label: 'Soirs',     val: wStats['4'],               icon: 'fa-moon',           color: '#EF4444',       border: 'rgba(239,68,68,0.25)', key: '4'  },
+      { label: 'RH/Repos',  val: wStats.RH,                 icon: 'fa-couch',          color: '#22C55E',       border: 'rgba(34,197,94,0.25)', key: 'RH' },
+      { label: 'Congés',    val: wStats.CP + wStats.RTT,    icon: 'fa-plane-departure',color: '#F97316',       border: 'rgba(249,115,22,0.25)',key: null },
+    ];
+
+    let h = `<div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">`;
+
+    // Stat row
+    h += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    STAT_DEFS.forEach(sd => {
+      const isActive = sd.key && _filterShift === sd.key;
+      h += `<div style="flex:1;min-width:80px;background:var(--bg2);border:1px solid ${isActive ? sd.color : sd.border};border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;transition:all 0.15s${sd.key ? ';cursor:pointer' : ''}"
+        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}"` : ''}>
+        <i class="fas ${sd.icon}" style="color:${sd.color};font-size:18px;flex-shrink:0"></i>
+        <div>
+          <div style="font-size:22px;font-weight:700;color:var(--text1);line-height:1;font-family:var(--ffm)">${sd.val}</div>
+          <div style="font-size:10px;color:var(--text3);font-weight:600;margin-top:2px;letter-spacing:0.3px">${esc(sd.label)}</div>
+        </div>
+      </div>`;
+    });
+    h += `</div>`;
+
+    // Day column headers (aligned with tech cell columns)
+    h += `<div style="display:flex;gap:4px;padding-left:192px">`;
+    days.forEach(ds => {
+      const dow  = new Date(ds + 'T00:00:00').getDay();
+      const isWE = dow === 0 || dow === 6;
+      const isTd = ds === today;
+      const cov  = dayCov[ds];
+      const covColor = (!isWE && cov === 0) ? '#EF4444' : (!isWE && cov === 1) ? '#F97316' : 'var(--text3)';
+      h += `<div style="flex:1;text-align:center;padding:6px 4px 4px;border-radius:8px;background:${isTd ? 'rgba(0,245,212,0.08)' : isWE ? 'rgba(139,92,246,0.05)' : 'transparent'}">
+        <div style="font-size:10px;font-weight:700;color:${isTd ? 'var(--cyan)' : isWE ? '#8B5CF6' : 'var(--text3)'};letter-spacing:0.5px">${DAY_LABELS[dow]}</div>
+        <div style="font-size:14px;font-weight:700;color:${isTd ? 'var(--cyan)' : 'var(--text1)'};font-family:var(--ffm)">${new Date(ds + 'T00:00:00').getDate()}</div>
+        ${!isWE ? `<div style="font-size:9px;color:${covColor};margin-top:2px;font-weight:600">${cov}<i class="fas fa-user" style="font-size:8px;margin-left:2px"></i></div>` : `<div style="height:15px"></div>`}
+      </div>`;
+    });
+    h += `</div>`;
+
+    // Tech cards container (keeps .plng-month-wrap for drag-select)
+    h += `<div class="plng-month-wrap" style="display:flex;flex-direction:column;gap:6px;overflow-x:auto">`;
+
+    if (!visible.length) {
+      h += `<div class="plng-empty"><i class="fas fa-users" style="font-size:28px"></i><span>Aucun agent</span></div>`;
+    }
 
     visible.forEach(user => {
       if (_filterShift) {
-        const has = days.some(ds => {
-          const e = entries[user.id + '_' + ds];
-          return e && e.shiftCode === _filterShift;
-        });
+        const has = days.some(ds => { const e = entries[user.id + '_' + ds]; return e && e.shiftCode === _filterShift; });
         if (!has) return;
       }
 
-      h += `<tr class="plng-user-row" data-uid="${esc(user.id)}">
-        <td class="plng-user-cell">
-          ${_avatar(user, 26)}
-          <span class="plng-user-name">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</span>
-          ${canEdit ? `<span class="plng-user-actions">
-            <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
-            <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
-          </span>` : ''}
-        </td>`;
+      const workDays = days.filter(ds => { const e = entries[user.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
+      const loadLabel = workDays === 0 ? '<span style="color:var(--text3)">Non planifié</span>'
+        : workDays <= 2 ? `<span style="color:#EF4444">${workDays}j · Faible</span>`
+        : workDays <= 4 ? `<span style="color:#F97316">${workDays}j · Moyen</span>`
+        : `<span style="color:#22C55E">${workDays}j · Chargé</span>`;
 
-      days.forEach(ds => {
-        const dow     = new Date(ds + 'T00:00:00').getDay();
-        const isWE    = dow === 0 || dow === 6;
-        const isToday = ds === today;
-        const entry   = entries[user.id + '_' + ds];
-        const shift   = entry ? _shiftByCode(entry.shiftCode) : null;
-        const selKey  = user.id + '_' + ds;
-        const isSel   = _selected.has(selKey);
-        const isDim   = _filterShift && entry && entry.shiftCode !== _filterShift;
+      h += `<div style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;min-width:500px">`;
 
-        const cellClass = 'plng-cell plng-cell-week'
-          + (isWE    ? ' plng-we'     : '')
-          + (isToday ? ' plng-today'  : '')
-          + (isSel   ? ' plng-sel'    : '')
-          + (isDim   ? ' plng-dimmed' : '');
+      // Left: user info (fixed 188px)
+      h += `<div style="width:188px;min-width:188px;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 12px;border-right:1px solid var(--border)">
+        ${_avatar(user, 32)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text1)">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
+          <div style="font-size:10px;margin-top:3px">${loadLabel}</div>
+        </div>
+        ${canEdit ? `<div style="display:flex;gap:2px;flex-shrink:0">
+          <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
+          <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
+        </div>` : ''}
+      </div>`;
 
-        h += `<td class="${cellClass}" data-uid="${esc(user.id)}" data-date="${ds}"
+      // Right: 7 day cells
+      h += `<div style="display:flex;flex:1;min-width:0">`;
+      days.forEach((ds, di) => {
+        const dow    = new Date(ds + 'T00:00:00').getDay();
+        const isWE   = dow === 0 || dow === 6;
+        const isTd   = ds === today;
+        const entry  = entries[user.id + '_' + ds];
+        const shift  = entry ? _shiftByCode(entry.shiftCode) : null;
+        const selKey = user.id + '_' + ds;
+        const isSel  = _selected.has(selKey);
+        const isDim  = _filterShift && entry && entry.shiftCode !== _filterShift;
+        const isLast = di === 6;
+
+        const cellClass = 'plng-cell'
+          + (isWE  ? ' plng-we'     : '')
+          + (isTd  ? ' plng-today'  : '')
+          + (isSel ? ' plng-sel'    : '')
+          + (isDim ? ' plng-dimmed' : '');
+
+        h += `<div class="${cellClass}" data-uid="${esc(user.id)}" data-date="${ds}"
+          style="flex:1;height:54px;min-width:0;display:flex;align-items:center;justify-content:center;${isLast ? '' : 'border-right:1px solid var(--border);'}padding:4px;"
           ${canEdit ? `onmousedown="MX.Pages.Planning._cellMouseDown(event,'${esc(user.id)}','${ds}')"` : ''}>`;
 
         if (shift) {
-          const needBorder = shift.color === '#FFFFFF';
-          h += `<div class="plng-cell-in plng-cell-in-week" style="background:${shift.color};color:${shift.textColor}${needBorder ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
-            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600}">${esc(shift.code)}</span>
+          const nb = shift.color === '#FFFFFF';
+          h += `<div class="plng-cell-in" style="width:calc(100% - 4px);height:46px;border-radius:7px;background:${shift.color};color:${shift.textColor}${nb ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
+            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600};font-size:${shift.code.length > 2 ? '10px' : '12px'}">${esc(shift.code)}</span>
             ${shift.start ? `<span class="plng-cell-time">${shift.start}–${shift.end}</span>` : ''}
           </div>`;
         } else {
-          h += `<div class="plng-cell-in plng-cell-in-week plng-cell-empty-in"></div>`;
+          h += `<div class="plng-cell-in plng-cell-empty-in" style="width:calc(100% - 4px);height:46px;border-radius:7px"></div>`;
         }
 
-        h += `</td>`;
+        h += `</div>`;
       });
-
-      h += `</tr>`;
+      h += `</div></div>`;
     });
 
-    h += `</tbody></table></div>`;
+    h += `</div></div>`;
     return h;
   }
 
-  // ── DAY LIST ──
+  // ── DAY LIST (unchanged) ──
 
   function _renderDayList(users, today, canEdit) {
     const esc     = MX.esc;
@@ -617,11 +677,14 @@
     return h;
   }
 
-  // ── SIDEBAR (légende + actions + événements) ──
+  // ── SIDEBAR ──
 
   function _renderSidebar(canEdit, isAdmin) {
-    const shifts = _shifts();
-    const esc    = MX.esc;
+    const shifts  = _shifts();
+    const esc     = MX.esc;
+    const users   = _users();
+    const entries = _entries();
+
     let h = `<div class="plng-legend">
       <div class="plng-legend-title">Légende des codes</div>`;
 
@@ -656,14 +719,40 @@
         <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-print"></i> Imprimer</button>`;
     }
 
-    // ── Prochains événements (CP / RTT / RH / JFL next 14 days) ──
-    const todayStr = _todayStr();
-    const upcoming = [];
-    const entries  = _entries();
-    const users    = _users();
+    // ── Conflits de couverture (week view) ──
+    if (_view === 'week') {
+      const WORK_CODES = ['1', '3', '4'];
+      const weekDays = _weekDays(_day);
+      const gaps = weekDays.filter(ds => {
+        const dow = new Date(ds + 'T00:00:00').getDay();
+        if (dow === 0 || dow === 6) return false;
+        return !users.some(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.includes(e.shiftCode); });
+      });
+
+      h += `<div class="plng-legend-sep"></div>`;
+      if (gaps.length > 0) {
+        h += `<div class="plng-legend-title" style="color:#EF4444"><i class="fas fa-triangle-exclamation" style="margin-right:4px"></i>Alertes couverture</div>`;
+        gaps.forEach(ds => {
+          const d2  = new Date(ds + 'T00:00:00');
+          const lbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()].slice(0, 3) + '.';
+          h += `<div class="plng-event-row" style="border-color:rgba(239,68,68,0.2)">
+            <span class="plng-event-chip" style="background:#EF4444;color:#fff;min-width:22px"><i class="fas fa-xmark" style="font-size:10px"></i></span>
+            <div class="plng-event-info">
+              <span class="plng-event-name" style="color:#EF4444">Aucune couverture</span>
+              <span class="plng-event-date">${esc(lbl)}</span>
+            </div>
+          </div>`;
+        });
+      } else {
+        h += `<div class="plng-legend-title" style="color:#22C55E"><i class="fas fa-circle-check" style="margin-right:4px"></i>Couverture OK</div>
+          <div class="plng-events-empty" style="color:#22C55E;font-size:11px"><i class="fas fa-check"></i> Tous les jours couverts</div>`;
+      }
+    }
+
+    // ── Prochains événements ──
+    const todayStr   = _todayStr();
+    const upcoming   = [];
     const ABSENCE_CODES = new Set(['CP','RTT','RH','JFL']);
-    const ABSENCE_LABELS = { CP: 'Congé payé', RTT: 'RTT', RH: 'Repos', JFL: 'Jour férié' };
-    const ABSENCE_ICONS  = { CP: 'fa-plane-departure', RTT: 'fa-calendar-xmark', RH: 'fa-moon', JFL: 'fa-star' };
     for (let i = 0; i <= 14; i++) {
       const d = new Date(todayStr + 'T00:00:00');
       d.setDate(d.getDate() + i);
@@ -703,7 +792,7 @@
     return h;
   }
 
-  // ── SHIFT PICKER MODAL (day view) ──
+  // ── SHIFT PICKER MODAL ──
 
   function _openShiftPicker(userId, userName, dateStr) {
     const shifts  = _shifts();
@@ -1036,7 +1125,7 @@
     } catch (e) { MX.toast('Erreur génération', true); }
   }
 
-  // ── SHIFT MANAGEMENT MODAL (admin) ──
+  // ── SHIFT MANAGEMENT MODAL ──
 
   function _openShiftMgmt() {
     MX.showModal('Gérer les codes poste', 'Modifier, ajouter ou supprimer des codes', []);
@@ -1175,7 +1264,7 @@
     const canEdit = _canEdit();
     const isAdmin = MX.Auth.isAdmin();
 
-    let title = _view === 'month' ? _fmtMonthTitle() : _view === 'week' ? _fmtWeekTitle() : _fmtDayTitle();
+    const title = _view === 'month' ? _fmtMonthTitle() : _view === 'week' ? _fmtWeekTitle() : _fmtDayTitle();
 
     const titleEl = document.getElementById('topbar-title');
     if (titleEl) titleEl.textContent = 'Planning';
@@ -1220,10 +1309,10 @@
 
     if (_loading) {
       h += `<div class="plng-empty"><i class="fas fa-spinner fa-spin" style="font-size:28px;color:var(--cyan)"></i><span>Chargement…</span></div>`;
+    } else if (_view === 'week') {
+      h += _renderWeekCards(users, today, canEdit);
     } else if (_view === 'month') {
       h += _renderMonthTable(users, today, canEdit);
-    } else if (_view === 'week') {
-      h += _renderWeekTable(users, today, canEdit);
     } else {
       h += _renderDayList(users, today, canEdit);
     }
