@@ -892,6 +892,85 @@
     return sl === 'matin' ? 'fa-sun' : sl === 'soir' ? 'fa-moon' : 'fa-cloud-sun';
   }
 
+  // ── PLANNING SUGGESTION HELPERS ──
+  const _DAY_OFFSETS = { lundi:0, mardi:1, mercredi:2, jeudi:3, vendredi:4, samedi:5, dimanche:6 };
+  // Maps planning shift codes → checklist slots (codes without start time = day-off, never suggested)
+  const _SHIFT_SLOT  = { '1':'matin', '2':'journee', '3':'journee', '4':'soir' };
+  const _OFF_CODES   = new Set(['RH','CP','RTT','JFL','EXT']);
+
+  function _weekKeyToMonday(weekKey) {
+    const parts = weekKey.split('_W');
+    const year  = parseInt(parts[0], 10);
+    const wn    = parseInt(parts[1], 10);
+    const jan4  = new Date(year, 0, 4);
+    const dow   = jan4.getDay() || 7;
+    const mon   = new Date(jan4);
+    mon.setDate(jan4.getDate() - dow + 1 + (wn - 1) * 7);
+    return mon;
+  }
+
+  function _weekDayToDate(weekKey, dayId) {
+    const mon = _weekKeyToMonday(weekKey);
+    const d   = new Date(mon);
+    d.setDate(mon.getDate() + (_DAY_OFFSETS[dayId] || 0));
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Returns shift object for a shiftCode from planningShifts (or default shifts)
+  function _getPlanShift(shiftCode) {
+    const shifts = (MX.state && MX.state.planningShifts) || [];
+    const shift  = shifts.find(s => s.code === shiftCode);
+    if (shift) return shift;
+    // Fallback: map by start time from the SHIFT_SLOT default
+    return null;
+  }
+
+  // Returns array of user names suggested for a slot based on planning entries for that specific day
+  function _getPlanSuggestions(weekKey, dayId, slot) {
+    const dateStr = _weekDayToDate(weekKey, dayId);
+    const entries = (MX.state && MX.state.planningEntries) || {};
+    const suggested = [];
+    Object.values(entries).forEach(e => {
+      if (e.date !== dateStr) return;
+      if (_OFF_CODES.has(e.shiftCode)) return;
+      // Use SHIFT_SLOT map first, then fall back to shift start-time heuristic
+      let matchedSlot = _SHIFT_SLOT[e.shiftCode];
+      if (!matchedSlot) {
+        const sh = _getPlanShift(e.shiftCode);
+        if (sh && sh.start) {
+          const h = parseInt(sh.start.split(':')[0], 10);
+          if (h <= 8)  matchedSlot = 'matin';
+          else if (h <= 11) matchedSlot = 'journee';
+          else matchedSlot = 'soir';
+        }
+      }
+      if (matchedSlot === slot && e.userName) suggested.push(e.userName);
+    });
+    return suggested;
+  }
+
+  // Ensure planning data is loaded for the months covered by a weekKey
+  async function _ensurePlanningForWeek(weekKey) {
+    const mon    = _weekKeyToMonday(weekKey);
+    const sun    = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const months = [
+      { y: mon.getFullYear(), m: mon.getMonth() },
+    ];
+    if (sun.getMonth() !== mon.getMonth()) months.push({ y: sun.getFullYear(), m: sun.getMonth() });
+
+    const existing = (MX.state && MX.state.planningEntries) || {};
+    for (const { y, m } of months) {
+      const ym = `${y}-${String(m + 1).padStart(2, '0')}`;
+      const hasData = Object.values(existing).some(e => e.ym === ym);
+      if (!hasData) {
+        try {
+          const map = await MX.DB.loadPlanningMonth(y, m);
+          MX.state.planningEntries = Object.assign({}, MX.state.planningEntries || {}, map);
+        } catch(e) { /* planning data unavailable — suggestions won't show */ }
+      }
+    }
+  }
+
   // ── HISTORICAL DAY VIEW (Responsable / Admin only) ──
   async function _showHistDay(weekKey, dayId) {
     if (!MX.Auth.canSeeAll()) return;
@@ -1395,16 +1474,23 @@
 
   // ── FUTURE WEEK DAY VIEW ──
 
-  function _showFutureDay(weekKey, dayId) {
+  async function _showFutureDay(weekKey, dayId) {
     const mc = document.getElementById('main-content');
     if (!mc) return;
     const { DAYS, getDaySlots, esc } = MX;
-    const data  = _mvD[weekKey] || null;
-    const tsk   = data ? (data.tasks || {}) : {};
-    const day   = DAYS.find(d => d.id === dayId);
+    const data   = _mvD[weekKey] || null;
+    const tsk    = data ? (data.tasks || {}) : {};
+    const day    = DAYS.find(d => d.id === dayId);
     const wLabel = (data && data.weekLabel) || _weekLabel(weekKey);
     const SLOT_LABELS = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
-    const slots = getDaySlots(dayId);
+    const slots  = getDaySlots(dayId);
+
+    // Load planning data for this week's months (non-blocking if already loaded)
+    await _ensurePlanningForWeek(weekKey);
+
+    const users    = (MX.state.users || []).filter(u => u.name && !u.hidden);
+    const PRIO_COLOR = { critique: 'var(--red)', haute: 'var(--orange)', faible: 'var(--text3)' };
+    const PRIO_LABEL = { critique: '🔴 Critique', haute: '🟠 Haute', faible: '⚪ Faible' };
 
     let h = `<div class="ph">
       <div class="ph-eye">${esc(wLabel)}</div>
@@ -1422,20 +1508,31 @@
 
     <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
       <i class="fas fa-circle-info" style="color:#A78BFA"></i>
-      <span>Configurez les tâches pour ce jour — elles seront actives à partir de ${esc(wLabel)}.</span>
+      <span>Configurez les tâches et assignez les techniciens — actif à partir de ${esc(wLabel)}.</span>
     </div>`;
 
     slots.forEach(sl => {
-      const tasks = tsk[`${dayId}_${sl}`] || [];
+      const tasks       = tsk[`${dayId}_${sl}`] || [];
+      const suggestions = _getPlanSuggestions(weekKey, dayId, sl);
+
       h += `<div class="slot-card" style="margin-bottom:12px">
         <div class="slot-head">
           <div class="ch-ico"><i class="fas ${_slotIcon(sl)}"></i></div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}</div>
             <div class="slot-dl">${tasks.length} tâche${tasks.length!==1?'s':''}</div>
-          </div>
-          <button onclick="MX.Pages.Checklist._addFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}')"
-            style="padding:6px 10px;border:1px solid var(--cyan-border);border-radius:7px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;gap:5px">
+          </div>`;
+
+      // Planning suggestion badge in slot header
+      if (suggestions.length) {
+        h += `<div style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--cyan);background:rgba(0,245,212,.07);border:1px solid rgba(0,245,212,.2);border-radius:6px;padding:3px 8px;margin-right:8px;flex-shrink:0">
+          <i class="fas fa-calendar-check" style="font-size:10px"></i>
+          ${suggestions.map(n => esc(n)).join(', ')}
+        </div>`;
+      }
+
+      h += `<button onclick="MX.Pages.Checklist._addFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}')"
+            style="padding:6px 10px;border:1px solid var(--cyan-border);border-radius:7px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;gap:5px;flex-shrink:0">
             <i class="fas fa-plus"></i> Ajouter
           </button>
         </div>`;
@@ -1446,11 +1543,14 @@
           Aucune tâche — cliquez sur Ajouter
         </div>`;
       } else {
-        const PRIO_COLOR = { critique: 'var(--red)', haute: 'var(--orange)', faible: 'var(--text3)' };
-        const PRIO_LABEL = { critique: '🔴 Critique', haute: '🟠 Haute', faible: '⚪ Faible' };
         tasks.forEach(t => {
-          const nc = t.assignedTo ? MX.userColors(t.assignedTo) : null;
-          h += `<div class="trow" style="flex-direction:column;align-items:stretch;gap:4px;cursor:default;padding:10px 12px">
+          const isPlanSugg = t.assignedTo && suggestions.includes(t.assignedTo);
+
+          // Build user <select> options — pre-select current assignedTo
+          const taskUserOpts = `<option value="">— Non assigné —</option>` +
+            users.map(u => `<option value="${esc(u.name)}"${u.name === t.assignedTo ? ' selected' : ''}>${esc(u.name)}</option>`).join('');
+
+          h += `<div class="trow" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;padding:10px 12px">
             <div style="display:flex;align-items:center;gap:8px">
               <div class="tcb" style="opacity:.25;flex-shrink:0"><i class="fas fa-circle"></i></div>
               <span class="ttext" style="flex:1">${esc(t.text || t.id)}</span>
@@ -1459,17 +1559,19 @@
                 <i class="fas fa-trash"></i>
               </button>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;padding-left:32px;flex-wrap:wrap">
-              ${t.assignedTo && nc
-                ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)"><span style="width:18px;height:18px;border-radius:5px;background:${nc.bg};color:${nc.fg};display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;font-family:var(--ffm);flex-shrink:0">${esc(t.assignedTo.substring(0,2).toUpperCase())}</span>👤 ${esc(t.assignedTo)}</span>`
-                : `<span style="font-size:11px;color:var(--text3)">Non assigné</span>`
-              }
+            <div style="display:flex;align-items:center;gap:8px;padding-left:32px;flex-wrap:wrap">
+              <i class="fas fa-user" style="font-size:10px;color:var(--text3);flex-shrink:0;margin-top:1px"></i>
+              <select class="fi fi-sm" style="flex:1;min-width:130px;max-width:200px;height:30px;font-size:12px;padding:0 8px"
+                onchange="MX.Pages.Checklist._updateFutureTaskAssign('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}','${esc(t.id)}',this.value)">
+                ${taskUserOpts}
+              </select>
+              <span id="ft-pbadge-${esc(t.id)}">${isPlanSugg ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,245,212,.1);color:var(--cyan);font-weight:600;border:1px solid rgba(0,245,212,.2)">📅 Planning</span>` : ''}</span>
               ${t.type === 'unique'
-                ? `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(99,102,241,.12);color:#818CF8;font-weight:600">📌 Unique</span>`
-                : `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(0,194,209,.08);color:var(--cyan);font-weight:600">🔄 Récurrente</span>`
+                ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(99,102,241,.12);color:#818CF8;font-weight:600">📌 Unique</span>`
+                : `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,194,209,.08);color:var(--cyan);font-weight:600">🔄 Récurrente</span>`
               }
               ${t.priority && t.priority !== 'normale'
-                ? `<span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;color:${PRIO_COLOR[t.priority] || 'var(--text2)'}">${PRIO_LABEL[t.priority] || t.priority}</span>`
+                ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600;color:${PRIO_COLOR[t.priority] || 'var(--text2)'}">${PRIO_LABEL[t.priority] || t.priority}</span>`
                 : ''
               }
             </div>
@@ -1486,10 +1588,16 @@
   function _addFutureTask(weekKey, dayId, slot) {
     if (!MX.Auth.canSeeAll()) return MX.toast('Accès réservé aux responsables', true);
     const { DAYS, esc } = MX;
-    const users = (MX.state.users || []);
+    const users = (MX.state.users || []).filter(u => u.name && !u.hidden);
 
-    const userOpts = `<option value="">— Non assigné —</option>` +
-      users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('');
+    // Planning suggestion for initial day/slot
+    const initSugg = _getPlanSuggestions(weekKey, dayId, slot);
+    const initAssign = initSugg[0] || '';
+
+    function _buildUserOpts(selVal) {
+      return `<option value="">— Non assigné —</option>` +
+        users.map(u => `<option value="${esc(u.name)}"${u.name === selVal ? ' selected' : ''}>${esc(u.name)}</option>`).join('');
+    }
 
     const dayOpts = DAYS.map(d =>
       `<option value="${esc(d.id)}"${d.id === dayId ? ' selected' : ''}>${esc(d.l)}</option>`
@@ -1502,6 +1610,9 @@
 
     const currKey = _weekKey(new Date());
     const sub = weekKey === currKey ? 'Semaine en cours' : esc(_weekLabel(weekKey));
+    const suggHint = initSugg.length
+      ? `<div id="ft-assign-sugg" style="font-size:11px;color:var(--cyan);display:flex;align-items:center;gap:5px;margin-top:4px"><i class="fas fa-calendar-check" style="font-size:10px"></i>Suggestion planning : ${initSugg.map(n => esc(n)).join(', ')}</div>`
+      : `<div id="ft-assign-sugg" style="font-size:11px;color:var(--text3);display:none"></div>`;
 
     MX.showModal({
       title: 'Nouvelle tâche',
@@ -1518,16 +1629,17 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Jour</label>
-            <select id="ft-day" class="fi">${dayOpts}</select>
+            <select id="ft-day" class="fi" onchange="MX.Pages.Checklist._refreshAddTaskSugg('${esc(weekKey)}')">${dayOpts}</select>
           </div>
           <div>
             <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Période</label>
-            <select id="ft-slot" class="fi">${slotOpts}</select>
+            <select id="ft-slot" class="fi" onchange="MX.Pages.Checklist._refreshAddTaskSugg('${esc(weekKey)}')">${slotOpts}</select>
           </div>
         </div>
         <div>
           <label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px">Technicien assigné</label>
-          <select id="ft-assign" class="fi">${userOpts}</select>
+          <select id="ft-assign" class="fi">${_buildUserOpts(initAssign)}</select>
+          ${suggHint}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
@@ -1560,6 +1672,30 @@
       ]
     });
     setTimeout(() => document.getElementById('ft-title')?.focus(), 50);
+  }
+
+  function _refreshAddTaskSugg(weekKey) {
+    const dayId = document.getElementById('ft-day')?.value;
+    const slot  = document.getElementById('ft-slot')?.value;
+    if (!dayId || !slot) return;
+    const sugg     = _getPlanSuggestions(weekKey, dayId, slot);
+    const users    = (MX.state.users || []).filter(u => u.name && !u.hidden);
+    const assignEl = document.getElementById('ft-assign');
+    const suggEl   = document.getElementById('ft-assign-sugg');
+    if (!assignEl) return;
+    const current = assignEl.value;
+    // Rebuild options; keep current selection unless it's empty and there's a new suggestion
+    const newVal = current || (sugg[0] || '');
+    assignEl.innerHTML = `<option value="">— Non assigné —</option>` +
+      users.map(u => `<option value="${u.name}"${u.name === newVal ? ' selected' : ''}>${u.name}</option>`).join('');
+    if (suggEl) {
+      if (sugg.length) {
+        suggEl.innerHTML = `<i class="fas fa-calendar-check" style="font-size:10px"></i>Suggestion planning : ${sugg.map(n => MX.esc(n)).join(', ')}`;
+        suggEl.style.display = '';
+      } else {
+        suggEl.style.display = 'none';
+      }
+    }
   }
 
   async function _doAddFutureTask(weekKey) {
@@ -1621,6 +1757,39 @@
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
+  async function _updateFutureTaskAssign(weekKey, dayId, slot, taskId, value) {
+    if (!_mvD[weekKey] || !_mvD[weekKey].tasks) return;
+    const key      = `${dayId}_${slot}`;
+    const existing = (_mvD[weekKey].tasks[key] || []);
+    const newItems = existing.map(t => {
+      if (t.id !== taskId) return t;
+      const updated = Object.assign({}, t);
+      if (value) updated.assignedTo = value;
+      else delete updated.assignedTo;
+      return updated;
+    });
+    // Optimistic local update
+    _mvD[weekKey].tasks[key] = newItems;
+    // Redraw only the badge next to the select (no full re-render to preserve focus)
+    const suggestions = _getPlanSuggestions(weekKey, dayId, slot);
+    const isPlanSugg  = value && suggestions.includes(value);
+    const badgeId     = `ft-pbadge-${taskId}`;
+    const badgeEl     = document.getElementById(badgeId);
+    if (badgeEl) {
+      badgeEl.innerHTML = isPlanSugg
+        ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,245,212,.1);color:var(--cyan);font-weight:600;border:1px solid rgba(0,245,212,.2)">📅 Planning</span>`
+        : '';
+    }
+    MX.syncStart();
+    try {
+      await MX.DB.updateWeeklyTasks(weekKey, dayId, slot, newItems);
+      MX.syncEnd();
+    } catch(e) {
+      MX.syncFail();
+      MX.toast('Erreur lors de l\'assignation', true);
+    }
+  }
+
   async function _archiveCurrentWeek() {
     const { state, DAYS, getDaySlots } = MX;
     const key = _weekKey(new Date());
@@ -1653,5 +1822,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask };
+  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
 })();
