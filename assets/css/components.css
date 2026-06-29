@@ -8024,3 +8024,26 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .mob-drw-item:active { background: var(--bg4); color: var(--text); }
 .mob-drw-item i { font-size: 20px; color: var(--cyan); margin-bottom: 1px; }
+
+/* ── V6 SIDEBAR REDESIGN ── */
+.sx-modules {
+  padding: 4px 0 8px;
+}
+.sx-mod-sep {
+  padding: 10px 16px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+  user-select: none;
+}
+.sx-compact .sx-mod-sep { display: none; }
+
+.sx-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 10px 8px;
+  opacity: 0.45;
+  flex-shrink: 0;
+}
