@@ -155,6 +155,10 @@
   window.MX.showIntTab     = function(tab) { window._intStartTab = tab; MX.showPage('interventions'); };
 
   window.MX.toggleCompact = function() {
+    if (window.innerWidth <= 900) {
+      MX.closeSidebar();
+      return;
+    }
     _compact = !_compact;
     _sx("mx_sx_compact", _compact);
     const sb = document.getElementById("sidebar");
@@ -391,9 +395,10 @@
 
     sideNav.innerHTML = h;
 
-    // Apply compact class
+    // Apply compact class — never on mobile (no compact mode on mobile)
     const sidebar = document.getElementById("sidebar");
-    if (sidebar) sidebar.classList.toggle("sx-compact", _compact);
+    const isMob = window.innerWidth <= 900;
+    if (sidebar) sidebar.classList.toggle("sx-compact", _compact && !isMob);
 
     // ── Bottom nav (mobile) — exactly 5 items ──
     const dayIds = DAYS.map(d => d.id);

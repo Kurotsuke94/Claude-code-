@@ -4323,7 +4323,14 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 @media (max-width: 900px) {
-  #sidebar.sx-compact { display: none !important; }
+  /* Compact button invisible on mobile — no compact mode on mobile */
+  .sx-compact-btn { display: none !important; }
+  /* Safety: if sx-compact is in DOM on mobile, restore full sidebar width
+     so the transform hide/show still works via .open class */
+  #sidebar.sx-compact {
+    width: var(--sidebar-w) !important;
+    display: flex !important;
+  }
 }
 
 /* ══════════════════════════════════════════════════════
