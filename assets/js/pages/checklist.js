@@ -8,6 +8,14 @@
     const canAll = MX.Auth.canSeeAll();
     const worker = (!canAll && cu) ? cu.name : null;
 
+    // Pre-load planning data for suggestion pre-fill (non-blocking; re-renders once loaded)
+    if (canAll && !Object.keys(MX.state.planningEntries || {}).length) {
+      _ensurePlanningForWeek(_weekKey(new Date())).then(() => {
+        const mc = document.getElementById('main-content');
+        if (mc && mc.dataset.dayId === dayId) render(dayId);
+      }).catch(() => {});
+    }
+
     // Today's date detection for daily claims
     const isToday              = dayId === MX.todayId();
     const dailyClaims          = isToday ? (state.dailyClaims || {}) : {};
@@ -109,10 +117,12 @@
     }
 
     let anyVisible = false;
+    const _currK = _weekKey(new Date());
     slots.forEach(sl => {
       const tasks      = state.tasks[`${dayId}_${sl}`] || [];
       const asn        = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
       const dailyClaim = isToday ? (dailyClaims[sl] || null) : null;
+      const planSugg   = canAll ? _getPlanSuggestions(_currK, dayId, sl) : [];
       const html  = Widgets.slotCard({
         dayId, slot: sl,
         tasks, assignment: asn,
@@ -121,7 +131,8 @@
         workerFilter: worker,
         isToday,
         dailyClaim,
-        todayPlanSuggestions
+        todayPlanSuggestions,
+        planSuggestions: planSugg
       });
       if (html) { anyVisible = true; h += html; }
     });
@@ -232,6 +243,7 @@
 
     h += `</div>`;
     el.innerHTML = h;
+    el.dataset.dayId = dayId;
   }
 
   async function toggle(dayId, slot, taskId) {
@@ -267,6 +279,29 @@
       MX.DB.addLog({ workerName: actorName, action: "assign", taskText: `${dayId} ${slot} → ${name || "(aucun)"}`, dayId, slot }).catch(() => {});
     } catch (e) {
       MX.toast("Erreur lors de l'assignation", true);
+    }
+  }
+
+  // ── PER-TASK ASSIGNMENT (current week) ──
+  async function assignTask(dayId, slot, taskId, value) {
+    const key      = `${dayId}_${slot}`;
+    const tasks    = MX.state.tasks[key] || [];
+    const newItems = tasks.map(t => {
+      if (t.id !== taskId) return t;
+      const updated = Object.assign({}, t);
+      if (value) updated.assignedTo = value;
+      else delete updated.assignedTo;
+      return updated;
+    });
+    MX.state.tasks[key] = newItems;
+    MX.syncStart();
+    try {
+      await MX.DB.setTasks(dayId, slot, newItems);
+      MX.syncEnd();
+    } catch(e) {
+      MX.state.tasks[key] = tasks;
+      MX.syncFail();
+      MX.toast('Erreur lors de l\'assignation', true);
     }
   }
 
@@ -1252,6 +1287,9 @@
 
     await _ensureWeekSystem();
 
+    // Pre-load planning data so suggestions are ready when a day is opened
+    _ensurePlanningForWeek(_weekKey(new Date())).catch(() => {});
+
     const currKey = _weekKey(new Date());
     const slots = [];
     const now = new Date();
@@ -1822,5 +1860,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
+  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
 })();

@@ -1,5 +1,5 @@
 (function () {
-  function slotCard({ dayId, slot, tasks, assignment, checks, showAssign, workerFilter, isToday, dailyClaim, todayPlanSuggestions }) {
+  function slotCard({ dayId, slot, tasks, assignment, checks, showAssign, workerFilter, isToday, dailyClaim, todayPlanSuggestions, planSuggestions }) {
     const { SLOTS, esc, chipHtml, alertLevel, state } = MX;
     const s  = SLOTS[slot];
     const cu = state.currentUser;
@@ -39,17 +39,16 @@
       </div>`;
 
     if (isToday) {
-      h += _dailyClaimRow(slot, dailyClaim, cu, showAssign, todayPlanSuggestions || {}, s, esc, chipHtml);
+      h += _dailyClaimRow(slot, dailyClaim, cu, showAssign, todayPlanSuggestions || {}, s, esc, chipHtml, planSuggestions || []);
     } else if (showAssign) {
-      const names = _allNames();
-      h += `<div class="arow">
-        <span class="arow-lbl">Assigné à</span>
-        <select class="asel" onchange="MX.Pages.Checklist.assign('${dayId}','${slot}',this.value)">
-          <option value="">— Choisir —</option>
-          ${names.map(n => `<option value="${esc(n)}" ${n===assignment?'selected':''}>${esc(n)}</option>`).join('')}
-        </select>
-        ${assignment ? chipHtml(assignment) : ''}
-      </div>`;
+      // Planning info banner — no slot-level dropdown (assignment is per task below)
+      const suggs = planSuggestions || [];
+      if (suggs.length) {
+        h += `<div class="arow">
+          <span class="arow-lbl"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px;margin-right:4px"></i>Planning</span>
+          ${suggs.map(n => chipHtml(n)).join('')}
+        </div>`;
+      }
     } else if (assignment) {
       h += `<div class="arow"><span class="arow-lbl">Assigné à</span>${chipHtml(assignment)}</div>`;
     }
@@ -64,7 +63,9 @@
         isChecked:    !!checks[`${dayId}_${slot}_${t.id}`],
         assigneeName: effectiveAsn,
         canTransfer,
-        transfer: tr ? { id: tr.id, status: tr.status, toUser: tr.toUser } : null
+        transfer: tr ? { id: tr.id, status: tr.status, toUser: tr.toUser } : null,
+        canAssign: showAssign,
+        planSuggestions: showAssign ? (planSuggestions || []) : []
       });
     });
 
@@ -76,31 +77,45 @@
     return h;
   }
 
-  function _dailyClaimRow(slot, claim, cu, showAssign, suggestions, s, esc, chipHtml) {
+  function _dailyClaimRow(slot, claim, cu, showAssign, suggestions, s, esc, chipHtml, planSuggestions) {
     const name     = (claim && claim.name)     || "";
     const lockedBy = (claim && claim.lockedBy) || "";
 
     if (showAssign) {
-      // Responsable / Admin : dropdown + bouton verrou
-      const names    = _allNames();
-      const lockBtn  = lockedBy
+      // Responsable / Admin : planning info + lock button, no slot-level dropdown
+      const lockBtn = lockedBy
         ? `<button class="slot-lock-btn on" title="Déverrouiller" onclick="MX.Pages.Checklist.toggleLockSlot('${esc(slot)}')"><i class="fas fa-lock"></i></button>`
         : `<button class="slot-lock-btn" title="Verrouiller" onclick="MX.Pages.Checklist.toggleLockSlot('${esc(slot)}')"><i class="fas fa-lock-open"></i></button>`;
-      return `<div class="arow">
-        <span class="arow-lbl">Assigné à</span>
-        <select class="asel" onchange="MX.Pages.Checklist.assignToday('${esc(slot)}',this.value)">
-          <option value="">— Choisir —</option>
-          ${names.map(n => `<option value="${esc(n)}" ${n===name?'selected':''}>${esc(n)}</option>`).join('')}
-        </select>
-        ${name ? chipHtml(name) : ''}
-        ${lockBtn}
-      </div>`;
+
+      const suggs = planSuggestions || [];
+      if (name) {
+        const extraPlan = suggs.length && !suggs.includes(name)
+          ? `<span style="font-size:10px;color:var(--cyan);background:rgba(0,245,212,.07);border:1px solid rgba(0,245,212,.2);border-radius:4px;padding:2px 5px;flex-shrink:0"><i class="fas fa-calendar-check" style="font-size:9px;margin-right:2px"></i>${suggs.map(n => esc(n)).join(', ')}</span>`
+          : '';
+        return `<div class="arow">
+          <span class="arow-lbl">Créneau pris par</span>
+          ${chipHtml(name)}
+          ${extraPlan}
+          ${lockBtn}
+        </div>`;
+      } else if (suggs.length) {
+        return `<div class="arow">
+          <span class="arow-lbl"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px;margin-right:3px"></i>Planning</span>
+          ${suggs.map(n => chipHtml(n)).join('')}
+          ${lockBtn}
+        </div>`;
+      } else {
+        return `<div class="arow">
+          <span class="arow-lbl">Créneau</span>
+          <span style="font-size:12px;color:var(--text3)">Non assigné</span>
+          ${lockBtn}
+        </div>`;
+      }
     }
 
     // ── Technicien ──
 
     if (lockedBy) {
-      // Verrouillé par responsable
       return `<div class="daily-claim">
         <div class="dc-assigned dc-locked">
           <i class="fas fa-lock" style="font-size:11px;color:var(--orange)"></i>
@@ -112,7 +127,6 @@
     }
 
     if (name && cu && name === cu.name) {
-      // Créneau pris par l'utilisateur connecté — peut se retirer
       return `<div class="daily-claim">
         <div class="dc-assigned dc-mine">
           <span class="arow-lbl">Vous êtes assigné</span>
@@ -125,7 +139,6 @@
     }
 
     if (name) {
-      // Pris par quelqu'un d'autre — lecture seule
       return `<div class="daily-claim">
         <div class="dc-assigned">
           <span class="arow-lbl">Assigné à</span>

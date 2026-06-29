@@ -1,5 +1,5 @@
 (function () {
-  function taskRow({ task, dayId, slot, isChecked, assigneeName, canTransfer, transfer }) {
+  function taskRow({ task, dayId, slot, isChecked, assigneeName, canTransfer, transfer, canAssign, planSuggestions }) {
     const { esc, avatarBg, avatarFg } = MX;
     const isPending     = transfer && transfer.status === "pending";
     const isTransferred = transfer && transfer.status === "accepted";
@@ -40,6 +40,34 @@
           <i class="fas fa-share"></i>
         </button>`;
       }
+    }
+
+    if (canAssign) {
+      // Responsable mode: column layout with per-task assignment dropdown
+      const users   = (MX.state.users || []).filter(u => u.name && !u.hidden);
+      const suggs   = planSuggestions || [];
+      const curVal  = task.assignedTo || '';
+      const dispVal = curVal || (suggs[0] || '');
+      const isSugg  = !curVal && suggs.length > 0;
+      const opts    = `<option value="">— Non assigné —</option>` +
+        users.map(u => `<option value="${esc(u.name)}"${u.name === dispVal ? ' selected' : ''}>${esc(u.name)}</option>`).join('');
+
+      return `<div class="trow ${isChecked ? 'done' : ''}" id="tr_${esc(task.id)}" style="flex-direction:column;align-items:stretch;cursor:default;padding:0;gap:0">
+        <div ${click} style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px 4px 12px">
+          <div class="tcb ${isChecked ? 'on' : ''}"><i class="fas fa-check"></i></div>
+          <span class="ttext" style="flex:1">${esc(task.text)}</span>
+          ${noteEl}
+          ${transferEl}
+        </div>
+        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:6px;padding:0 12px 8px 40px">
+          <i class="fas fa-user" style="font-size:10px;color:var(--text3);flex-shrink:0"></i>
+          <select style="font-size:11px;height:26px;padding:0 6px;border-radius:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--text1);min-width:120px;cursor:pointer;font-family:var(--ffs)"
+            onchange="MX.Pages.Checklist.assignTask('${esc(dayId)}','${esc(slot)}','${esc(task.id)}',this.value)">
+            ${opts}
+          </select>
+          ${isSugg ? `<span style="font-size:10px;color:var(--cyan);background:rgba(0,245,212,.08);border:1px solid rgba(0,245,212,.2);border-radius:4px;padding:2px 5px;white-space:nowrap;flex-shrink:0"><i class="fas fa-calendar-check" style="font-size:9px;margin-right:2px"></i>Planning</span>` : ''}
+        </div>
+      </div>`;
     }
 
     const perAssignee = task.assignedTo && task.assignedTo !== assigneeName ? task.assignedTo : null;
