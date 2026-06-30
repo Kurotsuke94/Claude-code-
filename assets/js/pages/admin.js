@@ -87,7 +87,7 @@
       { id: "tasks",          label: "📋 Tâches"            },
       { id: "team",           label: "👷 Gestion Équipes"   },
       { id: "alerts",         label: "🔔 Alertes"           },
-      { id: "alertes-config", label: "⚙️ Config alertes",   adminOnly: true },
+      { id: "alertes-config", label: "⚙️ Config alertes"    },
       { id: "week",           label: "📅 Semaine"           },
       { id: "history",        label: "📊 Historique"        },
       { id: "msgs",           label: "💬 Messages"          },
@@ -95,9 +95,9 @@
       { id: "bible-admin",    label: "📖 Bible"             },
       { id: "badges-admin",   label: "🏅 Badges"            },
       { id: "admin-journal",  label: "📜 Journal"           },
-      { id: "users",          label: "👤 Utilisateurs",      adminOnly: true },
-      { id: "roles",          label: "🎭 Rôles",             adminOnly: true },
-      { id: "absences",       label: "🏖 Absences",          adminOnly: true },
+      { id: "users",          label: "👤 Utilisateurs"      },
+      { id: "roles",          label: "🎭 Rôles"             },
+      { id: "absences",       label: "🏖 Absences"          },
       { id: "pin",            label: "🔑 Accès",             adminOnly: true },
       { id: "superadmin",     label: "🏨 Hôtels",            adminOnly: true }
     ];
@@ -105,7 +105,7 @@
 
     if (aTab === "missions" || aTab === "orders") aTab = "tasks";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
-    if (isResp && (aTab === "users" || aTab === "roles" || aTab === "alertes-config" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
+    if (isResp && (aTab === "pin" || aTab === "superadmin")) aTab = "tasks";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -125,7 +125,7 @@
         <div class="ph-row">
           <div>
             <div class="ph-title">Panneau ${isAdmin ? 'Admin' : 'Responsable'}</div>
-            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Interventions et gestion des tâches'}</div>
+            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Gestion opérationnelle'}</div>
           </div>
           ${actionBtn}
         </div>
@@ -145,14 +145,14 @@
     if (aTab === "tasks")             h += renderTasks();
     if (aTab === "team")              h += renderTeam();
     if (aTab === "alerts")            h += renderAlerts();
-    if (aTab === "alertes-config" && isAdmin) h += renderAlertRules();
+    if (aTab === "alertes-config" && (isAdmin || isResp)) h += renderAlertRules();
     if (aTab === "week")              h += renderWeek();
     if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
     if (aTab === "logs")              h += renderLogs();
-    if (aTab === "users"         && isAdmin)  h += renderUsers();
-    if (aTab === "roles"         && isAdmin)  h += renderRoles();
-    if (aTab === "absences"      && isAdmin)  h += renderAbsences();
+    if (aTab === "users"         && (isAdmin || isResp)) h += renderUsers();
+    if (aTab === "roles"         && (isAdmin || isResp)) h += renderRoles();
+    if (aTab === "absences"      && (isAdmin || isResp)) h += renderAbsences();
     if (aTab === "pin"           && isAdmin)  h += renderPin();
     if (aTab === "bible-admin")               h += renderBibleAdmin();
     if (aTab === "badges-admin")              h += renderBadgesAdmin();
@@ -1826,7 +1826,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     const { state, esc } = MX;
     const users    = state.users || [];
     const absences = state.absences || [];
-    const isAdmin  = MX.Auth.isAdmin();
+    const isAdmin    = MX.Auth.isAdmin();
+    const canManage  = isAdmin || MX.Auth.isResponsable();
 
     let h = `<div style="padding:0 0 16px">`;
 
@@ -1874,8 +1875,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
           </div>
           <span class="abs-badge ${validated ? 'abs-badge-ok' : 'abs-badge-pend'}">${validated ? 'Validée' : 'En attente'}</span>
           <div class="abs-actions">
-            ${isAdmin && !validated ? `<button class="icon-btn" title="Valider" onclick="MX.Pages.Admin.validateAbsence('${esc(a.id)}')"><i class="fas fa-check" style="color:var(--green)"></i></button>` : ''}
-            ${isAdmin ? `<button class="icon-btn" title="Supprimer" onclick="MX.Pages.Admin.deleteAbsence('${esc(a.id)}')"><i class="fas fa-trash" style="color:var(--red)"></i></button>` : ''}
+            ${canManage && !validated ? `<button class="icon-btn" title="Valider" onclick="MX.Pages.Admin.validateAbsence('${esc(a.id)}')"><i class="fas fa-check" style="color:var(--green)"></i></button>` : ''}
+            ${canManage ? `<button class="icon-btn" title="Supprimer" onclick="MX.Pages.Admin.deleteAbsence('${esc(a.id)}')"><i class="fas fa-trash" style="color:var(--red)"></i></button>` : ''}
           </div>
         </div>`;
       });

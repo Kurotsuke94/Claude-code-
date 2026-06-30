@@ -52,7 +52,7 @@
       return false;
     }
     // Legacy fallback: no roleId assigned → use old role field
-    if (cu.role === 'responsable') return module !== 'roles';
+    if (cu.role === 'responsable') return true;
     const TECH = { checklist: ['view','check'], planning: ['view'], counters: ['view','enter'], interventions: ['view'], messages: ['view','send'], resources: ['view'] };
     return !!(TECH[module] && TECH[module].includes(action));
   }
