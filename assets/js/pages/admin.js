@@ -87,6 +87,7 @@
       { id: "tasks",          label: "📋 Tâches"            },
       { id: "team",           label: "👷 Gestion Équipes"   },
       { id: "alerts",         label: "🔔 Alertes"           },
+      { id: "alertes-config", label: "⚙️ Config alertes",   adminOnly: true },
       { id: "week",           label: "📅 Semaine"           },
       { id: "history",        label: "📊 Historique"        },
       { id: "msgs",           label: "💬 Messages"          },
@@ -104,7 +105,7 @@
 
     if (aTab === "missions" || aTab === "orders") aTab = "tasks";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
-    if (isResp && (aTab === "users" || aTab === "roles" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
+    if (isResp && (aTab === "users" || aTab === "roles" || aTab === "alertes-config" || aTab === "pin" || aTab === "absences" || aTab === "superadmin")) aTab = "tasks";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -144,6 +145,7 @@
     if (aTab === "tasks")             h += renderTasks();
     if (aTab === "team")              h += renderTeam();
     if (aTab === "alerts")            h += renderAlerts();
+    if (aTab === "alertes-config" && isAdmin) h += renderAlertRules();
     if (aTab === "week")              h += renderWeek();
     if (aTab === "history")           h += renderHistory();
     if (aTab === "msgs")              h += renderMsgs();
@@ -471,33 +473,335 @@
     return h;
   }
 
-  // ── ALERTS ──
+  // ── ALERT LEVELS ──
+  const ALERT_LEVELS = [
+    { id: 'info',      emoji: '🟢', label: 'Information', color: '#22C55E', bg: 'rgba(34,197,94,0.10)',  border: 'rgba(34,197,94,0.25)'  },
+    { id: 'warning',   emoji: '🟡', label: 'Attention',   color: '#EAB308', bg: 'rgba(234,179,8,0.10)',  border: 'rgba(234,179,8,0.25)'  },
+    { id: 'important', emoji: '🟠', label: 'Important',   color: '#F97316', bg: 'rgba(249,115,22,0.10)', border: 'rgba(249,115,22,0.25)' },
+    { id: 'critical',  emoji: '🔴', label: 'Critique',    color: '#EF4444', bg: 'rgba(239,68,68,0.10)',  border: 'rgba(239,68,68,0.25)'  },
+  ];
+  function _alertLevel(id) { return ALERT_LEVELS.find(l => l.id === id) || ALERT_LEVELS[1]; }
+
+  const COND_DEFS = [
+    { type: 'time_after',              label: 'Heure ≥',                      fields: [{key:'value',type:'time',placeholder:'10:00',label:'Heure'}] },
+    { type: 'time_before',             label: 'Heure <',                       fields: [{key:'value',type:'time',placeholder:'22:00',label:'Heure'}] },
+    { type: 'checklist_pct_below',     label: 'Avancement slot < %',           fields: [{key:'slot',type:'slot',label:'Poste'},{key:'threshold',type:'number',placeholder:'30',label:'Seuil %',min:0,max:100}] },
+    { type: 'checklist_pct_above',     label: 'Avancement slot ≥ %',           fields: [{key:'slot',type:'slot',label:'Poste'},{key:'threshold',type:'number',placeholder:'80',label:'Seuil %',min:0,max:100}] },
+    { type: 'tech_overload',           label: 'Charge technicien > N tâches',  fields: [{key:'threshold',type:'number',placeholder:'15',label:'Max tâches',min:1}] },
+    { type: 'tech_idle',               label: 'Aucune tâche validée avant',    fields: [{key:'slot',type:'slot',label:'Poste'},{key:'value',type:'time',placeholder:'11:00',label:'Heure limite'}] },
+    { type: 'missions_unassigned',     label: 'Missions non assignées > N',    fields: [{key:'threshold',type:'number',placeholder:'0',label:'Seuil',min:0}] },
+    { type: 'missions_urgent_pending', label: 'Mission urgente en attente',    fields: [{key:'threshold',type:'number',placeholder:'0',label:'Délai (h)',min:0}] },
+    { type: 'planning_understaffed',   label: 'Effectif < N techniciens',      fields: [{key:'slot',type:'slot',label:'Poste'},{key:'threshold',type:'number',placeholder:'1',label:'Minimum',min:1}] },
+    { type: 'planning_no_tech_tomorrow', label: 'Aucun tech planifié demain',  fields: [{key:'slot',type:'slot',label:'Poste'}] },
+  ];
+  function _condDef(type) { return COND_DEFS.find(c => c.type === type) || COND_DEFS[0]; }
+
+  // ── MODULE-LEVEL STATE FOR RULE EDITOR ──
+  let _editRuleId   = null;
+  let _editRuleBuf  = {};  // local buffer for the rule being edited
+
+  // ── ALERTS DASHBOARD ──
   function renderAlerts() {
-    const { state, SLOTS, esc } = MX;
-    let h = `<div class="info-note" style="margin-bottom:12px">
-      <i class="fas fa-bell"></i> Les rappels sont envoyés par <strong>notification push</strong> aux techniciens assignés si la checklist n'est pas terminée à la deadline.
-      Les appareils doivent avoir accepté les notifications et être inscrits.
-    </div>`;
+    const { state, esc } = MX;
+    const alerts = (state.triggeredAlerts || []).slice().sort((a, b) => {
+      const ta = a.ts?.seconds || 0;
+      const tb = b.ts?.seconds || 0;
+      return tb - ta;
+    });
+    const counts = { critical: 0, important: 0, warning: 0, info: 0 };
+    alerts.forEach(a => { if (counts[a.level] !== undefined) counts[a.level]++; });
+    const hasUnack = alerts.some(a => !a.acknowledged);
+
+    let h = `<div class="alert-dash-header">
+      <div style="font-size:13px;font-weight:700;color:var(--text1)">Alertes du jour</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">`;
+    ALERT_LEVELS.slice().reverse().forEach(l => {
+      const cnt = counts[l.id];
+      h += `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;background:${l.bg};border:1px solid ${l.border};font-size:11px;font-weight:700;color:${l.color}">${l.emoji} ${cnt} ${l.label}${cnt!==1?'s':''}</span>`;
+    });
+    if (hasUnack) {
+      h += `<button class="icon-btn" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="MX.Pages.Admin._ackAllAlerts()"><i class="fas fa-check-double"></i> Tout marquer lu</button>`;
+    }
+    h += `</div></div>`;
+
+    if (!alerts.length) {
+      h += `<div class="plng-events-empty" style="margin-top:16px"><i class="fas fa-circle-check" style="color:#22C55E"></i> Aucune alerte aujourd'hui</div>`;
+    } else {
+      h += `<div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">`;
+      alerts.forEach(a => {
+        const lv  = _alertLevel(a.level);
+        const ts  = a.ts?.seconds ? new Date(a.ts.seconds * 1000) : null;
+        const tLbl = ts ? String(ts.getHours()).padStart(2,'0') + 'h' + String(ts.getMinutes()).padStart(2,'0') : '';
+        const dim  = a.acknowledged ? 'opacity:0.45;' : '';
+        h += `<div style="${dim}display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:${lv.bg};border:1px solid ${lv.border};border-radius:10px">
+          <span style="font-size:18px;line-height:1;flex-shrink:0;margin-top:1px">${lv.emoji}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;font-weight:700;color:${lv.color};margin-bottom:2px">${esc(a.ruleName||'')} ${tLbl ? `<span style="font-weight:400;color:var(--text3)">· ${tLbl}</span>` : ''}</div>
+            <div style="font-size:12.5px;color:var(--text1);line-height:1.45">${esc(a.message||'')}</div>
+          </div>
+          ${!a.acknowledged ? `<button class="icon-btn" style="flex-shrink:0;width:28px;height:28px" title="Marquer comme lu" onclick="MX.Pages.Admin._ackAlert('${esc(a.id)}')"><i class="fas fa-check" style="font-size:11px"></i></button>` : ''}
+        </div>`;
+      });
+      h += `</div>`;
+    }
+
+    h += `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.5px;color:var(--text3);margin-bottom:8px">RAPPELS PUSH PAR POSTE</div>`;
+    const { SLOTS } = MX;
     ["matin","journee","soir"].forEach(sl => {
       const s   = SLOTS[sl];
       const cfg = (state.alerts || {})[sl] || {};
-      const dimVar = sl === 'matin' ? 'matin' : sl === 'journee' ? 'jour' : 'soir';
       h += `<div class="acfg">
-        <div class="acfg-hd" style="background:var(--${dimVar}-dim)">
+        <div class="acfg-hd" style="background:var(--${sl==='matin'?'matin':sl==='journee'?'jour':'soir'}-dim)">
           <div class="ch-ico ${s.c}" style="width:32px;height:32px">${s.e}</div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:600">${s.l}</div>
-            <div style="font-size:11px;color:var(--text3)">${cfg.active ? '🔔 Rappel push actif' : '🔕 Rappel désactivé'}</div>
-          </div>
+          <div style="flex:1"><div style="font-size:13px;font-weight:600">${s.l}</div>
+          <div style="font-size:11px;color:var(--text3)">${cfg.active?'🔔 Push actif':'🔕 Désactivé'}</div></div>
           <button class="tog ${cfg.active?'on':'off'}" onclick="MX.Pages.Admin.togAlert('${sl}')" aria-label="Toggle"></button>
         </div>
-        <div class="rfield">
-          <label>Heure du rappel</label>
+        <div class="rfield"><label>Heure du rappel</label>
           <input class="ri" type="time" value="${esc(cfg.deadline||'')}" oninput="MX.Pages.Admin.updAlert('${sl}','deadline',this.value)">
         </div>
       </div>`;
     });
+    h += `</div>`;
     return h;
+  }
+
+  // ── ALERT RULES CONFIG ──
+  function renderAlertRules() {
+    const { state, esc } = MX;
+    const rules = state.alertRules || [];
+    let h = `<div class="info-note" style="margin-bottom:14px"><i class="fas fa-sliders"></i> Créez des règles d'alerte personnalisées. Elles sont évaluées toutes les 5 minutes quand l'application est ouverte.</div>`;
+
+    if (!rules.length && _editRuleId !== '__new__') {
+      h += `<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px"><i class="fas fa-bell-slash"></i><br><br>Aucune règle définie.</div>`;
+    }
+
+    rules.forEach(rule => {
+      const isEditing = _editRuleId === rule.id;
+      const lv = _alertLevel(rule.level);
+      const conds = rule.conditions || [];
+      h += `<div class="apcard${isEditing?' apcard--active':''}" style="margin-bottom:8px">
+        <div class="aphd">
+          <span style="font-size:18px;flex-shrink:0">${lv.emoji}</span>
+          <div style="flex:1;min-width:0;margin-left:4px">
+            <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
+              ${esc(rule.name||'Règle sans nom')}
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:${lv.bg};color:${lv.color};border:1px solid ${lv.border}">${lv.label}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${conds.length} condition${conds.length!==1?'s':''} · cooldown ${rule.cooldownMin||60}min</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="tog ${rule.active!==false?'on':'off'}" title="${rule.active!==false?'Activer':'Désactiver'}" onclick="MX.Pages.Admin._toggleRuleActive('${esc(rule.id)}',${!(rule.active!==false)})" aria-label="Toggle"></button>
+            <button class="icon-btn" title="Modifier" onclick="MX.Pages.Admin._editRule('${esc(rule.id)}')"><i class="fas fa-pen"></i></button>
+            <button class="icon-btn del" title="Supprimer" onclick="MX.Pages.Admin._delRule('${esc(rule.id)}')"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+        ${isEditing ? _ruleEditorHtml(false) : ''}
+      </div>`;
+    });
+
+    if (_editRuleId === '__new__') {
+      h += `<div class="apcard apcard--active" style="margin-bottom:12px">
+        <div class="aphd"><span style="font-size:18px">${_alertLevel(_editRuleBuf.level||'warning').emoji}</span><span style="font-weight:700;font-size:13px;margin-left:8px;flex:1">${esc(_editRuleBuf.name||'Nouvelle règle')}</span></div>
+        ${_ruleEditorHtml(true)}
+      </div>`;
+    }
+
+    if (_editRuleId !== '__new__') {
+      h += `<button class="dash-btn" onclick="MX.Pages.Admin._createRule()"><i class="fas fa-plus"></i> Créer une règle</button>`;
+    }
+    return h;
+  }
+
+  function _ruleEditorHtml(isNew) {
+    const esc = MX.esc;
+    const r   = _editRuleBuf;
+    const rid = isNew ? '__new__' : _editRuleId;
+    const conds = r.conditions || [];
+
+    let h = `<div style="border-top:1px solid var(--border);padding:14px 0 4px">
+      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:10px">RÈGLE D'ALERTE</div>
+      <div class="apgrid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <div class="aplbl">Nom</div>
+          <input class="fi fi-sm" placeholder="ex : Progression matin" value="${esc(r.name||'')}"
+            oninput="MX.Pages.Admin._bufRule('name',this.value)">
+        </div>
+        <div>
+          <div class="aplbl">Niveau</div>
+          <select class="fi fi-sm" onchange="MX.Pages.Admin._bufRule('level',this.value)">
+            ${ALERT_LEVELS.map(l=>`<option value="${l.id}"${(r.level||'warning')===l.id?' selected':''}>${l.emoji} ${l.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div class="aplbl">Message</div>
+          <input class="fi fi-sm" placeholder="ex : ⚠ Seulement {progress}% des tâches du matin." value="${esc(r.message||'')}"
+            oninput="MX.Pages.Admin._bufRule('message',this.value)">
+        </div>
+        <div>
+          <div class="aplbl">Cooldown (minutes)</div>
+          <input class="fi fi-sm" type="number" min="1" value="${r.cooldownMin||60}"
+            oninput="MX.Pages.Admin._bufRule('cooldownMin',Number(this.value))">
+        </div>
+      </div>
+
+      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:8px">CONDITIONS <span style="color:var(--text3);text-transform:none;font-weight:400">(toutes doivent être vraies)</span></div>
+      <div id="rule-conds-editor" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">`;
+
+    conds.forEach((c, i) => {
+      h += _condRowHtml(c, i);
+    });
+
+    h += `</div>
+      <button class="dash-btn" style="margin-bottom:14px" onclick="MX.Pages.Admin._addCond()"><i class="fas fa-plus"></i> Ajouter une condition</button>
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;margin-bottom:12px">
+        <input type="checkbox" ${r.notifyBrowser?'checked':''} onchange="MX.Pages.Admin._bufRule('notifyBrowser',this.checked)">
+        Notification navigateur / PWA si autorisée
+      </label>
+
+      <div style="display:flex;gap:8px">
+        ${isNew
+          ? `<button class="save-btn" style="flex:1" onclick="MX.Pages.Admin._confirmSaveRule(true)"><i class="fas fa-check"></i> Créer cette règle</button>
+             <button class="icon-btn" style="padding:0 14px" onclick="MX.Pages.Admin._cancelEditRule()">Annuler</button>`
+          : `<button class="save-btn" style="flex:1" onclick="MX.Pages.Admin._confirmSaveRule(false)"><i class="fas fa-check"></i> Enregistrer</button>
+             <button class="icon-btn" style="padding:0 14px" onclick="MX.Pages.Admin._cancelEditRule()">Annuler</button>`
+        }
+      </div>
+    </div>`;
+    return h;
+  }
+
+  function _condRowHtml(c, i) {
+    const esc = MX.esc;
+    const def = _condDef(c.type);
+    const SLOT_OPTS = ['matin','journee','soir'].map(s=>`<option value="${s}"${c.slot===s?' selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('');
+    let fieldHtml = '';
+    (def.fields||[]).forEach(f => {
+      if (f.type === 'slot') {
+        fieldHtml += `<select class="fi fi-sm" style="min-width:90px" onchange="MX.Pages.Admin._updCond(${i},'${f.key}',this.value)"><option value="">Poste</option>${SLOT_OPTS}</select>`;
+      } else {
+        fieldHtml += `<input class="fi fi-sm" type="${f.type||'text'}" placeholder="${esc(f.placeholder||f.label)}"
+          ${f.min!==undefined?`min="${f.min}"`:''}
+          ${f.max!==undefined?`max="${f.max}"`:''}
+          value="${esc(String(c[f.key]??''))}"
+          style="min-width:80px;max-width:100px"
+          oninput="MX.Pages.Admin._updCond(${i},'${f.key}',this.${f.type==='number'?'valueAsNumber||Number(this.value)':'value'})">`;
+      }
+    });
+    return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px">
+      <select class="fi fi-sm" style="min-width:180px" onchange="MX.Pages.Admin._setCond(${i},'type',this.value)">
+        ${COND_DEFS.map(cd=>`<option value="${cd.type}"${c.type===cd.type?' selected':''}>${esc(cd.label)}</option>`).join('')}
+      </select>
+      ${fieldHtml}
+      <button class="icon-btn del" style="width:28px;height:28px;flex-shrink:0;margin-left:auto" onclick="MX.Pages.Admin._rmCond(${i})"><i class="fas fa-times" style="font-size:11px"></i></button>
+    </div>`;
+  }
+
+  // Rule CRUD helpers
+  function _editRule(id) {
+    const rule = (MX.state.alertRules || []).find(r => r.id === id);
+    if (!rule) return;
+    _editRuleId  = id;
+    _editRuleBuf = JSON.parse(JSON.stringify(rule)); // deep copy
+    render();
+  }
+
+  function _createRule() {
+    _editRuleId  = '__new__';
+    _editRuleBuf = { name: '', level: 'warning', conditions: [], message: '', cooldownMin: 60, notifyBrowser: false, active: true, order: (MX.state.alertRules || []).length };
+    render();
+  }
+
+  function _cancelEditRule() {
+    _editRuleId  = null;
+    _editRuleBuf = {};
+    render();
+  }
+
+  async function _confirmSaveRule(isNew) {
+    if (!_editRuleBuf.name || !_editRuleBuf.name.trim()) {
+      MX.toast && MX.toast('Saisissez un nom pour cette règle', true);
+      return;
+    }
+    if (isNew) {
+      await MX.DB.addAlertRule({ ..._editRuleBuf });
+    } else {
+      const { id: _id, createdAt: _ca, ...rest } = _editRuleBuf;
+      await MX.DB.updateAlertRule(_editRuleId, rest);
+    }
+    _editRuleId  = null;
+    _editRuleBuf = {};
+    render();
+  }
+
+  function _bufRule(key, val) {
+    _editRuleBuf[key] = val;
+    // Refresh the emoji in the card header if level changes
+    if (key === 'level' || key === 'name') {
+      const hdr = document.querySelector('.apcard--active .aphd span:first-child');
+      const nm  = document.querySelector('.apcard--active .aphd span:last-child');
+      if (hdr && key === 'level') hdr.textContent = _alertLevel(val).emoji;
+      if (nm  && key === 'name' ) nm.textContent  = val || 'Nouvelle règle';
+    }
+  }
+
+  function _addCond() {
+    _editRuleBuf.conditions = _editRuleBuf.conditions || [];
+    _editRuleBuf.conditions.push({ type: 'time_after', value: '' });
+    _refreshCondsEditor();
+  }
+
+  function _rmCond(i) {
+    (_editRuleBuf.conditions || []).splice(i, 1);
+    _refreshCondsEditor();
+  }
+
+  function _setCond(i, key, val) {
+    const conds = _editRuleBuf.conditions || [];
+    if (!conds[i]) return;
+    // When type changes, reset condition to defaults
+    const oldType = conds[i].type;
+    if (key === 'type' && val !== oldType) {
+      conds[i] = { type: val };
+    } else {
+      conds[i][key] = val;
+    }
+    if (key === 'type') _refreshCondsEditor();
+  }
+
+  function _updCond(i, key, val) {
+    const conds = _editRuleBuf.conditions || [];
+    if (conds[i]) conds[i][key] = val;
+    // No re-render — input keeps its own value
+  }
+
+  function _refreshCondsEditor() {
+    const el = document.getElementById('rule-conds-editor');
+    if (!el) return;
+    el.innerHTML = (_editRuleBuf.conditions || []).map((c, i) => _condRowHtml(c, i)).join('');
+  }
+
+  function _toggleRuleActive(id, val) {
+    MX.DB.updateAlertRule(id, { active: val });
+  }
+
+  function _delRule(id) {
+    const rule = (MX.state.alertRules || []).find(r => r.id === id);
+    if (!confirm(`Supprimer la règle "${rule ? rule.name : id}" ?`)) return;
+    MX.DB.deleteAlertRule(id);
+    if (_editRuleId === id) { _editRuleId = null; _editRuleBuf = {}; }
+    render();
+  }
+
+  function _ackAlert(id) {
+    MX.DB.acknowledgeAlert(id);
+  }
+
+  function _ackAllAlerts() {
+    const alerts = MX.state.triggeredAlerts || [];
+    alerts.filter(a => !a.acknowledged).forEach(a => MX.DB.acknowledgeAlert(a.id));
   }
 
   // ── ORDERS ──
@@ -2145,5 +2449,8 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     _dbRepair,
     _editRole, _createRole, _cancelEditRole, _confirmCreateRole, _dupRole, _delRole,
     _saveRoleMeta, _togglePerm,
+    _editRule, _createRule, _cancelEditRule, _confirmSaveRule, _bufRule,
+    _addCond, _rmCond, _setCond, _updCond, _refreshCondsEditor,
+    _toggleRuleActive, _delRule, _ackAlert, _ackAllAlerts,
   };
 })();

@@ -1008,6 +1008,45 @@
   async function updateRole(id, data) { await R_ROLES().doc(id).update(data); }
   async function deleteRole(id)       { await R_ROLES().doc(id).delete(); }
 
+  // ── ALERT RULES (custom alert conditions) ──
+  const R_ALERT_RULES = () => db.collection('alert_rules');
+  const R_TRIG        = () => db.collection('triggered_alerts');
+
+  function listenAlertRules(cb) {
+    return R_ALERT_RULES().orderBy('order').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  async function addAlertRule(data) {
+    const ref = await R_ALERT_RULES().add({ ...data, createdAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+
+  async function updateAlertRule(id, data) { await R_ALERT_RULES().doc(id).update(data); }
+  async function deleteAlertRule(id)        { await R_ALERT_RULES().doc(id).delete(); }
+
+  function listenTriggeredAlerts(dateKey, cb) {
+    return R_TRIG().where('dateKey', '==', dateKey).orderBy('ts', 'desc').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+
+  async function createTriggeredAlert(data) {
+    return R_TRIG().add({ ...data, ts: FV.serverTimestamp() });
+  }
+
+  async function acknowledgeAlert(id) {
+    await R_TRIG().doc(id).update({ acknowledged: true });
+  }
+
+  async function clearTodayAlerts(dateKey) {
+    const snap  = await R_TRIG().where('dateKey', '==', dateKey).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    return batch.commit();
+  }
+
   // ── WEEKLY CHECKS (historical archive per week) ──
   const R_WC = () => db.collection('weekly_checks');
 
@@ -1085,6 +1124,8 @@
     markNotificationRead, markAllNotificationsRead,
     deleteNotification, archiveNotification,
     listenRoles, addRole, updateRole, deleteRole,
+    listenAlertRules, addAlertRule, updateAlertRule, deleteAlertRule,
+    listenTriggeredAlerts, createTriggeredAlert, acknowledgeAlert, clearTodayAlerts,
     getWeeklyChecks, saveWeeklyChecks, deleteWeeklyChecks, updateWeeklyTasks, promoteWeeklyToActive,
   };
 })();

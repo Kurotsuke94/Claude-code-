@@ -8111,3 +8111,24 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   /* Desktop: status bar is visible, hide topbar dot (topbar is hidden on desktop anyway) */
   .topbar-sync-dot { display: none; }
 }
+
+/* ── Alert dashboard header ── */
+.alert-dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.alert-dash-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.alert-dash-header .alert-dash-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

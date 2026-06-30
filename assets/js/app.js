@@ -395,7 +395,9 @@
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('pin')" title="Codes PIN"><i class="fas fa-key sx-ico"></i><span class="sx-lbl">Codes PIN & Accès</span></button>`;
         aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('absences')" title="Absences"><i class="fas fa-umbrella-beach sx-ico"></i><span class="sx-lbl">Absences</span></button>`;
       }
-      h += _group("fa-shield-halved", "sx-group-ico--orange", "Administration", "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Administration");
+      const _alertCnt = (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
+      const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
+      h += _group("fa-shield-halved", "sx-group-ico--orange", "Administration" + _alertBadge, "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Administration");
     }
 
     // ── Paramètres (standalone) ──
@@ -491,6 +493,13 @@
       </button>
       ${userHtml}
     `;
+  }
+
+  function _updAlertBadge() {
+    const alerts = MX.state.triggeredAlerts || [];
+    const cnt    = alerts.filter(a => !a.acknowledged).length;
+    const el     = document.getElementById('sxdb_alert-badge');
+    if (el) { el.textContent = cnt || ''; el.style.display = cnt ? '' : 'none'; }
   }
 
   function _updBadges() {
@@ -904,6 +913,22 @@
     DB.listenRoles(list => {
       state.roles = list;
       buildNav();
+    });
+
+    DB.listenAlertRules(list => {
+      state.alertRules = list;
+      if (MX.AlertsEngine && !MX.AlertsEngine._started) {
+        MX.AlertsEngine._started = true;
+        MX.AlertsEngine.start();
+      }
+    });
+
+    DB.listenTriggeredAlerts(state.todayDateStr, list => {
+      state.triggeredAlerts = list;
+      _updAlertBadge();
+      if (state.currentPage === 'utilisateurs' || state.currentPage === 'admin') {
+        MX.Pages.Admin && MX.Pages.Admin.render();
+      }
     });
 
     DB.listenLogs(list => {
