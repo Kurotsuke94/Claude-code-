@@ -2,14 +2,19 @@
   'use strict';
 
   // ── STATE ──
-  let _curTab     = 'dashboard';
-  let _csoSelDate = ''; // '' = today; set to 'YYYY-MM-DD' when browsing a past date
-  let _meters     = [];
-  let _readings   = [];
-  let _clients    = {};
-  let _loaded     = false;
-  let _unsubCso   = {};
-  let _photoB64   = null;
+  let _curTab        = 'dashboard';
+  let _csoSelDate    = ''; // '' = today; set to 'YYYY-MM-DD' when browsing a past date
+  let _meters        = [];
+  let _readings      = [];
+  let _clients       = {};
+  let _loaded        = false;
+  let _unsubCso      = {};
+  let _photoB64      = null;
+  let _csoSearch     = '';
+  let _csoTypeFilter = 'all';
+  let _openZones     = null; // null = not yet loaded
+  let _relQueue      = [];   // meter IDs for "Relever tout" queue
+  let _relQueueIdx   = 0;
 
   // ── CONSTANTS ──
   const FV = firebase.firestore.FieldValue;
@@ -24,6 +29,8 @@
     eau_chaude:  { icon: '🔥', label: 'Eau chaude',  unit: 'm³',  color: '#F97316', dim: 'rgba(249,115,22,0.15)'  },
     electricite: { icon: '⚡', label: 'Électricité', unit: 'kWh', color: '#F59E0B', dim: 'rgba(245,158,11,0.15)'  },
     gaz:         { icon: '🌬', label: 'Gaz',         unit: 'm³',  color: '#A78BFA', dim: 'rgba(167,139,250,0.15)' },
+    vapeur:      { icon: '♨️', label: 'Vapeur',      unit: 'kg',  color: '#EC4899', dim: 'rgba(236,72,153,0.15)'  },
+    eau_glacee:  { icon: '🧊', label: 'Eau glacée',  unit: 'm³',  color: '#06B6D4', dim: 'rgba(6,182,212,0.15)'   },
   };
 
   const TABS = [
@@ -252,27 +259,122 @@
     </div>`;
   }
 
-  // ── TAB: COMPTEURS & RATIOS ──
+  // ── ZONE HELPERS ──
+  function _getOpenZones() {
+    if (_openZones !== null) return _openZones;
+    try { _openZones = JSON.parse(localStorage.getItem('mx_cso_zones') || '{}'); }
+    catch(e) { _openZones = {}; }
+    return _openZones;
+  }
+  function _saveOpenZones() {
+    try { localStorage.setItem('mx_cso_zones', JSON.stringify(_openZones)); } catch(e) {}
+  }
+  function _toggleZone(encoded) {
+    const zone = decodeURIComponent(encoded);
+    const oz   = _getOpenZones();
+    oz[zone]   = oz[zone] !== false ? false : true; // default open; false = closed
+    _saveOpenZones();
+    _rerender();
+  }
+  function _zoneGroups() {
+    const g = {};
+    _meters.forEach(m => {
+      const z = (m.location || '').trim() || 'Sans zone';
+      if (!g[z]) g[z] = [];
+      g[z].push(m);
+    });
+    return g;
+  }
+  function _filteredMeters(meters, selDate) {
+    return meters.filter(m => {
+      if (_csoTypeFilter === 'pending') {
+        if (_readings.some(r => r.meterId === m.id && r.date === selDate)) return false;
+      } else if (_csoTypeFilter === 'done') {
+        if (!_readings.some(r => r.meterId === m.id && r.date === selDate)) return false;
+      } else if (_csoTypeFilter !== 'all') {
+        if (m.type !== _csoTypeFilter) return false;
+      }
+      if (_csoSearch) {
+        const q    = _csoSearch.toLowerCase();
+        const meta = MT[m.type] || MT.eau_froide;
+        if (!m.name.toLowerCase().includes(q) &&
+            !(m.location || '').toLowerCase().includes(q) &&
+            !meta.label.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }
+  function _csoSetSearch(v) { _csoSearch = v; _rerender(); }
+  function _csoSetFilter(v) { _csoTypeFilter = v; _rerender(); }
+  function _releverZone(encoded) {
+    const location  = decodeURIComponent(encoded);
+    const selDate   = _csoSelDate || _today();
+    const allInZone = _meters.filter(m => ((m.location || '').trim() || 'Sans zone') === location);
+    const pending   = allInZone.filter(m => !_readings.some(r => r.meterId === m.id && r.date === selDate));
+    if (!pending.length) { MX.toast && MX.toast('✅ Tous les relevés de cette zone sont effectués !'); return; }
+    _relQueue    = pending.map(m => m.id);
+    _relQueueIdx = 0;
+    _nextQueueReading();
+  }
+  function _nextQueueReading() {
+    if (_relQueueIdx >= _relQueue.length) {
+      _relQueue = [];
+      MX.toast && MX.toast('✅ Tous les relevés effectués !');
+      return;
+    }
+    const meterId = _relQueue[_relQueueIdx];
+    const m = _meters.find(x => x.id === meterId);
+    if (!m) { _relQueueIdx++; _nextQueueReading(); return; }
+    _newReading(meterId);
+  }
+  function _meterRowHtml(m, selDate, cli, isToday) {
+    const meta     = MT[m.type] || MT.eau_froide;
+    const unit     = m.unit || meta.unit;
+    const isW      = m.type === 'eau_froide' || m.type === 'eau_chaude';
+    const dateRdgs = _readings.filter(r => r.meterId === m.id && r.date === selDate);
+    const lr       = dateRdgs[0];
+    const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
+    const ratio    = cli > 0 && selConso > 0 ? (isW ? selConso * 1000 / cli : selConso / cli) : null;
+    const hasRdg   = !!lr;
+    let valLine = '';
+    if (lr) {
+      valLine = `Index&thinsp;: <b>${_fmtIdx(lr.index)}&thinsp;${esc(unit)}</b>`;
+      if (selConso) valLine += ` &middot; Conso&thinsp;: +<b>${_fmtIdx(selConso)}</b>`;
+      if (ratio !== null) valLine += ` &middot; R&thinsp;: <b>${_fmt(ratio, isW ? 0 : 2)}</b>`;
+    } else {
+      valLine = `<span class="cso-mrow-empty"><i class="fas fa-circle-minus"></i> Aucun relevé${isToday ? '' : ' ce jour'}</span>`;
+    }
+    return `<div class="cso-mrow ${hasRdg ? 'done' : 'pending'}" onclick="MX.Pages.Conso._newReading('${m.id}')">
+      <div class="cso-mrow-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
+      <div class="cso-mrow-info">
+        <div class="cso-mrow-top">
+          <span class="cso-mrow-name">${esc(m.name)}</span>
+          <span class="cso-mrow-badge ${hasRdg ? 'done' : 'pending'}">${hasRdg ? '✅ Relevé' : '🟠 En attente'}</span>
+        </div>
+        <div class="cso-mrow-vals">${valLine}</div>
+      </div>
+      <div class="cso-mrow-acts" onclick="event.stopPropagation()">
+        <button class="cso-ibtn" title="Historique" onclick="MX.Pages.Conso._meterHistory('${m.id}')"><i class="fas fa-chart-line"></i></button>
+        <button class="cso-ibtn" title="Modifier" onclick="MX.Pages.Conso._meterForm('${m.id}')"><i class="fas fa-pen"></i></button>
+        <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>`;
+  }
+
+  // ── TAB: COMPTEURS & RATIOS (zone-based compact refonte) ──
   function _tCompteurs() {
     const today   = _today();
     const selDate = _csoSelDate || today;
     const isToday = selDate === today;
     const cli     = _clients[selDate] || 0;
-
-    // Compute next/prev dates
-    const prevDs = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
-    const nextDs = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() + 1); const n = d.toISOString().slice(0, 10); return n <= today ? n : null; })();
+    const prevDs  = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
+    const nextDs  = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() + 1); const n = d.toISOString().slice(0, 10); return n <= today ? n : null; })();
 
     let html = `<div class="cso-inner">
       <div class="cso-date-nav">
-        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDatePrev()" title="${_dateLbl(prevDs)}">
-          <i class="fas fa-chevron-left"></i>
-        </button>
-        <input type="date" class="cso-date-inp" value="${selDate}" max="${today}"
-               onchange="MX.Pages.Conso._csoDateSet(this.value)">
-        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDateNext()"${!nextDs ? ' disabled' : ''} title="${nextDs ? _dateLbl(nextDs) : ''}">
-          <i class="fas fa-chevron-right"></i>
-        </button>
+        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDatePrev()" title="${_dateLbl(prevDs)}"><i class="fas fa-chevron-left"></i></button>
+        <input type="date" class="cso-date-inp" value="${selDate}" max="${today}" onchange="MX.Pages.Conso._csoDateSet(this.value)">
+        <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDateNext()"${!nextDs ? ' disabled' : ''} title="${nextDs ? _dateLbl(nextDs) : ''}"><i class="fas fa-chevron-right"></i></button>
         ${!isToday ? `<button class="cso-date-today-btn" onclick="MX.Pages.Conso._csoDateSet('${today}')">Aujourd'hui</button>` : ''}
       </div>
       <div class="cso-cli-bar">
@@ -284,108 +386,84 @@
         <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${selDate}',${cli})">
           <i class="fas fa-pen"></i> ${cli > 0 ? 'Modifier' : 'Saisir'}
         </button>
-      </div>
-      <div class="cso-ph">
-        <div class="cso-ph-ttl"><i class="fas fa-gauge-high"></i> ${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</div>
-        <button class="cso-add-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>
       </div>`;
 
     if (!_meters.length) {
       html += `<div class="cso-empty-st">
         <div class="cso-empty-ico"><i class="fas fa-gauge-high"></i></div>
         <div class="cso-empty-ttl">Aucun compteur configuré</div>
-        <div class="cso-empty-sub">Ajoutez votre premier compteur pour commencer à enregistrer vos consommations.</div>
+        <div class="cso-empty-sub">Ajoutez votre premier compteur pour commencer.</div>
         <button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Ajouter un compteur</button>
       </div>`;
     } else {
-      Object.entries(MT).forEach(([type, meta]) => {
-        const list = _meters.filter(m => m.type === type);
-        if (!list.length) return;
-        const isW = type === 'eau_froide' || type === 'eau_chaude';
-        html += `<div class="cso-type-sec">
-          <div class="cso-type-hd">${meta.icon} ${meta.label}</div>
-          <div class="cso-mcard-grid">`;
-
-        list.forEach(m => {
-          const unit     = m.unit || meta.unit;
-          const rUnit    = isW ? 'L/client' : `${unit}/client`;
-          // Readings scoped to the selected date
-          const dateRdgs = _readings.filter(r => r.meterId === m.id && r.date === selDate);
-          const lr       = dateRdgs[0]; // most-recent reading on selDate (array sorted desc)
-          const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
-          const ratio    = cli > 0 && selConso > 0
-            ? (isW ? selConso * 1000 / cli : selConso / cli)
-            : null;
-
-          html += `<div class="cso-mcard">
-            <div class="cso-mcard-top" style="background:linear-gradient(135deg,${meta.color}22 0%,${meta.color}0a 100%);border-bottom:2px solid ${meta.color}55">
-              <span class="cso-mcard-emoji">${meta.icon}</span>
-              <span class="cso-mcard-type" style="color:${meta.color}">${meta.label}</span>
-              ${m.location ? `<span class="cso-mcard-loc"><i class="fas fa-location-dot"></i> ${esc(m.location)}</span>` : ''}
-            </div>
-            <div class="cso-mcard-body">
-              <div class="cso-mcard-name">${esc(m.name)}</div>
-              <div class="cso-mcard-idx-wrap">
-                <div class="cso-mcard-idx-lbl">${isToday ? 'Index actuel' : `Index du ${_dateLbl(selDate)}`}</div>
-                <div class="cso-mcard-idx-val">${lr ? _fmtIdx(lr.index) : '—'}<span class="cso-mcard-u"> ${esc(unit)}</span></div>
-              </div>
-              <div class="cso-mcard-stats">
-                <div class="cso-mcard-stat">
-                  <div class="cso-mcard-stat-lbl">Consommation</div>
-                  <div class="cso-mcard-stat-val${selConso ? '' : ' cso-stat-empty'}">${selConso ? _fmtIdx(selConso) : '—'}</div>
-                  <div class="cso-mcard-stat-u">${esc(unit)}</div>
-                </div>
-                <div class="cso-mcard-stat">
-                  <div class="cso-mcard-stat-lbl">Ratio / client</div>
-                  <div class="cso-mcard-stat-val${ratio !== null ? '' : ' cso-stat-empty'}">${ratio !== null ? _fmt(ratio, isW ? 0 : 2) : '—'}</div>
-                  <div class="cso-mcard-stat-u">${ratio !== null ? rUnit : (cli ? esc(unit) : 'clients ?')}</div>
-                </div>
-              </div>
-              <div class="cso-mcard-last">
-                ${lr
-                  ? `<i class="fas fa-clock"></i> ${lr.technicienName ? `<b>${esc(lr.technicienName)}</b> · ` : ''}${_dateLbl(lr.date)}`
-                  : `<span style="color:var(--text3)"><i class="fas fa-ban"></i> Aucun relevé ce jour</span>`}
-              </div>
-            </div>
-            <div class="cso-mcard-acts">
-              <button class="cso-mact primary" onclick="MX.Pages.Conso._newReading('${m.id}')">
-                <i class="fas fa-camera"></i><span class="cso-mact-txt"> Relevé</span>
-              </button>
-              <button class="cso-mact" onclick="MX.Pages.Conso._meterHistory('${m.id}')">
-                <i class="fas fa-chart-line"></i><span class="cso-mact-txt"> Historique</span>
-              </button>
-              <button class="cso-mact" onclick="MX.Pages.Conso._meterForm('${m.id}')">
-                <i class="fas fa-pen"></i>
-              </button>
-              <button class="cso-mact del" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')">
-                <i class="fas fa-trash"></i>
-              </button>
-            </div>
-          </div>`;
-        });
-
-        html += `</div></div>`;
-      });
-    }
-
-    // ── Client history ──
-    const cliEntries = Object.entries(_clients)
-      .filter(([, v]) => v > 0)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .slice(0, 30);
-    if (cliEntries.length) {
-      html += `<div class="cso-cli-hist">
-        <div class="cso-cli-hist-ttl"><i class="fas fa-calendar-days"></i> Historique clients</div>
-        <div class="cso-cli-hist-list">
-          ${cliEntries.map(([ds, count]) => `
-            <div class="cso-cli-hist-row${ds === selDate ? ' active' : ''}" onclick="MX.Pages.Conso._csoDateSet('${ds}')">
-              <span class="cso-cli-hist-date">${_dateLbl(ds)}</span>
-              <span class="cso-cli-hist-count">👥 ${count} client${count > 1 ? 's' : ''}</span>
-            </div>`).join('')}
-        </div>
+      // ── Barre de recherche ──
+      html += `<div class="cso-compt-search-wrap">
+        <i class="fas fa-magnifying-glass cso-search-ico"></i>
+        <input class="cso-compt-search" type="search" placeholder="Nom, zone, type..." autocomplete="off"
+               value="${esc(_csoSearch)}" oninput="MX.Pages.Conso._csoSetSearch(this.value)">
+        ${_csoSearch ? `<button class="cso-search-clr" onclick="MX.Pages.Conso._csoSetSearch('')"><i class="fas fa-xmark"></i></button>` : ''}
       </div>`;
-    }
 
+      // ── Filtres rapides ──
+      const doneAll  = _meters.filter(m => _readings.some(r => r.meterId === m.id && r.date === selDate)).length;
+      const pendAll  = _meters.length - doneAll;
+      const usedTypes = [...new Set(_meters.map(m => m.type))].filter(t => MT[t]);
+      html += `<div class="cso-fchips">
+        <button class="cso-fchip${_csoTypeFilter === 'all' ? ' act' : ''}" onclick="MX.Pages.Conso._csoSetFilter('all')">Tous <span class="cso-fchip-cnt">${_meters.length}</span></button>
+        <button class="cso-fchip${_csoTypeFilter === 'pending' ? ' act act-orange' : ''}" onclick="MX.Pages.Conso._csoSetFilter('pending')">🟠 À faire <span class="cso-fchip-cnt">${pendAll}</span></button>
+        <button class="cso-fchip${_csoTypeFilter === 'done' ? ' act act-green' : ''}" onclick="MX.Pages.Conso._csoSetFilter('done')">✅ Relevés <span class="cso-fchip-cnt">${doneAll}</span></button>
+        ${usedTypes.map(t => { const mt2 = MT[t]; return `<button class="cso-fchip${_csoTypeFilter === t ? ' act' : ''}" onclick="MX.Pages.Conso._csoSetFilter('${t}')">${mt2.icon} ${mt2.label}</button>`; }).join('')}
+      </div>`;
+
+      // ── Groupes par zone ──
+      const groups     = _zoneGroups();
+      const zoneSorted = Object.keys(groups).sort((a, b) => {
+        if (a === 'Sans zone') return 1;
+        if (b === 'Sans zone') return -1;
+        return a.localeCompare(b, 'fr');
+      });
+      let anyVisible = false;
+      zoneSorted.forEach(zone => {
+        const allInZone = groups[zone];
+        const filtered  = _filteredMeters(allInZone, selDate);
+        if (!filtered.length) return;
+        anyVisible = true;
+        const oz     = _getOpenZones();
+        const isOpen = oz[zone] !== false; // default: open
+        const done   = allInZone.filter(m => _readings.some(r => r.meterId === m.id && r.date === selDate)).length;
+        const total  = allInZone.length;
+        const pct    = total ? Math.round(done / total * 100) : 0;
+        const barClr = pct === 100 ? '#34d399' : pct >= 50 ? '#f59e0b' : '#f87171';
+        const enc    = encodeURIComponent(zone);
+        html += `<div class="cso-zone${isOpen ? ' open' : ''}">
+          <div class="cso-zone-hd" onclick="MX.Pages.Conso._toggleZone('${enc}')">
+            <div class="cso-zone-hd-left">
+              <span class="cso-zone-chev">${isOpen ? '▼' : '▶'}</span>
+              <span class="cso-zone-ico">📍</span>
+              <span class="cso-zone-name">${esc(zone)}</span>
+              <span class="cso-zone-total">${total}</span>
+            </div>
+            <button class="cso-zone-relev-btn" onclick="event.stopPropagation();MX.Pages.Conso._releverZone('${enc}')">
+              <i class="fas fa-clipboard-list"></i><span class="cso-zone-relev-lbl"> Relever tout</span>
+            </button>
+          </div>
+          <div class="cso-zone-prog">
+            <div class="cso-zone-prog-txt">
+              <span>${done === total ? '<span class="cso-zp-done">✅ Complet</span>' : `<span class="cso-zp-pend">🟠 ${total - done} en attente</span>`} · ${done}/${total}</span>
+              <span class="cso-zone-pct">${pct}%</span>
+            </div>
+            <div class="cso-zone-track"><div class="cso-zone-fill" style="width:${pct}%;background:${barClr}"></div></div>
+          </div>
+          ${isOpen ? `<div class="cso-zone-body">${filtered.map(m => _meterRowHtml(m, selDate, cli, isToday)).join('')}</div>` : ''}
+        </div>`;
+      });
+      if (!anyVisible) {
+        html += `<div class="cso-empty-st"><div class="cso-empty-ico"><i class="fas fa-magnifying-glass"></i></div>
+          <div class="cso-empty-ttl">Aucun résultat</div>
+          <div class="cso-empty-sub">Modifiez le filtre ou la recherche.</div></div>`;
+      }
+      html += `<button class="cso-add-meter-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>`;
+    }
     return html + '</div>';
   }
 
@@ -801,9 +879,11 @@
       const meta = MT[m.type] || MT.eau_froide;
       return `<option value="${m.id}"${m.id===preId?' selected':''}>${meta.icon} ${esc(m.name)}</option>`;
     }).join('');
+    const inQueue = _relQueue.length > 0 && _relQueueIdx < _relQueue.length;
+    const title   = inQueue ? `📷 Relevé ${_relQueueIdx + 1}/${_relQueue.length}` : '📷 Nouveau relevé';
 
     MX.showModal({
-      title: '📷 Nouveau relevé',
+      title,
       sub: '',
       body: `<div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
         <select id="cso-rm" class="fi">${opts}</select>
@@ -817,8 +897,8 @@
         <img id="cso-rp-prev" style="display:none;width:100%;max-height:180px;object-fit:contain;border-radius:8px;border:1px solid var(--border2)">
       </div>`,
       actions: [
-        { label: 'Enregistrer', cls: 'confirm', fn: _saveReading },
-        { label: 'Annuler',     cls: 'cancel',  fn: () => { _photoB64 = null; } }
+        { label: inQueue && _relQueueIdx < _relQueue.length - 1 ? `Enregistrer (${_relQueueIdx+1}/${_relQueue.length}) →` : 'Enregistrer', cls: 'confirm', fn: _saveReading },
+        { label: 'Annuler', cls: 'cancel', fn: () => { _photoB64 = null; _relQueue = []; _relQueueIdx = 0; } }
       ]
     });
     setTimeout(() => document.getElementById('cso-ri')?.focus(), 100);
@@ -884,6 +964,10 @@
       await CSO.meters().doc(meterId).update({ lastIndex: index, lastReadAt: FV.serverTimestamp() });
       _photoB64 = null;
       MX.toast(consumption !== null ? `Relevé enregistré · +${_fmtIdx(consumption)} ${m.unit}` : 'Relevé enregistré');
+      if (_relQueue.length && _relQueueIdx < _relQueue.length) {
+        _relQueueIdx++;
+        setTimeout(() => _nextQueueReading(), 600);
+      }
     } catch(e) { MX.toast('Erreur enregistrement', true); console.error(e); }
   }
 
@@ -962,5 +1046,6 @@
     _allMeters, _csv, _pdf,
     _csoDateSet, _csoDatePrev, _csoDateNext,
     _getCsoState, _load,
+    _csoSetSearch, _csoSetFilter, _toggleZone, _releverZone,
   };
 })();
