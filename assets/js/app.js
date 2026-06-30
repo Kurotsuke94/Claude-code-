@@ -382,19 +382,36 @@
     // ── 🎯 Centre de Pilotage (respOnly) ──
     if (canAll) {
       const isAdmin = MX.Auth.isAdmin();
+      function _tabBtn(tabId, icon, label) {
+        return `<button class="sx-item sx-sub" onclick="MX.showAdminTab('${tabId}')" title="${label}"><i class="fas ${icon} sx-ico"></i><span class="sx-lbl">${label}</span></button>`;
+      }
+      function _sec(label) {
+        return `<div class="sx-sec-sep"><span>${label}</span></div>`;
+      }
       let aItems = "";
-      aItems += _item("utilisateurs", "fa-users",       "Utilisateurs",    { sub: true });
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('roles')" title="Rôles"><i class="fas fa-shield-halved sx-ico"></i><span class="sx-lbl">Rôles</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('alerts')" title="Alertes"><i class="fas fa-bell sx-ico"></i><span class="sx-lbl">Alertes</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('alertes-config')" title="Config Alertes"><i class="fas fa-bell-concierge sx-ico"></i><span class="sx-lbl">Config Alertes</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('bible-admin')" title="Validation Bible"><i class="fas fa-book-open sx-ico"></i><span class="sx-lbl">Validation Bible</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('logs')" title="Activité"><i class="fas fa-chart-line sx-ico"></i><span class="sx-lbl">Activité</span></button>`;
-      aItems += _item("org-resp",     "fa-users-gear",  "Organisation",    { sub: true, favable: true });
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('badges-admin')" title="Badges"><i class="fas fa-medal sx-ico"></i><span class="sx-lbl">Badges</span></button>`;
+      aItems += _sec("ÉQUIPE");
+      aItems += _tabBtn("tasks",          "fa-clipboard-list",  "Tâches Responsable");
+      aItems += _tabBtn("team",           "fa-users-gear",      "Gestion Équipe");
+      aItems += _tabBtn("users",          "fa-users",           "Utilisateurs");
+      aItems += _tabBtn("roles",          "fa-shield-halved",   "Rôles");
+
+      aItems += _sec("SUPERVISION");
+      aItems += _tabBtn("alerts",         "fa-bell",            "Alertes");
+      aItems += _tabBtn("alertes-config", "fa-bell-concierge",  "Config Alertes");
+      aItems += _tabBtn("history",        "fa-clock-rotate-left","Historique");
+      aItems += _tabBtn("logs",           "fa-chart-line",      "Activité");
+
+      aItems += _sec("ORGANISATION");
+      aItems += _tabBtn("week",           "fa-calendar-week",   "Gestion Semaines");
+      aItems += _tabBtn("badges-admin",   "fa-medal",           "Badges");
+
+      aItems += _sec("CONNAISSANCES");
+      aItems += _tabBtn("bible-admin",    "fa-book-open",       "Validation Bible");
+
       if (isAdmin) {
         aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
-        aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('superadmin')" title="Hôtels & Config"><i class="fas fa-hotel sx-ico"></i><span class="sx-lbl">Hôtels & Config</span></button>`;
-        aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('pin')" title="Codes PIN"><i class="fas fa-key sx-ico"></i><span class="sx-lbl">Codes PIN & Accès</span></button>`;
+        aItems += _tabBtn("superadmin",   "fa-hotel",           "Hôtels & Config");
+        aItems += _tabBtn("pin",          "fa-key",             "Codes PIN & Accès");
       }
       const _alertCnt = (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;

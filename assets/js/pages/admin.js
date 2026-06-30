@@ -117,28 +117,20 @@
       ? `<button class="logout-btn" onclick="MX.Auth.logout()"><i class="fas fa-lock"></i> Verrouiller</button>`
       : `<button class="logout-btn" onclick="MX.Auth.clearCurrentUser()"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>`;
 
+    const _curTab = tabs.find(t => t.id === aTab) || tabs[0];
+
     let h = `
       <div class="ph">
         <div class="ph-eye">PILOTAGE</div>
         <div class="ph-row">
           <div>
             <div class="ph-title">🎯 Centre de Pilotage</div>
-            <div class="ph-sub">Supervision du service maintenance</div>
+            <div class="ph-sub">${_curTab ? _curTab.label : 'Supervision du service maintenance'}</div>
           </div>
           ${actionBtn}
         </div>
       </div>
-      <div class="page-body">
-        <div class="atabs">
-          ${tabs.map((t, i) => {
-            const prev = tabs[i-1];
-            const sep  = isAdmin && !prev?.adminOnly && t.adminOnly
-              ? `<span class="atab-sep" title="Super Admin uniquement"></span>`
-              : '';
-            return sep + `<button class="atab ${aTab===t.id?'on':''} ${t.adminOnly?'atab--admin':''}"`
-              + ` onclick="MX.Pages.Admin.setTab('${t.id}')">${t.label}</button>`;
-          }).join('')}
-        </div>`;
+      <div class="page-body">`;
 
     if (aTab === "tasks")                        h += renderTasks();
     if (aTab === "team")                         h += renderTeam();

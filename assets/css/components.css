@@ -3948,6 +3948,25 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   flex-shrink: 0;
 }
 
+/* Neutral section separator inside sidebar accordion groups (ÉQUIPE / SUPERVISION / …) */
+.sx-sec-sep {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 10px 4px;
+  margin-top: 2px;
+}
+.sx-sec-sep:first-child { margin-top: 0; padding-top: 4px; }
+.sx-sec-sep span {
+  font-size: 8.5px; font-family: var(--ffm);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text3); opacity: 0.85; font-weight: 700;
+  white-space: nowrap;
+}
+.sx-sec-sep::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--border2), transparent);
+}
+#sidebar.sx-compact .sx-sec-sep { display: none; }
+
 /* Super Admin separator in sidebar */
 .sx-admin-sep {
   display: flex; align-items: center; gap: 8px;
