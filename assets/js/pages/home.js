@@ -219,6 +219,33 @@
       </div>
     </div>`;
 
+    // ── AUJOURD'HUI — Synthèse ──
+    const todaySlots = getDaySlots(todayId());
+    let clTotal = 0, clDone = 0;
+    todaySlots.forEach(function(sl) {
+      (state.tasks[todayId() + '_' + sl] || []).forEach(function(t) {
+        clTotal++;
+        if (state.checks[todayId() + '_' + sl + '_' + t.id]) clDone++;
+      });
+    });
+    const clLate        = clTotal > 0 && clDone < clTotal;
+    const mUrgentCount  = mUrgent.length;
+    const notifUnread   = (state.notifications || []).filter(function(n) { return !n.read; }).length;
+    if (mUrgentCount > 0 || clLate || mLate.length > 0 || lowProds.length > 0 || notifUnread > 0) {
+      h += '<div class="hc-today-strip">';
+      if (mUrgentCount > 0) h += '<button class="hcs-pill hcs-pill--red" onclick="MX.showPage(\'interventions\')">'
+        + '<i class="fas fa-circle-exclamation"></i> ' + mUrgentCount + ' mission' + (mUrgentCount > 1 ? 's' : '') + ' urgente' + (mUrgentCount > 1 ? 's' : '') + '</button>';
+      if (clLate) h += '<button class="hcs-pill hcs-pill--orange" onclick="MX.showPage(\'checklists\')">'
+        + '<i class="fas fa-square-check"></i> ' + (clTotal - clDone) + ' tâche' + (clTotal - clDone > 1 ? 's' : '') + ' restante' + (clTotal - clDone > 1 ? 's' : '') + '</button>';
+      if (mLate.length > 0) h += '<button class="hcs-pill hcs-pill--yellow" onclick="MX.showPage(\'interventions\')">'
+        + '<i class="fas fa-clock"></i> ' + mLate.length + ' en retard</button>';
+      if (lowProds.length > 0) h += '<button class="hcs-pill hcs-pill--blue" onclick="MX.showPage(\'orders\')">'
+        + '<i class="fas fa-box-open"></i> ' + lowProds.length + ' stock critique</button>';
+      if (notifUnread > 0) h += '<button class="hcs-pill hcs-pill--purple" onclick="MX.showPage(\'notifs\')">'
+        + '<i class="fas fa-bell"></i> ' + notifUnread + ' notification' + (notifUnread > 1 ? 's' : '') + '</button>';
+      h += '</div>';
+    }
+
     // ── KPI CARDS ──
     const efFmt = efToday > 0 ? efToday.toFixed(2).replace('.', ',') : '—';
     h += `<div class="hc-kpis">

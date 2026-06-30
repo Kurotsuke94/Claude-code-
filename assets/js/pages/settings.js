@@ -528,33 +528,81 @@
       ? `<span class="stt-badge stt-badge-red"><i class="fas fa-ban"></i> Bloquées</span>`
       : `<span class="stt-badge stt-badge-warn"><i class="fas fa-circle-question"></i> En attente</span>`;
 
-    return `
-      <div class="stt-section-head"><i class="fas fa-bell"></i> Notifications</div>
-      <div class="stt-card">
-        <div class="stt-card-title">Statut navigateur ${permBadge}</div>
-        ${notifPerm !== 'granted' ? `
-        <button class="stt-btn" style="margin-bottom:10px" onclick="MX.enableNotifications()">
-          <i class="fas fa-bell"></i> Activer les notifications push
-        </button>` : ''}
-      </div>
-      <div class="stt-card" style="margin-top:12px">
-        <div class="stt-card-title">Catégories</div>
-        <div class="stt-toggle-list">${rows}</div>
-      </div>
-      <div class="stt-card" style="margin-top:12px">
-        <div class="stt-card-title">Canal de réception</div>
-        <div class="stt-radio-group">
-          ${['app', 'email', 'both'].map(c => {
-            const labels = { app: 'Application uniquement', email: 'Email uniquement', both: 'Application + Email' };
-            const icons  = { app: 'fa-mobile-screen', email: 'fa-envelope', both: 'fa-layer-group' };
-            return `<label class="stt-radio-opt ${channel === c ? 'active' : ''}" onclick="MX.Pages.Settings._setChannel('${c}')">
-              <i class="fas ${icons[c]}"></i>
-              <span>${labels[c]}</span>
-              <span class="stt-radio-dot ${channel === c ? 'on' : ''}"></span>
-            </label>`;
-          }).join('')}
-        </div>
-      </div>`;
+    const sndPrefs = MX.Notifs && MX.Notifs.getSoundPrefs ? MX.Notifs.getSoundPrefs() : { enabled: true };
+    const sndEnabled = sndPrefs.enabled !== false;
+
+    const SND_TYPES = [
+      { key: 'critical',  icon: 'fa-circle-exclamation',  label: 'Critique',  color: '#EF4444' },
+      { key: 'important', icon: 'fa-triangle-exclamation', label: 'Important', color: '#F97316' },
+      { key: 'warning',   icon: 'fa-bell',                 label: 'Attention', color: '#EAB308' },
+      { key: 'info',      icon: 'fa-circle-info',          label: 'Info',      color: '#06B6D4' },
+      { key: 'success',   icon: 'fa-circle-check',         label: 'Succès',    color: '#22C55E' },
+    ];
+
+    const sndRows = SND_TYPES.map(function(s) {
+      const on = sndPrefs[s.key] !== false;
+      return '<div class="stt-toggle-row">'
+        + '<span class="stt-toggle-icon" style="color:' + s.color + '"><i class="fas ' + s.icon + '"></i></span>'
+        + '<span class="stt-toggle-label">' + s.label + '</span>'
+        + '<button class="stt-icon-btn" style="margin-right:8px;color:var(--text3)" onclick="MX.Pages.Settings._previewSound(\'' + s.key + '\')" title="Aperçu">'
+        + '<i class="fas fa-play"></i></button>'
+        + '<label class="stt-switch">'
+        + '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="MX.Pages.Settings._toggleSound(\'' + s.key + '\', this.checked)">'
+        + '<span class="stt-switch-track"></span>'
+        + '</label>'
+        + '</div>';
+    }).join('');
+
+    return '<div class="stt-section-head"><i class="fas fa-bell"></i> Notifications</div>'
+      + '<div class="stt-card">'
+      + '<div class="stt-card-title">Statut navigateur ' + permBadge + '</div>'
+      + (notifPerm !== 'granted'
+        ? '<button class="stt-btn" style="margin-bottom:10px" onclick="MX.enableNotifications()">'
+          + '<i class="fas fa-bell"></i> Activer les notifications push</button>'
+        : '')
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Catégories</div>'
+      + '<div class="stt-toggle-list">' + rows + '</div>'
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Sons</div>'
+      + '<div class="stt-toggle-row">'
+      + '<span class="stt-toggle-icon"><i class="fas fa-volume-high"></i></span>'
+      + '<span class="stt-toggle-label">Sons activés</span>'
+      + '<label class="stt-switch">'
+      + '<input type="checkbox" ' + (sndEnabled ? 'checked' : '') + ' onchange="MX.Pages.Settings._toggleSound(\'enabled\', this.checked)">'
+      + '<span class="stt-switch-track"></span>'
+      + '</label>'
+      + '</div>'
+      + (sndEnabled ? '<div class="stt-toggle-list" style="margin-top:8px">' + sndRows + '</div>' : '')
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Canal de réception</div>'
+      + '<div class="stt-radio-group">'
+      + ['app', 'email', 'both'].map(function(c) {
+          const labels = { app: 'Application uniquement', email: 'Email uniquement', both: 'Application + Email' };
+          const icons  = { app: 'fa-mobile-screen', email: 'fa-envelope', both: 'fa-layer-group' };
+          return '<label class="stt-radio-opt ' + (channel === c ? 'active' : '') + '" onclick="MX.Pages.Settings._setChannel(\'' + c + '\')">'
+            + '<i class="fas ' + icons[c] + '"></i>'
+            + '<span>' + labels[c] + '</span>'
+            + '<span class="stt-radio-dot ' + (channel === c ? 'on' : '') + '"></span>'
+            + '</label>';
+        }).join('')
+      + '</div>'
+      + '</div>';
+  }
+
+  function _toggleSound(key, val) {
+    if (!(MX.Notifs && MX.Notifs.getSoundPrefs && MX.Notifs.saveSoundPrefs)) return;
+    const p = MX.Notifs.getSoundPrefs();
+    p[key] = val;
+    MX.Notifs.saveSoundPrefs(p);
+    _showSection('notifications');
+  }
+
+  function _previewSound(key) {
+    if (MX.Notifs && MX.Notifs.playSound) MX.Notifs.playSound(key);
   }
 
   function _renderApparence() {
@@ -1150,5 +1198,7 @@
     _avatarHtml,
     _diagVersionTap,
     _refreshDiag: () => _showSection('diagnostic'),
+    _toggleSound,
+    _previewSound,
   };
 })();

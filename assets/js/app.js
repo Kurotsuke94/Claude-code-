@@ -502,6 +502,7 @@
     const cnt    = alerts.filter(a => !a.acknowledged).length;
     const el     = document.getElementById('sxdb_alert-badge');
     if (el) { el.textContent = cnt || ''; el.style.display = cnt ? '' : 'none'; }
+    MX.Notifs && MX.Notifs.checkNewAlerts && MX.Notifs.checkNewAlerts(alerts);
   }
 
   function _updBadges() {
@@ -1549,11 +1550,186 @@
       setTimeout(() => { _initialized = true; }, 3000);
     }
 
+    // ── Sound engine (Web Audio API) ──
+    let _audioCtx = null;
+    const _SND_KEY = 'mx_notif_sounds';
+
+    function _getCtx() {
+      try {
+        if (!_audioCtx || _audioCtx.state === 'closed') {
+          _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (_audioCtx.state === 'suspended') _audioCtx.resume();
+        return _audioCtx;
+      } catch(_e) { return null; }
+    }
+
+    function _beep(freqs, dur, wave, vol) {
+      const ctx = _getCtx(); if (!ctx) return;
+      try {
+        const master = ctx.createGain();
+        master.gain.setValueAtTime(vol || 0.3, ctx.currentTime);
+        master.connect(ctx.destination);
+        freqs.forEach(function(f, i) {
+          const osc = ctx.createOscillator(), gn = ctx.createGain();
+          osc.connect(gn); gn.connect(master);
+          osc.type = wave || 'sine';
+          osc.frequency.setValueAtTime(f, ctx.currentTime + i * dur);
+          gn.gain.setValueAtTime(1, ctx.currentTime + i * dur);
+          gn.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * dur + dur * 0.88);
+          osc.start(ctx.currentTime + i * dur);
+          osc.stop(ctx.currentTime + i * dur + dur + 0.05);
+        });
+      } catch(_e) {}
+    }
+
+    const _SND = {
+      critical:  function() { _beep([880, 660, 880], 0.14, 'square',   0.50); },
+      important: function() { _beep([660, 550],       0.20, 'sawtooth', 0.36); },
+      warning:   function() { _beep([523, 493],       0.24, 'triangle', 0.28); },
+      info:      function() { _beep([523, 659],       0.18, 'sine',     0.22); },
+      success:   function() { _beep([523, 659, 784],  0.12, 'sine',     0.28); },
+    };
+
+    const _TYPE_SND = {
+      mission:'critical', checklist:'important', counter:'warning', intervention:'info',
+      absence:'important', planning:'info', alert:'warning', message:'info',
+      stock:'warning', badge:'success', update:'info', system:'info',
+    };
+
+    function getSoundPrefs() {
+      try { return JSON.parse(localStorage.getItem(_SND_KEY) || '{"enabled":true}'); }
+      catch(_e) { return { enabled: true }; }
+    }
+    function saveSoundPrefs(p) { localStorage.setItem(_SND_KEY, JSON.stringify(p)); }
+
+    function playSound(key) {
+      const p = getSoundPrefs(); if (!p.enabled) return;
+      const sndKey = _TYPE_SND[key] || key;
+      if (p[sndKey] === false) return;
+      const fn = _SND[sndKey]; if (fn) fn();
+    }
+
+    // ── Floating toasts ──
+    const _FLOAT_DUR = 5200;
+    let _floatIds = new Set(), _floatQ = [];
+    const _MAX_FLT = 4;
+
+    const _LVL = {
+      critical:  { color:'#EF4444', icon:'fa-circle-exclamation',  lbl:'CRITIQUE'  },
+      important: { color:'#F97316', icon:'fa-triangle-exclamation', lbl:'IMPORTANT' },
+      warning:   { color:'#EAB308', icon:'fa-bell',                 lbl:'ATTENTION' },
+      info:      { color:'#06B6D4', icon:'fa-circle-info',          lbl:'INFO'      },
+      success:   { color:'#22C55E', icon:'fa-circle-check',         lbl:'SUCCÈS'    },
+    };
+
+    const _FA_CAT = {
+      mission:'fa-list-check', checklist:'fa-square-check', counter:'fa-gauge-high',
+      intervention:'fa-wrench', absence:'fa-user-clock', planning:'fa-calendar-days',
+      alert:'fa-bell', message:'fa-comments', stock:'fa-box', badge:'fa-medal', system:'fa-gear',
+    };
+
+    function showFloat(n) {
+      if (_floatIds.size >= _MAX_FLT) { _floatQ.push(n); return; }
+      const container = document.getElementById('float-notifs');
+      if (!container) return;
+      const lv  = _LVL[n.level] || _LVL.info;
+      const ico = _FA_CAT[n.type] || lv.icon;
+      const dur = (n.duration != null) ? n.duration : _FLOAT_DUR;
+      const id  = 'flt_' + Date.now() + '_' + (Math.random() * 999 | 0);
+      const el  = document.createElement('div');
+      el.className = 'fn-toast'; el.id = id;
+      const esc = MX.esc || function(s) {
+        return String(s).replace(/[&<>"']/g, function(c) {
+          return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+      };
+      el.innerHTML = '<div class="fn-accent" style="background:' + lv.color + '"></div>'
+        + '<div class="fn-ico" style="color:' + lv.color + ';background:' + lv.color + '1A"><i class="fas ' + ico + '"></i></div>'
+        + '<div class="fn-body">'
+        + '<div class="fn-lbl" style="color:' + lv.color + '">' + lv.lbl + (n.type && n.type !== 'system' ? ' · ' + n.type.toUpperCase() : '') + '</div>'
+        + '<div class="fn-ttl">' + esc(n.title || '') + '</div>'
+        + (n.description ? '<div class="fn-dsc">' + esc(n.description) + '</div>' : '')
+        + '</div>'
+        + '<button class="fn-cls" onclick="MX.Notifs.closeFloat(\'' + id + '\')" aria-label="Fermer"><i class="fas fa-times"></i></button>'
+        + (dur > 0 ? '<div class="fn-bar" style="background:' + lv.color + ';animation-duration:' + dur + 'ms"></div>' : '');
+      container.appendChild(el);
+      _floatIds.add(id);
+      requestAnimationFrame(function() { el.classList.add('fn-toast--in'); });
+      if (dur > 0) setTimeout(function() { closeFloat(id); }, dur);
+    }
+
+    function closeFloat(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.add('fn-toast--out');
+        setTimeout(function() { el.remove(); _floatIds.delete(id); _nextFloat(); }, 320);
+      } else { _floatIds.delete(id); _nextFloat(); }
+    }
+    function _nextFloat() { if (_floatQ.length && _floatIds.size < _MAX_FLT) showFloat(_floatQ.shift()); }
+
+    // ── Bell flash ──
+    function flashBell() {
+      const badge = document.getElementById('notif-bell-badge');
+      if (badge && badge.classList.contains('show')) {
+        badge.classList.remove('nb-pop'); void badge.offsetWidth; badge.classList.add('nb-pop');
+        setTimeout(function() { badge.classList.remove('nb-pop'); }, 600);
+      }
+      const btn = document.getElementById('notif-bell-btn');
+      if (btn) {
+        btn.classList.remove('bell-shake'); void btn.offsetWidth; btn.classList.add('bell-shake');
+        setTimeout(function() { btn.classList.remove('bell-shake'); }, 700);
+      }
+    }
+
+    // ── Main push API ──
+    let _prevAlertIds = new Set();
+
+    function _lvlForType(t) {
+      const m = { mission:'critical', checklist:'important', counter:'warning', intervention:'info',
+                  absence:'important', planning:'info', alert:'warning', message:'info',
+                  stock:'warning', badge:'success', update:'info', system:'info' };
+      return m[t] || 'info';
+    }
+
+    function push(n) {
+      const level = n.level || _lvlForType(n.type);
+      if (!n.silent) playSound(n.type || level);
+      if (!n.noFloat) showFloat(Object.assign({}, n, { level: level }));
+      flashBell();
+      if (MX.DB && MX.DB.createNotification) {
+        MX.DB.createNotification({
+          key: n.key || null, type: n.type || 'system', level: level,
+          title: n.title || '', description: n.description || '',
+          icon: n.icon || null, author: n.author || '',
+          userId: n.userId || 'all', data: n.data || {},
+        }).catch(function() {});
+      }
+    }
+
+    function checkNewAlerts(alertList) {
+      if (!_initialized) { _prevAlertIds = new Set(alertList.map(function(a) { return a.id; })); return; }
+      const lvlMap = { info:'info', warning:'warning', important:'important', critical:'critical' };
+      alertList.forEach(function(a) {
+        if (!_prevAlertIds.has(a.id) && !a.acknowledged) {
+          _prevAlertIds.add(a.id);
+          push({
+            title: a.ruleName || 'Alerte', description: a.message || '',
+            type: 'alert', level: lvlMap[a.level] || 'warning',
+            userId: 'all', key: 'alert_' + a.id,
+          });
+        }
+      });
+      _prevAlertIds = new Set(alertList.map(function(a) { return a.id; }));
+    }
+
     return {
       init, onUpdate, updateBell, toggleDrop, _closeDrop, onItemClick, markAllRead,
       _checkAnnouncements, _checkStock, _checkUserBadges,
       createVersionNotif, createSystemNotif,
       _catColor, _catIcon, _fmtDate,
+      push, showFloat, closeFloat, flashBell, playSound,
+      getSoundPrefs, saveSoundPrefs, checkNewAlerts,
     };
   })();
 
