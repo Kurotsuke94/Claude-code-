@@ -8820,23 +8820,23 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
    Mobile uniquement (≤900px). Desktop inchangé.
 ══════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
-  /* Espace bas suffisant pour la barre flottante + protrusion FAB */
-  :root { --bottomnav-h: 94px; }
+  /* Padding bas pour que le contenu ne passe pas sous la barre */
+  :root { --bottomnav-h: 80px; }
 
   /* Conteneur transparent — la barre visuelle est .mbn-bar */
   #bottom-nav {
     background: transparent !important;
     border-top: none !important;
     box-shadow: none !important;
-    height: calc(94px + env(safe-area-inset-bottom, 0px)) !important;
+    height: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
     padding-bottom: 0 !important;
     overflow: visible !important;
   }
 
-  /* ── Barre flottante ── */
+  /* ── Barre flottante — ancrée bas de l'écran ── */
   .mbn-bar {
     position: absolute;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
     left: 12px;
     right: 12px;
     height: 72px;
@@ -8945,7 +8945,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .mbn-fmenu-panel {
   position: absolute;
-  bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(100px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%) translateY(14px) scale(0.94);
   display: flex;
