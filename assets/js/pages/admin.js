@@ -63,13 +63,13 @@
     if (!isAdmin && !isResp) {
       const hasUsers = (MX.state.users || []).length > 0;
       el.innerHTML = `
-        <div class="ph"><div class="ph-eye">ADMIN</div><div class="ph-title">Administration</div></div>
+        <div class="ph"><div class="ph-eye">PILOTAGE</div><div class="ph-title">Centre de Pilotage</div></div>
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:50vh;gap:16px;padding:40px">
           <div style="width:76px;height:76px;border-radius:22px;background:var(--bg3);border:1px solid var(--border3);display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--text3)">
             <i class="fas fa-lock"></i>
           </div>
           <div style="font-size:20px;font-weight:700">Accès restreint</div>
-          <div style="font-size:13px;color:var(--text2);text-align:center;line-height:1.6;max-width:300px">Connectez-vous pour accéder à ce panneau.</div>
+          <div style="font-size:13px;color:var(--text2);text-align:center;line-height:1.6;max-width:300px">Connectez-vous pour accéder au Centre de Pilotage.</div>
           <button class="primary-btn" style="max-width:280px" onclick="MX.Auth.showLogin(()=>MX.showPage('admin'))">
             <i class="fas fa-sign-in-alt"></i> Connexion Admin
           </button>
@@ -84,27 +84,25 @@
     if (_lsTab) { aTab = _lsTab; localStorage.removeItem("mx_admin_tab"); }
 
     const allTabs = [
-      { id: "tasks",          label: "📋 Tâches"            },
-      { id: "team",           label: "👷 Gestion Équipes"   },
-      { id: "alerts",         label: "🔔 Alertes"           },
-      { id: "alertes-config", label: "⚙️ Config alertes"    },
-      { id: "week",           label: "📅 Semaine"           },
-      { id: "history",        label: "📊 Historique"        },
-      { id: "msgs",           label: "💬 Messages"          },
-      { id: "logs",           label: "📈 Activité"          },
-      { id: "bible-admin",    label: "📖 Bible"             },
-      { id: "badges-admin",   label: "🏅 Badges"            },
-      { id: "admin-journal",  label: "📜 Journal"           },
-      { id: "users",          label: "👤 Utilisateurs"      },
-      { id: "roles",          label: "🎭 Rôles"             },
-      { id: "absences",       label: "🏖 Absences"          },
-      { id: "pin",            label: "🔑 Accès",             adminOnly: true },
-      { id: "superadmin",     label: "🏨 Hôtels",            adminOnly: true }
+      { id: "tasks",          label: "📋 Tâches Responsable" },
+      { id: "team",           label: "👥 Gestion Équipe"     },
+      { id: "users",          label: "👤 Utilisateurs"       },
+      { id: "roles",          label: "🛡️ Rôles"             },
+      { id: "alerts",         label: "🔔 Alertes"            },
+      { id: "alertes-config", label: "⚙️ Config Alertes"     },
+      { id: "week",           label: "📅 Gestion Semaines"   },
+      { id: "bible-admin",    label: "📚 Validation Bible"   },
+      { id: "history",        label: "🕘 Historique"         },
+      { id: "logs",           label: "📈 Activité"           },
+      { id: "badges-admin",   label: "🏅 Badges"             },
+      { id: "pin",            label: "🔑 Accès",              adminOnly: true },
+      { id: "superadmin",     label: "🏨 Hôtels",             adminOnly: true }
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
     if (aTab === "missions" || aTab === "orders") aTab = "tasks";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
+    if (aTab === "admin-journal" || aTab === "absences" || aTab === "msgs") aTab = "tasks";
     if (isResp && (aTab === "pin" || aTab === "superadmin")) aTab = "tasks";
 
     // Start admin journal listener on first use
@@ -121,11 +119,11 @@
 
     let h = `
       <div class="ph">
-        <div class="ph-eye">${isAdmin ? 'ADMINISTRATION' : 'RESPONSABLE'}</div>
+        <div class="ph-eye">PILOTAGE</div>
         <div class="ph-row">
           <div>
-            <div class="ph-title">Panneau ${isAdmin ? 'Admin' : 'Responsable'}</div>
-            <div class="ph-sub">${isAdmin ? 'Configuration et gestion' : 'Gestion opérationnelle'}</div>
+            <div class="ph-title">🎯 Centre de Pilotage</div>
+            <div class="ph-sub">Supervision du service maintenance</div>
           </div>
           ${actionBtn}
         </div>
@@ -142,22 +140,19 @@
           }).join('')}
         </div>`;
 
-    if (aTab === "tasks")             h += renderTasks();
-    if (aTab === "team")              h += renderTeam();
-    if (aTab === "alerts")            h += renderAlerts();
-    if (aTab === "alertes-config" && (isAdmin || isResp)) h += renderAlertRules();
-    if (aTab === "week")              h += renderWeek();
-    if (aTab === "history")           h += renderHistory();
-    if (aTab === "msgs")              h += renderMsgs();
-    if (aTab === "logs")              h += renderLogs();
-    if (aTab === "users"         && (isAdmin || isResp)) h += renderUsers();
-    if (aTab === "roles"         && (isAdmin || isResp)) h += renderRoles();
-    if (aTab === "absences"      && (isAdmin || isResp)) h += renderAbsences();
-    if (aTab === "pin"           && isAdmin)  h += renderPin();
-    if (aTab === "bible-admin")               h += renderBibleAdmin();
-    if (aTab === "badges-admin")              h += renderBadgesAdmin();
-    if (aTab === "admin-journal")             h += renderAdminJournal();
-    if (aTab === "superadmin"    && isAdmin)  h += renderSuperAdmin();
+    if (aTab === "tasks")                        h += renderTasks();
+    if (aTab === "team")                         h += renderTeam();
+    if (aTab === "users")                        h += renderUsers();
+    if (aTab === "roles")                        h += renderRoles();
+    if (aTab === "alerts")                       h += renderAlerts();
+    if (aTab === "alertes-config")               h += renderAlertRules();
+    if (aTab === "week")                         h += renderWeek();
+    if (aTab === "bible-admin")                  h += renderBibleAdmin();
+    if (aTab === "history")                      h += renderHistory();
+    if (aTab === "logs")                         h += renderLogs();
+    if (aTab === "badges-admin")                 h += renderBadgesAdmin();
+    if (aTab === "pin"        && isAdmin)        h += renderPin();
+    if (aTab === "superadmin" && isAdmin)        h += renderSuperAdmin();
 
     h += `</div>`;
     el.innerHTML = h;

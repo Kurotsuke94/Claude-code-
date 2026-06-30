@@ -379,17 +379,16 @@
       h += _group("fa-chart-bar", "sx-group-ico--green", "Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Analyses");
     }
 
-    // ── ⚙️ Administration (respOnly) ──
+    // ── 🎯 Centre de Pilotage (respOnly) ──
     if (canAll) {
       const isAdmin = MX.Auth.isAdmin();
       let aItems = "";
-      aItems += _item("equipe",       "fa-users-gear",  "Gestion Équipe",  { sub: true });
       aItems += _item("utilisateurs", "fa-users",       "Utilisateurs",    { sub: true });
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('roles')" title="Rôles"><i class="fas fa-masks-theater sx-ico"></i><span class="sx-lbl">Rôles</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('absences')" title="Absences"><i class="fas fa-umbrella-beach sx-ico"></i><span class="sx-lbl">Absences</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('alertes-config')" title="Config alertes"><i class="fas fa-bell-concierge sx-ico"></i><span class="sx-lbl">Config alertes</span></button>`;
-      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('admin-journal')" title="Journal d'actions"><i class="fas fa-book-journal-whills sx-ico"></i><span class="sx-lbl">Journal d'actions</span></button>`;
-      aItems += _item("documents",    "fa-book-open",   "Bibliothèque",    { sub: true });
+      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('roles')" title="Rôles"><i class="fas fa-shield-halved sx-ico"></i><span class="sx-lbl">Rôles</span></button>`;
+      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('alerts')" title="Alertes"><i class="fas fa-bell sx-ico"></i><span class="sx-lbl">Alertes</span></button>`;
+      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('alertes-config')" title="Config Alertes"><i class="fas fa-bell-concierge sx-ico"></i><span class="sx-lbl">Config Alertes</span></button>`;
+      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('bible-admin')" title="Validation Bible"><i class="fas fa-book-open sx-ico"></i><span class="sx-lbl">Validation Bible</span></button>`;
+      aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('logs')" title="Activité"><i class="fas fa-chart-line sx-ico"></i><span class="sx-lbl">Activité</span></button>`;
       aItems += _item("org-resp",     "fa-users-gear",  "Organisation",    { sub: true, favable: true });
       aItems += `<button class="sx-item sx-sub" onclick="MX.showAdminTab('badges-admin')" title="Badges"><i class="fas fa-medal sx-ico"></i><span class="sx-lbl">Badges</span></button>`;
       if (isAdmin) {
@@ -399,7 +398,7 @@
       }
       const _alertCnt = (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
-      h += _group("fa-shield-halved", "sx-group-ico--orange", "Administration" + _alertBadge, "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Administration");
+      h += _group("fa-crosshairs", "sx-group-ico--cyan", "Centre de Pilotage" + _alertBadge, "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Centre de Pilotage");
     }
 
     // ── Paramètres (standalone) ──
@@ -1849,7 +1848,7 @@
     if (canAll) {
       navItems.splice(2, 0,
         { id: 'org-resp',     icon: 'fa-users-gear',    label: 'Organisation',   fn: "MX.closeMobileDrawer();MX.showPage('org-resp')" },
-        { id: 'utilisateurs', icon: 'fa-shield-halved', label: 'Administration', fn: "MX.closeMobileDrawer();MX.showPage('utilisateurs')" }
+        { id: 'utilisateurs', icon: 'fa-crosshairs', label: 'Centre de Pilotage', fn: "MX.closeMobileDrawer();MX.showPage('utilisateurs')" }
       );
     }
     const gridHtml = navItems.map(function(item) {
