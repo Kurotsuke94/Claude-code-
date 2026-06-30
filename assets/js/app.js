@@ -437,15 +437,12 @@
     // ── Bottom nav (mobile) — floating bar: Accueil | Missions | Compteurs | ➕ | Planning | Pilotage ──
     const dayIds = DAYS.map(d => d.id);
     const allCl  = ["today-cl", "mes-missions", ...dayIds];
-    const pilPages = new Set(['utilisateurs', 'org-resp']);
-    const pilAct   = pilPages.has(cur);
     let bot = `<div class="mbn-bar">`;
     bot += `<button class="mbn-btn${cur==="home"?" mbn-act":""}" onclick="MX.showPage('home')"><i class="fas fa-house"></i><span>Accueil</span></button>`;
     bot += `<button class="mbn-btn${allCl.includes(cur)?" mbn-act":""}" onclick="MX.showPage('mes-missions')"><i class="fas fa-list-check"></i><span>Missions</span></button>`;
-    bot += `<button class="mbn-btn${cur==="consommations"?" mbn-act":""}" onclick="MX.showCsoTab('compteurs')"><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
     bot += `<button class="mbn-fab" id="mbn-fab-btn" onclick="MX.openFabMenu()"><i class="fas fa-plus"></i></button>`;
+    bot += `<button class="mbn-btn${cur==="consommations"?" mbn-act":""}" onclick="MX.showCsoTab('compteurs')"><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
     bot += `<button class="mbn-btn${cur==="planning"?" mbn-act":""}" onclick="MX.showPage('planning')"><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
-    bot += `<button class="mbn-btn${pilAct?" mbn-act":""}" onclick="MX.openPilotageMenu()"><i class="fas fa-crosshairs"></i><span>Pilotage</span></button>`;
     bot += `</div>`;
     botNav.innerHTML = bot;
 
