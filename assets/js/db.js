@@ -1013,13 +1013,21 @@
   const R_TRIG        = () => db.collection('triggered_alerts');
 
   function listenAlertRules(cb) {
-    return R_ALERT_RULES().orderBy('order').onSnapshot(snap => {
-      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    console.log('[DB] listenAlertRules: attaching snapshot listener on alert_rules');
+    return R_ALERT_RULES().onSnapshot(snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      console.log('[DB] listenAlertRules: snapshot received,', list.length, 'alert(s)', list);
+      cb(list);
+    }, err => {
+      console.error('[DB] listenAlertRules: snapshot error', err);
     });
   }
 
   async function addAlertRule(data) {
+    console.log('[DB] addAlertRule: saving rule', data);
     const ref = await R_ALERT_RULES().add({ ...data, createdAt: FV.serverTimestamp() });
+    console.log('[DB] addAlertRule: saved with id', ref.id);
     return ref.id;
   }
 

@@ -863,6 +863,7 @@
       notifyBrowser: true,
       cooldownMin: 60,
       active: true,
+      order: (MX.state.alertRules || []).length,
       wizardMeta: { type: _wiz.type, slot: _wiz.slot, cond: _wiz.cond, recs: _wiz.recs },
     };
   }
@@ -873,7 +874,9 @@
       return;
     }
     var rule = _wizToRule();
-    await MX.DB.addAlertRule(rule);
+    console.log('[Admin] _wizSave: creating rule from wizard', rule);
+    var newId = await MX.DB.addAlertRule(rule);
+    console.log('[Admin] _wizSave: rule created with id', newId, '— total rules now expected:', (MX.state.alertRules || []).length + 1);
     MX.toast && MX.toast('Alerte créée !');
     _wizActive = false;
     _wiz = { type: '', slot: '', time: '10:00', cond: '', recs: ['resp'], level: 'warning', msg: '' };

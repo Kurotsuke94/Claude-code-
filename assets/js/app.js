@@ -935,10 +935,14 @@
     });
 
     DB.listenAlertRules(list => {
+      console.log('[App] listenAlertRules callback:', list.length, 'alert rule(s) loaded into state');
       state.alertRules = list;
       if (MX.AlertsEngine && !MX.AlertsEngine._started) {
         MX.AlertsEngine._started = true;
         MX.AlertsEngine.start();
+      }
+      if (state.currentPage === 'utilisateurs' || state.currentPage === 'admin') {
+        MX.Pages.Admin && MX.Pages.Admin.render();
       }
     });
 
