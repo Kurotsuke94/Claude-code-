@@ -494,6 +494,8 @@
   // ── MODULE-LEVEL STATE FOR RULE EDITOR ──
   let _editRuleId   = null;
   let _editRuleBuf  = {};  // local buffer for the rule being edited
+  let _wizActive    = false;
+  let _wiz          = { type: '', slot: '', time: '10:00', cond: '', recs: ['resp'], level: 'warning', msg: '' };
 
   // ── ALERTS DASHBOARD ──
   function renderAlerts() {
@@ -562,136 +564,398 @@
     return h;
   }
 
+  // ── WIZARD CONSTANTS ──
+  var _WIZ_TYPES = [
+    { id: 'checklist',    ico: '📋', lbl: 'Checklist',    sub: 'Suivi des tâches quotidiennes',  hasSlot: true  },
+    { id: 'intervention', ico: '🔧', lbl: 'Intervention', sub: 'Maintenance et interventions',   hasSlot: true  },
+    { id: 'compteur',     ico: '📊', lbl: 'Compteur',     sub: 'Relevés et mesures',             hasSlot: false },
+    { id: 'mission',      ico: '📌', lbl: 'Mission',      sub: 'Missions et affectations',       hasSlot: false },
+    { id: 'planning',     ico: '📅', lbl: 'Planning',     sub: 'Présence et planning équipe',    hasSlot: true  },
+  ];
+  var _WIZ_SLOTS = [
+    { id: 'matin',   lbl: 'MATIN',   range: '08h00 → 12h00', ico: '🌅', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.35)' },
+    { id: 'journee', lbl: 'JOURNÉE', range: '09h00 → 17h30', ico: '☀️',  color: '#3B82F6', bg: 'rgba(59,130,246,0.15)',  border: 'rgba(59,130,246,0.35)'  },
+    { id: 'soir',    lbl: 'SOIR',    range: '13h00 → 21h30', ico: '🌙', color: '#EF4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.35)'   },
+  ];
+  var _WIZ_CONDS = {
+    checklist:    [
+      { id: 'pct10', lbl: 'Moins de 10% completé', condType: 'checklist_pct_below', threshold: 10 },
+      { id: 'pct20', lbl: 'Moins de 20% completé', condType: 'checklist_pct_below', threshold: 20 },
+      { id: 'pct30', lbl: 'Moins de 30% completé', condType: 'checklist_pct_below', threshold: 30 },
+      { id: 'pct50', lbl: 'Moins de 50% completé', condType: 'checklist_pct_below', threshold: 50 },
+      { id: 'idle',  lbl: 'Aucune tâche validée',   condType: 'tech_idle',           threshold: 0  },
+    ],
+    intervention: [
+      { id: 'none_started', lbl: 'Aucune intervention démarrée', condType: 'missions_unassigned',     threshold: 0 },
+      { id: 'overdue',      lbl: 'Intervention en retard',        condType: 'missions_urgent_pending', threshold: 2 },
+      { id: 'unassigned',   lbl: 'Intervention non assignée',     condType: 'missions_unassigned',     threshold: 1 },
+    ],
+    compteur: [
+      { id: 'no_reading', lbl: 'Aucun relevé effectué',      condType: 'tech_idle',    threshold: 0 },
+      { id: 'overload',   lbl: 'Surcharge technicien',        condType: 'tech_overload', threshold: 15 },
+      { id: 'understaffed', lbl: 'Équipe insuffisante',       condType: 'planning_understaffed', threshold: 1 },
+    ],
+    mission: [
+      { id: 'not_started',   lbl: 'Mission non démarrée',     condType: 'missions_urgent_pending', threshold: 1 },
+      { id: 'unassigned',    lbl: 'Mission non assignée',      condType: 'missions_unassigned',     threshold: 0 },
+      { id: 'urgent_late',   lbl: 'Mission urgente en retard', condType: 'missions_urgent_pending', threshold: 0 },
+    ],
+    planning: [
+      { id: 'no_tech',     lbl: 'Aucun technicien planifié',  condType: 'planning_no_tech_tomorrow', threshold: 0 },
+      { id: 'absence',     lbl: 'Absence non couverte',        condType: 'planning_understaffed',    threshold: 1 },
+      { id: 'understaffed', lbl: 'Effectif insuffisant',       condType: 'planning_understaffed',    threshold: 2 },
+    ],
+  };
+  var _WIZ_RECS = [
+    { id: 'tech', ico: '👤', lbl: 'Technicien concerné', sub: 'Technicien du créneau'     },
+    { id: 'resp', ico: '👔', lbl: 'Responsable',          sub: 'Vous et les responsables'  },
+    { id: 'team', ico: '👥', lbl: "Toute l'équipe",       sub: 'Tous les utilisateurs'     },
+  ];
+  var _WIZ_TPLS = [
+    { ico: '📋', lbl: 'Checklist matin < 30%',     type: 'checklist',    slot: 'matin',   time: '10:00', cond: 'pct30',      recs: ['resp'],        level: 'warning',   msg: ''  },
+    { ico: '📋', lbl: 'Checklist soir bloquée',    type: 'checklist',    slot: 'soir',    time: '19:00', cond: 'pct50',      recs: ['resp','tech'],  level: 'important', msg: ''  },
+    { ico: '🔧', lbl: 'Intervention non démarrée', type: 'intervention', slot: 'matin',   time: '09:30', cond: 'none_started', recs: ['resp'],       level: 'important', msg: ''  },
+    { ico: '🔧', lbl: 'Intervention urgente',      type: 'intervention', slot: 'journee', time: '14:00', cond: 'overdue',    recs: ['resp','team'],  level: 'critical',  msg: ''  },
+    { ico: '📌', lbl: 'Mission non assignée',      type: 'mission',      slot: '',        time: '08:00', cond: 'unassigned', recs: ['resp'],         level: 'warning',   msg: ''  },
+    { ico: '📌', lbl: 'Mission urgente en retard', type: 'mission',      slot: '',        time: '12:00', cond: 'urgent_late', recs: ['resp','team'], level: 'critical',  msg: ''  },
+    { ico: '📅', lbl: 'Aucun tech planifié demain', type: 'planning',    slot: 'matin',   time: '18:00', cond: 'no_tech',    recs: ['resp'],         level: 'important', msg: ''  },
+    { ico: '📅', lbl: 'Effectif insuffisant',       type: 'planning',    slot: 'soir',    time: '15:00', cond: 'understaffed', recs: ['resp'],       level: 'warning',   msg: ''  },
+    { ico: '📊', lbl: 'Aucun relevé ce matin',     type: 'compteur',    slot: 'matin',   time: '11:00', cond: 'no_reading', recs: ['resp'],         level: 'warning',   msg: ''  },
+    { ico: '📊', lbl: 'Surcharge technicien',      type: 'compteur',    slot: '',        time: '09:00', cond: 'overload',   recs: ['resp'],         level: 'important', msg: ''  },
+  ];
+
   // ── ALERT RULES CONFIG ──
   function renderAlertRules() {
-    const { state, esc } = MX;
-    const rules = state.alertRules || [];
-    let h = `<div class="info-note" style="margin-bottom:14px"><i class="fas fa-sliders"></i> Créez des règles d'alerte personnalisées. Elles sont évaluées toutes les 5 minutes quand l'application est ouverte.</div>`;
+    var esc = MX.esc;
+    var rules = MX.state.alertRules || [];
+    var h = '<div class="ar-page">';
 
-    if (!rules.length && _editRuleId !== '__new__') {
-      h += `<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px"><i class="fas fa-bell-slash"></i><br><br>Aucune règle définie.</div>`;
+    // Header tabs
+    h += '<div class="ar-header">';
+    h += '<button class="ar-tab' + (!_wizActive ? ' ar-tab--act' : '') + '" onclick="MX.Pages.Admin._arList()">';
+    h += '<i class="fas fa-list"></i> Mes alertes';
+    h += '<span class="ar-tab-cnt">' + rules.length + '</span></button>';
+    h += '<button class="ar-tab ar-tab--new' + (_wizActive ? ' ar-tab--act' : '') + '" onclick="MX.Pages.Admin._arNew()">';
+    h += '<i class="fas fa-plus"></i> Créer une alerte</button>';
+    h += '</div>';
+
+    if (_wizActive) {
+      h += _wizLayoutHtml(rules);
+    } else {
+      // Templates section
+      h += _arTplsHtml();
+      // Existing rules
+      h += _arRulesHtml(rules);
     }
 
-    rules.forEach(rule => {
-      const isEditing = _editRuleId === rule.id;
-      const lv = _alertLevel(rule.level);
-      const conds = rule.conditions || [];
-      h += `<div class="apcard${isEditing?' apcard--active':''}" style="margin-bottom:8px">
-        <div class="aphd">
-          <span style="font-size:18px;flex-shrink:0">${lv.emoji}</span>
-          <div style="flex:1;min-width:0;margin-left:4px">
-            <div style="font-weight:700;font-size:13px;display:flex;align-items:center;gap:6px">
-              ${esc(rule.name||'Règle sans nom')}
-              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:${lv.bg};color:${lv.color};border:1px solid ${lv.border}">${lv.label}</span>
-            </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">${conds.length} condition${conds.length!==1?'s':''} · cooldown ${rule.cooldownMin||60}min</div>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <button class="tog ${rule.active!==false?'on':'off'}" title="${rule.active!==false?'Activer':'Désactiver'}" onclick="MX.Pages.Admin._toggleRuleActive('${esc(rule.id)}',${!(rule.active!==false)})" aria-label="Toggle"></button>
-            <button class="icon-btn" title="Modifier" onclick="MX.Pages.Admin._editRule('${esc(rule.id)}')"><i class="fas fa-pen"></i></button>
-            <button class="icon-btn del" title="Supprimer" onclick="MX.Pages.Admin._delRule('${esc(rule.id)}')"><i class="fas fa-trash"></i></button>
-          </div>
-        </div>
-        ${isEditing ? _ruleEditorHtml(false) : ''}
-      </div>`;
-    });
-
-    if (_editRuleId === '__new__') {
-      h += `<div class="apcard apcard--active" style="margin-bottom:12px">
-        <div class="aphd"><span style="font-size:18px">${_alertLevel(_editRuleBuf.level||'warning').emoji}</span><span style="font-weight:700;font-size:13px;margin-left:8px;flex:1">${esc(_editRuleBuf.name||'Nouvelle règle')}</span></div>
-        ${_ruleEditorHtml(true)}
-      </div>`;
-    }
-
-    if (_editRuleId !== '__new__') {
-      h += `<button class="dash-btn" onclick="MX.Pages.Admin._createRule()"><i class="fas fa-plus"></i> Créer une règle</button>`;
-    }
+    h += '</div>';
     return h;
   }
 
-  function _ruleEditorHtml(isNew) {
-    const esc = MX.esc;
-    const r   = _editRuleBuf;
-    const rid = isNew ? '__new__' : _editRuleId;
-    const conds = r.conditions || [];
+  function _wizAutoMsg() {
+    var t = _WIZ_TYPES.find(function(x) { return x.id === _wiz.type; });
+    var s = _WIZ_SLOTS.find(function(x) { return x.id === _wiz.slot; });
+    var conds = _wiz.type ? (_WIZ_CONDS[_wiz.type] || []) : [];
+    var c = conds.find(function(x) { return x.id === _wiz.cond; });
+    var parts = [];
+    if (t) parts.push(t.lbl);
+    if (s) parts.push(s.lbl.charAt(0) + s.lbl.slice(1).toLowerCase());
+    if (c) parts.push('— ' + c.lbl.toLowerCase());
+    return parts.length ? parts.join(' ') : 'Nouvelle alerte';
+  }
 
-    let h = `<div style="border-top:1px solid var(--border);padding:14px 0 4px">
-      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:10px">RÈGLE D'ALERTE</div>
-      <div class="apgrid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
-        <div>
-          <div class="aplbl">Nom</div>
-          <input class="fi fi-sm" placeholder="ex : Progression matin" value="${esc(r.name||'')}"
-            oninput="MX.Pages.Admin._bufRule('name',this.value)">
-        </div>
-        <div>
-          <div class="aplbl">Niveau</div>
-          <select class="fi fi-sm" onchange="MX.Pages.Admin._bufRule('level',this.value)">
-            ${ALERT_LEVELS.map(l=>`<option value="${l.id}"${(r.level||'warning')===l.id?' selected':''}>${l.emoji} ${l.label}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <div class="aplbl">Message</div>
-          <input class="fi fi-sm" placeholder="ex : ⚠ Seulement {progress}% des tâches du matin." value="${esc(r.message||'')}"
-            oninput="MX.Pages.Admin._bufRule('message',this.value)">
-        </div>
-        <div>
-          <div class="aplbl">Cooldown (minutes)</div>
-          <input class="fi fi-sm" type="number" min="1" value="${r.cooldownMin||60}"
-            oninput="MX.Pages.Admin._bufRule('cooldownMin',Number(this.value))">
-        </div>
-      </div>
+  function _wizLayoutHtml(rules) {
+    var esc = MX.esc;
+    var t    = _WIZ_TYPES.find(function(x) { return x.id === _wiz.type; });
+    var s    = _WIZ_SLOTS.find(function(x) { return x.id === _wiz.slot; });
+    var lv   = _alertLevel(_wiz.level);
+    var conds = _wiz.type ? (_WIZ_CONDS[_wiz.type] || []) : [];
+    var condM = conds.find(function(x) { return x.id === _wiz.cond; });
+    var autoMsg = _wiz.msg || _wizAutoMsg();
+    var sn = 0;
 
-      <div class="aplbl" style="font-size:10px;letter-spacing:0.5px;margin-bottom:8px">CONDITIONS <span style="color:var(--text3);text-transform:none;font-weight:400">(toutes doivent être vraies)</span></div>
-      <div id="rule-conds-editor" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">`;
+    var h = '<div class="ar-wiz-layout">';
+    h += '<div class="ar-wiz-left">';
 
-    conds.forEach((c, i) => {
-      h += _condRowHtml(c, i);
+    // Step 1: Type
+    sn++;
+    h += '<div class="ar-step">';
+    h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+    h += '<div><div class="ar-step-q">Que voulez-vous surveiller ?</div>';
+    h += '<div class="ar-step-sub">Choisissez un domaine</div></div></div>';
+    h += '<div class="ar-type-grid">';
+    _WIZ_TYPES.forEach(function(tp) {
+      var sel = _wiz.type === tp.id ? ' sel' : '';
+      h += '<div class="ar-type-card' + sel + '" onclick="MX.Pages.Admin._wizSet(\'type\',\'' + tp.id + '\')">';
+      h += '<div class="ar-tc-ico">' + tp.ico + '</div>';
+      h += '<div class="ar-tc-lbl">' + tp.lbl + '</div>';
+      h += '<div class="ar-tc-sub">' + tp.sub + '</div>';
+      h += '</div>';
     });
+    h += '</div></div>';
 
-    h += `</div>
-      <button class="dash-btn" style="margin-bottom:14px" onclick="MX.Pages.Admin._addCond()"><i class="fas fa-plus"></i> Ajouter une condition</button>
+    // Step 2: Slot (conditional)
+    if (t && t.hasSlot) {
+      sn++;
+      h += '<div class="ar-step">';
+      h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+      h += '<div><div class="ar-step-q">Quel créneau surveiller ?</div>';
+      h += '<div class="ar-step-sub">Le moment de la journée concerné</div></div></div>';
+      h += '<div class="ar-slot-grid">';
+      _WIZ_SLOTS.forEach(function(sl) {
+        var sel = _wiz.slot === sl.id ? ' sel' : '';
+        h += '<div class="ar-slot-card' + sel + '" style="--sl-color:' + sl.color + ';--sl-bg:' + sl.bg + ';--sl-border:' + sl.border + '" onclick="MX.Pages.Admin._wizSet(\'slot\',\'' + sl.id + '\')">';
+        h += '<div class="ar-sc-emoji">' + sl.ico + '</div>';
+        h += '<div class="ar-sc-lbl">' + sl.lbl + '</div>';
+        h += '<div class="ar-sc-range">' + sl.range + '</div>';
+        h += '</div>';
+      });
+      h += '</div></div>';
+    }
 
-      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;margin-bottom:12px">
-        <input type="checkbox" ${r.notifyBrowser?'checked':''} onchange="MX.Pages.Admin._bufRule('notifyBrowser',this.checked)">
-        Notification navigateur / PWA si autorisée
-      </label>
+    // Step 3: Time
+    sn++;
+    h += '<div class="ar-step">';
+    h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+    h += '<div><div class="ar-step-q">À quelle heure vérifier ?</div>';
+    h += '<div class="ar-step-sub">L\'alerte sera évaluée à cet horaire</div></div></div>';
+    h += '<div class="ar-time-wrap">';
+    h += '<input class="ar-time-input" type="time" value="' + esc(_wiz.time) + '" onchange="MX.Pages.Admin._wizSet(\'time\',this.value)">';
+    h += '</div></div>';
 
-      <div style="display:flex;gap:8px">
-        ${isNew
-          ? `<button class="save-btn" style="flex:1" onclick="MX.Pages.Admin._confirmSaveRule(true)"><i class="fas fa-check"></i> Créer cette règle</button>
-             <button class="icon-btn" style="padding:0 14px" onclick="MX.Pages.Admin._cancelEditRule()">Annuler</button>`
-          : `<button class="save-btn" style="flex:1" onclick="MX.Pages.Admin._confirmSaveRule(false)"><i class="fas fa-check"></i> Enregistrer</button>
-             <button class="icon-btn" style="padding:0 14px" onclick="MX.Pages.Admin._cancelEditRule()">Annuler</button>`
-        }
-      </div>
-    </div>`;
+    // Step 4: Condition
+    sn++;
+    h += '<div class="ar-step">';
+    h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+    h += '<div><div class="ar-step-q">Dans quelle situation déclencher l\'alerte ?</div>';
+    h += '<div class="ar-step-sub">Choisissez une condition métier</div></div></div>';
+    h += '<div class="ar-cond-opts">';
+    if (conds.length) {
+      conds.forEach(function(c) {
+        var sel = _wiz.cond === c.id ? ' sel' : '';
+        h += '<div class="ar-cond-opt' + sel + '" onclick="MX.Pages.Admin._wizSet(\'cond\',\'' + c.id + '\')">' + c.lbl + '</div>';
+      });
+    } else {
+      h += '<div style="color:var(--text3);font-size:12px;padding:8px">Sélectionnez d\'abord un type ci-dessus.</div>';
+    }
+    h += '</div></div>';
+
+    // Step 5: Level
+    sn++;
+    h += '<div class="ar-step">';
+    h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+    h += '<div><div class="ar-step-q">Niveau d\'urgence</div>';
+    h += '<div class="ar-step-sub">Priorité de la notification</div></div></div>';
+    h += '<div class="ar-cond-opts">';
+    ALERT_LEVELS.slice().reverse().forEach(function(lv2) {
+      var sel = _wiz.level === lv2.id ? ' sel' : '';
+      h += '<div class="ar-cond-opt' + sel + '" style="border-color:' + (sel ? lv2.border : '') + ';color:' + (sel ? lv2.color : '') + '" onclick="MX.Pages.Admin._wizSet(\'level\',\'' + lv2.id + '\')">' + lv2.emoji + ' ' + lv2.label + '</div>';
+    });
+    h += '</div></div>';
+
+    // Step 6: Recipients
+    sn++;
+    h += '<div class="ar-step">';
+    h += '<div class="ar-step-hd"><span class="ar-step-num">' + sn + '</span>';
+    h += '<div><div class="ar-step-q">Qui doit recevoir cette alerte ?</div>';
+    h += '<div class="ar-step-sub">Sélection multiple possible</div></div></div>';
+    h += '<div class="ar-rec-grid">';
+    _WIZ_RECS.forEach(function(rc) {
+      var sel = _wiz.recs.indexOf(rc.id) >= 0 ? ' sel' : '';
+      h += '<div class="ar-rec-card' + sel + '" onclick="MX.Pages.Admin._wizToggleRec(\'' + rc.id + '\')">';
+      h += '<div class="ar-rc-ico">' + rc.ico + '</div>';
+      h += '<div class="ar-rc-lbl">' + rc.lbl + '</div>';
+      h += '<div class="ar-rc-sub">' + rc.sub + '</div>';
+      h += '</div>';
+    });
+    h += '</div></div>';
+
+    h += '</div>'; // ar-wiz-left
+
+    // Preview panel
+    h += _wizPreviewHtml(rules, lv, t, s, condM, autoMsg);
+
+    h += '</div>'; // ar-wiz-layout
     return h;
   }
 
-  function _condRowHtml(c, i) {
-    const esc = MX.esc;
-    const def = _condDef(c.type);
-    const SLOT_OPTS = ['matin','journee','soir'].map(s=>`<option value="${s}"${c.slot===s?' selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('');
-    let fieldHtml = '';
-    (def.fields||[]).forEach(f => {
-      if (f.type === 'slot') {
-        fieldHtml += `<select class="fi fi-sm" style="min-width:90px" onchange="MX.Pages.Admin._updCond(${i},'${f.key}',this.value)"><option value="">Poste</option>${SLOT_OPTS}</select>`;
-      } else {
-        fieldHtml += `<input class="fi fi-sm" type="${f.type||'text'}" placeholder="${esc(f.placeholder||f.label)}"
-          ${f.min!==undefined?`min="${f.min}"`:''}
-          ${f.max!==undefined?`max="${f.max}"`:''}
-          value="${esc(String(c[f.key]??''))}"
-          style="min-width:80px;max-width:100px"
-          oninput="MX.Pages.Admin._updCond(${i},'${f.key}',this.${f.type==='number'?'valueAsNumber||Number(this.value)':'value'})">`;
+  function _wizPreviewHtml(rules, lv, t, s, condM, autoMsg) {
+    var esc = MX.esc;
+    var recLabels = _wiz.recs.map(function(id) {
+      var r = _WIZ_RECS.find(function(x) { return x.id === id; });
+      return r ? r.lbl : id;
+    });
+    var recStr = recLabels.length ? recLabels.join(', ') : 'Personne sélectionné';
+    var timeStr = _wiz.time || '—';
+    var slotStr = s ? (s.ico + ' ' + s.lbl) : (t && !t.hasSlot ? 'Tous créneaux' : '—');
+    var condStr = condM ? condM.lbl : '—';
+    var typeStr = t ? (t.ico + ' ' + t.lbl) : '—';
+    var canSave = _wiz.type && _wiz.cond && _wiz.recs.length;
+
+    var h = '<div class="ar-wiz-right">';
+    h += '<div class="ar-preview">';
+    h += '<div class="ar-preview-title">Aperçu de la notification</div>';
+
+    // Notification preview card
+    h += '<div class="ar-preview-notif" style="border-color:' + lv.border + ';background:' + lv.bg + '">';
+    h += '<div class="ar-pn-ico">' + lv.emoji + '</div>';
+    h += '<div style="flex:1;min-width:0">';
+    h += '<div class="ar-pn-level" style="color:' + lv.color + '">' + lv.label.toUpperCase() + '</div>';
+    h += '<div class="ar-pn-title">' + esc(autoMsg) + '</div>';
+    h += '<div class="ar-pn-body">' + condStr + '</div>';
+    h += '<div class="ar-pn-dest"><i class="fas fa-paper-plane" style="font-size:10px"></i> ' + esc(recStr) + '</div>';
+    h += '</div></div>';
+
+    // Summary table
+    h += '<div class="ar-summary">';
+    h += '<div class="ar-sum-row"><span class="ar-sum-lbl">Type</span><span class="ar-sum-val">' + typeStr + '</span></div>';
+    h += '<div class="ar-sum-row"><span class="ar-sum-lbl">Créneau</span><span class="ar-sum-val">' + slotStr + '</span></div>';
+    h += '<div class="ar-sum-row"><span class="ar-sum-lbl">Vérification</span><span class="ar-sum-val">' + timeStr + '</span></div>';
+    h += '<div class="ar-sum-row"><span class="ar-sum-lbl">Condition</span><span class="ar-sum-val">' + condStr + '</span></div>';
+    h += '<div class="ar-sum-row"><span class="ar-sum-lbl">Destinataires</span><span class="ar-sum-val">' + esc(recStr) + '</span></div>';
+    h += '</div>';
+
+    // Active rules mini list
+    if (rules.length) {
+      h += '<div class="ar-active-mini">';
+      h += '<div class="ar-active-mini-title">Alertes actives (' + rules.length + ')</div>';
+      rules.slice(0, 4).forEach(function(rule) {
+        var rlv = _alertLevel(rule.level);
+        h += '<div class="ar-active-row">';
+        h += '<span>' + rlv.emoji + '</span>';
+        h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(rule.name || 'Sans nom') + '</span>';
+        h += '<button class="tog ' + (rule.active !== false ? 'on' : 'off') + '" style="transform:scale(0.75)" onclick="MX.Pages.Admin._toggleRuleActive(\'' + esc(rule.id) + '\',' + (!(rule.active !== false)) + ')" aria-label="Toggle"></button>';
+        h += '</div>';
+      });
+      if (rules.length > 4) {
+        h += '<div style="font-size:11px;color:var(--text3);text-align:center;padding:4px 0">+ ' + (rules.length - 4) + ' autres</div>';
       }
+      h += '</div>';
+    }
+
+    // Save button
+    h += '<button class="save-btn" style="width:100%;margin-top:12px' + (canSave ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="MX.Pages.Admin._wizSave()">';
+    h += '<i class="fas fa-bell"></i> Créer l\'alerte</button>';
+
+    if (!canSave) {
+      h += '<div style="text-align:center;font-size:11px;color:var(--text3);margin-top:6px">Complétez les étapes pour activer</div>';
+    }
+
+    h += '</div></div>'; // ar-preview, ar-wiz-right
+    return h;
+  }
+
+  function _wizToRule() {
+    var t     = _WIZ_TYPES.find(function(x) { return x.id === _wiz.type; });
+    var conds  = _wiz.type ? (_WIZ_CONDS[_wiz.type] || []) : [];
+    var condM  = conds.find(function(x) { return x.id === _wiz.cond; });
+    var autoMsg = _wiz.msg || _wizAutoMsg();
+    var conditions = [];
+    if (condM) {
+      var cobj = { type: condM.condType };
+      if (condM.threshold !== undefined) cobj.threshold = condM.threshold;
+      if (_wiz.slot && t && t.hasSlot) cobj.slot = _wiz.slot;
+      conditions.push(cobj);
+    }
+    if (_wiz.time) {
+      conditions.push({ type: 'time_after', value: _wiz.time });
+    }
+    var recMap = { tech: 'technician', resp: 'responsable', team: 'all' };
+    var notifyRoles = _wiz.recs.map(function(id) { return recMap[id] || id; });
+    return {
+      name: autoMsg,
+      level: _wiz.level,
+      message: autoMsg,
+      conditions: conditions,
+      notifyRoles: notifyRoles,
+      notifyBrowser: true,
+      cooldownMin: 60,
+      active: true,
+      wizardMeta: { type: _wiz.type, slot: _wiz.slot, cond: _wiz.cond, recs: _wiz.recs },
+    };
+  }
+
+  async function _wizSave() {
+    if (!_wiz.type || !_wiz.cond || !_wiz.recs.length) {
+      MX.toast && MX.toast('Complétez toutes les étapes', true);
+      return;
+    }
+    var rule = _wizToRule();
+    await MX.DB.addAlertRule(rule);
+    MX.toast && MX.toast('Alerte créée !');
+    _wizActive = false;
+    _wiz = { type: '', slot: '', time: '10:00', cond: '', recs: ['resp'], level: 'warning', msg: '' };
+    render();
+  }
+
+  function _wizSet(k, v) {
+    _wiz[k] = v;
+    if (k === 'type') {
+      _wiz.slot = '';
+      _wiz.cond = '';
+      var conds = _WIZ_CONDS[v] || [];
+      if (conds.length) _wiz.cond = conds[0].id;
+    }
+    render();
+  }
+
+  function _wizToggleRec(id) {
+    var idx = _wiz.recs.indexOf(id);
+    if (idx >= 0) {
+      _wiz.recs.splice(idx, 1);
+    } else {
+      _wiz.recs.push(id);
+    }
+    render();
+  }
+
+  function _wizFromTpl(i) {
+    var tpl = _WIZ_TPLS[i];
+    if (!tpl) return;
+    _wiz = { type: tpl.type, slot: tpl.slot, time: tpl.time, cond: tpl.cond, recs: tpl.recs.slice(), level: tpl.level, msg: tpl.msg };
+    _wizActive = true;
+    render();
+  }
+
+  function _arList() { _wizActive = false; render(); }
+  function _arNew()  { _wizActive = true;  render(); }
+
+  function _arTplsHtml() {
+    var h = '<div class="ar-tpl-section">';
+    h += '<div class="ar-tpl-title"><i class="fas fa-bolt"></i> Modèles prêts à l\'emploi</div>';
+    h += '<div class="ar-tpl-grid">';
+    _WIZ_TPLS.forEach(function(tpl, i) {
+      h += '<div class="ar-tpl-card" onclick="MX.Pages.Admin._wizFromTpl(' + i + ')">';
+      h += '<span style="font-size:18px;line-height:1">' + tpl.ico + '</span>';
+      h += '<span class="ar-tpl-lbl">' + tpl.lbl + '</span>';
+      h += '</div>';
     });
-    return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px">
-      <select class="fi fi-sm" style="min-width:180px" onchange="MX.Pages.Admin._setCond(${i},'type',this.value)">
-        ${COND_DEFS.map(cd=>`<option value="${cd.type}"${c.type===cd.type?' selected':''}>${esc(cd.label)}</option>`).join('')}
-      </select>
-      ${fieldHtml}
-      <button class="icon-btn del" style="width:28px;height:28px;flex-shrink:0;margin-left:auto" onclick="MX.Pages.Admin._rmCond(${i})"><i class="fas fa-times" style="font-size:11px"></i></button>
-    </div>`;
+    h += '</div></div>';
+    return h;
+  }
+
+  function _arRulesHtml(rules) {
+    var esc = MX.esc;
+    if (!rules.length) {
+      return '<div style="text-align:center;padding:32px 16px;color:var(--text3);font-size:13px"><i class="fas fa-bell-slash" style="font-size:24px;display:block;margin-bottom:8px"></i>Aucune alerte configurée.<br>Utilisez un modèle ou créez votre alerte.</div>';
+    }
+    var h = '<div class="ar-rules-list">';
+    h += '<div class="ar-rules-head">Alertes configurées</div>';
+    rules.forEach(function(rule) {
+      var lv   = _alertLevel(rule.level);
+      var isOff = rule.active === false;
+      h += '<div class="ar-rule-row' + (isOff ? ' ar-rule-row--off' : '') + '">';
+      h += '<span class="ar-rule-lv" style="color:' + lv.color + '">' + lv.emoji + '</span>';
+      h += '<div style="flex:1;min-width:0">';
+      h += '<div class="ar-rule-name">' + esc(rule.name || 'Sans nom') + '</div>';
+      h += '<div class="ar-rule-meta">' + lv.label + ' · cooldown ' + (rule.cooldownMin || 60) + 'min</div>';
+      h += '</div>';
+      h += '<button class="tog ' + (isOff ? 'off' : 'on') + '" onclick="MX.Pages.Admin._toggleRuleActive(\'' + esc(rule.id) + '\',' + isOff + ')" aria-label="Toggle"></button>';
+      h += '<button class="icon-btn del" style="width:30px;height:30px" onclick="MX.Pages.Admin._delRule(\'' + esc(rule.id) + '\')"><i class="fas fa-trash" style="font-size:11px"></i></button>';
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
   }
 
   // Rule CRUD helpers
@@ -2448,5 +2712,6 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     _editRule, _createRule, _cancelEditRule, _confirmSaveRule, _bufRule,
     _addCond, _rmCond, _setCond, _updCond, _refreshCondsEditor,
     _toggleRuleActive, _delRule, _ackAlert, _ackAllAlerts,
+    _wizSet, _wizToggleRec, _wizFromTpl, _wizSave, _arList, _arNew,
   };
 })();
