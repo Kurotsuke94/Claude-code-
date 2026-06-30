@@ -434,17 +434,18 @@
     const isMob = window.innerWidth <= 900;
     if (sidebar) sidebar.classList.toggle("sx-compact", _compact && !isMob);
 
-    // ── Bottom nav (mobile) — 5 items: Accueil | Missions | Compteurs | Interventions | Plus ──
+    // ── Bottom nav (mobile) — floating bar: Accueil | Missions | Compteurs | ➕ | Planning | Pilotage ──
     const dayIds = DAYS.map(d => d.id);
     const allCl  = ["today-cl", "mes-missions", ...dayIds];
-    const primarySet = new Set(["home", "consommations", "interventions", ...allCl]);
-    const drawerAct  = !primarySet.has(cur);
-    let bot = `<div class="bottom-nav-inner">`;
-    bot += `<button class="bn${cur==="home"?" active":""}" data-page="home" onclick="MX.showPage('home')"><div class="bn-bar"></div><i class="fas fa-house"></i><span>Accueil</span></button>`;
-    bot += `<button class="bn${allCl.includes(cur)?" active":""}" onclick="MX.showPage('mes-missions')"><div class="bn-bar"></div><i class="fas fa-list-check"></i><span>Missions</span></button>`;
-    bot += `<button class="bn${cur==="consommations"?" active":""}" onclick="MX.showCsoTab('compteurs')"><div class="bn-bar"></div><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
-    bot += `<button class="bn${cur==="interventions"?" active":""}" onclick="MX.showPage('interventions')"><div class="bn-bar"></div><i class="fas fa-wrench"></i><span class="nav-badge" id="bnb_int"></span><span>Interventions</span></button>`;
-    bot += `<button class="bn${drawerAct?" active":""}" onclick="MX.openMobileDrawer()"><div class="bn-bar"></div><i class="fas fa-grip"></i><span>Plus</span></button>`;
+    const pilPages = new Set(['utilisateurs', 'org-resp']);
+    const pilAct   = pilPages.has(cur);
+    let bot = `<div class="mbn-bar">`;
+    bot += `<button class="mbn-btn${cur==="home"?" mbn-act":""}" onclick="MX.showPage('home')"><i class="fas fa-house"></i><span>Accueil</span></button>`;
+    bot += `<button class="mbn-btn${allCl.includes(cur)?" mbn-act":""}" onclick="MX.showPage('mes-missions')"><i class="fas fa-list-check"></i><span>Missions</span></button>`;
+    bot += `<button class="mbn-btn${cur==="consommations"?" mbn-act":""}" onclick="MX.showCsoTab('compteurs')"><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
+    bot += `<button class="mbn-fab" id="mbn-fab-btn" onclick="MX.openFabMenu()"><i class="fas fa-plus"></i></button>`;
+    bot += `<button class="mbn-btn${cur==="planning"?" mbn-act":""}" onclick="MX.showPage('planning')"><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
+    bot += `<button class="mbn-btn${pilAct?" mbn-act":""}" onclick="MX.openPilotageMenu()"><i class="fas fa-crosshairs"></i><span>Pilotage</span></button>`;
     bot += `</div>`;
     botNav.innerHTML = bot;
 
@@ -1915,6 +1916,80 @@
     setTimeout(function() { if (drw.parentNode) drw.parentNode.removeChild(drw); }, 310);
   }
 
+  function openFabMenu() {
+    closeFabMenu();
+    const html = '<div class="mbn-fmenu" id="mbn-fmenu">' +
+      '<div class="mbn-fmenu-ov" onclick="MX.closeFabMenu()"></div>' +
+      '<div class="mbn-fmenu-panel">' +
+        '<button class="mbn-fitem" onclick="MX.closeFabMenu();MX.showPage(\'mes-missions\')"><i class="fas fa-list-check"></i><span>Nouvelle mission</span></button>' +
+        '<button class="mbn-fitem" onclick="MX.closeFabMenu();MX.showCsoTab(\'compteurs\')"><i class="fas fa-gauge-high"></i><span>Nouveau relevé</span></button>' +
+        '<button class="mbn-fitem" onclick="MX.closeFabMenu();MX.showPage(\'interventions\')"><i class="fas fa-wrench"></i><span>Nouvelle intervention</span></button>' +
+        '<button class="mbn-fitem" onclick="MX.closeFabMenu();MX.showPage(\'documents\')"><i class="fas fa-book"></i><span>Nouvelle fiche Bible</span></button>' +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    const fab = document.getElementById('mbn-fab-btn');
+    if (fab) fab.classList.add('open');
+    requestAnimationFrame(function() {
+      const el = document.getElementById('mbn-fmenu');
+      if (el) el.classList.add('mbn-fmenu--open');
+    });
+  }
+
+  function closeFabMenu() {
+    const el = document.getElementById('mbn-fmenu');
+    if (el) {
+      el.classList.remove('mbn-fmenu--open');
+      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+    }
+    const fab = document.getElementById('mbn-fab-btn');
+    if (fab) fab.classList.remove('open');
+  }
+
+  function openPilotageMenu() {
+    closePilotageMenu();
+    const canAll = MX.Auth.canSeeAll();
+    let items = '';
+    items += '<div class="mbn-pmenu-sec">PILOTAGE</div>';
+    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'tasks\')"><i class="fas fa-chart-bar"></i><span>Tableau Responsable</span></button>';
+    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'org-resp\')"><i class="fas fa-clipboard-list"></i><span>Organisation Responsable</span></button>';
+    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'week\')"><i class="fas fa-calendar-week"></i><span>Gestion Semaines</span></button>';
+    if (canAll) {
+      items += '<div class="mbn-pmenu-sec">ÉQUIPE</div>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'team\')"><i class="fas fa-users-gear"></i><span>Gestion Équipe</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'users\')"><i class="fas fa-users"></i><span>Utilisateurs</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'roles\')"><i class="fas fa-shield-halved"></i><span>Rôles</span></button>';
+      items += '<div class="mbn-pmenu-sec">SUPERVISION</div>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'alerts\')"><i class="fas fa-bell"></i><span>Alertes</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'alertes-config\')"><i class="fas fa-bell-concierge"></i><span>Config Alertes</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'logs\')"><i class="fas fa-chart-line"></i><span>Activité</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'history\')"><i class="fas fa-clock-rotate-left"></i><span>Historique</span></button>';
+      items += '<div class="mbn-pmenu-sec">CONNAISSANCES</div>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'bible-admin\')"><i class="fas fa-book-open"></i><span>Validation Bible</span></button>';
+      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'badges-admin\')"><i class="fas fa-medal"></i><span>Badges</span></button>';
+    }
+    const html = '<div class="mbn-pmenu" id="mbn-pmenu">' +
+      '<div class="mbn-pmenu-ov" onclick="MX.closePilotageMenu()"></div>' +
+      '<div class="mbn-pmenu-panel">' +
+        '<div class="mbn-pmenu-handle"></div>' +
+        '<div class="mbn-pmenu-title"><i class="fas fa-crosshairs"></i>Centre de Pilotage</div>' +
+        items +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    requestAnimationFrame(function() {
+      const el = document.getElementById('mbn-pmenu');
+      if (el) el.classList.add('mbn-pmenu--open');
+    });
+  }
+
+  function closePilotageMenu() {
+    const el = document.getElementById('mbn-pmenu');
+    if (!el) return;
+    el.classList.remove('mbn-pmenu--open');
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 310);
+  }
+
   window.MX.buildNav           = buildNav;
   window.MX.buildDeskHeader    = buildDeskHeader;
   window.MX.updateNavProgress  = updateNavProgress;
@@ -1922,6 +1997,10 @@
   window.MX.renderStatusBar    = renderStatusBar;
   window.MX.openMobileDrawer   = openMobileDrawer;
   window.MX.closeMobileDrawer  = closeMobileDrawer;
+  window.MX.openFabMenu        = openFabMenu;
+  window.MX.closeFabMenu       = closeFabMenu;
+  window.MX.openPilotageMenu   = openPilotageMenu;
+  window.MX.closePilotageMenu  = closePilotageMenu;
 
   document.addEventListener("DOMContentLoaded", init);
 })();

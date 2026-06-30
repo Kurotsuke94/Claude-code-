@@ -8814,3 +8814,275 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ══════════════════════════════════════════════════════
+   MOBILE BOTTOM NAV — FLOATING GLASSMORPHISM BAR
+   Mobile uniquement (≤900px). Desktop inchangé.
+══════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  /* Augmente la variable pour que .main-content ajoute assez de padding */
+  :root { --bottomnav-h: 88px; }
+
+  /* Le conteneur nav devient transparent — la barre visuelle est .mbn-bar */
+  #bottom-nav {
+    background: transparent !important;
+    border-top: none !important;
+    box-shadow: none !important;
+    height: calc(88px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* ── Barre flottante glassmorphism ── */
+  .mbn-bar {
+    position: absolute;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+    height: 66px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 6px;
+    z-index: 100;
+  }
+
+  /* ── Boutons d'onglet ── */
+  .mbn-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 8px 5px;
+    border: none;
+    background: transparent;
+    color: var(--text3);
+    font-family: var(--ffs);
+    font-size: 9px;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    flex: 1;
+    min-height: 54px;
+    position: relative;
+    transition: color 200ms ease;
+    border-radius: 16px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mbn-btn i { font-size: 17px; transition: transform 200ms ease; }
+  .mbn-btn span { margin-top: 1px; }
+
+  /* État actif */
+  .mbn-btn.mbn-act { color: var(--cyan); }
+  .mbn-btn.mbn-act i { transform: translateY(-2px); }
+
+  /* Capsule indicateur sous l'onglet actif */
+  .mbn-btn.mbn-act::after {
+    content: '';
+    position: absolute;
+    bottom: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 18px;
+    height: 3px;
+    background: var(--cyan);
+    border-radius: 2px;
+    opacity: 0.85;
+  }
+
+  /* ── FAB central ── */
+  .mbn-fab {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #00F5D4 0%, #06B6D4 100%);
+    color: #08111F;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 18px rgba(0,245,212,0.45), 0 2px 6px rgba(0,0,0,0.3);
+    transition: transform 200ms var(--ease-spring), box-shadow 200ms ease;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+    z-index: 1;
+  }
+  .mbn-fab i {
+    font-size: 20px;
+    transition: transform 280ms var(--ease-spring);
+  }
+  .mbn-fab.open i { transform: rotate(45deg); }
+  .mbn-fab:active { transform: scale(0.9); }
+}
+
+/* ── Menu actions rapides du FAB (global, pas dans la media query) ── */
+.mbn-fmenu {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.mbn-fmenu--open {
+  pointer-events: all;
+  opacity: 1;
+}
+.mbn-fmenu-ov {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+}
+.mbn-fmenu-panel {
+  position: absolute;
+  bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%) translateY(14px) scale(0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: calc(100% - 48px);
+  max-width: 320px;
+  transition: transform 250ms var(--ease-spring), opacity 250ms ease;
+  opacity: 0;
+}
+.mbn-fmenu--open .mbn-fmenu-panel {
+  transform: translateX(-50%) translateY(0) scale(1);
+  opacity: 1;
+}
+.mbn-fitem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  color: var(--text);
+  font-family: var(--ffs);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  transition: background 150ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.mbn-fitem:active { background: var(--bg4); }
+.mbn-fitem i {
+  font-size: 16px;
+  color: var(--cyan);
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Bottom sheet Centre de Pilotage ── */
+.mbn-pmenu {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+.mbn-pmenu--open {
+  pointer-events: all;
+  opacity: 1;
+}
+.mbn-pmenu-ov {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+}
+.mbn-pmenu-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg2);
+  border-radius: 24px 24px 0 0;
+  border-top: 1px solid var(--border2);
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  max-height: 82vh;
+  overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 300ms var(--ease-out);
+}
+.mbn-pmenu--open .mbn-pmenu-panel { transform: translateY(0); }
+.mbn-pmenu-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--border2);
+  border-radius: 2px;
+  margin: 12px auto 0;
+  flex-shrink: 0;
+}
+.mbn-pmenu-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 14px;
+  font-family: var(--ffs);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.mbn-pmenu-title i { color: var(--cyan); }
+.mbn-pmenu-sec {
+  padding: 14px 20px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text3);
+  font-family: var(--ffs);
+  text-transform: uppercase;
+}
+.mbn-pitem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 20px;
+  background: transparent;
+  border: none;
+  color: var(--text1);
+  font-family: var(--ffs);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.mbn-pitem:active { background: var(--bg4); }
+.mbn-pitem i {
+  width: 22px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--cyan);
+  flex-shrink: 0;
+}
+
+/* ── Thème clair ── */
+[data-theme="light"] .mbn-bar {
+  background: rgba(255,255,255,0.88);
+  border-color: rgba(0,0,0,0.08);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+}
+[data-theme="light"] .mbn-fitem {
+  background: rgba(255,255,255,0.96);
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .mbn-pmenu-panel { background: var(--bg2); }
