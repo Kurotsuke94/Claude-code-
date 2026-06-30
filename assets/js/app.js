@@ -385,28 +385,32 @@
       function _tabBtn(tabId, icon, label) {
         return `<button class="sx-item sx-sub" onclick="MX.showAdminTab('${tabId}')" title="${label}"><i class="fas ${icon} sx-ico"></i><span class="sx-lbl">${label}</span></button>`;
       }
+      function _pageBtn(pageId, icon, label) {
+        return `<button class="sx-item sx-sub" onclick="MX.showPage('${pageId}')" title="${label}"><i class="fas ${icon} sx-ico"></i><span class="sx-lbl">${label}</span></button>`;
+      }
       function _sec(label) {
         return `<div class="sx-sec-sep"><span>${label}</span></div>`;
       }
       let aItems = "";
+      aItems += _sec("PILOTAGE");
+      aItems += _tabBtn("tasks",          "fa-chart-bar",        "Tableau Responsable");
+      aItems += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
+      aItems += _tabBtn("week",           "fa-calendar-week",    "Gestion Semaines");
+
       aItems += _sec("ÉQUIPE");
-      aItems += _tabBtn("tasks",          "fa-clipboard-list",  "Tâches Responsable");
-      aItems += _tabBtn("team",           "fa-users-gear",      "Gestion Équipe");
-      aItems += _tabBtn("users",          "fa-users",           "Utilisateurs");
-      aItems += _tabBtn("roles",          "fa-shield-halved",   "Rôles");
+      aItems += _tabBtn("team",           "fa-users-gear",       "Gestion Équipe");
+      aItems += _tabBtn("users",          "fa-users",            "Utilisateurs");
+      aItems += _tabBtn("roles",          "fa-shield-halved",    "Rôles");
 
       aItems += _sec("SUPERVISION");
-      aItems += _tabBtn("alerts",         "fa-bell",            "Alertes");
-      aItems += _tabBtn("alertes-config", "fa-bell-concierge",  "Config Alertes");
+      aItems += _tabBtn("alerts",         "fa-bell",             "Alertes");
+      aItems += _tabBtn("alertes-config", "fa-bell-concierge",   "Config Alertes");
+      aItems += _tabBtn("logs",           "fa-chart-line",       "Activité");
       aItems += _tabBtn("history",        "fa-clock-rotate-left","Historique");
-      aItems += _tabBtn("logs",           "fa-chart-line",      "Activité");
-
-      aItems += _sec("ORGANISATION");
-      aItems += _tabBtn("week",           "fa-calendar-week",   "Gestion Semaines");
-      aItems += _tabBtn("badges-admin",   "fa-medal",           "Badges");
 
       aItems += _sec("CONNAISSANCES");
-      aItems += _tabBtn("bible-admin",    "fa-book-open",       "Validation Bible");
+      aItems += _tabBtn("bible-admin",    "fa-book-open",        "Validation Bible");
+      aItems += _tabBtn("badges-admin",   "fa-medal",            "Badges");
 
       if (isAdmin) {
         aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
