@@ -451,7 +451,7 @@
           '<div class="pmp-eq-actions">' +
           '<button class="pmp-act-btn" onclick="MX.Pages.PMP._createInt(\'' + esc(eq.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
           '<button class="pmp-act-btn" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')"><i class="fas fa-pen"></i></button>' +
-          '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delEq(\'' + esc(eq.id) + '\',\'' + esc(eq.name) + '\')"><i class="fas fa-trash"></i></button>' +
+          '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delEq(\'' + eq.id + '\')"><i class="fas fa-trash"></i></button>' +
           '</div></div></div>';
       });
       h += '</div>';
@@ -637,7 +637,7 @@
             '</div>' : '') +
           '<div class="pmp-tpl-footer">' +
           '<button class="pmp-act-btn" onclick="MX.Pages.PMP._tplForm(\'' + esc(t.id) + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
-          '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delTpl(\'' + esc(t.id) + '\',\'' + esc(t.name) + '\')"><i class="fas fa-trash"></i></button>' +
+          '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delTpl(\'' + t.id + '\')"><i class="fas fa-trash"></i></button>' +
           '</div></div>';
       });
       h += '</div>';
@@ -1024,10 +1024,10 @@
       '</select></div>' +
       '</div>';
 
-    MX.showModal(id ? "Modifier l'équipement" : 'Nouvel équipement', body, [
+    MX.showModal({ title: id ? "Modifier l'équipement" : 'Nouvel équipement', body: body, actions: [
       { label: 'Enregistrer', cls: 'primary', fn: function () { _saveEq(id); } },
       { label: 'Annuler',     cls: 'cancel' },
-    ]);
+    ]});
   }
 
   async function _saveEq(id) {
@@ -1065,7 +1065,10 @@
     } catch (e) { console.error(e); MX.toast('Erreur : ' + e.message, true); }
   }
 
-  function _delEq(id, name) {
+  function _delEq(id) {
+    if (!id) { MX.toast('Identifiant introuvable', true); return; }
+    var eq   = _pmpEq.find(function (e) { return e.id === id; });
+    var name = eq ? eq.name : '';
     MX.showModal("Supprimer l'équipement ?",
       '"' + esc(name) + '" et ses interventions associées seront supprimés définitivement.',
       [
@@ -1077,7 +1080,7 @@
                    .forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
             await batch.commit();
             MX.toast('Équipement supprimé');
-          } catch (e) { MX.toast('Erreur : ' + e.message, true); }
+          } catch (e) { console.error('[PMP] delEq:', e); MX.toast('Erreur suppression : ' + e.message, true); }
         }},
         { label: 'Annuler', cls: 'cancel' },
       ]
@@ -1089,13 +1092,13 @@
   function _createInt(eqId) {
     var eq = _pmpEq.find(function (e) { return e.id === eqId; });
     if (!eq) return;
-    MX.showModal('Nouvelle intervention PMP',
-      '<div style="display:flex;flex-direction:column;gap:10px">' +
+    MX.showModal({ title: 'Nouvelle intervention PMP',
+      body: '<div style="display:flex;flex-direction:column;gap:10px">' +
       '<p style="color:var(--text2);font-size:13px;margin:0">Équipement : <strong>' + esc(eq.name) + '</strong></p>' +
       '<div><label class="pmp-form-lbl">Date prévue</label>' +
       '<input class="fi" type="date" id="pmp-ci-date" value="' + _today() + '"></div>' +
       '</div>',
-      [
+      actions: [
         { label: 'Créer', cls: 'primary', fn: async function () {
           var date = document.getElementById('pmp-ci-date')?.value || _today();
           try {
@@ -1111,15 +1114,15 @@
         }},
         { label: 'Annuler', cls: 'cancel' },
       ]
-    );
+    });
   }
 
   function _createIntManual() {
     var users     = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
     var activeEqs = _pmpEq.filter(function (e) { return e.status !== 'inactif'; })
                           .sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
-    MX.showModal('Nouvelle intervention',
-      '<div style="display:flex;flex-direction:column;gap:10px">' +
+    MX.showModal({ title: 'Nouvelle intervention',
+      body: '<div style="display:flex;flex-direction:column;gap:10px">' +
       '<div><label class="pmp-form-lbl">Équipement *</label>' +
       '<select class="fi" id="pmp-ci-eq"><option value="">— Sélectionner —</option>' +
       activeEqs.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>'; }).join('') +
@@ -1130,7 +1133,7 @@
       '<select class="fi" id="pmp-ci-tech"><option value="">— Non assigné —</option>' +
       users.map(function (u) { return '<option value="' + esc(u.name) + '">' + esc(u.name) + '</option>'; }).join('') +
       '</select></div></div>',
-      [
+      actions: [
         { label: 'Créer', cls: 'primary', fn: async function () {
           var eqId = document.getElementById('pmp-ci-eq')?.value;
           var date = document.getElementById('pmp-ci-date2')?.value || _today();
@@ -1151,21 +1154,21 @@
         }},
         { label: 'Annuler', cls: 'cancel' },
       ]
-    );
+    });
   }
 
   function _markDone(intId) {
     var i = _pmpInt.find(function (x) { return x.id === intId; });
     if (!i) return;
-    MX.showModal('Valider l\'intervention',
-      '<div style="display:flex;flex-direction:column;gap:10px">' +
+    MX.showModal({ title: 'Valider l\'intervention',
+      body: '<div style="display:flex;flex-direction:column;gap:10px">' +
       '<p style="color:var(--text2);font-size:13px;margin:0">Équipement : <strong>' + esc(i.equipmentName) + '</strong></p>' +
       '<div><label class="pmp-form-lbl">Date de réalisation</label>' +
       '<input class="fi" type="date" id="pmp-done-date" value="' + _today() + '"></div>' +
       '<div><label class="pmp-form-lbl">Observations</label>' +
       '<textarea class="fi" id="pmp-done-obs" rows="2" placeholder="Remarques, anomalies…" style="resize:vertical"></textarea></div>' +
       '</div>',
-      [
+      actions: [
         { label: 'Valider', cls: 'primary', fn: async function () {
           var doneDate = document.getElementById('pmp-done-date')?.value || _today();
           var obs      = (document.getElementById('pmp-done-obs')?.value || '').trim();
@@ -1184,7 +1187,7 @@
         }},
         { label: 'Annuler', cls: 'cancel' },
       ]
-    );
+    });
   }
 
   function _delInt(id) {
@@ -1211,8 +1214,8 @@
         '</div>';
     }).join('');
 
-    MX.showModal(tpl ? 'Modifier le modèle' : 'Nouveau modèle de checklist',
-      '<div style="display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow-y:auto">' +
+    MX.showModal({ title: tpl ? 'Modifier le modèle' : 'Nouveau modèle de checklist',
+      body: '<div style="display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow-y:auto">' +
       '<div><label class="pmp-form-lbl">Nom du modèle *</label>' +
       '<input class="fi" id="pmp-tpl-name" value="' + esc(tpl ? tpl.name || '' : '') + '" placeholder="Ex: Checklist CTA mensuelle"></div>' +
       '<div><label class="pmp-form-lbl">Description</label>' +
@@ -1222,11 +1225,11 @@
       '<button onclick="MX.Pages.PMP._tplAddItem()" style="margin-top:8px;padding:6px 12px;font-size:12px;border-radius:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--cyan);cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;gap:6px;width:100%;justify-content:center">' +
       '<i class="fas fa-plus"></i> Ajouter une tâche</button>' +
       '</div></div>',
-      [
+      actions: [
         { label: 'Enregistrer', cls: 'primary', fn: function () { _saveTpl(id); } },
         { label: 'Annuler',     cls: 'cancel' },
       ]
-    );
+    });
   }
 
   function _tplAddItem() {
@@ -1260,11 +1263,14 @@
     } catch (e) { MX.toast('Erreur : ' + e.message, true); }
   }
 
-  function _delTpl(id, name) {
+  function _delTpl(id) {
+    if (!id) { MX.toast('Identifiant introuvable', true); return; }
+    var tpl  = _pmpTpl.find(function (t) { return t.id === id; });
+    var name = tpl ? tpl.name : '';
     MX.showModal('Supprimer le modèle ?', '"' + esc(name) + '" sera supprimé définitivement.', [
       { label: 'Supprimer', cls: 'danger', fn: async function () {
         try { await PMP_DB.tpl().doc(id).delete(); MX.toast('Modèle supprimé'); }
-        catch (e) { MX.toast('Erreur : ' + e.message, true); }
+        catch (e) { console.error('[PMP] delTpl:', e); MX.toast('Erreur suppression : ' + e.message, true); }
       }},
       { label: 'Annuler', cls: 'cancel' },
     ]);
