@@ -19,6 +19,7 @@
   let _critBeepTimer = null;
   let _currentCritAlert = null;
   let _lastSmartAlerts  = [];
+  let _anHiddenTypes    = new Set();
 
   // ── CONSTANTS ──
   const FV = firebase.firestore.FieldValue;
@@ -905,148 +906,254 @@
 
   // ── TAB: ANALYSES — Dashboard énergétique ──
   function _tAnalyses() {
-    const per = window._csoPer || '30';
+    // ── Setup ─────────────────────────────────────────────
+    const per  = window._csoPer || '30';
     const days = parseInt(per);
     const today = _today();
     const dates = Array.from({length: days}, (_, i) => _daysAgo(days - 1 - i));
     const ratioZone = window._csoRatioZone || 'all';
 
-    const zones = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
+    const zones   = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
     const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.zone || '') === ratioZone);
 
+    window._anToggle = function(type) {
+      if (_anHiddenTypes.has(type)) _anHiddenTypes.delete(type);
+      else _anHiddenTypes.add(type);
+      MX.Pages.Conso._tab('analyses');
+    };
+
     const perBtns = ['7', '30', '90', '365'].map(p => {
-      const lbl = { 7: '7j', 30: '30j', 90: '3m', 365: '1an' }[p];
-      return `<button class="cso-per-btn${per === p ? ' active' : ''}" onclick="window._csoPer='${p}';MX.Pages.Conso._tab('analyses')">${lbl}</button>`;
+      const lbl = {7:'7j',30:'30j',90:'3m',365:'1an'}[p];
+      return `<button class="cso-per-btn${per===p?' active':''}" onclick="window._csoPer='${p}';MX.Pages.Conso._tab('analyses')">${lbl}</button>`;
     }).join('');
 
     const zoneBtns = zones.length > 1 ? ['all', ...zones].map(z => {
       const lbl = z === 'all' ? 'Toutes' : z;
-      return `<button class="ra-zone-btn${ratioZone === z ? ' active' : ''}" onclick="window._csoRatioZone='${z}';MX.Pages.Conso._tab('analyses')">${esc(lbl)}</button>`;
+      return `<button class="ra-zone-btn${ratioZone===z?' active':''}" onclick="window._csoRatioZone='${z}';MX.Pages.Conso._tab('analyses')">${esc(lbl)}</button>`;
     }).join('') : '';
 
-    // Compute data per energy type
+    // ── Per-type data ──────────────────────────────────────
     const typeData = {};
     Object.entries(MT).forEach(([type, meta]) => {
-      const ids = fMeters.filter(m => m.type === type).map(m => m.id);
+      const ids  = fMeters.filter(m => m.type === type).map(m => m.id);
       if (!ids.length) return;
       const unit = fMeters.find(m => m.type === type)?.unit || meta.unit;
-      const daily = dates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
+      const daily = dates.map(ds =>
+        _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
+          .reduce((s, r) => s + (r.consumption || 0), 0)
+      );
       const total = daily.reduce((a, b) => a + b, 0);
       const prevDates = Array.from({length: days}, (_, i) => _daysAgo(days * 2 - 1 - i));
-      const prevTotal = prevDates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0)).reduce((a, b) => a + b, 0);
+      const prevTotal = prevDates.map(ds =>
+        _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
+          .reduce((s, r) => s + (r.consumption || 0), 0)
+      ).reduce((a, b) => a + b, 0);
       const evoPct = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
-      const todayVal = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
+      const todayVal = _readings.filter(r => ids.includes(r.meterId) && r.date === today)
+        .reduce((s, r) => s + (r.consumption || 0), 0);
       const n30 = Math.min(30, days);
-      const avg30Arr = Array.from({length: n30}, (_, i) => _daysAgo(n30 - 1 - i)).map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0)).filter(v => v > 0);
-      const avg30Val = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
+      const avg30Arr = Array.from({length: n30}, (_, i) => _daysAgo(n30 - 1 - i))
+        .map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
+          .reduce((s, r) => s + (r.consumption || 0), 0))
+        .filter(v => v > 0);
+      const avg30Val  = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
+      const todayEcart = avg30Val > 0 ? (todayVal - avg30Val) / avg30Val * 100 : null;
+      const lvl = todayEcart === null ? 'na' : todayEcart > 50 ? 'crit' : todayEcart > 10 ? 'warn' : 'ok';
       const isW = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
-      const dailyRatios = dates.map((ds, i) => { const c = _clients[ds] || 0; return c > 0 ? (isW ? daily[i] * 1000 / c : daily[i] / c) : null; }).filter(v => v !== null);
+      const dailyRatios = dates.map((ds, i) => {
+        const c = _clients[ds] || 0;
+        return c > 0 ? (isW ? daily[i] * 1000 / c : daily[i] / c) : null;
+      }).filter(v => v !== null);
       const avgRatio = dailyRatios.length ? dailyRatios.reduce((a, b) => a + b, 0) / dailyRatios.length : 0;
       const rUnit = isW ? 'L/client' : `${unit}/client`;
-      typeData[type] = { meta, unit, daily, total, prevTotal, evoPct, todayVal, avg30Val, avgRatio, rUnit, spark: daily.slice(-14) };
+      typeData[type] = {
+        meta, unit, daily, total, prevTotal, evoPct, todayVal, avg30Val,
+        todayEcart, lvl, avgRatio, rUnit, spark: daily.slice(-14),
+      };
     });
 
     if (!Object.keys(typeData).length) {
       return `<div class="cso-inner"><div class="ra-toolbar"><div class="ra-per-row">${perBtns}</div></div>
-        <div class="cso-empty-state"><i class="fas fa-chart-bar" style="font-size:32px;opacity:.2"></i><p style="color:var(--text-3);margin-top:10px">Aucun compteur dans cette zone</p></div></div>`;
+        <div class="cso-empty-state"><i class="fas fa-chart-bar" style="font-size:32px;opacity:.2"></i>
+        <p style="color:var(--text-3);margin-top:10px">Aucun compteur dans cette zone</p></div></div>`;
     }
 
-    // KPI cards — 4 main energies
+    // ── Performance score & grade ──────────────────────────
+    const score = _calcScore();
+    const grade = score >= 95 ? 'A+' : score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 50 ? 'C' : 'D';
+    const gradeColor = score >= 85 ? '#34d399' : score >= 70 ? '#f59e0b' : score >= 50 ? '#fb923c' : '#f87171';
+
+    // ── Smart alerts ───────────────────────────────────────
+    const smartAlerts = _detectAlerts();
+    const critCount = smartAlerts.filter(a => a.level === 'critical').length;
+    const warnCount = smartAlerts.filter(a => a.level === 'warning').length;
+
+    // ── ROW 1: KPI cards (4 main energies) ────────────────
     const kpiTypes = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
     const kpiHtml = kpiTypes.map(type => {
       const d = typeData[type];
       if (!d) return '';
-      const { meta, unit, total, evoPct, spark } = d;
-      const evoColor = evoPct === null ? '#94a3b8' : evoPct > 5 ? '#f87171' : evoPct < -5 ? '#34d399' : '#94a3b8';
-      const evoIcon = evoPct === null ? 'fa-minus' : evoPct > 5 ? 'fa-arrow-trend-up' : evoPct < -5 ? 'fa-arrow-trend-down' : 'fa-minus';
-      const evoTxt = evoPct !== null ? `${evoPct > 0 ? '+' : ''}${_fmt(evoPct, 1)}% vs pér. préc.` : 'Pas de comparaison';
-      return `<div class="ra-kpi-card" style="--kc:${meta.color};--kd:${meta.dim}">
-        <div class="ra-kpi-head"><span class="ra-kpi-ico">${meta.icon}</span><span class="ra-kpi-lbl">${esc(meta.label)}</span></div>
-        <div class="ra-kpi-val">${_fmt(total, total >= 1000 ? 0 : 1)}</div>
-        <div class="ra-kpi-sub">${esc(unit)} · ${days}j</div>
-        <div class="ra-kpi-evo" style="color:${evoColor}"><i class="fas ${evoIcon}"></i> ${evoTxt}</div>
-        <div class="ra-kpi-spark">${_sparkSVG(spark, meta.color, 100, 30)}</div>
+      const { meta, unit, evoPct, todayVal, avg30Val, todayEcart, lvl, spark } = d;
+      const evoColor = evoPct === null ? '#64748b' : evoPct > 5 ? '#f87171' : evoPct < -5 ? '#34d399' : '#64748b';
+      const evoIcon  = evoPct === null ? 'fa-minus' : evoPct > 5 ? 'fa-arrow-trend-up' : evoPct < -5 ? 'fa-arrow-trend-down' : 'fa-minus';
+      const dotColor = {crit:'#f87171',warn:'#f59e0b',ok:'#34d399',na:'#475569'}[lvl];
+      const ecartTxt  = todayEcart !== null ? `${todayEcart>0?'+':''}${_fmt(todayEcart,0)}% / moy.` : 'Pas de moy.';
+      const ecartColor = {crit:'#f87171',warn:'#f59e0b',ok:'#34d399',na:'#64748b'}[lvl];
+      return `<div class="an-kpi-card" style="--kc:${meta.color}">
+        <div class="an-kpi-head">
+          <span class="an-kpi-ico">${meta.icon}</span>
+          <span class="an-kpi-lbl">${esc(meta.label)}</span>
+          <span class="an-kpi-dot" style="background:${dotColor}"></span>
+        </div>
+        <div class="an-kpi-val">${_fmt(todayVal, todayVal>=100?0:1)}<span class="an-kpi-u"> ${esc(unit)}</span></div>
+        <div class="an-kpi-spark">${_sparkSVG(spark, meta.color, 96, 24)}</div>
+        <div class="an-kpi-evo" style="color:${evoColor}"><i class="fas ${evoIcon}"></i> ${evoPct!==null?`${evoPct>0?'+':''}${_fmt(evoPct,1)}%`:'—'} pér. préc.</div>
+        <div class="an-kpi-ecart" style="color:${ecartColor}">${ecartTxt}</div>
       </div>`;
     }).filter(Boolean).join('');
 
-    // Main line chart (smooth bezier)
-    const chartDS = Object.entries(typeData).filter(([, d]) => d.daily.some(v => v > 0)).map(([, d]) => ({ color: d.meta.color, vals: d.daily, label: d.meta.label }));
-    const lineChart = _bezierLineSVG(chartDS, dates, 200);
-    const chartLeg = chartDS.map(ds => `<span class="ra-leg-item"><span class="ra-leg-dot" style="background:${ds.color}"></span>${esc(ds.label)}</span>`).join('');
+    // ── ROW 2: Normalized chart with interactive legend ────
+    const allChartDS = Object.entries(typeData)
+      .filter(([, d]) => d.daily.some(v => v > 0))
+      .map(([type, d]) => ({ type, color: d.meta.color, label: d.meta.label, vals: d.daily }));
 
-    // Comparison bar: today vs 30-day avg
-    const cmpItems = Object.entries(typeData).filter(([, d]) => d.avg30Val > 0 || d.todayVal > 0).map(([, d]) => ({
-      label: d.meta.label, color: d.meta.color, today: d.todayVal, avg: d.avg30Val, unit: d.unit,
-      pctDiff: d.avg30Val > 0 ? (d.todayVal - d.avg30Val) / d.avg30Val * 100 : null,
-    }));
-    const hBar = _hBarSVG(cmpItems);
+    const visibleDS = allChartDS.filter(ds => !_anHiddenTypes.has(ds.type));
+    const normDS = visibleDS.map(ds => {
+      const mx = Math.max(...ds.vals, 0.001);
+      return { color: ds.color, label: ds.label, vals: ds.vals.map(v => v / mx * 100) };
+    });
 
-    // Donut: distribution by type
-    const donutItems = Object.entries(typeData).filter(([, d]) => d.total > 0).map(([, d]) => ({ label: d.meta.label, color: d.meta.color, val: d.total, unit: d.unit }));
-    const donut = _donutSVG(donutItems);
+    const legendHtml = allChartDS.map(ds => {
+      const off = _anHiddenTypes.has(ds.type);
+      return `<span class="an-leg-item${off?' an-leg-item--off':''}" onclick="window._anToggle('${ds.type}')"><span class="an-leg-dot" style="background:${off?'transparent':ds.color};border:2px solid ${ds.color}"></span>${esc(ds.label)}</span>`;
+    }).join('');
 
-    // Weekly area chart for drift detection
+    // ── ROW 3: Comparison bars + donut ────────────────────
+    const cmpItems = Object.entries(typeData)
+      .filter(([, d]) => d.avg30Val > 0 || d.todayVal > 0)
+      .map(([, d]) => ({
+        label: d.meta.label, color: d.meta.color,
+        today: d.todayVal, avg: d.avg30Val, unit: d.unit,
+        pctDiff: d.avg30Val > 0 ? (d.todayVal - d.avg30Val) / d.avg30Val * 100 : null,
+      }));
+    const donutItems = Object.entries(typeData)
+      .filter(([, d]) => d.total > 0)
+      .map(([, d]) => ({ label: d.meta.label, color: d.meta.color, val: d.total, unit: d.unit }));
+
+    // ── ROW 4: Weekly evolution (normalized) ───────────────
     const nW = Math.min(Math.ceil(days / 7), 16);
-    const areaDS = Object.entries(typeData).filter(([, d]) => d.daily.some(v => v > 0)).map(([, d]) => ({
-      color: d.meta.color, label: d.meta.label,
-      vals: Array.from({length: nW}, (_, wi) => {
-        const si = days - (nW - wi) * 7;
-        return d.daily.slice(Math.max(0, si), Math.max(0, si + 7)).reduce((a, b) => a + b, 0);
-      }),
-    }));
+    const normAreaDS = Object.entries(typeData)
+      .filter(([, d]) => d.daily.some(v => v > 0))
+      .map(([, d]) => {
+        const vals = Array.from({length: nW}, (_, wi) => {
+          const si = days - (nW - wi) * 7;
+          return d.daily.slice(Math.max(0, si), Math.max(0, si + 7)).reduce((a, b) => a + b, 0);
+        });
+        const mx = Math.max(...vals, 0.001);
+        return { color: d.meta.color, label: d.meta.label, vals: vals.map(v => v / mx * 100) };
+      });
     const wkLabels = Array.from({length: nW}, (_, i) => `S${i + 1}`);
-    const areaChart = _areaLineSVG(areaDS, wkLabels, 160);
 
-    // Ratio per client rows
-    const ratioHtml = Object.entries(typeData).filter(([, d]) => d.avgRatio > 0).map(([type, d]) =>
-      `<div class="ra-ratio-row">
-        <span class="ra-ratio-ico">${d.meta.icon}</span>
-        <span class="ra-ratio-lbl">${esc(d.meta.label)}</span>
-        <span class="ra-ratio-val">${_fmt(d.avgRatio, ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type) ? 0 : 2)}</span>
-        <span class="ra-ratio-u">${esc(d.rUnit)}</span>
-      </div>`
-    ).join('');
+    // ── ROW 5: Heatmap (30j × 4 types) ───────────────────
+    const hmTypes  = ['eau_froide','eau_chaude','electricite','chauffage'].filter(t => typeData[t] && typeData[t].daily.some(v => v > 0));
+    const hmDays   = Math.min(30, days);
+    const hmDates  = Array.from({length: hmDays}, (_, i) => _daysAgo(hmDays - 1 - i));
+    const hmCells  = [];
+    hmTypes.forEach((type, ri) => {
+      const d = typeData[type];
+      hmDates.forEach((ds, ci) => {
+        const v   = d.daily[days - hmDays + ci] || 0;
+        const rel = d.avg30Val > 0 ? v / d.avg30Val : 0;
+        const lvl = !v ? 'none' : rel > 1.5 ? 'crit' : rel > 1.1 ? 'warn' : 'ok';
+        hmCells.push({ row: ri, col: ci, level: lvl, val: Math.min(rel, 2) / 2 });
+      });
+    });
+    const hmRowLabels = hmTypes.map(t => typeData[t].meta.icon);
+    const hmColLabels = hmDates.map((ds, i) => (i % 5 === 0 || i === hmDays - 1) ? ds.split('-')[2] : '');
 
-    return `<div class="cso-inner ra-page">
-      <div class="ra-toolbar">
+    // ── History: last 10 readings ──────────────────────────
+    const histReadings = [..._readings]
+      .filter(r => r.date)
+      .sort((a, b) => b.date > a.date ? 1 : b.date < a.date ? -1 : 0)
+      .slice(0, 10);
+    const histHtml = histReadings.length ? histReadings.map(r => {
+      const m    = _meters.find(me => me.id === r.meterId);
+      const meta = m ? (MT[m.type] || {}) : {};
+      return `<div class="an-hist-row"><span class="an-hist-ico">${meta.icon||'📊'}</span><span class="an-hist-body"><span class="an-hist-lbl">${esc(m?m.name:r.meterId)}</span><span class="an-hist-cso">${_fmt(r.consumption,1)} ${esc(m?(m.unit||''):'')}</span></span><span class="an-hist-date">${_dateLbl(r.date)}</span></div>`;
+    }).join('') : '<div class="an-hist-empty">Aucun relevé</div>';
+
+    // ── Alert cards (smart + Firestore saved) ──────────────
+    const savedAlerts = _csoAlerts.filter(a => !a.acknowledged && (a.level === 'critical' || a.level === 'warning'));
+    const allAlerts   = [...smartAlerts, ...savedAlerts.slice(0, 4)];
+
+    const alertsHtml = allAlerts.length ? allAlerts.map(a => {
+      const metric = a.metric || a.type || 'default';
+      const meta   = MT[metric] || {};
+      const sug    = (_SUG[metric] || _SUG.default).slice(0, 3);
+      const isCrit = a.level === 'critical';
+      return `<div class="an-alert-card${isCrit?' an-alert-card--crit':' an-alert-card--warn'}">
+        <div class="an-alert-head">
+          <span class="an-alert-ico">${meta.icon||'⚠️'}</span>
+          <div class="an-alert-info"><div class="an-alert-ttl">${esc(a.title||a.type||'Anomalie')}</div><div class="an-alert-msg">${esc(a.msg||a.message||'')}</div></div>
+          <span class="an-alert-lvl${isCrit?' an-alert-lvl--crit':''}">${isCrit?'CRITIQUE':'ATTENTION'}</span>
+        </div>
+        ${sug.length?`<div class="an-alert-acts"><span class="an-alert-act-ttl">Actions :</span>${sug.map(s=>`<label class="an-alert-chk"><input type="checkbox"> ${esc(s)}</label>`).join('')}</div>`:''}
+      </div>`;
+    }).join('') : '<div class="an-no-alerts"><i class="fas fa-check-circle"></i> Aucune anomalie détectée</div>';
+
+    // ── Score badge (toolbar) ─────────────────────────────
+    const scoreBadge = `<div class="an-score-badge" style="border-color:${gradeColor};color:${gradeColor}" title="Performance énergétique · ${score}/100"><span class="an-score-grade">${grade}</span><span class="an-score-pts">${score}pts</span></div>`;
+
+    // ── Assemble ───────────────────────────────────────────
+    return `<div class="cso-inner an-page">
+      <div class="an-toolbar">
         <div class="ra-per-row">${perBtns}</div>
-        ${zoneBtns ? `<div class="ra-zone-row">${zoneBtns}</div>` : ''}
+        ${zoneBtns?`<div class="ra-zone-row">${zoneBtns}</div>`:''}
+        ${scoreBadge}
       </div>
 
-      <div class="ra-kpi-row">${kpiHtml || '<div class="ra-empty">Aucune donnée KPI sur la période</div>'}</div>
+      <div class="an-kpi-row">${kpiHtml||'<div class="ra-empty">Aucune donnée KPI</div>'}</div>
 
-      ${chartDS.length ? `<div class="ra-chart-block">
-        <div class="ra-chart-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations</div>
-        <div class="ra-chart-sub">Consommations journalières par énergie — ${days} jours</div>
-        ${lineChart}
-        <div class="ra-legend">${chartLeg}</div>
-      </div>` : ''}
+      ${normDS.length?`<div class="an-chart-block">
+        <div class="an-chart-head">
+          <div><div class="an-chart-ttl"><i class="fas fa-chart-line"></i> Évolution normalisée ${days}j</div><div class="an-chart-sub">% du max individuel · cliquer sur la légende pour masquer/afficher</div></div>
+          <div class="an-chart-badges">${critCount?`<span class="an-badge an-badge--crit">${critCount} crit.</span>`:''} ${warnCount?`<span class="an-badge an-badge--warn">${warnCount} att.</span>`:''}</div>
+        </div>
+        <div class="an-legend">${legendHtml}</div>
+        ${_supLineSVG(normDS, dates, 250)}
+      </div>`:''}
 
-      <div class="ra-row2">
-        ${cmpItems.length ? `<div class="ra-chart-block ra-half">
-          <div class="ra-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>
-          <div class="ra-chart-sub">Écart par rapport à la moyenne mobile</div>
-          ${hBar}
-        </div>` : ''}
-        ${donutItems.length >= 2 ? `<div class="ra-chart-block ra-half">
-          <div class="ra-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>
-          <div class="ra-chart-sub">Distribution relative sur la période</div>
-          ${donut}
-        </div>` : ''}
+      <div class="an-row3">
+        ${cmpItems.length?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>${_hBarSVG(cmpItems)}</div>`:''}
+        ${donutItems.length>=2?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>${_donutSVG(donutItems)}</div>`:''}
       </div>
 
-      ${areaDS.length ? `<div class="ra-chart-block">
-        <div class="ra-chart-ttl"><i class="fas fa-chart-area"></i> Évolution hebdomadaire</div>
-        <div class="ra-chart-sub">Consommations agrégées par semaine — détection de dérive</div>
-        ${areaChart}
-        <div class="ra-legend">${chartLeg}</div>
-      </div>` : ''}
+      ${normAreaDS.length?`<div class="an-chart-block">
+        <div class="an-chart-ttl"><i class="fas fa-chart-area"></i> Évolution hebdomadaire</div>
+        <div class="an-chart-sub">Normalisé · tendance et détection de dérive</div>
+        ${_areaLineSVG(normAreaDS, wkLabels, 200)}
+        <div class="an-legend an-legend--sm">${allChartDS.map(ds=>`<span class="an-leg-item"><span class="an-leg-dot" style="background:${ds.color};border:2px solid ${ds.color}"></span>${esc(ds.label)}</span>`).join('')}</div>
+      </div>`:''}
 
-      ${ratioHtml ? `<div class="ra-chart-block">
-        <div class="ra-chart-ttl"><i class="fas fa-user-check"></i> Ratios par client hébergé</div>
-        <div class="ra-chart-sub">Consommation moyenne par client sur la période</div>
-        <div class="ra-ratio-grid">${ratioHtml}</div>
-      </div>` : ''}
+      ${hmTypes.length?`<div class="an-row5">
+        <div class="an-chart-block">
+          <div class="an-chart-ttl"><i class="fas fa-th"></i> Carte thermique 30j</div>
+          <div class="an-chart-sub"><span style="color:#34d399">●</span> Normal &nbsp;<span style="color:#f59e0b">●</span> +10% &nbsp;<span style="color:#f87171">●</span> +50%</div>
+          ${_heatmapSVG(hmCells, hmRowLabels, hmColLabels, hmTypes.length, hmDays)}
+        </div>
+        <div class="an-chart-block">
+          <div class="an-chart-ttl"><i class="fas fa-list"></i> Derniers relevés</div>
+          <div class="an-hist-list">${histHtml}</div>
+        </div>
+      </div>`:''}
+
+      <div class="an-chart-block">
+        <div class="an-chart-head">
+          <div class="an-chart-ttl"><i class="fas fa-triangle-exclamation"></i> Anomalies & alertes</div>
+          ${allAlerts.length?`<div class="an-chart-badges">${critCount?`<span class="an-badge an-badge--crit">${critCount}</span>`:''} ${warnCount?`<span class="an-badge an-badge--warn">${warnCount}</span>`:''}</div>`:''}
+        </div>
+        <div class="an-alert-grid">${alertsHtml}</div>
+      </div>
     </div>`;
   }
 
