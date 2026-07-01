@@ -639,10 +639,10 @@
       ]
     },
   ];
-  window.MX.appVer = "1.0.33";
+  window.MX.appVer = window.MX_VERSION || "1.0.33";
 
   // ── STATUS BAR ──
-  const _APP_VER = "1.0.33";
+  const _APP_VER = window.MX_VERSION || "1.0.33";
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -1080,6 +1080,21 @@
   // ── INIT ──
   const _splashStart = performance.now();
 
+  // Logs de version au démarrage
+  console.log(
+    '%c Maintix v' + _APP_VER + ' %c build ' + (window.MX_BUILD || '—'),
+    'background:#8B5CF6;color:#fff;padding:3px 8px;border-radius:4px 0 0 4px;font-weight:700',
+    'background:#1e1b4b;color:#a78bfa;padding:3px 8px;border-radius:0 4px 4px 0'
+  );
+  caches.keys().then(keys => {
+    const swCache = keys.find(k => k.startsWith('maintix-')) || '—';
+    console.log('[Maintix] Version app     :', _APP_VER);
+    console.log('[Maintix] Cache SW actif  :', swCache);
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      console.log('[Maintix] SW scriptURL    :', navigator.serviceWorker.controller.scriptURL);
+    }
+  }).catch(() => {});
+
   async function init() {
     MX.ThemeManager && MX.ThemeManager.init();
     const loadingTimeout = setTimeout(hideLoading, 4500);
@@ -1142,28 +1157,35 @@
 
     if ("serviceWorker" in navigator) {
       const _swHadController = !!navigator.serviceWorker.controller;
+      let _swReg = null;
       navigator.serviceWorker.register("/sw.js").then(reg => {
-        // Periodic background update check every hour
-        setInterval(() => reg.update().catch(() => {}), 3600000);
+        _swReg = reg;
+        // Vérification toutes les 5 minutes (au lieu de 1 heure)
+        setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
       }).catch(() => {});
+      // Vérification au retour au premier plan (swipe-back, alt-tab, etc.)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && _swReg) {
+          _swReg.update().catch(() => {});
+        }
+      });
+      // Rechargement automatique silencieux à chaque nouveau SW
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (_swHadController) _showSwUpdateBar();
+        if (_swHadController) {
+          MX.toast('Mise à jour automatique en cours…', false);
+          setTimeout(() => window.location.reload(), 2500);
+        }
+      });
+      // Écoute du message SW_UPDATED (envoyé par activate → clients.claim)
+      navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data && e.data.type === 'SW_UPDATED') {
+          console.log('[Maintix] SW mis à jour → v' + e.data.version);
+        }
       });
     }
 
     MX.Notifs.init();
     MX.Updates.init();
-  }
-
-  function _showSwUpdateBar() {
-    if (document.getElementById('sw-update-bar')) return;
-    const bar = document.createElement('div');
-    bar.id = 'sw-update-bar';
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;display:flex;align-items:center;gap:10px;padding:10px 20px;background:var(--cyan);color:#0C0C0E;font-size:13px;font-weight:600;font-family:var(--ffs);box-shadow:0 2px 12px rgba(0,0,0,0.3)';
-    bar.innerHTML = '<i class="fas fa-rocket"></i><span style="flex:1">Nouvelle version disponible</span>'
-      + '<button onclick="window.location.reload()" style="background:#0C0C0E;color:var(--cyan);border:none;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--ffs);flex-shrink:0">Mettre à jour</button>'
-      + '<button onclick="document.getElementById(\'sw-update-bar\').remove()" style="background:transparent;border:none;color:#0C0C0E;cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0" title="Plus tard">×</button>';
-    document.body.insertBefore(bar, document.body.firstChild);
   }
 
   function hideLoading() {

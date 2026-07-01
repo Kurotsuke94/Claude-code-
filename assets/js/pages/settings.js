@@ -891,7 +891,7 @@
   }
 
   function _renderApropos() {
-    const ver = '1.0.33';
+    const ver = (window.MX && MX.appVer) ? MX.appVer : (window.MX_VERSION || '1.0.33');
     const isOnline = navigator.onLine;
     const users = MX.state.users || [];
     const lastSync = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';
@@ -1021,11 +1021,35 @@
     const firestoreState = isOnline ? 'Connecté' : 'Hors ligne';
     const ua = navigator.userAgent;
     const isMob = /Mobi|Android/i.test(ua) ? 'Mobile' : 'Desktop';
+    const appVer   = (window.MX && MX.appVer)  || (window.MX_VERSION || '—');
+    const buildNum = window.MX_BUILD || '—';
+
+    // Cache SW actif (async — affiché après rendu via micro-update)
+    let swCache = '…';
+    caches.keys().then(keys => {
+      const found = keys.find(k => k.startsWith('maintix-')) || '—';
+      const el = document.getElementById('diag-sw-cache');
+      if (el) el.textContent = found;
+    }).catch(() => {});
+    const swScriptUrl = (navigator.serviceWorker && navigator.serviceWorker.controller)
+      ? navigator.serviceWorker.controller.scriptURL.replace(location.origin, '') : '—';
 
     return `
       <div class="stt-section-head"><i class="fas fa-bug"></i> Diagnostic développeur <span class="stt-badge stt-badge-green" style="margin-left:8px;font-size:10px">DEV</span></div>
       <div class="stt-card" style="font-family:var(--ffm);font-size:12px">
         <div class="stt-info-list">
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-rocket"></i> Version application</span>
+            <span class="stt-info-val" style="color:var(--cyan);font-weight:700">v${MX.esc(appVer)} (build ${MX.esc(String(buildNum))})</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-gear"></i> Cache Service Worker</span>
+            <span class="stt-info-val" id="diag-sw-cache">${MX.esc(swCache)}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-file-code"></i> Script SW</span>
+            <span class="stt-info-val">${MX.esc(swScriptUrl)}</span>
+          </div>
           <div class="stt-info-row">
             <span class="stt-info-label"><i class="fas fa-user"></i> Utilisateur connecté</span>
             <span class="stt-info-val">${MX.esc(userName)}</span>

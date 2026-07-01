@@ -1,3 +1,4 @@
+importScripts('/version.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
@@ -32,10 +33,15 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
-const CACHE  = "maintix-v77";
-const SHELL  = [
+// ── VERSION — source unique : version.js ──
+const CACHE = "maintix-" + MX_VERSION;
+const V     = "?v=" + MX_BUILD;
+
+// ── APP SHELL — tous les assets chargés par index.html ──
+const SHELL = [
   "/",
   "/index.html",
+  "/version.js",
   "/manifest.json",
   "/browserconfig.xml",
   "/favicon.ico",
@@ -55,40 +61,41 @@ const SHELL  = [
   "/assets/icons/favicon-16.png",
   "/assets/icons/favicon-32.png",
   "/assets/icons/favicon-48.png",
-  "/assets/css/variables.css",
-  "/assets/css/variables.css?v=77",
-  "/assets/css/main.css",
-  "/assets/css/main.css?v=77",
-  "/assets/css/components.css",
-  "/assets/css/components.css?v=77",
   "/assets/fontawesome/css/all.min.css",
   "/assets/fontawesome/webfonts/fa-solid-900.woff2",
   "/assets/fontawesome/webfonts/fa-regular-400.woff2",
   "/assets/fontawesome/webfonts/fa-brands-400.woff2",
   "/assets/fontawesome/webfonts/fa-v4compatibility.woff2",
-  "/assets/js/firebase-config.js",
-  "/assets/js/utils/helpers.js",
-  "/assets/js/utils/uuid.js",
-  "/assets/js/db.js",
-  "/assets/js/auth.js",
-  "/assets/js/widgets/task-row.js",
-  "/assets/js/widgets/user-badge.js",
-  "/assets/js/widgets/progress-widget.js",
-  "/assets/js/widgets/slot-card.js",
-  "/assets/js/widgets/global-search.js",
-  "/assets/js/pages/home.js",
-  "/assets/js/pages/checklist.js",
-  "/assets/js/pages/messages.js",
-  "/assets/js/pages/orders.js",
-  "/assets/js/pages/admin.js",
-  "/assets/js/pages/resp-planning.js",
-  "/assets/js/pages/badges.js",
-  "/assets/js/pages/planning.js",
-  "/assets/js/pages/settings.js",
-  "/assets/js/pages/bible.js",
-  "/assets/js/pages/consommations.js",
-  "/assets/js/pages/interventions.js",
-  "/assets/js/app.js"
+  "/assets/css/variables.css"  + V,
+  "/assets/css/main.css"       + V,
+  "/assets/css/components.css" + V,
+  "/assets/js/firebase-config.js"            + V,
+  "/assets/js/utils/helpers.js"              + V,
+  "/assets/js/utils/uuid.js"                 + V,
+  "/assets/js/db.js"                         + V,
+  "/assets/js/auth.js"                       + V,
+  "/assets/js/widgets/task-row.js"           + V,
+  "/assets/js/widgets/user-badge.js"         + V,
+  "/assets/js/widgets/progress-widget.js"    + V,
+  "/assets/js/widgets/slot-card.js"          + V,
+  "/assets/js/widgets/global-search.js"      + V,
+  "/assets/js/pages/home.js"                 + V,
+  "/assets/js/pages/checklist.js"            + V,
+  "/assets/js/pages/mes-missions.js"         + V,
+  "/assets/js/pages/messages.js"             + V,
+  "/assets/js/pages/orders.js"               + V,
+  "/assets/js/pages/admin.js"                + V,
+  "/assets/js/pages/org-resp.js"             + V,
+  "/assets/js/pages/badges.js"               + V,
+  "/assets/js/pages/planning.js"             + V,
+  "/assets/js/pages/settings.js"             + V,
+  "/assets/js/pages/bible.js"                + V,
+  "/assets/js/pages/consommations.js"        + V,
+  "/assets/js/pages/interventions.js"        + V,
+  "/assets/js/pages/notifications.js"        + V,
+  "/assets/js/pages/equipe.js"               + V,
+  "/assets/js/alerts-engine.js"              + V,
+  "/assets/js/app.js"                        + V,
 ];
 
 // Firebase domains — never intercept, let Firebase SDK handle
@@ -102,30 +109,40 @@ const BYPASS = [
   "fcm.googleapis.com"
 ];
 
+// ── INSTALL — préchargement du shell complet ──
 self.addEventListener("install", e => {
+  console.log("[SW] Maintix v" + MX_VERSION + " (build " + MX_BUILD + ") — install");
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then(c => c.addAll(SHELL))
+      .then(() => self.skipWaiting())
   );
 });
 
+// ── ACTIVATE — nettoyage des anciens caches + rechargement automatique ──
 self.addEventListener("activate", e => {
+  console.log("[SW] Maintix v" + MX_VERSION + " — activate, cache: " + CACHE);
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: "window" }).then(list => {
+        list.forEach(client => client.postMessage({ type: "SW_UPDATED", version: MX_VERSION }));
+      }))
   );
 });
 
+// ── FETCH — stratégie hybride ──
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
 
-  // Skip non-http(s) schemes (chrome-extension://, data:, etc.)
   if (url.protocol !== "http:" && url.protocol !== "https:") return;
-  // Skip non-GET and bypass domains
   if (e.request.method !== "GET") return;
   if (BYPASS.some(d => url.hostname.includes(d))) return;
 
-  // Navigation requests — network first, fallback to cached index
+  // Navigation (HTML) — Network First → fallback index.html offline
   if (e.request.mode === "navigate") {
     e.respondWith(
       fetch(e.request).catch(() => caches.match("/index.html"))
@@ -133,8 +150,43 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // Versioned JS/CSS — network first (always get fresh code), cache as offline fallback
-  if (/\.(js|css)\?v=/.test(url.href)) {
+  // Icônes, logos, images — Cache First (actifs statiques, changent rarement)
+  if (/\.(png|jpg|jpeg|webp|svg|ico|gif)$/.test(url.pathname)) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(res => {
+          if (res && res.status === 200 && res.type === "basic") {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // Polices (woff2, woff, ttf) — Cache First (jamais modifiées en release)
+  if (/\.(woff2?|ttf|eot|otf)$/.test(url.pathname)) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(res => {
+          if (res && res.status === 200) {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // JS et CSS versionnés — Network First (toujours le code le plus récent)
+  // Couvre : checklist, missions, planning, alertes, utilisateurs, org-resp, etc.
+  if (/\.(js|css)(\?v=|$)/.test(url.href)) {
     e.respondWith(
       fetch(e.request).then(res => {
         if (res && res.status === 200 && res.type === "basic") {
@@ -147,7 +199,7 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // App shell (icons, fonts, etc.) — cache first
+  // Tout le reste — Cache First avec fallback réseau
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
