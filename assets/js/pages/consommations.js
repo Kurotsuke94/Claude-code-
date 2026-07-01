@@ -246,6 +246,71 @@
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet"><line x1="${PADl}" y1="${baseY}" x2="${W - PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>${areas}${lines}${xlbls}</svg></div>`;
   }
 
+  // Supervision line chart with per-dataset threshold dots + red zone
+  function _supLineSVG(datasets, labels, H) {
+    H = H || 220;
+    const W = 600, PADt = 16, PADb = 42, PADl = 10, PADr = 10;
+    const cW = W - PADl - PADr, cH = H - PADt - PADb;
+    if (!datasets || !datasets.length) return '';
+    const N = Math.max(...datasets.map(d => d.vals.length), 2);
+    const maxV = Math.max(...datasets.flatMap(d => d.vals), 0.001);
+    const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
+    const py = v => PADt + cH - (v / maxV) * cH;
+    let grid = '', areas = '', lines = '', xlbls = '', thrLines = '';
+    for (let g = 0; g <= 4; g++) {
+      const y = PADt + (g / 4) * cH, v = maxV * (1 - g / 4);
+      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+      grid += `<text x="${(PADl+2).toFixed(1)}" y="${(y-3).toFixed(1)}" fill="rgba(255,255,255,0.22)" font-size="8" font-family="monospace">${_fmt(v,v>=100?0:1)}</text>`;
+    }
+    const step = N<=7?1:N<=30?5:N<=90?14:30;
+    (labels||[]).forEach((lb,i) => {
+      if (i%step!==0&&i!==N-1) return;
+      const parts=lb.split('-'); const lbl=parts.length===3?`${parts[2]}/${parts[1]}`:lb;
+      xlbls+=`<text x="${px(i).toFixed(1)}" y="${(H-PADb+16).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="8" font-family="sans-serif">${lbl}</text>`;
+    });
+    datasets.forEach(ds => {
+      if (!ds.vals.some(v=>v>0)) return;
+      const nonZero=ds.vals.filter(v=>v>0);
+      const avg=nonZero.length?nonZero.reduce((a,b)=>a+b,0)/nonZero.length:0;
+      const thr=avg*1.35;
+      if (thr>0&&thr<maxV) {
+        const ty=py(thr);
+        thrLines+=`<line x1="${PADl}" y1="${ty.toFixed(1)}" x2="${W-PADr}" y2="${ty.toFixed(1)}" stroke="${ds.color}" stroke-width="1" stroke-dasharray="4,3" opacity="0.4"/>`;
+        thrLines+=`<rect x="${PADl}" y="${PADt}" width="${cW}" height="${(ty-PADt).toFixed(1)}" fill="rgba(248,113,113,0.03)"/>`;
+      }
+      const pts=ds.vals.map((v,i)=>({x:px(i),y:py(v)}));
+      let d=`M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+      for (let i=1;i<pts.length;i++){const p0=pts[i-1],p1=pts[i],cpx=(p0.x+p1.x)/2;d+=` C ${cpx.toFixed(1)},${p0.y.toFixed(1)} ${cpx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;}
+      const bY=(PADt+cH).toFixed(1),gId='sv'+ds.color.replace('#','');
+      areas+=`<defs><linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.15"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0"/></linearGradient></defs>`;
+      areas+=`<path d="${d} L ${pts[pts.length-1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
+      lines+=`<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+      ds.vals.forEach((v,i)=>{if(thr>0&&v>thr)lines+=`<circle cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="4" fill="#f87171" opacity="0.9" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>`;});
+      lines+=`<circle cx="${pts[pts.length-1].x.toFixed(1)}" cy="${pts[pts.length-1].y.toFixed(1)}" r="3" fill="${ds.color}"/>`;
+    });
+    const baseY=(PADt+cH).toFixed(1);
+    return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
+      <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      ${grid}${thrLines}${areas}${lines}${xlbls}</svg></div>`;
+  }
+
+  // Heatmap SVG: cells[{row,col,level,val}]
+  function _heatmapSVG(cells, rowLabels, colLabels, nRows, nCols) {
+    const CELL_W = Math.max(12, Math.min(26, Math.floor(460/nCols)));
+    const CELL_H = 26, PAD_L = 30, PAD_T = 18, PAD_B = 8;
+    const W = PAD_L + nCols*CELL_W + 8, H = PAD_T + nRows*CELL_H + PAD_B;
+    let rects='', rowLbls='', colLbls='';
+    cells.forEach(c => {
+      const x=PAD_L+c.col*CELL_W, y=PAD_T+c.row*CELL_H;
+      const color=c.level==='crit'?'#f87171':c.level==='warn'?'#f59e0b':c.level==='ok'?'#34d399':'rgba(255,255,255,0.04)';
+      const opacity=c.level==='none'?1:(0.15+c.val*0.65).toFixed(2);
+      rects+=`<rect x="${x+1}" y="${y+1}" width="${CELL_W-2}" height="${CELL_H-2}" rx="2" fill="${color}" opacity="${opacity}"/>`;
+    });
+    rowLabels.forEach((l,i) => { rowLbls+=`<text x="${PAD_L-3}" y="${(PAD_T+i*CELL_H+CELL_H/2+4).toFixed(1)}" text-anchor="end" fill="rgba(255,255,255,0.45)" font-size="13" font-family="sans-serif">${l}</text>`; });
+    colLabels.forEach((l,i) => { if(!l)return; colLbls+=`<text x="${(PAD_L+i*CELL_W+CELL_W/2).toFixed(1)}" y="${(PAD_T-5).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="7.5" font-family="sans-serif">${l}</text>`; });
+    return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rects}${rowLbls}${colLbls}</svg></div>`;
+  }
+
   // ── ENERGY SCORE ──
   function _calcScore() {
     const today = _today();
@@ -985,213 +1050,263 @@
     </div>`;
   }
 
-  // ── TAB: SUPERVISION (Alertes) ──
+  // ── TAB: SUPERVISION — Salle de contrôle énergétique ──
+  const _SUG = {
+    eau_froide:  ['Vérifier fuites réseau', 'Contrôler WC & robinets', 'Vérifier arrosage extérieur', 'Contrôler remplissage ballon ECS', 'Inspecter compteur fuyard'],
+    eau_chaude:  ['Vérifier production ECS', 'Contrôler vannes 3 voies', 'Vérifier pertes thermiques', 'Contrôler ballon de stockage', 'Vérifier débit circulateur'],
+    electricite: ['Vérifier CVC / climatisation', 'Contrôler éclairages laissés allumés', 'Contrôler équipements cuisine', 'Vérifier charge serveurs', 'Contrôler chauffage électrique'],
+    chauffage:   ['Vérifier réglages chaufferie', 'Contrôler vannes de régulation', 'Vérifier calorifugeage', 'Contrôler robinets thermostatiques', 'Vérifier compensation météo'],
+    gaz:         ['Contrôler brûleurs', 'Vérifier pertes de charge', 'Contrôler débitmètre', 'Vérifier régulation température'],
+    default:     ['Vérifier le compteur', 'Contrôler les relevés', 'Analyser les consommations'],
+  };
+
   function _tAlertes() {
     const today = _today();
     const per   = window._csoSupPer || '30';
     const days  = parseInt(per);
-    const cli   = _clients[today] || 0;
+    // ── Smart alert detection ──
+    const smartAlerts = _detectAlerts();
+    const nCrit = smartAlerts.filter(a => a.level === 'critical').length;
+    const nWarn = smartAlerts.filter(a => a.level === 'warning').length;
+    const savedCrit = _csoAlerts.filter(a => a.level === 'critical' && !a.acknowledged).length;
+    const savedWarn = _csoAlerts.filter(a => a.level === 'warning' && !a.acknowledged).length;
+    const totalCrit = nCrit + savedCrit;
+    const totalWarn = nWarn + savedWarn;
 
     // ── Score ──
     const score = _calcScore();
     const scoreColor = score >= 90 ? '#34d399' : score >= 70 ? '#06B6D4' : score >= 50 ? '#f59e0b' : '#f87171';
     const scoreLbl   = score >= 90 ? 'Excellent' : score >= 70 ? 'Bon' : score >= 50 ? 'Moyen' : 'Critique';
-    const circ = 2 * Math.PI * 28;
-    const scoreCircle = `<svg width="72" height="72" viewBox="0 0 72 72">
-      <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6"/>
-      <circle cx="36" cy="36" r="28" fill="none" stroke="${scoreColor}" stroke-width="6"
-        stroke-dasharray="${(score / 100 * circ).toFixed(1)} ${circ.toFixed(1)}"
-        stroke-linecap="round" transform="rotate(-90 36 36)"/>
-      <text x="36" y="36" text-anchor="middle" dominant-baseline="central" fill="${scoreColor}" font-size="16" font-weight="700" font-family="monospace">${score}</text>
+    const scoreSub   = score >= 90 ? 'Consommations dans les normes' : score >= 70 ? 'Légères anomalies détectées' : score >= 50 ? 'Anomalies à surveiller' : 'Interventions requises';
+    const scoreR = 56, scoreCirc = 2 * Math.PI * scoreR;
+    const scoreSVG = `<svg width="140" height="140" viewBox="0 0 140 140">
+      <circle cx="70" cy="70" r="${scoreR}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="10"/>
+      <circle cx="70" cy="70" r="${scoreR}" fill="none" stroke="${scoreColor}" stroke-width="10"
+        stroke-dasharray="${(score/100*scoreCirc).toFixed(1)} ${scoreCirc.toFixed(1)}"
+        stroke-linecap="round" transform="rotate(-90 70 70)"/>
+      <text x="70" y="62" text-anchor="middle" fill="${scoreColor}" font-size="30" font-weight="700" font-family="Space Mono,monospace">${score}</text>
+      <text x="70" y="80" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-family="sans-serif">/100</text>
+      <text x="70" y="97" text-anchor="middle" fill="${scoreColor}" font-size="11" font-weight="600" font-family="sans-serif">${scoreLbl}</text>
     </svg>`;
 
-    // ── 4 KPI supervision cards ──
+    // ── Energy status cards ──
     const SUP_TYPES = ['eau_froide', 'eau_chaude', 'chauffage', 'electricite'];
-    let kpiCards = '';
+    let energyCards = '';
+    const energyData = {};
     SUP_TYPES.forEach(type => {
       const meta = MT[type]; if (!meta) return;
       const ids = _meters.filter(m => m.type === type).map(m => m.id);
       const unit = ids.length ? (_meters.find(m => m.type === type)?.unit || meta.unit) : meta.unit;
-      const todayC = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
+      const todayC = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s,r) => s+(r.consumption||0), 0);
+      const spark7 = Array.from({length:7}, (_,i) => _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(6-i)).reduce((s,r) => s+(r.consumption||0), 0));
       let sum30 = 0, cnt30 = 0;
       for (let i = 1; i <= 30; i++) {
-        const c = _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(i)).reduce((s, r) => s + (r.consumption || 0), 0);
+        const c = _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(i)).reduce((s,r) => s+(r.consumption||0), 0);
         if (c > 0) { sum30 += c; cnt30++; }
       }
-      const avg30 = cnt30 ? sum30 / cnt30 : 0;
-      const ecart = avg30 > 0 ? Math.round((todayC - avg30) / avg30 * 100) : null;
-      const lvl   = ecart === null ? 'nodata' : Math.abs(ecart) <= 15 ? 'ok' : Math.abs(ecart) <= 40 ? 'warn' : 'crit';
-      const lvlClr = lvl === 'ok' ? '#34d399' : lvl === 'warn' ? '#f59e0b' : lvl === 'crit' ? '#f87171' : 'var(--text3)';
-      const lvlIco = lvl === 'ok' ? '✓' : lvl === 'warn' ? '⚠' : lvl === 'crit' ? '🚨' : '—';
-      const spark7 = Array.from({ length: 7 }, (_, i) => _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(6 - i)).reduce((s, r) => s + (r.consumption || 0), 0));
-      kpiCards += `<div class="cso-sup-kpi" style="--kc:${meta.color};--kd:${meta.dim}">
-        <div class="cso-sup-kpi-hd">
-          <span style="font-size:18px">${meta.icon}</span>
-          <span class="cso-sup-kpi-nm">${meta.label}</span>
-          <span class="cso-sup-kpi-lvl" style="color:${lvlClr}">${lvlIco}</span>
+      const avg30 = cnt30 ? sum30/cnt30 : 0;
+      const ecart = avg30 > 0 ? Math.round((todayC - avg30)/avg30 * 100) : null;
+      const lvl = ecart === null ? 'nodata' : Math.abs(ecart) <= 15 ? 'ok' : Math.abs(ecart) <= 40 ? 'warn' : 'crit';
+      const lvlColor = lvl === 'ok' ? '#34d399' : lvl === 'warn' ? '#f59e0b' : lvl === 'crit' ? '#f87171' : 'var(--text3)';
+      const lvlLabel = lvl === 'ok' ? 'Normal' : lvl === 'warn' ? 'Surveillance' : lvl === 'crit' ? 'Critique' : 'Sans données';
+      const barPct = avg30 > 0 ? Math.min(100, Math.round(todayC/avg30*100)) : 0;
+      energyData[type] = { todayC, avg30, ecart, lvl, ids, unit };
+      energyCards += `<div class="sv-energy-card" style="--ec:${meta.color};--ed:${meta.dim}">
+        <div class="sv-energy-hd">
+          <span class="sv-energy-ico">${meta.icon}</span>
+          <div>
+            <div class="sv-energy-nm">${meta.label}</div>
+            <div class="sv-energy-status" style="color:${lvlColor}"><span class="sv-status-dot" style="background:${lvlColor}"></span>${lvlLabel}</div>
+          </div>
+          <div class="sv-energy-ecart" style="color:${lvlColor}">${ecart !== null ? `${ecart > 0 ? '+' : ''}${ecart}%` : '—'}</div>
         </div>
-        <div class="cso-sup-kpi-val">${todayC > 0 ? _fmt(todayC) : '—'}<span class="cso-sup-kpi-u"> ${unit}</span></div>
-        <div class="cso-sup-kpi-row"><span class="cso-sup-kpi-lbl">Moy. 30j</span><span>${avg30 > 0 ? `${_fmt(avg30)} ${unit}` : '—'}</span></div>
-        <div class="cso-sup-kpi-row"><span class="cso-sup-kpi-lbl">Écart</span><span style="color:${lvlClr};font-weight:700">${ecart !== null ? `${ecart > 0 ? '+' : ''}${ecart}%` : '—'}</span></div>
-        <div class="cso-sup-kpi-spark">${_sparkSVG(spark7, meta.color, 80, 26)}</div>
+        <div class="sv-energy-val">${todayC > 0 ? _fmt(todayC) : '—'}<span class="sv-energy-u"> ${unit}</span></div>
+        <div class="sv-energy-bar-wrap"><div class="sv-energy-bar" style="width:${barPct}%;background:${lvlColor}"></div></div>
+        <div class="sv-energy-foot">Moy.30j : ${avg30 > 0 ? `${_fmt(avg30)} ${unit}` : '—'}</div>
+        <div class="sv-energy-spark">${_sparkSVG(spark7, meta.color, 80, 26)}</div>
       </div>`;
     });
 
-    // ── Multi-series line chart ──
-    const periods    = [{ id: '7', l: '7j' }, { id: '30', l: '30j' }, { id: '90', l: '3m' }, { id: '365', l: '1an' }];
-    const chartDates = Array.from({ length: days }, (_, i) => _daysAgo(days - 1 - i));
-    const chartTypes = ['eau_froide', 'eau_chaude', 'electricite'];
-    const datasets   = chartTypes.map(type => {
+    // ── Score per-energy mini bars ──
+    let scoreBars = '';
+    SUP_TYPES.forEach(type => {
+      const d = energyData[type]; if (!d) return;
       const meta = MT[type];
-      const ids  = _meters.filter(m => m.type === type).map(m => m.id);
-      return { vals: chartDates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0)), color: meta.color, label: `${meta.icon} ${meta.label}` };
+      const barW = d.avg30 > 0 ? Math.min(100, Math.round(d.todayC/d.avg30*100)) : 0;
+      const barC = d.lvl === 'ok' ? '#34d399' : d.lvl === 'warn' ? '#f59e0b' : d.lvl === 'crit' ? '#f87171' : 'rgba(255,255,255,0.12)';
+      scoreBars += `<div class="sv-sbar-row">
+        <span class="sv-sbar-ico">${meta.icon}</span>
+        <div class="sv-sbar-wrap"><div class="sv-sbar-fill" style="width:${barW}%;background:${barC}"></div></div>
+        <span class="sv-sbar-pct" style="color:${barC}">${barW}%</span>
+      </div>`;
     });
-    const hasChartData = datasets.some(d => d.vals.some(v => v > 0));
-    let chartHtml = `<div class="cso-chart2-wrap">
-      <div class="cso-chart2-hd">
-        <span class="cso-chart2-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations</span>
-        <div class="cso-chart2-per">${periods.map(p => `<button class="cso-per-btn${per === p.id ? ' active' : ''}" onclick="window._csoSupPer='${p.id}';MX.Pages.Conso._tab('alertes')">${p.l}</button>`).join('')}</div>
-      </div>
-      <div class="cso-chart2-leg">${datasets.map(d => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)"><span style="width:10px;height:2px;background:${d.color};display:inline-block;border-radius:1px"></span>${d.label}</span>`).join('')}</div>
-      ${hasChartData ? `<div class="cso-chart2-svg">${_lineSVG(datasets, 150)}</div>` : '<div class="cso-chart2-empty">Aucune donnée sur la période</div>'}
-    </div>`;
 
-    // ── Chauffage ADP chart (MWh) ──
-    const chIds = _meters.filter(m => m.type === 'chauffage').map(m => m.id);
-    let chChart = '';
-    if (chIds.length) {
-      const chVals = chartDates.map(ds => _readings.filter(r => chIds.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
-      if (chVals.some(v => v > 0)) {
-        const ds2 = [{ vals: chVals, color: MT.chauffage.color, label: '🏢 Chauffage ADP' }];
-        chChart = `<div class="cso-chart2-wrap">
-          <div class="cso-chart2-hd"><span class="cso-chart2-ttl">🏢 Chauffage ADP — MWh</span></div>
-          <div class="cso-chart2-svg">${_lineSVG(ds2, 100)}</div>
-        </div>`;
-      }
-    }
+    // ── Main chart: multi-energy over period ──
+    const periods = [{id:'7',l:'7j'},{id:'30',l:'30j'},{id:'90',l:'3m'},{id:'365',l:'1an'}];
+    const chartDates = Array.from({length: days}, (_,i) => _daysAgo(days-1-i));
+    const chartDS = ['eau_froide','eau_chaude','electricite','chauffage'].map(type => {
+      const meta = MT[type];
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      return { vals: chartDates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s,r) => s+(r.consumption||0), 0)), color: meta.color, label: `${meta.icon} ${meta.label}` };
+    });
+    const hasChartData = chartDS.some(d => d.vals.some(v => v > 0));
+    const chartXLabels = chartDates.map((ds,i) => i % Math.ceil(days/6) === 0 ? ds.slice(5) : '');
 
-    // ── Per-client analysis ──
-    let perCliHtml = '';
-    if (cli > 0) {
-      ['eau_froide', 'eau_chaude', 'electricite'].forEach(type => {
-        const meta = MT[type];
-        const ids  = _meters.filter(m => m.type === type).map(m => m.id);
-        if (!ids.length) return;
-        const isW   = type === 'eau_froide' || type === 'eau_chaude';
-        const todayC = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
-        if (!todayC) return;
-        const todayR = isW ? todayC * 1000 / cli : todayC / cli;
-        const rU = isW ? 'L/client' : `${meta.unit}/client`;
-        let sum30 = 0, cnt = 0;
-        for (let i = 1; i <= 30; i++) {
-          const c2 = _clients[_daysAgo(i)] || 0; if (!c2) continue;
-          const cv = _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(i)).reduce((s, r) => s + (r.consumption || 0), 0);
-          if (cv > 0) { sum30 += isW ? cv * 1000 / c2 : cv / c2; cnt++; }
-        }
-        const avgR  = cnt ? sum30 / cnt : 0;
-        const ecart = avgR > 0 ? Math.round((todayR - avgR) / avgR * 100) : null;
-        const clr   = ecart === null ? 'var(--text3)' : Math.abs(ecart) <= 15 ? '#34d399' : Math.abs(ecart) <= 40 ? '#f59e0b' : '#f87171';
-        perCliHtml += `<div class="cso-percli-row">
-          <span class="cso-percli-ico" style="color:${meta.color}">${meta.icon}</span>
-          <span class="cso-percli-nm">${meta.label}</span>
-          <span class="cso-percli-val">${_fmt(todayR, isW ? 0 : 2)}<span class="cso-percli-u"> ${rU}</span></span>
-          <span class="cso-percli-ecart" style="color:${clr}">${ecart !== null ? `${ecart > 0 ? '+' : ''}${ecart}%` : '—'}</span>
-          <span class="cso-percli-avg">${avgR > 0 ? `Moy.30j : ${_fmt(avgR, isW ? 0 : 2)} ${rU}` : 'Pas de base'}</span>
-        </div>`;
+    // ── Alert timeline (smart + saved, desc) ──
+    const nowDt = new Date();
+    const tlItems = [];
+    smartAlerts.forEach((a, salIdx) => {
+      const meta = MT[a.metric] || {};
+      tlItems.push({ ts: nowDt, level: a.level, title: a.title, msg: a.msg, icon: meta.icon||'⚡', zone: a.zone||'', isSmart: true, salIdx, id: null });
+    });
+    _csoAlerts.filter(a => !a.acknowledged).forEach(a => {
+      const d = _tsDate(a.ts || a.createdAt);
+      const meta = MT[a.type] || MT[a.metric] || {};
+      tlItems.push({ ts: d || nowDt, level: a.level, title: a.title||a.type, msg: a.msg||a.message||'', icon: meta.icon||'⚡', zone: a.zone||'', isSmart: false, salIdx: null, id: a.id });
+    });
+    tlItems.sort((a, b) => b.ts - a.ts);
+    let tlHtml = '';
+    tlItems.slice(0, 15).forEach(item => {
+      const lvlC = item.level === 'critical' ? '#f87171' : item.level === 'warning' ? '#f59e0b' : '#34d399';
+      const tmStr = item.ts.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+      const dtStr = item.ts.toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit'});
+      const actBtns = item.isSmart
+        ? `<button class="sv-tl-act" onclick="MX.Pages.Conso._salSave(${item.salIdx})" title="Sauvegarder"><i class="fas fa-floppy-disk"></i></button>
+           <button class="sv-tl-act" onclick="MX.Pages.Conso._salCreateInt(${item.salIdx})" title="Créer intervention"><i class="fas fa-screwdriver-wrench"></i></button>`
+        : `<button class="sv-tl-act" onclick="MX.Pages.Conso._resolveAlert('${esc(item.id)}')" title="Résoudre"><i class="fas fa-check"></i></button>`;
+      tlHtml += `<div class="sv-tl-item sv-tl--${item.level}">
+        <div class="sv-tl-line"><span class="sv-tl-dot" style="background:${lvlC}"></span></div>
+        <div class="sv-tl-body">
+          <div class="sv-tl-ttl">${item.icon} ${esc(item.title)}</div>
+          <div class="sv-tl-msg">${esc(item.msg)}</div>
+          ${item.zone ? `<div class="sv-tl-zone"><i class="fas fa-location-dot"></i> ${esc(item.zone)}</div>` : ''}
+        </div>
+        <div class="sv-tl-meta">
+          <span class="sv-tl-time">${dtStr} ${tmStr}</span>
+          <div class="sv-tl-acts">${actBtns}</div>
+        </div>
+      </div>`;
+    });
+
+    // ── Intelligent suggestions (critical only) ──
+    const critAlerts = smartAlerts.filter(a => a.level === 'critical');
+    let sugHtml = '';
+    critAlerts.forEach((a, ci) => {
+      const meta = MT[a.metric] || {};
+      const sugs = (_SUG[a.metric] || _SUG.default).slice(0, 4);
+      const salI = smartAlerts.indexOf(a);
+      sugHtml += `<div class="sv-suggest-card" style="--sc:${meta.color||'#06B6D4'}">
+        <div class="sv-suggest-hd">${meta.icon||'⚡'} ${esc(a.title)}</div>
+        <div class="sv-suggest-ecart" style="color:#f87171">+${a.ecart||0}% vs moy. 30j</div>
+        <ul class="sv-suggest-list">${sugs.map(s => `<li><i class="fas fa-chevron-right"></i> ${esc(s)}</li>`).join('')}</ul>
+        <button class="sv-suggest-btn" onclick="MX.Pages.Conso._salCreateInt(${salI})"><i class="fas fa-screwdriver-wrench"></i> Créer intervention</button>
+      </div>`;
+    });
+
+    // ── Heatmap: 30 days × 4 energy types ──
+    const hmTypes = ['eau_froide','eau_chaude','electricite','chauffage'];
+    const hmDays = 30;
+    const hmCells = [];
+    const hmColLabels = Array.from({length: hmDays}, (_,i) => {
+      const d = new Date(); d.setDate(d.getDate() - (hmDays-1-i));
+      return i % 5 === 0 ? `${d.getDate()}/${d.getMonth()+1}` : '';
+    });
+    const hmRowLabels = hmTypes.map(t => MT[t]?.icon || t);
+    hmTypes.forEach((type, row) => {
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      const vals = Array.from({length:hmDays}, (_,i) => _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(hmDays-1-i)).reduce((s,r) => s+(r.consumption||0), 0));
+      const nz = vals.filter(v => v > 0);
+      const avg = nz.length ? nz.reduce((a,b) => a+b, 0)/nz.length : 0;
+      vals.forEach((v, col) => {
+        const lvl = v === 0 ? 'none' : avg === 0 ? 'ok' : v > avg*1.5 ? 'crit' : v > avg*1.2 ? 'warn' : 'ok';
+        hmCells.push({row, col, level: lvl, val: avg > 0 ? Math.min(1, v/avg) : 0});
       });
-    }
+    });
 
-    // ── Smart alerts ──
-    const smartAlerts = _detectAlerts();
-    let salHtml = '';
-    smartAlerts.forEach((a, idx) => {
-      const meta   = MT[a.metric] || {};
-      const lvlClr = a.level === 'critical' ? '#f87171' : '#f59e0b';
-      salHtml += `<div class="cso-sal-item ${a.level}">
-        <div class="cso-sal-badge" style="color:${lvlClr}">${a.level === 'critical' ? '🚨 Critique' : '⚠ Attention'}</div>
-        <div class="cso-sal-body">
-          <div class="cso-sal-ttl">${meta.icon || ''} ${esc(a.title)}</div>
-          <div class="cso-sal-msg">${esc(a.msg)}</div>
-          ${a.zone ? `<div class="cso-sal-zone"><i class="fas fa-location-dot"></i> ${esc(a.zone)}</div>` : ''}
+    // ── History table ──
+    const histItems = [..._csoAlerts].slice(0, 12);
+    let histRows = '';
+    histItems.forEach(a => {
+      const d = _tsDate(a.ts || a.createdAt);
+      const ds = d ? d.toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit'}) : '—';
+      const meta = MT[a.type] || MT[a.metric] || {};
+      const lvlC = a.level === 'critical' ? '#f87171' : a.level === 'warning' ? '#f59e0b' : '#34d399';
+      histRows += `<div class="sv-hist-row${a.acknowledged ? ' sv-hist-ack' : ''}">
+        <span class="sv-hist-ico" style="color:${meta.color||lvlC}">${meta.icon||'⚡'}</span>
+        <div class="sv-hist-body">
+          <div class="sv-hist-ttl">${esc(a.title||a.type||'')}</div>
+          ${a.zone ? `<div class="sv-hist-zone"><i class="fas fa-location-dot"></i> ${esc(a.zone)}</div>` : ''}
         </div>
-        <div class="cso-sal-acts">
-          <button class="cso-ibtn" title="Créer intervention" onclick="MX.Pages.Conso._salCreateInt(${idx})"><i class="fas fa-screwdriver-wrench"></i></button>
-          <button class="cso-ibtn" title="Sauvegarder" onclick="MX.Pages.Conso._salSave(${idx})"><i class="fas fa-floppy-disk"></i></button>
+        <div class="sv-hist-right">
+          <span class="sv-hist-date">${ds}</span>
+          ${a.acknowledged
+            ? `<span class="sv-hist-done"><i class="fas fa-check"></i></span>`
+            : `<button class="sv-tl-act" onclick="MX.Pages.Conso._resolveAlert('${esc(a.id)}')"><i class="fas fa-check"></i></button>`}
         </div>
       </div>`;
     });
 
-    // ── Top zones ──
-    const zoneStats = {};
-    _meters.forEach(m => {
-      const z = (m.location || '').trim() || 'Sans zone';
-      if (!zoneStats[z]) zoneStats[z] = { ok: 0, warn: 0, crit: 0 };
-      _readings.some(r => r.meterId === m.id && r.date === today) ? zoneStats[z].ok++ : zoneStats[z].warn++;
-    });
-    smartAlerts.forEach(a => {
-      const z = (a.zone || '').trim() || 'Sans zone';
-      if (zoneStats[z]) { if (a.level === 'critical') { zoneStats[z].crit++; zoneStats[z].ok = Math.max(0, zoneStats[z].ok - 1); } else { zoneStats[z].warn = Math.max(1, zoneStats[z].warn); } }
-    });
-    const topZones = Object.entries(zoneStats).sort((a, b) => (b[1].crit * 10 + b[1].warn) - (a[1].crit * 10 + a[1].warn)).slice(0, 6);
-    const zonesHtml = topZones.map(([zone, st]) => `<div class="cso-zones2-row ${st.crit ? 'crit' : st.warn ? 'warn' : 'ok'}">
-      <div class="cso-zones2-name"><i class="fas fa-location-dot"></i> ${esc(zone)}</div>
-      <div class="cso-zones2-pills">
-        ${st.ok  > 0 ? `<span class="cso-zpill ok">${st.ok} ✓</span>`   : ''}
-        ${st.warn > 0 ? `<span class="cso-zpill warn">${st.warn} ⚠</span>` : ''}
-        ${st.crit > 0 ? `<span class="cso-zpill crit">${st.crit} 🚨</span>` : ''}
-      </div>
-    </div>`).join('');
+    return `<div class="cso-inner sv-page">
 
-    // ── Alert history ──
-    const histList = [..._csoAlerts].slice(0, 20);
-    const histHtml = histList.map(a => {
-      const d  = _tsDate(a.ts || a.createdAt);
-      const ds = d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-      const tm = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-      const lc = a.level === 'critical' ? '#f87171' : a.level === 'warning' ? '#f59e0b' : '#34d399';
-      return `<div class="cso-hist-alert${a.acknowledged ? ' ack' : ''}">
-        <div class="cso-hist-alert-dt"><span>${ds}</span><span class="cso-hist-alert-tm">${tm}</span></div>
-        <div class="cso-hist-alert-body">
-          <div class="cso-hist-alert-ttl" style="color:${lc}">${esc(a.title || a.type || '')}</div>
-          <div class="cso-hist-alert-msg">${esc(a.msg || a.message || '')}</div>
-          ${a.zone ? `<div class="cso-hist-alert-zone"><i class="fas fa-location-dot"></i> ${esc(a.zone)}</div>` : ''}
+      <div class="sv-header">
+        <div class="sv-header-left">
+          <i class="fas fa-shield-halved" style="color:var(--cyan);font-size:20px"></i>
+          <div>
+            <div class="sv-header-ttl">Centre de Supervision Énergétique</div>
+            <div class="sv-header-sub">${_dateLbl(today)} · ${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</div>
+          </div>
         </div>
-        <div class="cso-hist-alert-status">
-          ${a.acknowledged ? `<span class="cso-hist-badge ack">✓ Traité</span>` : `<button class="cso-ibtn" title="Marquer traité" onclick="MX.Pages.Conso._resolveAlert('${esc(a.id)}')"><i class="fas fa-check"></i></button>`}
+        <div class="sv-header-badges">
+          ${totalCrit > 0 ? `<span class="sv-badge sv-badge--crit"><i class="fas fa-triangle-exclamation"></i> ${totalCrit} critique${totalCrit > 1 ? 's' : ''}</span>` : ''}
+          ${totalWarn > 0 ? `<span class="sv-badge sv-badge--warn"><i class="fas fa-exclamation-circle"></i> ${totalWarn} attention${totalWarn > 1 ? 's' : ''}</span>` : ''}
+          ${totalCrit === 0 && totalWarn === 0 ? `<span class="sv-badge sv-badge--ok"><i class="fas fa-check-circle"></i> Tout normal</span>` : ''}
         </div>
-      </div>`;
-    }).join('');
-
-    return `<div class="cso-inner">
-      <div class="cso-sup-header">
-        <div class="cso-sup-score">${scoreCircle}<div><div class="cso-sup-score-lbl">Score Énergie</div><div class="cso-sup-score-st" style="color:${scoreColor}">${scoreLbl}</div></div></div>
-        <div class="cso-sup-hd-info"><i class="fas fa-shield-halved" style="color:var(--cyan);font-size:18px"></i><div><div style="font-weight:700;font-size:14px">Centre de Supervision</div><div style="font-size:12px;color:var(--text2)">${_dateLbl(today)} · ${_meters.length} compteur${_meters.length !== 1 ? 's' : ''}</div></div></div>
       </div>
 
-      <div class="cso-sup-kpi-grid">${kpiCards || '<div class="cso-chart2-empty">Aucun compteur configuré — <button class="cso-add-btn" onclick="MX.Pages.Conso._tab(\'compteurs\')">Ajouter</button></div>'}</div>
+      <div class="sv-top-row">
+        <div class="sv-score-card">
+          <div class="sv-score-gauge">${scoreSVG}</div>
+          <div class="sv-score-info">
+            <div class="sv-score-ttl">Score Énergie</div>
+            <div class="sv-score-sub" style="color:${scoreColor}">${scoreSub}</div>
+            <div class="sv-score-bars">${scoreBars}</div>
+          </div>
+        </div>
+        <div class="sv-energy-grid">${energyCards || '<div class="cso-chart2-empty" style="grid-column:1/-1">Aucun compteur configuré — <button class="cso-add-btn" onclick="MX.Pages.Conso._tab(\'compteurs\')">Ajouter</button></div>'}</div>
+      </div>
 
-      ${chartHtml}
-      ${chChart}
+      <div class="ra-chart-block">
+        <div class="sv-chart-head">
+          <span><i class="fas fa-chart-line"></i> Évolution des consommations</span>
+          <div class="cso-chart2-per">${periods.map(p => `<button class="cso-per-btn${per === p.id ? ' active' : ''}" onclick="window._csoSupPer='${p.id}';MX.Pages.Conso._tab('alertes')">${p.l}</button>`).join('')}</div>
+        </div>
+        <div class="ra-chart-leg">${chartDS.map(d => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2)"><span style="width:10px;height:2px;background:${d.color};display:inline-block;border-radius:1px"></span>${d.label}</span>`).join('')}</div>
+        ${hasChartData ? _supLineSVG(chartDS, chartXLabels, 220) : '<div class="cso-chart2-empty">Aucune donnée sur la période</div>'}
+      </div>
 
-      ${perCliHtml ? `<div class="cso-percli-wrap">
-        <div class="cso-section-ttl"><i class="fas fa-users"></i> Par client (${cli} présents aujourd'hui)</div>
-        <div class="cso-percli-list">${perCliHtml}</div>
+      <div class="sv-timeline">
+        <div class="sv-section-ttl"><i class="fas fa-clock"></i> Chronologie des alertes <span class="sv-cnt">${tlItems.length}</span></div>
+        ${tlHtml || '<div class="cso-chart2-empty"><i class="fas fa-check-circle" style="color:#34d399;font-size:20px"></i><br>Aucune anomalie active</div>'}
+      </div>
+
+      ${critAlerts.length > 0 ? `<div class="sv-section--crit">
+        <div class="sv-section-ttl"><i class="fas fa-robot"></i> Suggestions intelligentes <span class="sv-cnt">${critAlerts.length}</span></div>
+        <div class="sv-suggest-grid">${sugHtml}</div>
       </div>` : ''}
 
-      <div class="cso-sal-wrap">
-        <div class="cso-section-ttl"><i class="fas fa-robot"></i> Alertes intelligentes <span class="cso-section-cnt">${smartAlerts.length}</span></div>
-        ${salHtml || '<div class="cso-chart2-empty"><i class="fas fa-check-circle" style="color:#34d399;font-size:20px"></i><br>Aucune anomalie détectée</div>'}
+      <div class="sv-row2">
+        <div class="sv-section">
+          <div class="sv-section-ttl"><i class="fas fa-th"></i> Heatmap 30 jours</div>
+          ${_heatmapSVG(hmCells, hmRowLabels, hmColLabels, hmTypes.length, hmDays)}
+        </div>
+        <div class="sv-section">
+          <div class="sv-section-ttl"><i class="fas fa-clock-rotate-left"></i> Historique <span class="sv-cnt">${histItems.length}</span></div>
+          <div class="sv-hist-list">
+            ${histRows || '<div class="cso-chart2-empty" style="padding:16px">Aucune alerte enregistrée</div>'}
+          </div>
+        </div>
       </div>
 
-      ${topZones.length ? `<div class="cso-zones2-wrap">
-        <div class="cso-section-ttl"><i class="fas fa-map-marker-alt"></i> Zones</div>
-        <div class="cso-zones2-list">${zonesHtml}</div>
-      </div>` : ''}
-
-      <div class="cso-alert-hist-wrap">
-        <div class="cso-section-ttl"><i class="fas fa-clock-rotate-left"></i> Historique des alertes <span class="cso-section-cnt">${histList.length}</span></div>
-        ${histHtml || '<div class="cso-chart2-empty" style="padding:16px">Aucune alerte enregistrée</div>'}
-      </div>
     </div>`;
   }
 
