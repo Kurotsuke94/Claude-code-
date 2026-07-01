@@ -19,6 +19,7 @@ html, body {
   color: var(--text);
   font-family: var(--ffs);
   min-height: 100dvh;
+  min-height: calc(var(--vh, 1dvh) * 100);
   overflow: hidden;
   overflow-x: hidden;
   max-width: 100vw;
@@ -160,6 +161,7 @@ html, body {
   display: flex;
   width: 100vw;
   height: 100dvh;
+  height: calc(var(--vh, 1dvh) * 100);
   overflow: hidden;
   position: relative;
 }
@@ -169,6 +171,7 @@ html, body {
 .sidebar {
   width: var(--sidebar-w);
   height: 100dvh;
+  height: calc(var(--vh, 1dvh) * 100);
   background: var(--bg);
   border-right: 1px solid var(--border);
   display: flex;
@@ -739,7 +742,7 @@ html, body {
   }
   /* Contenu — compense la barre de gestes iOS en bas + encoches latérales (mode paysage) */
   .main-content {
-    padding-bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--bottomnav-h) + max(12px, env(safe-area-inset-bottom, 0px)));
     padding-left:  env(safe-area-inset-left,  0px);
     padding-right: env(safe-area-inset-right, 0px);
   }
@@ -754,7 +757,7 @@ html, body {
   .page-body { padding: 14px 16px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .page-cols { grid-template-columns: 1fr; }
-  .toast { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 10px); }
+  .toast { bottom: calc(var(--bottomnav-h) + max(12px, env(safe-area-inset-bottom, 0px)) + 10px); }
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar { padding-top: env(safe-area-inset-top); }

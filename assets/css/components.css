@@ -8821,14 +8821,15 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 ══════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
   /* Padding bas pour que le contenu ne passe pas sous la barre */
-  :root { --bottomnav-h: 80px; }
+  :root { --bottomnav-h: 72px; }
 
   /* Conteneur transparent — la barre visuelle est .mbn-bar */
   #bottom-nav {
     background: transparent !important;
     border-top: none !important;
     box-shadow: none !important;
-    height: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
+    /* Hauteur = barre (72px) + espace sous la barre (safe-area ou 12px min) */
+    height: calc(72px + max(12px, env(safe-area-inset-bottom, 0px))) !important;
     padding-bottom: 0 !important;
     overflow: visible !important;
   }
@@ -8836,7 +8837,8 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   /* ── Barre flottante — ancrée bas de l'écran ── */
   .mbn-bar {
     position: absolute;
-    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    /* Zéro valeur fixe : la barre flotte exactement au-dessus du home indicator */
+    bottom: max(12px, env(safe-area-inset-bottom, 12px));
     left: 12px;
     right: 12px;
     height: 72px;

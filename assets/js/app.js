@@ -658,10 +658,23 @@
   window.addEventListener('online',  () => { _isOffline = false; renderStatusBar(); MX.toast('🟢 Connexion rétablie — données synchronisées'); });
   window.addEventListener('offline', () => { _isOffline = true;  renderStatusBar(); MX.toast('⚠️ Mode hors ligne', true); });
 
+  // ── VIEWPORT HEIGHT — corrige le bug iOS Safari au premier lancement ──
+  // iOS Safari: window.innerHeight est exact (exclut les barres du navigateur).
+  // 100dvh peut être mal évalué avant le premier layout sur certains appareils.
+  // Solution: --vh calculé en JS, mis à jour sur tous les événements de redimensionnement.
+  function updateViewportHeight() {
+    document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+  }
+  window.MX.updateViewportHeight = updateViewportHeight;
+
+  // Appel immédiat — avant le premier paint
+  updateViewportHeight();
+
   // On resize between mobile and desktop: close sidebar + clear overlay to avoid stuck state
   window.addEventListener('resize', (function() {
     var _lastMob = window.innerWidth <= 900;
     return function() {
+      updateViewportHeight();
       var mob = window.innerWidth <= 900;
       if (mob !== _lastMob) {
         _lastMob = mob;
@@ -670,6 +683,22 @@
       }
     };
   })());
+
+  // Recalcul après rotation (iOS a besoin d'un délai pour mettre à jour innerHeight)
+  window.addEventListener('orientationchange', () => {
+    setTimeout(updateViewportHeight, 150);
+    setTimeout(updateViewportHeight, 400); // deuxième passe — certains iOS sont lents
+  });
+
+  // visualViewport: API précise pour les claviers virtuels et les barres du navigateur
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateViewportHeight);
+  }
+
+  // Retour au premier plan (depuis une autre app)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') updateViewportHeight();
+  });
 
   window.MX.syncStart = function () {
     _pendingSaves++;
@@ -1136,6 +1165,7 @@
 
     clearTimeout(loadingTimeout);
     hideLoading();
+    updateViewportHeight(); // recalcul après login (picker utilisateur peut décaler le viewport)
 
     _lastSyncTime = new Date();
     renderStatusBar();
@@ -1194,7 +1224,19 @@
     if (!loading || loading.classList.contains("fade-out")) return;
     loading.classList.add("fade-out");
     shell.classList.remove("hidden");
-    setTimeout(() => { loading.style.display = "none"; }, 400);
+    // Recalcul du viewport après que le shell est visible (iOS recompute safe-area ici)
+    updateViewportHeight();
+    setTimeout(() => {
+      loading.style.display = "none";
+      updateViewportHeight(); // deuxième passe après la transition de fade
+      // Logs diagnostic viewport (comparaison premier lancement vs après rotation)
+      if (window.visualViewport) {
+        console.log('[Maintix Viewport] innerHeight:', window.innerHeight,
+          '| visualViewport.height:', window.visualViewport.height,
+          '| outerHeight:', window.outerHeight,
+          '| --vh:', (window.innerHeight * 0.01).toFixed(2) + 'px');
+      }
+    }, 420);
   }
 
   window.MX.tryInstall = function() {
