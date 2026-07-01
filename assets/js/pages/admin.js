@@ -235,6 +235,44 @@
       ? (state.adminUser ? state.adminUser.email : "Admin")
       : (cu ? cu.name : "Responsable");
 
+    // ── Helper : options techniciens groupées par créneau planning ──
+    const _planSugg = state.todayPlanSuggestions || {};
+    const _SLOT_LBL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+    const _hasPlan  = Object.keys(_planSugg).length > 0;
+    const _visUsers = users.filter(u => u.name && !u.hidden);
+    function _techOpts(sel) {
+      let o = `<option value="">— Assigner à —</option><option value="all"${sel === 'all' ? ' selected' : ''}>Tout le monde</option>`;
+      if (!_hasPlan) {
+        return o + _visUsers.map(u =>
+          `<option value="${esc(u.name)}"${sel === u.name ? ' selected' : ''}>${esc(u.name)}</option>`
+        ).join('');
+      }
+      const bySlot = { matin: [], journee: [], soir: [] };
+      const noSlot = [];
+      _visUsers.forEach(u => {
+        const sl = _planSugg[u.name];
+        if (sl && bySlot[sl]) bySlot[sl].push(u);
+        else noSlot.push(u);
+      });
+      ['matin', 'journee', 'soir'].forEach(sl => {
+        if (!bySlot[sl].length) return;
+        const lbl = _SLOT_LBL[sl];
+        o += `<optgroup label="${lbl}">` +
+          bySlot[sl].map(u =>
+            `<option value="${esc(u.name)}"${sel === u.name ? ' selected' : ''}>${esc(u.name)} (${lbl})</option>`
+          ).join('') +
+          `</optgroup>`;
+      });
+      if (noSlot.length) {
+        o += `<optgroup label="Autres">` +
+          noSlot.map(u =>
+            `<option value="${esc(u.name)}"${sel === u.name ? ' selected' : ''}>${esc(u.name)}</option>`
+          ).join('') +
+          `</optgroup>`;
+      }
+      return o;
+    }
+
     // Priorité button helper
     function prioBtnStyle(key, active) {
       const p = PRIO[key];
@@ -271,9 +309,7 @@
             ${DAYS.map(d => `<option value="${d.id}">${esc(d.l)}</option>`).join('')}
           </select>
           <select class="fi fi-sm" id="ms-user" style="flex:1;min-width:130px">
-            <option value="">— Assigner à —</option>
-            <option value="all">Tout le monde</option>
-            ${users.map(u => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}
+            ${_techOpts('')}
           </select>
         </div>
         <button class="save-btn" style="margin-top:0" onclick="MX.Pages.Admin.addMission('${esc(createdBy)}')">
@@ -332,9 +368,7 @@
                   ${DAYS.map(d => `<option value="${d.id}" ${m.dayId===d.id?'selected':''}>${esc(d.l)}</option>`).join('')}
                 </select>
                 <select class="fi fi-sm" id="edit-ms-user-${esc(m.id)}" style="flex:1;min-width:130px">
-                  <option value="">— Assigner à —</option>
-                  <option value="all" ${m.assignedTo==='all'?'selected':''}>Tout le monde</option>
-                  ${users.map(u => `<option value="${esc(u.name)}" ${m.assignedTo===u.name?'selected':''}>${esc(u.name)}</option>`).join('')}
+                  ${_techOpts(m.assignedTo || '')}
                 </select>
               </div>
               <div style="display:flex;gap:8px;margin-top:4px">
