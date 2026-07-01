@@ -533,6 +533,50 @@
         h += `</div>`;
       }
       h += `</div>`;
+
+      // ── SECTION PMP ──
+      const Pmp = MX.Pages && MX.Pages.PMP;
+      const pmpStats = Pmp ? Pmp.getStats() : null;
+      if (pmpStats) {
+        const pmpConf = pmpStats.conformite;
+        const confColor = pmpConf >= 80 ? 'var(--green)' : pmpConf >= 50 ? 'var(--orange)' : 'var(--red)';
+        const pmpNextLbl = pmpStats.nextDue ? pmpStats.nextDue.split('-').reverse().join('/') : '—';
+        h += `<div class="hc-pmp">
+          <div class="home-section-head">
+            <div class="home-section-title"><i class="fas fa-screwdriver-wrench" style="color:var(--orange)"></i> Maintenance Préventive</div>
+            <button class="home-section-btn" onclick="MX.showPage('pmp')">Tout voir</button>
+          </div>
+          <div class="pmp-home-grid">
+            <div class="pmp-home-kpi" onclick="MX.showPage('pmp')">
+              <div class="pmp-home-val" style="color:${confColor}">${pmpConf}%</div>
+              <div class="pmp-home-lbl">Conformité</div>
+            </div>
+            <div class="pmp-home-kpi" onclick="MX.showPage('pmp')">
+              <div class="pmp-home-val" style="color:var(--green)">${pmpStats.realisees}</div>
+              <div class="pmp-home-lbl">Réalisées</div>
+            </div>
+            <div class="pmp-home-kpi${pmpStats.enRetard > 0 ? ' pmp-home-kpi--alert' : ''}" onclick="MX.showPmpTab ? MX.showPmpTab('retards') : MX.showPage('pmp')">
+              <div class="pmp-home-val" style="color:${pmpStats.enRetard > 0 ? 'var(--red)' : 'var(--text)'}">${pmpStats.enRetard}</div>
+              <div class="pmp-home-lbl">En retard</div>
+            </div>
+            <div class="pmp-home-kpi" onclick="MX.showPage('pmp')">
+              <div class="pmp-home-val" style="font-size:13px">${pmpNextLbl}</div>
+              <div class="pmp-home-lbl">Prochaine</div>
+            </div>
+          </div>
+        </div>`;
+      } else {
+        h += `<div class="hc-pmp">
+          <div class="home-section-head">
+            <div class="home-section-title"><i class="fas fa-screwdriver-wrench" style="color:var(--orange)"></i> Maintenance Préventive</div>
+            <button class="home-section-btn" onclick="MX.showPage('pmp')">Configurer</button>
+          </div>
+          <div class="home-state-box" style="color:var(--text3)">
+            <i class="fas fa-screwdriver-wrench" style="font-size:22px;margin-bottom:6px;opacity:0.4"></i>
+            <div style="font-size:13px">Module PMP — Accéder pour initialiser</div>
+          </div>
+        </div>`;
+      }
     }
 
     // ── SECTION COMMUNICATIONS ──

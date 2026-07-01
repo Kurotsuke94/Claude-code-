@@ -85,6 +85,7 @@
     if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
+    if (id === "pmp")          return Pages.PMP  ? Pages.PMP.render()  : _renderStub("Maintenance PMP", "fa-screwdriver-wrench", "Chargement…");
     if (id === "org-resp")      return Pages.OrgResp ? Pages.OrgResp.render() : null;
     if (id === "mes-missions")  return Pages.MesMissions ? Pages.MesMissions.render() : (Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : null);
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
@@ -159,6 +160,7 @@
   window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
   window.MX.showCsoTab     = function(tab) { window._csoStartTab = tab; MX.showPage('consommations'); };
   window.MX.showIntTab     = function(tab) { window._intStartTab = tab; MX.showPage('interventions'); };
+  window.MX.showPmpTab     = function(tab) { window._pmpStartTab = tab; MX.showPage('pmp'); };
 
   window.MX.toggleCompact = function() {
     if (window.innerWidth <= 900) {
@@ -184,6 +186,7 @@
     'documents':     { icon: 'fa-book',            l: 'Bibliothèque' },
     'consommations': { icon: 'fa-gauge-high',       l: 'Compteurs' },
     'interventions': { icon: 'fa-wrench',          l: 'Interventions' },
+    'pmp':           { icon: 'fa-screwdriver-wrench', l: 'Maintenance PMP' },
     'utilisateurs':  { icon: 'fa-users',           l: 'Utilisateurs' },
     'equipe':        { icon: 'fa-users-gear',      l: 'Équipe' },
     'badges':        { icon: 'fa-medal',           l: 'Badges' },
@@ -377,6 +380,20 @@
         anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
       });
       h += _group("fa-chart-bar", "sx-group-ico--green", "Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Analyses");
+    }
+
+    // ── 🛠️ Maintenance PMP (respOnly) ──
+    if (canAll) {
+      var pmpItems = '';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'dashboard\')" title="Tableau de bord PMP"><i class="fas fa-gauge sx-ico"></i><span class="sx-lbl">Tableau de bord</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'equipements\')" title="Équipements PMP"><i class="fas fa-wrench sx-ico"></i><span class="sx-lbl">Équipements</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'calendrier\')" title="Calendrier PMP"><i class="fas fa-calendar-days sx-ico"></i><span class="sx-lbl">Calendrier</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'interventions\')" title="Interventions PMP"><i class="fas fa-clipboard-list sx-ico"></i><span class="sx-lbl">Interventions</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'retards\')" title="Retards PMP"><i class="fas fa-triangle-exclamation sx-ico"></i><span class="sx-lbl">Retards</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'modeles\')" title="Modèles PMP"><i class="fas fa-layer-group sx-ico"></i><span class="sx-lbl">Modèles</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'import\')" title="Import CSV"><i class="fas fa-file-import sx-ico"></i><span class="sx-lbl">Import CSV</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'historique\')" title="Historique PMP"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
+      h += _group("fa-screwdriver-wrench", "sx-group-ico--orange", "Maintenance PMP", "maint", "toggleNavMaint", _maintOpen, pmpItems, "pmp", "PMP");
     }
 
     // ── 🎯 Centre de Pilotage (respOnly) ──

@@ -98,6 +98,7 @@
 
     var badges = '';
     if (pri.l) badges += '<span class="mm-pri ' + e(pri.cls) + '">' + e(pri.l) + '</span>';
+    if (t.category === 'pmp' || t.isPmp) badges += '<span class="mm-pri mm-pri--pmp">🛠️ PMP</span>';
     if (t.fromUser) badges += '<span class="mm-pri mm-pri--xfer">Transféré</span>';
 
     var descH = t.desc ? '<div class="mm-card-desc">' + e(t.desc) + '</div>' : '';
