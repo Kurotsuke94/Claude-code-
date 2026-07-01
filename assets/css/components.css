@@ -9391,3 +9391,68 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .pmp-dash-top { flex-direction:column; }
   .pmp-conf-card { flex-direction:row; width:100%; justify-content:flex-start; padding:14px; }
 }
+
+/* ── PMP Import Wizard (rework) ── */
+.pmp-import-hdr { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.pmp-import-ttl { font-size:15px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:8px; }
+.pmp-import-sub { font-size:11px; color:var(--text3); margin-top:3px; }
+
+/* Steps bar */
+.pmp-import-steps-bar { display:flex; align-items:center; gap:0; margin-bottom:20px; }
+.pmp-import-step-item { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:60px; }
+.pmp-import-step-item span { font-size:10px; font-weight:600; color:var(--text3); }
+.pmp-import-step-item.active span { color:var(--orange); }
+.pmp-import-step-item.done span { color:var(--green); }
+.pmp-import-step-num { width:26px; height:26px; border-radius:50%; border:2px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:var(--text3); background:var(--bg2); }
+.pmp-import-step-item.active .pmp-import-step-num { border-color:var(--orange); color:var(--orange); background:rgba(249,115,22,.1); }
+.pmp-import-step-item.done .pmp-import-step-num { border-color:var(--green); color:var(--green); background:rgba(34,197,94,.1); }
+.pmp-import-step-line { flex:1; height:2px; background:var(--border); min-width:20px; margin:0 4px; margin-bottom:14px; }
+.pmp-import-step-line.done { background:var(--green); }
+
+/* Drop zone */
+.pmp-import-dropzone { border:2px dashed var(--border); border-radius:12px; padding:40px 20px; text-align:center; cursor:pointer; transition:border-color .2s,background .2s; display:flex; flex-direction:column; align-items:center; }
+.pmp-import-dropzone:hover { border-color:var(--orange); background:rgba(249,115,22,.04); }
+.pmp-import-dropzone.drag-over { border-color:var(--orange); background:rgba(249,115,22,.08); transform:scale(1.01); }
+.pmp-import-dropzone.loading { cursor:default; border-color:var(--orange); background:rgba(249,115,22,.04); }
+.pmp-import-fmt-tags { display:flex; gap:6px; margin-top:4px; }
+.pmp-import-fmt-tags span { font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--bg3); border:1px solid var(--border); color:var(--text2); }
+
+/* Analysis stats */
+.pmp-import-stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:16px; }
+.pmp-import-stat { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:12px; text-align:center; }
+.pmp-import-stat-n { font-size:24px; font-weight:800; color:var(--text); }
+.pmp-import-stat-l { font-size:11px; color:var(--text3); margin-top:2px; font-weight:500; }
+
+/* Mapping box */
+.pmp-import-mapbox { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; }
+.pmp-import-mapbox-ttl { font-size:12px; font-weight:700; color:var(--text2); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+.pmp-import-map-grid { display:flex; flex-wrap:wrap; gap:6px; }
+.pmp-import-map-item { display:flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; background:var(--bg3); border:1px solid var(--border); font-size:11px; }
+.pmp-import-map-item.ok { border-color:rgba(34,197,94,.25); background:rgba(34,197,94,.06); }
+.pmp-import-map-col { font-weight:600; color:var(--text2); }
+.pmp-import-map-field { color:var(--green); font-weight:600; }
+.pmp-import-map-miss { margin-top:10px; font-size:11px; color:var(--text3); display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.pmp-import-map-miss span { background:var(--bg3); padding:2px 6px; border-radius:4px; border:1px solid var(--border); }
+
+/* Unrecognized columns */
+.pmp-import-unmap-box { background:rgba(245,158,11,.06); border:1px solid rgba(245,158,11,.25); border-radius:10px; padding:14px; margin-bottom:12px; }
+.pmp-import-unmap-ttl { font-size:12px; font-weight:700; color:var(--orange); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+.pmp-import-unmap-row { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid rgba(245,158,11,.12); }
+.pmp-import-unmap-row:last-child { border-bottom:none; }
+.pmp-import-unmap-col { font-size:12px; font-weight:600; color:var(--text); min-width:120px; font-family:monospace; }
+
+/* Result screen */
+.pmp-import-result { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px; }
+.pmp-import-result-ttl { font-size:16px; font-weight:700; color:var(--text); margin-top:8px; }
+.pmp-import-result-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:16px 0; }
+.pmp-import-rs { background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:12px; display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; font-size:11px; color:var(--text3); }
+.pmp-import-rs-n { font-size:26px; font-weight:800; }
+.pmp-import-absent { font-size:12px; color:var(--text2); padding:10px 14px; background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); border-radius:8px; margin-bottom:12px; line-height:1.5; }
+.pmp-import-suggest { background:rgba(249,115,22,.06); border:1px solid rgba(249,115,22,.2); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+.pmp-import-suggest-ttl { font-size:13px; font-weight:700; color:var(--orange); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+
+@media (max-width:700px) {
+  .pmp-import-stats-row { grid-template-columns:repeat(2,1fr); }
+  .pmp-import-result-stats { grid-template-columns:repeat(3,1fr); }
+  .pmp-import-steps-bar { display:none; }
+}

@@ -10,7 +10,14 @@
   var _loaded          = false;
   var _unsubPmp        = {};
   var _calMonth        = '';
-  var _csvPreview      = null;
+  var _importStep      = 1;
+  var _importRawRows   = [];
+  var _importHeaders   = [];
+  var _importMapping   = {};
+  var _importUnmapped  = [];
+  var _importAnalysis  = null;
+  var _importUserMap   = {};
+  var _importResult    = null;
   var _eqSearch        = '';
   var _eqTypeFilter    = 'all';
   var _intStatusFilter = 'all';
@@ -67,7 +74,7 @@
     { id: 'interventions', icon: 'fa-clipboard-list',       l: 'Interventions',   mob: 'PMP'      },
     { id: 'retards',       icon: 'fa-triangle-exclamation', l: 'Retards',         mob: 'Retards'  },
     { id: 'modeles',       icon: 'fa-layer-group',          l: 'Modèles',         mob: 'Modèles'  },
-    { id: 'import',        icon: 'fa-file-import',          l: 'Import CSV',      mob: 'Import'   },
+    { id: 'import',        icon: 'fa-file-excel',           l: 'Import Excel',    mob: 'Import'   },
     { id: 'historique',    icon: 'fa-clock-rotate-left',    l: 'Historique',      mob: 'Histo.'   },
   ];
 
@@ -639,67 +646,285 @@
     return h;
   }
 
-  // ── IMPORT CSV ────────────────────────────────────────────────────────────
+  // ── IMPORT EXCEL ─────────────────────────────────────────────────────────
+
+  var IMPORT_FIELDS = [
+    { key: 'ref',        label: 'Référence',           aliases: ['ref','reference','bt','nobt','numero','id','code'] },
+    { key: 'name',       label: 'Nom intervention',    required: true, aliases: ['nom','libelle','label','designation','intervention','titre','name','intitule','description'] },
+    { key: 'equipment',  label: 'Équipement',          aliases: ['equipement','equipment','materiel','appareil','machine','installation'] },
+    { key: 'type',       label: 'Catégorie',           aliases: ['type','categorie','category','famille'] },
+    { key: 'zone',       label: 'Zone',                aliases: ['zone','secteur','batiment','site'] },
+    { key: 'subZone',    label: 'Sous-zone',           aliases: ['souszone','soussecteur','local','piece','localisation'] },
+    { key: 'frequency',  label: 'Fréquence',           aliases: ['frequence','frequency','periodicite','declencheur','recurrence','periode','jours','days'] },
+    { key: 'nextDue',    label: 'Date prochaine',      aliases: ['dateprochaine','dateprevue','echeance','prochain','dateintervention','datechue','nextdue','prevue','datemaintenance'] },
+    { key: 'duration',   label: 'Durée estimée',       aliases: ['duree','duration','temps','dureeestimee','dureeprevue','estimee'] },
+    { key: 'criticite',  label: 'Criticité',           aliases: ['criticite','criticality','priorite','gravite','urgence','crit'] },
+    { key: 'technician', label: 'Technicien référent', aliases: ['technicien','technician','responsable','operateur','assigne','referent','intervenant'] },
+    { key: 'comments',   label: 'Commentaires',        aliases: ['commentaire','comment','note','remarque','observation'] },
+  ];
+
+  var TPL_DEFAULTS = {
+    cta:          ['Vérifier l\'état des filtres', 'Nettoyer ou remplacer les filtres', 'Contrôler les courroies', 'Vérifier les pressions de soufflage et reprise', 'Contrôler la régulation', 'Graisser les roulements', 'Vérifier les débits d\'air'],
+    groupe_froid: ['Contrôler le niveau de fluide frigorigène', 'Vérifier les pressions HP/BP', 'Nettoyer les ailettes du condenseur', 'Contrôler la régulation', 'Recherche de fuites'],
+    ecs:          ['Contrôler la température de stockage (≥60°C)', 'Vérifier l\'anode magnésium', 'Purger le ballon', 'Contrôler la pression de service', 'Vérifier le groupe de sécurité'],
+    ssi:          ['Test déclenchement manuel des détecteurs', 'Vérifier voyants et signalisations', 'Contrôler l\'état des batteries', 'Test sirènes et avertisseurs', 'Vérifier la centrale incendie'],
+    ascenseur:    ['Vérifier le fonctionnement des portes', 'Contrôler les câbles et poulies', 'Lubrifier les guidages', 'Test arrêt d\'urgence', 'Contrôler l\'éclairage cabine'],
+    pompe:        ['Contrôler l\'étanchéité des presse-étoupes', 'Vérifier les vibrations', 'Graisser les paliers', 'Contrôler la pression de refoulement', 'Vérifier les clapets anti-retour'],
+    tgbt:         ['Vérifier le bon état des serrures', 'Contrôler les disjoncteurs', 'Mesurer les températures des départs', 'Nettoyer l\'intérieur', 'Vérifier les connexions et serrage'],
+    vmc:          ['Nettoyer les filtres', 'Vérifier les débits d\'air', 'Contrôler les courroies', 'Graisser les roulements'],
+    adoucisseur:  ['Vérifier le niveau de sel', 'Contrôler le cycle de régénération', 'Analyser la dureté de l\'eau', 'Vérifier la pression de service'],
+    porte_auto:   ['Vérifier les capteurs de sécurité', 'Contrôler les sécurités antipincement', 'Lubrifier les guidages', 'Test arrêt d\'urgence', 'Régler les vitesses d\'ouverture/fermeture'],
+    eclairage:    ['Contrôler les éclairages de secours', 'Vérifier l\'autonomie des batteries', 'Nettoyer les luminaires'],
+    divers:       ['Contrôle visuel général', 'Vérifier l\'état général', 'Vérifier les fixations'],
+  };
+
+  function _normH(s) {
+    return (s || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  function _autoMapCols(headers) {
+    var normed = headers.map(_normH);
+    var mapping = {}, used = {};
+    IMPORT_FIELDS.forEach(function (f) {
+      var idx = -1;
+      for (var i = 0; i < normed.length; i++) {
+        if (used[i]) continue;
+        var nh = normed[i];
+        if (f.aliases.some(function (a) { return nh === a || nh.startsWith(a) || a.startsWith(nh) || nh.includes(a); })) {
+          idx = i; break;
+        }
+      }
+      mapping[f.key] = idx;
+      if (idx >= 0) used[idx] = true;
+    });
+    var unmapped = [];
+    headers.forEach(function (h, i) { if (!used[i] && (h || '').trim()) unmapped.push({ idx: i, header: h }); });
+    return { mapping: mapping, unmapped: unmapped };
+  }
+
+  function _parseFreq(s) {
+    if (!s) return 30;
+    var n = parseInt(s, 10);
+    if (!isNaN(n) && n > 0) return n;
+    var sl = _normH(s);
+    if (sl.includes('hebdo')) return 7;
+    if (sl.includes('quinz')) return 15;
+    if (sl.includes('bimes')) return 60;
+    if (sl.includes('trimes')) return 90;
+    if (sl.includes('semes')) return 180;
+    if (sl.includes('annuel') || sl.includes('annual')) return 365;
+    if (sl.includes('mens')) return 30;
+    return 30;
+  }
+
+  function _parseDate(s) {
+    if (!s) return '';
+    var d = String(s).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10);
+    var m = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (m) {
+      var p1 = m[1].padStart(2, '0'), p2 = m[2].padStart(2, '0');
+      var yr = m[3].length === 2 ? '20' + m[3] : m[3];
+      return yr + '-' + p2 + '-' + p1;
+    }
+    try { var dt = new Date(d); if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10); } catch (e_) {}
+    return '';
+  }
+
+  function _matchType(s) {
+    if (!s) return 'divers';
+    var n = _normH(s);
+    return Object.keys(EQ_TYPES).find(function (k) {
+      return k === n || _normH(EQ_TYPES[k].l) === n || n.includes(k) || k.includes(n.slice(0, 4));
+    }) || 'divers';
+  }
+
+  function _matchCrit(s) {
+    if (!s) return 'normale';
+    var n = _normH(s);
+    return Object.keys(CRIT).find(function (k) {
+      return k === n || _normH(CRIT[k].l) === n || n.includes(k);
+    }) || 'normale';
+  }
 
   function _tImport() {
-    var HMAP = { name: 'Nom', type: 'Type', zone: 'Zone', subZone: 'Sous-zone', ref: 'Référence', criticite: 'Criticité', frequency: 'Fréquence (j)', technician: 'Technicien' };
-    var h = '<div class="pmp-import-page">' +
-      '<div class="pmp-import-header">' +
-      '<div class="pmp-import-ttl"><i class="fas fa-file-import"></i> Import CSV — Équipements</div>' +
-      '<p class="pmp-import-sub">Importez votre parc équipements depuis un fichier CSV.</p>' +
+    var h = '<div class="pmp-import-page">';
+
+    // Header
+    h += '<div class="pmp-import-hdr">' +
+      '<div>' +
+        '<div class="pmp-import-ttl"><i class="fas fa-file-excel" style="color:#22C55E"></i> Import Excel — Maintenance Préventive</div>' +
+        '<div class="pmp-import-sub">Format officiel Maintix · .xlsx · .xls · .csv (compatibilité)</div>' +
       '</div>' +
-      '<div class="pmp-import-zone" onclick="document.getElementById(\'pmp-csv-input\').click()">' +
-      '<i class="fas fa-file-import" style="font-size:36px;color:var(--cyan);margin-bottom:10px;display:block"></i>' +
-      '<div style="font-size:15px;font-weight:600">Choisir un fichier CSV</div>' +
-      '<div style="font-size:12px;color:var(--text3);margin-top:4px">ou glisser-déposer ici</div>' +
-      '<input type="file" id="pmp-csv-input" accept=".csv,.txt,text/csv" style="display:none"' +
-      ' onchange="MX.Pages.PMP._onCsvFile(this)">' +
+      '<button class="pmp-act-btn" onclick="MX.Pages.PMP._downloadTemplate()" title="Télécharger le modèle Excel Maintix">' +
+        '<i class="fas fa-download"></i> Modèle Maintix' +
+      '</button>' +
+    '</div>';
+
+    // Steps bar
+    var SLBLS = ['Fichier', 'Analyse', 'Aperçu', 'Import'];
+    var activeS = _importStep <= 1 ? 0 : _importStep === 3 ? 2 : _importStep >= 4 ? 3 : 1;
+    h += '<div class="pmp-import-steps-bar">';
+    SLBLS.forEach(function (lbl, i) {
+      var done = i < activeS, act = i === activeS;
+      h += '<div class="pmp-import-step-item' + (done ? ' done' : act ? ' active' : '') + '">' +
+        '<div class="pmp-import-step-num">' + (done ? '<i class="fas fa-check"></i>' : (i + 1)) + '</div>' +
+        '<span>' + lbl + '</span></div>';
+      if (i < 3) h += '<div class="pmp-import-step-line' + (i < activeS ? ' done' : '') + '"></div>';
+    });
+    h += '</div>';
+
+    if (_importStep === 1 || _importStep === 2) {
+      var loading = _importStep === 2;
+      h += '<div class="pmp-import-dropzone' + (loading ? ' loading' : '') + '" id="pmp-dropzone"' +
+        ' ondragover="event.preventDefault();document.getElementById(\'pmp-dropzone\').classList.add(\'drag-over\')"' +
+        ' ondragleave="document.getElementById(\'pmp-dropzone\').classList.remove(\'drag-over\')"' +
+        ' ondrop="event.preventDefault();document.getElementById(\'pmp-dropzone\').classList.remove(\'drag-over\');MX.Pages.PMP._onImportDrop(event)"' +
+        ' onclick="if(!this.classList.contains(\'loading\'))document.getElementById(\'pmp-import-input\').click()">';
+      if (loading) {
+        h += '<i class="fas fa-spinner fa-spin" style="font-size:32px;color:var(--orange);margin-bottom:12px;display:block"></i>' +
+          '<div style="font-size:14px;font-weight:600">Analyse du fichier en cours…</div>';
+      } else {
+        h += '<i class="fas fa-file-excel" style="font-size:40px;color:#22C55E;margin-bottom:12px;display:block"></i>' +
+          '<div style="font-size:15px;font-weight:700">Glisser votre fichier Excel ici</div>' +
+          '<div style="font-size:12px;color:var(--text3);margin-top:6px;margin-bottom:10px">ou cliquer pour sélectionner</div>' +
+          '<div class="pmp-import-fmt-tags"><span>.xlsx</span><span>.xls</span><span>.csv</span></div>';
+      }
+      h += '<input type="file" id="pmp-import-input" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" style="display:none" onchange="MX.Pages.PMP._onImportFile(this)">';
+      h += '</div>';
+
+      h += '<div class="pmp-import-help"><div class="pmp-import-help-ttl"><i class="fas fa-circle-info"></i> Colonnes reconnues automatiquement</div>' +
+        '<div class="pmp-import-cols">' +
+        IMPORT_FIELDS.map(function (f) {
+          return '<div class="pmp-import-col"><strong>' + f.label + '</strong><span>' + f.aliases.slice(0, 3).join(', ') + '…</span></div>';
+        }).join('') + '</div></div>';
+
+    } else if (_importStep === 3) {
+      var an = _importAnalysis;
+
+      // Stats row
+      h += '<div class="pmp-import-stats-row">' +
+        '<div class="pmp-import-stat"><div class="pmp-import-stat-n">' + an.total + '</div><div class="pmp-import-stat-l">Lignes</div></div>' +
+        '<div class="pmp-import-stat"><div class="pmp-import-stat-n">' + an.equipCount + '</div><div class="pmp-import-stat-l">Équipements</div></div>' +
+        '<div class="pmp-import-stat"><div class="pmp-import-stat-n">' + an.zoneCount + '</div><div class="pmp-import-stat-l">Zones</div></div>' +
+        '<div class="pmp-import-stat"><div class="pmp-import-stat-n">' + an.freqCount + '</div><div class="pmp-import-stat-l">Fréquences</div></div>' +
       '</div>';
 
-    if (_csvPreview) {
-      var rows    = _csvPreview.rows;
-      var headers = _csvPreview.headers;
-      var errors  = _csvPreview.errors;
-      h += '<div class="pmp-import-preview">' +
-        '<div class="pmp-import-preview-hd">' +
-        '<span>' + rows.length + ' équipement' + (rows.length !== 1 ? 's' : '') + ' détecté' + (rows.length !== 1 ? 's' : '') + '</span>' +
-        (errors.length
-          ? '<span style="color:var(--orange)">' + errors.length + ' avertissement' + (errors.length > 1 ? 's' : '') + '</span>'
-          : '<span style="color:var(--green)"><i class="fas fa-check"></i> Prêt à importer</span>') +
-        '</div>' +
-        '<div class="pmp-import-table-wrap"><table class="pmp-import-table"><thead><tr>' +
-        headers.map(function (k) { return '<th>' + (HMAP[k] || k) + '</th>'; }).join('') +
-        '</tr></thead><tbody>' +
-        rows.slice(0, 8).map(function (r) {
-          return '<tr>' + headers.map(function (k) { return '<td>' + esc(r[k] || '') + '</td>'; }).join('') + '</tr>';
+      // Mapping display
+      var detected = IMPORT_FIELDS.filter(function (f) { return (_importMapping[f.key] || -1) >= 0; });
+      var missed   = IMPORT_FIELDS.filter(function (f) { return (_importMapping[f.key] || -1) < 0; });
+      h += '<div class="pmp-import-mapbox">' +
+        '<div class="pmp-import-mapbox-ttl"><i class="fas fa-magic" style="color:var(--orange)"></i> Correspondance automatique — ' + detected.length + '/' + IMPORT_FIELDS.length + ' colonnes détectées</div>' +
+        '<div class="pmp-import-map-grid">' +
+        detected.map(function (f) {
+          var colName = _importHeaders[_importMapping[f.key]] || '';
+          return '<div class="pmp-import-map-item ok">' +
+            '<span class="pmp-import-map-col">' + esc(colName) + '</span>' +
+            '<i class="fas fa-arrow-right" style="color:var(--green);font-size:10px;flex-shrink:0"></i>' +
+            '<span class="pmp-import-map-field">' + f.label + '</span>' +
+          '</div>';
         }).join('') +
-        '</tbody></table>' +
-        (rows.length > 8 ? '<div style="text-align:center;font-size:11px;color:var(--text3);padding:8px">+' + (rows.length - 8) + ' lignes supplémentaires</div>' : '') +
-        '</div>' +
-        (errors.length ? '<div class="pmp-import-errors">' + errors.map(function (e) {
-          return '<div class="pmp-import-err"><i class="fas fa-triangle-exclamation"></i> ' + esc(e) + '</div>';
-        }).join('') + '</div>' : '') +
-        '<div class="pmp-import-actions">' +
-        '<button class="pmp-add-btn" onclick="MX.Pages.PMP._importCsvRows()"><i class="fas fa-upload"></i> Importer ' + rows.length + ' équipement' + (rows.length !== 1 ? 's' : '') + '</button>' +
-        '<button class="pmp-act-btn" onclick="MX.Pages.PMP._clearCsv()"><i class="fas fa-times"></i> Annuler</button>' +
-        '</div></div>';
-    }
+        '</div>';
+      if (missed.length) {
+        h += '<div class="pmp-import-map-miss">Non détectés (optionnels) : ' +
+          missed.map(function (f) { return '<span class="pmp-import-col">' + f.label + '</span>'; }).join('') + '</div>';
+      }
+      h += '</div>';
 
-    h += '<div class="pmp-import-help"><div class="pmp-import-help-ttl"><i class="fas fa-circle-info"></i> Colonnes reconnues</div>' +
-      '<div class="pmp-import-cols">' +
-      [
-        { n: 'nom / name',              d: 'Nom de l\'équipement (requis)' },
-        { n: 'type',                    d: 'cta, ecs, ssi, ascenseur, tgbt, pompe, vmc…' },
-        { n: 'zone',                    d: 'Zone ou emplacement physique' },
-        { n: 'sous-zone / subzone',     d: 'Sous-zone ou local technique' },
-        { n: 'référence / ref',         d: 'Référence interne ou numéro d\'inventaire' },
-        { n: 'criticité / criticite',   d: 'faible, normale, haute, critique' },
-        { n: 'fréquence / jours',       d: 'Nombre de jours entre les visites (ex: 30)' },
-        { n: 'technicien / technician', d: 'Nom du technicien référent' },
-      ].map(function (c) {
-        return '<div class="pmp-import-col"><code>' + c.n + '</code><span>' + c.d + '</span></div>';
-      }).join('') +
-      '</div></div>';
+      // Unrecognized columns
+      if (_importUnmapped.length) {
+        h += '<div class="pmp-import-unmap-box">' +
+          '<div class="pmp-import-unmap-ttl"><i class="fas fa-question-circle" style="color:var(--orange)"></i> ' + _importUnmapped.length + ' colonne' + (_importUnmapped.length > 1 ? 's' : '') + ' non reconnue' + (_importUnmapped.length > 1 ? 's' : '') + ' — à quoi correspondent-elles ?</div>' +
+          _importUnmapped.map(function (u) {
+            return '<div class="pmp-import-unmap-row">' +
+              '<span class="pmp-import-unmap-col">' + esc(u.header) + '</span>' +
+              '<i class="fas fa-long-arrow-alt-right" style="color:var(--text3);flex-shrink:0"></i>' +
+              '<select class="pmp-select" onchange="MX.Pages.PMP._setImportUserMap(this.value,' + u.idx + ')">' +
+                '<option value="">Ignorer cette colonne</option>' +
+                IMPORT_FIELDS.map(function (f) {
+                  return '<option value="' + f.key + '"' + (_importUserMap[f.key] === u.idx ? ' selected' : '') + '>' + f.label + '</option>';
+                }).join('') +
+              '</select>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }
+
+      // Preview table
+      var allMap = Object.assign({}, _importMapping);
+      Object.keys(_importUserMap).forEach(function (k) { if (_importUserMap[k] >= 0) allMap[k] = _importUserMap[k]; });
+      var visFields = IMPORT_FIELDS.filter(function (f) { return (allMap[f.key] !== undefined && allMap[f.key] >= 0); });
+      h += '<div class="pmp-import-preview">' +
+        '<div class="pmp-import-preview-hd"><span>Aperçu — 10 premières lignes</span></div>' +
+        '<div class="pmp-import-table-wrap"><table class="pmp-import-table"><thead><tr>' +
+        visFields.map(function (f) { return '<th>' + f.label + '</th>'; }).join('') +
+        '</tr></thead><tbody>' +
+        _importRawRows.slice(0, 10).map(function (r) {
+          return '<tr>' + visFields.map(function (f) {
+            return '<td>' + esc(String(r[allMap[f.key]] || '')) + '</td>';
+          }).join('') + '</tr>';
+        }).join('') +
+        '</tbody></table></div>' +
+        (_importRawRows.length > 10 ? '<div style="text-align:center;font-size:11px;color:var(--text3);padding:8px">+' + (_importRawRows.length - 10) + ' lignes supplémentaires</div>' : '') +
+      '</div>';
+
+      h += '<div class="pmp-import-actions">' +
+        '<button class="pmp-add-btn" onclick="MX.Pages.PMP._runImport()">' +
+          '<i class="fas fa-rocket"></i> Lancer l\'import — ' + _importRawRows.length + ' ligne' + (_importRawRows.length > 1 ? 's' : '') +
+        '</button>' +
+        '<button class="pmp-act-btn" onclick="MX.Pages.PMP._resetImport()">' +
+          '<i class="fas fa-arrow-left"></i> Changer de fichier' +
+        '</button>' +
+      '</div>';
+
+    } else if (_importStep === 4) {
+      h += '<div class="pmp-empty pmp-empty--big">' +
+        '<i class="fas fa-spinner fa-spin" style="font-size:36px;color:var(--orange)"></i>' +
+        '<div class="pmp-empty-ttl" style="margin-top:14px">Import en cours…</div>' +
+        '<div class="pmp-empty-sub">Création des équipements et des interventions</div>' +
+      '</div>';
+
+    } else if (_importStep === 5) {
+      var res = _importResult || {};
+      h += '<div class="pmp-import-result">' +
+        '<div style="text-align:center;margin-bottom:16px">' +
+          '<i class="fas fa-circle-check" style="font-size:36px;color:var(--green)"></i>' +
+          '<div class="pmp-import-result-ttl">Import terminé avec succès</div>' +
+        '</div>' +
+        '<div class="pmp-import-result-stats">' +
+          '<div class="pmp-import-rs"><span class="pmp-import-rs-n" style="color:var(--green)">' + (res.created || 0) + '</span><span>Équipements créés</span></div>' +
+          '<div class="pmp-import-rs"><span class="pmp-import-rs-n" style="color:var(--cyan)">' + (res.updated || 0) + '</span><span>Mis à jour</span></div>' +
+          '<div class="pmp-import-rs"><span class="pmp-import-rs-n" style="color:var(--orange)">' + (res.intCreated || 0) + '</span><span>Interventions planifiées</span></div>' +
+        '</div>';
+      if (res.absent > 0) {
+        h += '<div class="pmp-import-absent"><i class="fas fa-triangle-exclamation" style="color:var(--orange)"></i> ' +
+          '<strong>' + res.absent + ' équipement' + (res.absent > 1 ? 's' : '') + '</strong>' +
+          ' présent' + (res.absent > 1 ? 's' : '') + ' dans Maintix mais absent' + (res.absent > 1 ? 's' : '') + ' de ce fichier. ' +
+          'Ils ont été conservés et marqués <em>non présents dans le dernier import</em>.</div>';
+      }
+      if (res.suggestions && res.suggestions.length) {
+        h += '<div class="pmp-import-suggest">' +
+          '<div class="pmp-import-suggest-ttl"><i class="fas fa-lightbulb" style="color:var(--orange)"></i> Modèles de checklist suggérés</div>' +
+          '<p style="font-size:12px;color:var(--text2);margin:6px 0 10px">Ces catégories n\'ont pas encore de modèle de checklist :</p>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+          res.suggestions.map(function (cat) {
+            var t = EQ_TYPES[cat] || { icon: '🔧', l: cat };
+            return '<span class="pmp-retard-badge pmp-retard-badge--big">' + t.icon + ' ' + t.l + '</span>';
+          }).join('') + '</div>' +
+          '<button class="pmp-add-btn" onclick="MX.Pages.PMP._createDefaultTpls(' + JSON.stringify(res.suggestions) + ')">' +
+            '<i class="fas fa-layer-group"></i> Créer les modèles par défaut' +
+          '</button></div>';
+      }
+      h += '<div class="pmp-import-actions" style="margin-top:16px">' +
+        '<button class="pmp-add-btn" onclick="MX.Pages.PMP._tab(\'equipements\')">' +
+          '<i class="fas fa-wrench"></i> Voir les équipements' +
+        '</button>' +
+        '<button class="pmp-act-btn" onclick="MX.Pages.PMP._resetImport()">' +
+          '<i class="fas fa-upload"></i> Nouvel import' +
+        '</button></div></div>';
+    }
 
     h += '</div>';
     return h;
@@ -1045,89 +1270,258 @@
     ]);
   }
 
-  // ── CSV IMPORT ────────────────────────────────────────────────────────────
+  // ── EXCEL IMPORT HANDLERS ────────────────────────────────────────────────
 
-  function _onCsvFile(input) {
-    var file = input.files[0];
+  function _onImportFile(input) {
+    var file = input && input.files && input.files[0];
     if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function (e) { _parseCsv(e.target.result); };
-    reader.readAsText(file, 'UTF-8');
+    input.value = '';
+    _importStep = 2; _rerender();
+    setTimeout(function () { _parseImportFile(file); }, 50);
   }
 
-  function _parseCsv(text) {
-    var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
-    if (!lines.length) { MX.toast('Fichier vide', true); return; }
-    var rawH = lines[0].split(/[;,\t]/).map(function (h) { return h.trim().toLowerCase().replace(/['"]/g, ''); });
+  function _onImportDrop(e) {
+    var file = e && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    _importStep = 2; _rerender();
+    setTimeout(function () { _parseImportFile(file); }, 50);
+  }
 
-    function _mapH(candidates) {
-      return rawH.findIndex(function (h) { return candidates.some(function (c) { return h.includes(c); }); });
+  function _parseImportFile(file) {
+    var ext = (file.name || '').split('.').pop().toLowerCase();
+    var reader = new FileReader();
+    reader.onerror = function () { MX.toast('Erreur de lecture du fichier', true); _importStep = 1; _rerender(); };
+    if (ext === 'csv' || ext === 'txt') {
+      reader.onload = function (e) { _parseCsvFallback(e.target.result); };
+      reader.readAsText(file, 'UTF-8');
+    } else {
+      reader.onload = function (e) { _parseXlsxFile(e.target.result); };
+      reader.readAsArrayBuffer(file);
     }
+  }
 
-    var colMap = {
-      name:       _mapH(['nom','name','equipement','équipement']),
-      type:       _mapH(['type']),
-      zone:       _mapH(['zone']),
-      subZone:    _mapH(['sous-zone','subzone','sous_zone','local']),
-      ref:        _mapH(['ref','reference','référence']),
-      criticite:  _mapH(['criticite','criticité','priorite','priorité','crit']),
-      frequency:  _mapH(['freq','fréquence','frequence','jours','days']),
-      technician: _mapH(['tech','technicien','technician','resp']),
-    };
-
-    var headers = Object.keys(colMap).filter(function (k) { return colMap[k] >= 0; });
-    var rows = [], errors = [];
-
-    for (var i = 1; i < lines.length; i++) {
-      var cells = lines[i].split(/[;,\t]/).map(function (c) { return c.trim().replace(/^["']|["']$/g, ''); });
-      var row   = {};
-      headers.forEach(function (k) { row[k] = colMap[k] >= 0 ? (cells[colMap[k]] || '') : ''; });
-      if (!row.name) { errors.push('Ligne ' + (i + 1) + ' : nom manquant'); continue; }
-
-      var tl = (row.type || '').toLowerCase().replace(/\s/g, '_');
-      row.type = Object.keys(EQ_TYPES).find(function (k) {
-        return k === tl || EQ_TYPES[k].l.toLowerCase() === tl;
-      }) || 'divers';
-
-      var cl = (row.criticite || '').toLowerCase();
-      row.criticite = Object.keys(CRIT).find(function (k) {
-        return k === cl || CRIT[k].l.toLowerCase() === cl;
-      }) || 'normale';
-
-      row.frequency = parseInt(row.frequency) || 30;
-      rows.push(row);
+  function _parseXlsxFile(buffer) {
+    try {
+      var XLSX = window.XLSX;
+      if (!XLSX) { MX.toast('Bibliothèque Excel non disponible — utilisez un fichier CSV', true); _importStep = 1; _rerender(); return; }
+      var wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: false });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+      if (!data || !data.length) { MX.toast('Fichier vide', true); _importStep = 1; _rerender(); return; }
+      _processRawData(data);
+    } catch (e) {
+      MX.toast('Erreur lecture Excel : ' + e.message, true);
+      _importStep = 1; _rerender();
     }
+  }
 
-    _csvPreview = { rows: rows, headers: headers, errors: errors };
+  function _parseCsvFallback(text) {
+    try {
+      var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+      if (!lines.length) { MX.toast('Fichier vide', true); _importStep = 1; _rerender(); return; }
+      var semiCount = (lines[0].match(/;/g) || []).length;
+      var commaCount = (lines[0].match(/,/g) || []).length;
+      var sep = lines[0].includes('\t') ? '\t' : semiCount >= commaCount ? ';' : ',';
+      var data = lines.map(function (l) {
+        return l.split(sep).map(function (c) { return c.trim().replace(/^["']|["']$/g, ''); });
+      });
+      _processRawData(data);
+    } catch (e) {
+      MX.toast('Erreur lecture CSV : ' + e.message, true);
+      _importStep = 1; _rerender();
+    }
+  }
+
+  function _processRawData(data) {
+    var headers = (data[0] || []).map(function (c) { return String(c || '').trim(); });
+    var rows = data.slice(1).filter(function (r) {
+      return r.some(function (c) { return String(c || '').trim(); });
+    });
+    if (!headers.length || !rows.length) {
+      MX.toast('Le fichier semble vide ou mal formaté', true);
+      _importStep = 1; _rerender(); return;
+    }
+    var auto = _autoMapCols(headers);
+    _importHeaders  = headers;
+    _importRawRows  = rows;
+    _importMapping  = auto.mapping;
+    _importUnmapped = auto.unmapped;
+    _importUserMap  = {};
+
+    var nm = _importMapping.name, em = _importMapping.equipment;
+    var fm = _importMapping.frequency, zm = _importMapping.zone;
+    var equips = new Set(), freqs = new Set(), zones = new Set();
+    rows.forEach(function (r) {
+      var en = (em >= 0 ? r[em] : '') || (nm >= 0 ? r[nm] : '') || '';
+      if (en) equips.add(String(en).trim().toLowerCase());
+      if (fm >= 0 && r[fm]) freqs.add(String(r[fm]).trim());
+      if (zm >= 0 && r[zm]) zones.add(String(r[zm]).trim().toLowerCase());
+    });
+    _importAnalysis = { total: rows.length, equipCount: equips.size || rows.length, freqCount: freqs.size, zoneCount: zones.size };
+    _importStep = 3; _importResult = null;
     _rerender();
   }
 
-  function _clearCsv() { _csvPreview = null; _rerender(); }
+  function _resetImport() {
+    _importStep = 1; _importRawRows = []; _importHeaders = [];
+    _importMapping = {}; _importUnmapped = []; _importAnalysis = null;
+    _importUserMap = {}; _importResult = null;
+    _rerender();
+  }
 
-  async function _importCsvRows() {
-    if (!_csvPreview || !_csvPreview.rows.length) return;
-    var rows    = _csvPreview.rows;
-    var today   = _today();
-    var imported = 0;
+  function _setImportUserMap(fieldKey, colIdx) {
+    Object.keys(_importUserMap).forEach(function (k) {
+      if (_importUserMap[k] === parseInt(colIdx, 10)) delete _importUserMap[k];
+    });
+    if (fieldKey) _importUserMap[fieldKey] = parseInt(colIdx, 10);
+  }
+
+  function _downloadTemplate() {
+    var XLSX = window.XLSX;
+    var hdrs = ['Référence','Nom de l\'intervention','Équipement','Catégorie','Zone','Sous-zone',
+                'Fréquence','Date prochaine intervention','Durée estimée','Criticité',
+                'Technicien référent','Commentaires'];
+    var example = ['REF-001','Vérification CTA toiture','CTA-TOITURE-01','CTA','Toiture','Local technique',
+                   '90','2025-07-01','2h','haute','Dupont Jean','Vérifier filtres et courroies'];
+    if (XLSX) {
+      try {
+        var wb = XLSX.utils.book_new();
+        var ws = XLSX.utils.aoa_to_sheet([hdrs, example]);
+        ws['!cols'] = hdrs.map(function () { return { wch: 24 }; });
+        XLSX.utils.book_append_sheet(wb, ws, 'PMP Maintix');
+        XLSX.writeFile(wb, 'Modele_PMP_Maintix.xlsx');
+        return;
+      } catch (e_) {}
+    }
+    var csv = '﻿' + hdrs.join(';') + '\n' + example.join(';');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = 'Modele_PMP_Maintix.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function _runImport() {
+    if (_importStep !== 3) return;
+    _importStep = 4; _rerender();
+
+    var today = _today();
+    var finalMap = Object.assign({}, _importMapping);
+    Object.keys(_importUserMap).forEach(function (k) {
+      var v = parseInt(_importUserMap[k], 10);
+      if (!isNaN(v) && v >= 0) finalMap[k] = v;
+    });
+
+    function _cell(r, key) {
+      var idx = finalMap[key];
+      return (idx !== undefined && idx >= 0 && idx < r.length) ? String(r[idx] || '').trim() : '';
+    }
+
+    var validRows = _importRawRows.filter(function (r) { return _cell(r, 'name') || _cell(r, 'equipment'); });
+    var created = 0, updated = 0, intCreated = 0;
+    var importedNames = new Set(), catCount = {};
+
     try {
-      for (var i = 0; i < rows.length; i++) {
-        var row  = rows[i];
-        var freq = row.frequency || 30;
-        await PMP_DB.eq().add({
-          name: row.name, type: row.type, zone: row.zone || '',
-          subZone: row.subZone || '', ref: row.ref || '',
-          criticite: row.criticite, frequency: freq,
-          technician: row.technician || '', startDate: today,
-          lastDone: '', nextDue: _addDays(today, freq),
-          status: 'actif', templateId: '',
-          createdAt: FV.serverTimestamp(), createdBy: _author() + ' (CSV)',
-        });
-        imported++;
+      for (var i = 0; i < validRows.length; i++) {
+        var r = validRows[i];
+        var eqName  = _cell(r, 'equipment') || _cell(r, 'name');
+        var intName = _cell(r, 'name') || eqName;
+        if (!eqName) continue;
+        importedNames.add(eqName.toLowerCase());
+
+        var eqType  = _matchType(_cell(r, 'type'));
+        catCount[eqType] = (catCount[eqType] || 0) + 1;
+        var freq    = _parseFreq(_cell(r, 'frequency')) || 30;
+        var nextDue = _parseDate(_cell(r, 'nextDue')) || _addDays(today, freq);
+        var crit    = _matchCrit(_cell(r, 'criticite')) || 'normale';
+        var tech    = _cell(r, 'technician'), zone = _cell(r, 'zone');
+        var subZone = _cell(r, 'subZone'), ref = _cell(r, 'ref');
+        var comments = _cell(r, 'comments'), duration = _cell(r, 'duration');
+
+        var existing = _pmpEq.find(function (e) { return (e.name || '').toLowerCase() === eqName.toLowerCase(); });
+        var eqId;
+
+        if (existing) {
+          await PMP_DB.eq().doc(existing.id).update({
+            type: eqType, zone: zone || existing.zone || '',
+            subZone: subZone || existing.subZone || '',
+            ref: ref || existing.ref || '', criticite: crit, frequency: freq,
+            technician: tech || existing.technician || '', nextDue: nextDue,
+            lastImportAbsent: false, updatedAt: FV.serverTimestamp(),
+          });
+          eqId = existing.id; updated++;
+        } else {
+          var docRef = await PMP_DB.eq().add({
+            name: eqName, type: eqType, zone: zone || '', subZone: subZone || '',
+            ref: ref || '', criticite: crit, frequency: freq, technician: tech || '',
+            startDate: today, lastDone: '', nextDue: nextDue, status: 'actif',
+            templateId: '', lastImportAbsent: false,
+            createdAt: FV.serverTimestamp(), createdBy: _author() + ' (Import Excel)',
+          });
+          eqId = docRef.id; created++;
+        }
+
+        if (nextDue && eqId) {
+          var hasOpen = _pmpInt.some(function (x) {
+            return x.equipmentId === eqId && x.dueDate === nextDue &&
+                   (x.status === 'planifiee' || x.status === 'en_cours');
+          });
+          if (!hasOpen) {
+            await PMP_DB.int().add({
+              equipmentId: eqId, equipmentName: eqName, intName: intName,
+              type: eqType, dueDate: nextDue, source: 'import',
+              status: nextDue < today ? 'en_retard' : 'planifiee',
+              comments: comments, duration: duration,
+              createdAt: FV.serverTimestamp(),
+            });
+            intCreated++;
+          }
+        }
       }
-      _csvPreview = null;
-      MX.toast(imported + ' équipements importés ✓');
+
+      var absent = _pmpEq.filter(function (e) {
+        return e.status === 'actif' && !importedNames.has((e.name || '').toLowerCase());
+      });
+      for (var j = 0; j < absent.length; j++) {
+        await PMP_DB.eq().doc(absent[j].id).update({ lastImportAbsent: true, updatedAt: FV.serverTimestamp() });
+      }
+
+      var suggestions = Object.keys(catCount)
+        .filter(function (cat) { return catCount[cat] >= 2; })
+        .filter(function (cat) { return !_pmpTpl.some(function (t) { return (t.type || t.category) === cat; }); });
+
+      _importResult = { created: created, updated: updated, intCreated: intCreated, absent: absent.length, suggestions: suggestions };
+      _importStep = 5;
+      window._pmpGenDone = false;
+      _rerender();
+      MX.toast('Import terminé : ' + created + ' créé' + (created > 1 ? 's' : '') + ', ' + updated + ' mis à jour ✓');
     } catch (e) {
-      MX.toast('Erreur à la ligne ' + (imported + 1) + ' : ' + e.message, true);
+      MX.toast('Erreur import : ' + e.message, true);
+      _importStep = 3; _rerender();
+    }
+  }
+
+  async function _createDefaultTpls(cats) {
+    if (!Array.isArray(cats) || !cats.length) return;
+    var done = 0;
+    try {
+      for (var i = 0; i < cats.length; i++) {
+        var cat = cats[i];
+        var items = TPL_DEFAULTS[cat] || ['Contrôle visuel général', 'Vérifier l\'état général'];
+        var ti = EQ_TYPES[cat] || { l: cat, icon: '🔧' };
+        await PMP_DB.tpl().add({
+          name: 'Modèle ' + ti.l, type: cat, category: cat,
+          description: 'Modèle standard ' + ti.l + ' — généré automatiquement à l\'import',
+          items: items,
+          createdAt: FV.serverTimestamp(), createdBy: _author() + ' (Import auto)',
+        });
+        done++;
+      }
+      MX.toast(done + ' modèle' + (done > 1 ? 's' : '') + ' de checklist créé' + (done > 1 ? 's' : '') + ' ✓');
+      if (_importResult) _importResult.suggestions = [];
+      _rerender();
+    } catch (e) {
+      MX.toast('Erreur création modèles : ' + e.message, true);
     }
   }
 
@@ -1147,7 +1541,7 @@
     _tab, _setEqSearch, _setEqType, _setIntFilter, _setCalMonth,
     _eqForm, _delEq, _createInt, _createIntManual, _markDone, _delInt,
     _tplForm, _tplAddItem, _delTpl,
-    _onCsvFile, _importCsvRows, _clearCsv, _checkAndGenerate,
+    _onImportFile, _onImportDrop, _runImport, _resetImport, _setImportUserMap, _downloadTemplate, _createDefaultTpls, _checkAndGenerate,
     getStats: function () {
       var k = _kpiData();
       return { totalEq: k.totalEq, thisMonthCount: k.thisMonthCount, realisees: k.realisees, enRetard: k.enRetard, conformite: k.conformite, nextDue: k.nextDue };

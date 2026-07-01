@@ -425,6 +425,9 @@
       aItems += _tabBtn("logs",           "fa-chart-line",       "Activité");
       aItems += _tabBtn("history",        "fa-clock-rotate-left","Historique");
 
+      aItems += _sec("MAINTENANCE");
+      aItems += _pageBtn("pmp",           "fa-screwdriver-wrench","Maintenance PMP");
+
       aItems += _sec("CONNAISSANCES");
       aItems += _tabBtn("bible-admin",    "fa-book-open",        "Validation Bible");
       aItems += _tabBtn("badges-admin",   "fa-medal",            "Badges");
