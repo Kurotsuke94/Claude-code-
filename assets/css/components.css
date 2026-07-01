@@ -8223,6 +8223,18 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   background: var(--green, #22c55e);
   border-color: var(--green, #22c55e);
 }
+.mm-card--avail {
+  border-color: rgba(99,102,241,.25);
+  background: rgba(99,102,241,.04);
+}
+.mm-act--take {
+  flex: 1;
+  background: var(--cyan-dim);
+  border-color: var(--cyan-border);
+  color: var(--cyan);
+  font-weight: 600;
+}
+.mm-act--take:hover { opacity: .88; }
 
 /* ── Empty state ───────────────────────────────── */
 .mm-empty {

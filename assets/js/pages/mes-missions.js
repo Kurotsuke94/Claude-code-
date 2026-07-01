@@ -38,19 +38,22 @@
       tasks.forEach(function (task) {
         var mine = task.assignedTo === cu.name
                 || (!task.assignedTo && slotAssignee === cu.name);
-        if (!mine) return;
+        var unassigned = !task.assignedTo && !slotAssignee;
+        if (!mine && !unassigned) return;
         var ck = key + '_' + task.id;
         result.push({
-          id:       task.id,
-          text:     task.text || '',
-          desc:     task.description || '',
-          priority: task.priority || 'normale',
-          slot:     slot,
-          dayId:    todayId,
-          checkKey: ck,
-          done:     !!(state.checks[ck]),
-          note:     (state.notes && state.notes[ck]) || '',
-          fromUser: null
+          id:         task.id,
+          text:       task.text || '',
+          desc:       task.description || '',
+          priority:   task.priority || 'normale',
+          slot:       slot,
+          dayId:      todayId,
+          checkKey:   ck,
+          done:       !!(state.checks[ck]),
+          note:       (state.notes && state.notes[ck]) || '',
+          fromUser:   null,
+          mine:       mine,
+          unassigned: unassigned
         });
       });
     });
@@ -108,6 +111,21 @@
     var dayE  = e(t.dayId);
     var slotE = e(t.slot);
     var idE   = e(t.id);
+
+    if (t.unassigned) {
+      return '<div class="mm-card mm-card--avail" data-ck="' + ck + '">'
+        + '<div class="mm-card-top">'
+        + '<span class="mm-slot-tag mm-slot-tag--' + e(t.slot) + '">' + e(si.l) + '</span>'
+        + '<span style="font-size:10px;color:var(--text3);margin-left:auto">Non assigné</span>'
+        + '</div>'
+        + '<div class="mm-card-title">' + e(t.text) + '</div>'
+        + descH
+        + '<div class="mm-card-actions">'
+        + '<button class="mm-act mm-act--take" onclick="MX.MM.prendre(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')" title="Prendre cette mission"><i class="fas fa-hand-pointer"></i><span>Prendre</span></button>'
+        + '</div>'
+        + '</div>';
+    }
+
     var valBtn = t.done
       ? '<button class="mm-act mm-act--val mm-act--vdone" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')" title="Annuler la validation"><i class="fas fa-circle-check"></i><span>Validée</span></button>'
       : '<button class="mm-act mm-act--val" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')" title="Valider la mission"><i class="fas fa-circle-check"></i><span>Valider</span></button>';
@@ -135,8 +153,11 @@
     var MOIS   = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
     var dateStr = JOURS[today.getDay()] + ' ' + today.getDate() + ' ' + MOIS[today.getMonth()];
 
-    var done  = allTasks.filter(function (t) { return t.done; }).length;
-    var total = allTasks.length;
+    var myTasks        = allTasks.filter(function (t) { return t.mine; });
+    var availableTasks = allTasks.filter(function (t) { return t.unassigned; });
+
+    var done  = myTasks.filter(function (t) { return t.done; }).length;
+    var total = myTasks.length;
     var pct   = total ? Math.round(done / total * 100) : 0;
     var pctCol = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--cyan)';
     var status = (done === total && total > 0)
@@ -154,15 +175,15 @@
     var greet = hour < 12 ? 'Bonjour' : hour < 18 ? 'Bon après-midi' : 'Bonsoir';
 
     var counts = {
-      all:     allTasks.length,
-      prio:    allTasks.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; }).length,
-      todo:    allTasks.filter(function (t) { return !t.done; }).length,
-      matin:   allTasks.filter(function (t) { return t.slot === 'matin'; }).length,
-      journee: allTasks.filter(function (t) { return t.slot === 'journee'; }).length,
-      soir:    allTasks.filter(function (t) { return t.slot === 'soir'; }).length
+      all:     myTasks.length,
+      prio:    myTasks.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; }).length,
+      todo:    myTasks.filter(function (t) { return !t.done; }).length,
+      matin:   myTasks.filter(function (t) { return t.slot === 'matin'; }).length,
+      journee: myTasks.filter(function (t) { return t.slot === 'journee'; }).length,
+      soir:    myTasks.filter(function (t) { return t.slot === 'soir'; }).length
     };
 
-    var filtered = _applyFilter(allTasks, _curFilter);
+    var filtered = _applyFilter(myTasks, _curFilter);
 
     // Gamification (reads from rewards module state if available)
     var ru  = (MX.state.rewardsUsers || {})[cu.name] || {};
@@ -257,6 +278,21 @@
         + '</div>';
     }
 
+    if (availableTasks.length) {
+      h += '<div class="mm-section" style="margin-top:8px">'
+        + '<div class="mm-sec-hd">'
+        + '<div class="mm-sec-hd-l">'
+        + '<span class="mm-sec-dot" style="background:var(--text3)"></span>'
+        + '<span class="mm-sec-ttl">Missions disponibles</span>'
+        + '<span class="mm-sec-sub">Non assignées — cliquez pour prendre</span>'
+        + '</div>'
+        + '<span class="mm-sec-ct">' + availableTasks.length + '</span>'
+        + '</div>'
+        + '<div class="mm-cards">';
+      availableTasks.forEach(function (task) { h += _card(task); });
+      h += '</div></div>';
+    }
+
     h += '</div>'; // mm-sections
 
     // Hidden file input for photo capture
@@ -294,6 +330,13 @@
   // Delegates to existing Checklist toggle — writes to Firestore, triggers re-render via listener
   function toggle(dayId, slot, taskId) {
     MX.Pages.Checklist.toggle(dayId, slot, taskId);
+  }
+
+  function prendre(dayId, slot, taskId) {
+    var cu = MX.state.currentUser;
+    if (!cu) return MX.toast('Connectez-vous pour prendre une mission', true);
+    MX.Pages.Checklist.assignTask(dayId, slot, taskId, cu.name);
+    MX.toast('Mission prise ✓');
   }
 
   // ── Photo attachment ──
@@ -396,6 +439,7 @@
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.MesMissions = {
     render: render, setFilter: setFilter, toggle: toggle,
+    prendre: prendre,
     photo: photo, _onPh: _onPh, signal: signal, _doSignal: _doSignal
   };
   window.MX.MM = window.MX.Pages.MesMissions;

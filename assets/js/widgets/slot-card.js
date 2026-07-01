@@ -43,11 +43,15 @@
     } else if (showAssign) {
       // Planning info banner — no slot-level dropdown (assignment is per task below)
       const suggs = planSuggestions || [];
+      const _assignAllBtn = `<button onclick="event.stopPropagation();MX.Pages.Checklist.promptAssignAll('${esc(dayId)}','${esc(slot)}')" style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 9px;border-radius:6px;background:var(--cyan-dim);border:1px solid var(--cyan-border);color:var(--cyan);cursor:pointer;font-family:var(--ffs);white-space:nowrap;flex-shrink:0"><i class="fas fa-user-check" style="font-size:10px"></i>Assigner tout</button>`;
       if (suggs.length) {
         h += `<div class="arow">
           <span class="arow-lbl"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px;margin-right:4px"></i>Planning</span>
           ${suggs.map(n => chipHtml(n)).join('')}
+          ${_assignAllBtn}
         </div>`;
+      } else {
+        h += `<div class="arow">${_assignAllBtn}</div>`;
       }
     } else if (assignment) {
       h += `<div class="arow"><span class="arow-lbl">Assigné à</span>${chipHtml(assignment)}</div>`;
@@ -82,10 +86,13 @@
     const lockedBy = (claim && claim.lockedBy) || "";
 
     if (showAssign) {
-      // Responsable / Admin : planning info + lock button, no slot-level dropdown
+      // Responsable / Admin : planning info + lock button + "Assigner tout"
       const lockBtn = lockedBy
         ? `<button class="slot-lock-btn on" title="Déverrouiller" onclick="MX.Pages.Checklist.toggleLockSlot('${esc(slot)}')"><i class="fas fa-lock"></i></button>`
         : `<button class="slot-lock-btn" title="Verrouiller" onclick="MX.Pages.Checklist.toggleLockSlot('${esc(slot)}')"><i class="fas fa-lock-open"></i></button>`;
+
+      const _todayId = MX.todayId ? MX.todayId() : '';
+      const _aaBtn   = `<button onclick="event.stopPropagation();MX.Pages.Checklist.promptAssignAll('${esc(_todayId)}','${esc(slot)}')" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 9px;border-radius:6px;background:var(--cyan-dim);border:1px solid var(--cyan-border);color:var(--cyan);cursor:pointer;font-family:var(--ffs);white-space:nowrap;flex-shrink:0"><i class="fas fa-user-check" style="font-size:10px"></i>Assigner tout</button>`;
 
       const suggs = planSuggestions || [];
       if (name) {
@@ -96,18 +103,21 @@
           <span class="arow-lbl">Créneau pris par</span>
           ${chipHtml(name)}
           ${extraPlan}
+          ${_aaBtn}
           ${lockBtn}
         </div>`;
       } else if (suggs.length) {
         return `<div class="arow">
           <span class="arow-lbl"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px;margin-right:3px"></i>Planning</span>
           ${suggs.map(n => chipHtml(n)).join('')}
+          ${_aaBtn}
           ${lockBtn}
         </div>`;
       } else {
         return `<div class="arow">
           <span class="arow-lbl">Créneau</span>
           <span style="font-size:12px;color:var(--text3)">Non assigné</span>
+          ${_aaBtn}
           ${lockBtn}
         </div>`;
       }

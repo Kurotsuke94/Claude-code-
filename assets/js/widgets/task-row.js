@@ -43,22 +43,22 @@
     }
 
     if (canAssign) {
-      // Responsable mode: column layout with per-task assignment dropdown
-      const users   = (MX.state.users || []).filter(u => u.name && !u.hidden);
-      const suggs   = planSuggestions || [];
-      const curVal  = task.assignedTo || '';
-      const dispVal = curVal || (suggs[0] || '');
-      const isSugg  = !curVal && suggs.length > 0;
-      // Only show techs from planning; keep currently-assigned if not in planning; fall back to all if no data
-      const availableUsers = suggs.length > 0
-        ? users.filter(u => suggs.includes(u.name) || u.name === curVal)
-        : users;
-      const _SLOT_LABEL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
-      const _slotSfx = _SLOT_LABEL[slot] ? ` (${_SLOT_LABEL[slot]})` : '';
-      const opts    = `<option value="">— Non assigné —</option>` +
-        availableUsers.map(u => {
-          const lbl = suggs.includes(u.name) ? esc(u.name) + _slotSfx : esc(u.name);
-          return `<option value="${esc(u.name)}"${u.name === dispVal ? ' selected' : ''}>${lbl}</option>`;
+      // Responsable mode: column layout with per-task assignment dropdown — all users, planning labels
+      const users      = (MX.state.users || []).filter(u => u.name && !u.hidden);
+      const suggs      = planSuggestions || [];
+      const curVal     = task.assignedTo || '';
+      const todayPlan  = (MX.state && MX.state.todayPlanSuggestions) || {};
+      const _SLOT_LBL  = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+      const opts = `<option value="">— Non assigné —</option>` +
+        users.map(u => {
+          let lbl = esc(u.name);
+          const uSlot = todayPlan[u.name];
+          if (uSlot && _SLOT_LBL[uSlot]) {
+            lbl += ` (${_SLOT_LBL[uSlot]})`;
+          } else if (suggs.includes(u.name) && _SLOT_LBL[slot]) {
+            lbl += ` (${_SLOT_LBL[slot]})`;
+          }
+          return `<option value="${esc(u.name)}"${u.name === curVal ? ' selected' : ''}>${lbl}</option>`;
         }).join('');
 
       return `<div class="trow ${isChecked ? 'done' : ''}" id="tr_${esc(task.id)}" style="flex-direction:column;align-items:stretch;cursor:default;padding:0;gap:0">
@@ -74,7 +74,6 @@
             onchange="MX.Pages.Checklist.assignTask('${esc(dayId)}','${esc(slot)}','${esc(task.id)}',this.value)">
             ${opts}
           </select>
-          ${isSugg ? `<span style="font-size:10px;color:var(--cyan);background:rgba(0,245,212,.08);border:1px solid rgba(0,245,212,.2);border-radius:4px;padding:2px 5px;white-space:nowrap;flex-shrink:0"><i class="fas fa-calendar-check" style="font-size:9px;margin-right:2px"></i>Planning</span>` : ''}
         </div>
       </div>`;
     }

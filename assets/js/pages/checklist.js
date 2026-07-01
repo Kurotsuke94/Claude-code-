@@ -305,6 +305,55 @@
     }
   }
 
+  // ── ASSIGN ALL TASKS IN A SLOT ──
+  async function assignAllSlotTasks(dayId, slot, assigneeName) {
+    const key      = `${dayId}_${slot}`;
+    const tasks    = MX.state.tasks[key] || [];
+    const newItems = tasks.map(t => {
+      const updated = Object.assign({}, t);
+      if (assigneeName) updated.assignedTo = assigneeName;
+      else delete updated.assignedTo;
+      return updated;
+    });
+    MX.state.tasks[key] = newItems;
+    MX.syncStart();
+    try {
+      await MX.DB.setTasks(dayId, slot, newItems);
+      MX.syncEnd();
+      const _SLOT_LBL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+      MX.toast(`${_SLOT_LBL[slot] || slot} — toutes les tâches assignées à ${assigneeName} ✓`);
+    } catch(e) {
+      MX.state.tasks[key] = tasks;
+      MX.syncFail();
+      MX.toast('Erreur lors de l\'assignation', true);
+    }
+  }
+
+  function promptAssignAll(dayId, slot) {
+    const users = (MX.state.users || []).filter(u => u.name && !u.hidden);
+    const _SLOT_LBL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+    document.getElementById('m-title').textContent = 'Assigner tout — ' + (_SLOT_LBL[slot] || slot);
+    document.getElementById('m-sub').innerHTML =
+      '<select id="assign-all-sel" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border2);background:var(--bg3);color:var(--text1);font-size:14px;font-family:var(--ffs)">'
+      + '<option value="">— Choisir un technicien —</option>'
+      + users.map(u => `<option value="${MX.esc(u.name)}">${MX.esc(u.name)}</option>`).join('')
+      + '</select>';
+    document.getElementById('m-body').innerHTML = '';
+    document.getElementById('m-actions').innerHTML =
+      `<button class="modal-btn confirm" onclick="MX.Pages.Checklist._doAssignAll('${MX.esc(dayId)}','${MX.esc(slot)}')">`
+      + '<i class="fas fa-user-check"></i> Assigner tout</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  function _doAssignAll(dayId, slot) {
+    const sel  = document.getElementById('assign-all-sel');
+    const name = sel ? sel.value : '';
+    if (!name) { MX.toast('Sélectionnez un technicien', true); return; }
+    MX.closeModal();
+    assignAllSlotTasks(dayId, slot, name);
+  }
+
   // ── DAILY CLAIMS (auto-attribution) ──
   async function claimSlot(slot) {
     const cu = MX.state.currentUser;
@@ -965,12 +1014,6 @@
     const dateStr = _weekDayToDate(weekKey, dayId);
     const entries = (MX.state && MX.state.planningEntries) || {};
 
-    const codesForSlot = Object.keys(_SHIFT_SLOT).filter(k => _SHIFT_SLOT[k] === slot);
-    const planningDay  = Object.values(entries).filter(e => e.date === dateStr);
-    console.log('[Plan→Missions] Date mission', dateStr, '| slot:', slot);
-    console.log('[Plan→Missions] Code recherché', codesForSlot);
-    console.log('[Plan→Missions] Planning du jour', planningDay);
-
     const suggested = [];
     Object.values(entries).forEach(e => {
       if (e.date !== dateStr) return;
@@ -989,7 +1032,6 @@
       if (matchedSlot === slot && e.userName) suggested.push(e.userName);
     });
 
-    console.log('[Plan→Missions] Techniciens compatibles', suggested);
     return suggested;
   }
 
@@ -1869,5 +1911,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
+  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
 })();
