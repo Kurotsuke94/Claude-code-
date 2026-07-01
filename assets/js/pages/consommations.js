@@ -171,9 +171,9 @@
   }
 
   // Horizontal bar chart: today vs 30-day avg per energy type
-  function _hBarSVG(items) {
+  function _hBarSVG(items, rowH) {
     if (!items || !items.length) return '';
-    const ROW = 46, W = 480, PL = 112, PR = 70, BW = W - PL - PR;
+    const ROW = rowH || 46, W = 480, PL = 112, PR = 70, BW = W - PL - PR;
     const H = items.length * ROW + 16;
     const maxV = Math.max(...items.flatMap(it => [it.today, it.avg]), 0.001);
     let rows = '';
@@ -194,11 +194,11 @@
   }
 
   // Donut chart: distribution by energy type
-  function _donutSVG(items) {
+  function _donutSVG(items, sz) {
     if (!items || items.length < 2) return '';
     const total = items.reduce((s, it) => s + it.val, 0);
     if (!total) return '';
-    const SZ = 160, cx = 80, cy = 80, R = 64, ri = 42;
+    const SZ = sz || 160, cx = SZ/2, cy = SZ/2, R = Math.round(SZ*0.4), ri = Math.round(SZ*0.2625);
     let paths = '', leg = '', ang = -Math.PI / 2;
     items.forEach(it => {
       const pct = it.val / total, sw = pct * 2 * Math.PI, ea = ang + sw, lg = sw > Math.PI ? 1 : 0;
@@ -296,9 +296,9 @@
   }
 
   // Heatmap SVG: cells[{row,col,level,val}]
-  function _heatmapSVG(cells, rowLabels, colLabels, nRows, nCols) {
+  function _heatmapSVG(cells, rowLabels, colLabels, nRows, nCols, cellH) {
     const CELL_W = Math.max(12, Math.min(26, Math.floor(460/nCols)));
-    const CELL_H = 26, PAD_L = 30, PAD_T = 18, PAD_B = 8;
+    const CELL_H = cellH || 26, PAD_L = 30, PAD_T = 18, PAD_B = 8;
     const W = PAD_L + nCols*CELL_W + 8, H = PAD_T + nRows*CELL_H + PAD_B;
     let rects='', rowLbls='', colLbls='';
     cells.forEach(c => {
@@ -1120,18 +1120,18 @@
           <div class="an-chart-badges">${critCount?`<span class="an-badge an-badge--crit">${critCount} crit.</span>`:''} ${warnCount?`<span class="an-badge an-badge--warn">${warnCount} att.</span>`:''}</div>
         </div>
         <div class="an-legend">${legendHtml}</div>
-        ${_supLineSVG(normDS, dates, 250)}
+        ${_supLineSVG(normDS, dates, 155)}
       </div>`:''}
 
       <div class="an-row3">
-        ${cmpItems.length?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>${_hBarSVG(cmpItems)}</div>`:''}
-        ${donutItems.length>=2?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>${_donutSVG(donutItems)}</div>`:''}
+        ${cmpItems.length?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>${_hBarSVG(cmpItems, 34)}</div>`:''}
+        ${donutItems.length>=2?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>${_donutSVG(donutItems, 126)}</div>`:''}
       </div>
 
       ${normAreaDS.length?`<div class="an-chart-block">
         <div class="an-chart-ttl"><i class="fas fa-chart-area"></i> Évolution hebdomadaire</div>
         <div class="an-chart-sub">Normalisé · tendance et détection de dérive</div>
-        ${_areaLineSVG(normAreaDS, wkLabels, 200)}
+        ${_areaLineSVG(normAreaDS, wkLabels, 135)}
         <div class="an-legend an-legend--sm">${allChartDS.map(ds=>`<span class="an-leg-item"><span class="an-leg-dot" style="background:${ds.color};border:2px solid ${ds.color}"></span>${esc(ds.label)}</span>`).join('')}</div>
       </div>`:''}
 
@@ -1139,7 +1139,7 @@
         <div class="an-chart-block">
           <div class="an-chart-ttl"><i class="fas fa-th"></i> Carte thermique 30j</div>
           <div class="an-chart-sub"><span style="color:#34d399">●</span> Normal &nbsp;<span style="color:#f59e0b">●</span> +10% &nbsp;<span style="color:#f87171">●</span> +50%</div>
-          ${_heatmapSVG(hmCells, hmRowLabels, hmColLabels, hmTypes.length, hmDays)}
+          ${_heatmapSVG(hmCells, hmRowLabels, hmColLabels, hmTypes.length, hmDays, 20)}
         </div>
         <div class="an-chart-block">
           <div class="an-chart-ttl"><i class="fas fa-list"></i> Derniers relevés</div>
