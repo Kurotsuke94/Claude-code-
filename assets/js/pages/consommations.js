@@ -125,6 +125,127 @@
     </svg>`;
   }
 
+  // Smooth bezier line chart with gradient area fill
+  function _bezierLineSVG(datasets, labels, H) {
+    H = H || 200;
+    const W = 600, PADt = 12, PADb = 38, PADl = 8, PADr = 8;
+    const cW = W - PADl - PADr, cH = H - PADt - PADb;
+    if (!datasets || !datasets.length) return '';
+    const N = Math.max(...datasets.map(d => d.vals.length), 2);
+    const maxV = Math.max(...datasets.flatMap(d => d.vals), 0.001);
+    const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
+    const py = v => PADt + cH - (v / maxV) * cH;
+    let grid = '', xlbls = '', areas = '', lines = '';
+    for (let g = 0; g <= 4; g++) {
+      const y = PADt + (g / 4) * cH;
+      const v = maxV * (1 - g / 4);
+      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W - PADr}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>` +
+        `<text x="${(PADl + 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" fill="rgba(255,255,255,0.22)" font-size="8" font-family="monospace">${_fmt(v, v >= 100 ? 0 : 1)}</text>`;
+    }
+    const step = N <= 7 ? 1 : N <= 30 ? 5 : N <= 90 ? 14 : 30;
+    (labels || []).forEach((lb, i) => {
+      if (i % step !== 0 && i !== N - 1) return;
+      const parts = lb.split('-');
+      const lbl = parts.length === 3 ? `${parts[2]}/${parts[1]}` : lb;
+      xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 14).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="8" font-family="sans-serif">${lbl}</text>`;
+    });
+    datasets.forEach(ds => {
+      if (!ds.vals.some(v => v > 0)) return;
+      const pts = ds.vals.map((v, i) => ({ x: px(i), y: py(v) }));
+      let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i], cpx = (p0.x + p1.x) / 2;
+        d += ` C ${cpx.toFixed(1)},${p0.y.toFixed(1)} ${cpx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+      }
+      const bY = (PADt + cH).toFixed(1);
+      const gId = 'ag' + ds.color.replace('#', '');
+      areas += `<defs><linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.2"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0"/></linearGradient></defs>`;
+      areas += `<path d="${d} L ${pts[pts.length - 1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
+      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+      lines += `<circle cx="${pts[pts.length - 1].x.toFixed(1)}" cy="${pts[pts.length - 1].y.toFixed(1)}" r="3" fill="${ds.color}"/>`;
+    });
+    return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
+      <line x1="${PADl}" y1="${(PADt + cH).toFixed(1)}" x2="${W - PADr}" y2="${(PADt + cH).toFixed(1)}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      ${grid}${areas}${lines}${xlbls}</svg></div>`;
+  }
+
+  // Horizontal bar chart: today vs 30-day avg per energy type
+  function _hBarSVG(items) {
+    if (!items || !items.length) return '';
+    const ROW = 46, W = 480, PL = 112, PR = 70, BW = W - PL - PR;
+    const H = items.length * ROW + 16;
+    const maxV = Math.max(...items.flatMap(it => [it.today, it.avg]), 0.001);
+    let rows = '';
+    items.forEach((it, i) => {
+      const y = i * ROW + 8;
+      const tp = Math.max((it.today / maxV) * BW, 0);
+      const ap = Math.max((it.avg / maxV) * BW, 0);
+      const dc = it.pctDiff === null ? 'rgba(255,255,255,0.3)' : it.pctDiff > 10 ? '#f87171' : it.pctDiff < -10 ? '#34d399' : '#94a3b8';
+      const dt = it.pctDiff !== null ? `${it.pctDiff > 0 ? '+' : ''}${_fmt(it.pctDiff, 0)}%` : '—';
+      rows += `<text x="${PL - 8}" y="${(y + 16).toFixed(1)}" text-anchor="end" fill="rgba(255,255,255,0.6)" font-size="9.5" font-family="sans-serif">${esc(it.label)}</text>`;
+      rows += `<rect x="${PL}" y="${(y + 2).toFixed(1)}" width="${ap.toFixed(1)}" height="10" rx="2" fill="${it.color}" opacity="0.18"/>`;
+      rows += `<text x="${(PL + ap + 3).toFixed(1)}" y="${(y + 11).toFixed(1)}" fill="rgba(255,255,255,0.25)" font-size="7.5" font-family="sans-serif">30j moy</text>`;
+      rows += `<rect x="${PL}" y="${(y + 14).toFixed(1)}" width="${tp.toFixed(1)}" height="16" rx="3" fill="${it.color}" opacity="0.82"/>`;
+      rows += `<text x="${(PL + tp + 4).toFixed(1)}" y="${(y + 25).toFixed(1)}" fill="${it.color}" font-size="9" font-weight="600" font-family="sans-serif">${_fmt(it.today, 1)} ${esc(it.unit)}</text>`;
+      rows += `<text x="${W - PR + 4}" y="${(y + 21).toFixed(1)}" fill="${dc}" font-size="10" font-weight="700" font-family="monospace">${dt}</text>`;
+    });
+    return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rows}</svg></div>`;
+  }
+
+  // Donut chart: distribution by energy type
+  function _donutSVG(items) {
+    if (!items || items.length < 2) return '';
+    const total = items.reduce((s, it) => s + it.val, 0);
+    if (!total) return '';
+    const SZ = 160, cx = 80, cy = 80, R = 64, ri = 42;
+    let paths = '', leg = '', ang = -Math.PI / 2;
+    items.forEach(it => {
+      const pct = it.val / total, sw = pct * 2 * Math.PI, ea = ang + sw, lg = sw > Math.PI ? 1 : 0;
+      if (pct > 0.005) {
+        const x1 = cx + R * Math.cos(ang), y1 = cy + R * Math.sin(ang);
+        const x2 = cx + R * Math.cos(ea), y2 = cy + R * Math.sin(ea);
+        const ix1 = cx + ri * Math.cos(ang), iy1 = cy + ri * Math.sin(ang);
+        const ix2 = cx + ri * Math.cos(ea), iy2 = cy + ri * Math.sin(ea);
+        paths += `<path d="M ${x1.toFixed(2)},${y1.toFixed(2)} A ${R},${R} 0 ${lg} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L ${ix2.toFixed(2)},${iy2.toFixed(2)} A ${ri},${ri} 0 ${lg} 0 ${ix1.toFixed(2)},${iy1.toFixed(2)} Z" fill="${it.color}" opacity="0.85" stroke="rgba(0,0,0,0.3)" stroke-width="1"/>`;
+      }
+      leg += `<div class="ra-donut-leg-item"><span class="ra-leg-dot" style="background:${it.color}"></span><span class="ra-donut-leg-lbl">${esc(it.label)}</span><span class="ra-donut-leg-pct">${_fmt(pct * 100, 1)}%</span></div>`;
+      ang = ea;
+    });
+    return `<div class="ra-donut-wrap"><svg width="${SZ}" height="${SZ}" viewBox="0 0 ${SZ} ${SZ}">${paths}<circle cx="${cx}" cy="${cy}" r="${ri - 1}" fill="var(--surface,#0f172a)"/><text x="${cx}" y="${cy - 5}" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="8" font-family="sans-serif">répartition</text><text x="${cx}" y="${cy + 10}" text-anchor="middle" fill="rgba(255,255,255,0.85)" font-size="14" font-weight="700" font-family="monospace">${items.length}</text><text x="${cx}" y="${cy + 22}" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="7.5" font-family="sans-serif">énergies</text></svg><div class="ra-donut-legend">${leg}</div></div>`;
+  }
+
+  // Area line chart: weekly aggregation for drift detection
+  function _areaLineSVG(datasets, labels, H) {
+    H = H || 160;
+    const W = 500, PADt = 12, PADb = 28, PADl = 8, PADr = 8;
+    const cW = W - PADl - PADr, cH = H - PADt - PADb;
+    if (!datasets || !datasets.length) return '';
+    const N = Math.max(...datasets.map(d => d.vals.length), 2);
+    const maxV = Math.max(...datasets.flatMap(d => d.vals), 0.001);
+    const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
+    const py = v => PADt + cH - (v / maxV) * cH;
+    let areas = '', lines = '', xlbls = '';
+    datasets.forEach(ds => {
+      if (!ds.vals.some(v => v > 0)) return;
+      const pts = ds.vals.map((v, i) => ({ x: px(i), y: py(v) }));
+      let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i], cpx = (p0.x + p1.x) / 2;
+        d += ` C ${cpx.toFixed(1)},${p0.y.toFixed(1)} ${cpx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+      }
+      const bY = (PADt + cH).toFixed(1);
+      const gId = 'wag' + ds.color.replace('#', '');
+      areas += `<defs><linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.3"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0.02"/></linearGradient></defs>`;
+      areas += `<path d="${d} L ${pts[pts.length - 1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
+      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="1.8" stroke-linecap="round" opacity="0.9"/>`;
+    });
+    (labels || []).forEach((lb, i) => {
+      xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 14).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="8" font-family="sans-serif">${esc(lb)}</text>`;
+    });
+    const baseY = (PADt + cH).toFixed(1);
+    return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet"><line x1="${PADl}" y1="${baseY}" x2="${W - PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>${areas}${lines}${xlbls}</svg></div>`;
+  }
+
   // ── ENERGY SCORE ──
   function _calcScore() {
     const today = _today();
@@ -717,84 +838,151 @@
     return html + '</div>';
   }
 
-  // ── TAB: ANALYSES ──
+  // ── TAB: ANALYSES — Dashboard énergétique ──
   function _tAnalyses() {
-    const periods = [{ id: '7', l: '7 jours' }, { id: '30', l: '30 jours' }, { id: '90', l: '3 mois' }, { id: '365', l: '1 an' }];
-    const sel  = window._csoPer || '7';
-    const days = parseInt(sel);
-    const dates = Array.from({ length: days }, (_, i) => _daysAgo(days - 1 - i));
+    const per = window._csoPer || '30';
+    const days = parseInt(per);
+    const today = _today();
+    const dates = Array.from({length: days}, (_, i) => _daysAgo(days - 1 - i));
+    const ratioZone = window._csoRatioZone || 'all';
 
-    // ── Ratio history section ──
-    let ratioHtml = '';
+    const zones = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
+    const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.zone || '') === ratioZone);
+
+    const perBtns = ['7', '30', '90', '365'].map(p => {
+      const lbl = { 7: '7j', 30: '30j', 90: '3m', 365: '1an' }[p];
+      return `<button class="cso-per-btn${per === p ? ' active' : ''}" onclick="window._csoPer='${p}';MX.Pages.Conso._tab('analyses')">${lbl}</button>`;
+    }).join('');
+
+    const zoneBtns = zones.length > 1 ? ['all', ...zones].map(z => {
+      const lbl = z === 'all' ? 'Toutes' : z;
+      return `<button class="ra-zone-btn${ratioZone === z ? ' active' : ''}" onclick="window._csoRatioZone='${z}';MX.Pages.Conso._tab('analyses')">${esc(lbl)}</button>`;
+    }).join('') : '';
+
+    // Compute data per energy type
+    const typeData = {};
     Object.entries(MT).forEach(([type, meta]) => {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      const ids = fMeters.filter(m => m.type === type).map(m => m.id);
       if (!ids.length) return;
-      const isW  = type === 'eau_froide' || type === 'eau_chaude';
-      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
+      const unit = fMeters.find(m => m.type === type)?.unit || meta.unit;
+      const daily = dates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
+      const total = daily.reduce((a, b) => a + b, 0);
+      const prevDates = Array.from({length: days}, (_, i) => _daysAgo(days * 2 - 1 - i));
+      const prevTotal = prevDates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0)).reduce((a, b) => a + b, 0);
+      const evoPct = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
+      const todayVal = _readings.filter(r => ids.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
+      const n30 = Math.min(30, days);
+      const avg30Arr = Array.from({length: n30}, (_, i) => _daysAgo(n30 - 1 - i)).map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0)).filter(v => v > 0);
+      const avg30Val = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
+      const isW = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+      const dailyRatios = dates.map((ds, i) => { const c = _clients[ds] || 0; return c > 0 ? (isW ? daily[i] * 1000 / c : daily[i] / c) : null; }).filter(v => v !== null);
+      const avgRatio = dailyRatios.length ? dailyRatios.reduce((a, b) => a + b, 0) / dailyRatios.length : 0;
       const rUnit = isW ? 'L/client' : `${unit}/client`;
-      const dailyRatios = dates
-        .map(ds => {
-          const c = _clients[ds] || 0;
-          if (!c) return null;
-          const cv = _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0);
-          return cv > 0 ? (isW ? cv * 1000 / c : cv / c) : null;
-        })
-        .filter(v => v !== null);
-      if (!dailyRatios.length) return;
-      const avgRatio = dailyRatios.reduce((a, b) => a + b) / dailyRatios.length;
-      const minRatio = Math.min(...dailyRatios);
-      const maxRatio = Math.max(...dailyRatios);
-      ratioHtml += `<div class="cso-ratio-card" style="--kc:${meta.color};--kd:${meta.dim}">
-        <div class="cso-ratio-head">${meta.icon} ${meta.label}</div>
-        <div class="cso-ratio-body">
-          <div><div class="cso-ratio-val">${_fmt(avgRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit} moy.</div></div>
-          <div class="cso-ratio-avg"><div class="cso-ratio-avglbl">Min</div><div class="cso-ratio-avgval">${_fmt(minRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit}</div></div>
-          <div class="cso-ratio-avg"><div class="cso-ratio-avglbl">Max</div><div class="cso-ratio-avgval">${_fmt(maxRatio, isW ? 0 : 2)}</div><div class="cso-ratio-u">${rUnit}</div></div>
-        </div>
-        <div class="cso-ratio-base">Sur ${dailyRatios.length} jour${dailyRatios.length > 1 ? 's' : ''} avec données clients</div>
+      typeData[type] = { meta, unit, daily, total, prevTotal, evoPct, todayVal, avg30Val, avgRatio, rUnit, spark: daily.slice(-14) };
+    });
+
+    if (!Object.keys(typeData).length) {
+      return `<div class="cso-inner"><div class="ra-toolbar"><div class="ra-per-row">${perBtns}</div></div>
+        <div class="cso-empty-state"><i class="fas fa-chart-bar" style="font-size:32px;opacity:.2"></i><p style="color:var(--text-3);margin-top:10px">Aucun compteur dans cette zone</p></div></div>`;
+    }
+
+    // KPI cards — 4 main energies
+    const kpiTypes = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
+    const kpiHtml = kpiTypes.map(type => {
+      const d = typeData[type];
+      if (!d) return '';
+      const { meta, unit, total, evoPct, spark } = d;
+      const evoColor = evoPct === null ? '#94a3b8' : evoPct > 5 ? '#f87171' : evoPct < -5 ? '#34d399' : '#94a3b8';
+      const evoIcon = evoPct === null ? 'fa-minus' : evoPct > 5 ? 'fa-arrow-trend-up' : evoPct < -5 ? 'fa-arrow-trend-down' : 'fa-minus';
+      const evoTxt = evoPct !== null ? `${evoPct > 0 ? '+' : ''}${_fmt(evoPct, 1)}% vs pér. préc.` : 'Pas de comparaison';
+      return `<div class="ra-kpi-card" style="--kc:${meta.color};--kd:${meta.dim}">
+        <div class="ra-kpi-head"><span class="ra-kpi-ico">${meta.icon}</span><span class="ra-kpi-lbl">${esc(meta.label)}</span></div>
+        <div class="ra-kpi-val">${_fmt(total, total >= 1000 ? 0 : 1)}</div>
+        <div class="ra-kpi-sub">${esc(unit)} · ${days}j</div>
+        <div class="ra-kpi-evo" style="color:${evoColor}"><i class="fas ${evoIcon}"></i> ${evoTxt}</div>
+        <div class="ra-kpi-spark">${_sparkSVG(spark, meta.color, 100, 30)}</div>
       </div>`;
-    });
+    }).filter(Boolean).join('');
 
-    let html = `<div class="cso-inner">
-      <div class="cso-period-row">
-        ${periods.map(p => `<button class="cso-per-btn${sel===p.id?' active':''}" onclick="window._csoPer='${p.id}';MX.Pages.Conso._tab('analyses')">${p.l}</button>`).join('')}
+    // Main line chart (smooth bezier)
+    const chartDS = Object.entries(typeData).filter(([, d]) => d.daily.some(v => v > 0)).map(([, d]) => ({ color: d.meta.color, vals: d.daily, label: d.meta.label }));
+    const lineChart = _bezierLineSVG(chartDS, dates, 200);
+    const chartLeg = chartDS.map(ds => `<span class="ra-leg-item"><span class="ra-leg-dot" style="background:${ds.color}"></span>${esc(ds.label)}</span>`).join('');
+
+    // Comparison bar: today vs 30-day avg
+    const cmpItems = Object.entries(typeData).filter(([, d]) => d.avg30Val > 0 || d.todayVal > 0).map(([, d]) => ({
+      label: d.meta.label, color: d.meta.color, today: d.todayVal, avg: d.avg30Val, unit: d.unit,
+      pctDiff: d.avg30Val > 0 ? (d.todayVal - d.avg30Val) / d.avg30Val * 100 : null,
+    }));
+    const hBar = _hBarSVG(cmpItems);
+
+    // Donut: distribution by type
+    const donutItems = Object.entries(typeData).filter(([, d]) => d.total > 0).map(([, d]) => ({ label: d.meta.label, color: d.meta.color, val: d.total, unit: d.unit }));
+    const donut = _donutSVG(donutItems);
+
+    // Weekly area chart for drift detection
+    const nW = Math.min(Math.ceil(days / 7), 16);
+    const areaDS = Object.entries(typeData).filter(([, d]) => d.daily.some(v => v > 0)).map(([, d]) => ({
+      color: d.meta.color, label: d.meta.label,
+      vals: Array.from({length: nW}, (_, wi) => {
+        const si = days - (nW - wi) * 7;
+        return d.daily.slice(Math.max(0, si), Math.max(0, si + 7)).reduce((a, b) => a + b, 0);
+      }),
+    }));
+    const wkLabels = Array.from({length: nW}, (_, i) => `S${i + 1}`);
+    const areaChart = _areaLineSVG(areaDS, wkLabels, 160);
+
+    // Ratio per client rows
+    const ratioHtml = Object.entries(typeData).filter(([, d]) => d.avgRatio > 0).map(([type, d]) =>
+      `<div class="ra-ratio-row">
+        <span class="ra-ratio-ico">${d.meta.icon}</span>
+        <span class="ra-ratio-lbl">${esc(d.meta.label)}</span>
+        <span class="ra-ratio-val">${_fmt(d.avgRatio, ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type) ? 0 : 2)}</span>
+        <span class="ra-ratio-u">${esc(d.rUnit)}</span>
+      </div>`
+    ).join('');
+
+    return `<div class="cso-inner ra-page">
+      <div class="ra-toolbar">
+        <div class="ra-per-row">${perBtns}</div>
+        ${zoneBtns ? `<div class="ra-zone-row">${zoneBtns}</div>` : ''}
       </div>
-      ${ratioHtml ? `<div class="cso-an-ratio-sec"><div class="cso-an-ratio-ttl"><i class="fas fa-percent"></i> Ratios sur la période</div>${ratioHtml}</div>` : ''}`;
 
-    Object.entries(MT).forEach(([type, meta]) => {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
-      if (!ids.length) return;
-      const vals = dates.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
-      const maxV = Math.max(...vals, 0.001);
-      const total = vals.reduce((a, b) => a + b, 0);
-      const avg   = total / days;
-      const unit  = _meters.find(m => m.type === type)?.unit || meta.unit;
+      <div class="ra-kpi-row">${kpiHtml || '<div class="ra-empty">Aucune donnée KPI sur la période</div>'}</div>
 
-      html += `<div class="cso-chart-block">
-        <div class="cso-chart-ttl">${meta.icon} ${meta.label}</div>`;
+      ${chartDS.length ? `<div class="ra-chart-block">
+        <div class="ra-chart-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations</div>
+        <div class="ra-chart-sub">Consommations journalières par énergie — ${days} jours</div>
+        ${lineChart}
+        <div class="ra-legend">${chartLeg}</div>
+      </div>` : ''}
 
-      if (!vals.some(v => v > 0)) {
-        html += `<div class="cso-chart-empty">Aucune donnée sur la période</div>`;
-      } else {
-        const step = days <= 7 ? 1 : days <= 30 ? 3 : days <= 90 ? 7 : 30;
-        const DOW  = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-        html += `<div class="cso-bars">` + dates.map((ds, i) => {
-          const pct = vals[i] > 0 ? Math.max(vals[i] / maxV * 100, 4) : 0;
-          const [, mo, d] = ds.split('-');
-          const lbl = days <= 7 ? DOW[new Date(ds).getDay()] : (i % step === 0 ? `${d}/${mo}` : '');
-          return `<div class="cso-bar-col">
-            <div class="cso-bar" style="height:${pct}%;background:${meta.color};opacity:${pct?1:.12}"></div>
-            <div class="cso-bar-lbl">${lbl}</div>
-          </div>`;
-        }).join('') + `</div>
-        <div class="cso-chart-leg">
-          <span>Total: <b>${_fmt(total)} ${esc(unit)}</b></span>
-          <span>Moy/jour: <b>${_fmt(avg)} ${esc(unit)}</b></span>
-        </div>`;
-      }
-      html += `</div>`;
-    });
-    return html + '</div>';
+      <div class="ra-row2">
+        ${cmpItems.length ? `<div class="ra-chart-block ra-half">
+          <div class="ra-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>
+          <div class="ra-chart-sub">Écart par rapport à la moyenne mobile</div>
+          ${hBar}
+        </div>` : ''}
+        ${donutItems.length >= 2 ? `<div class="ra-chart-block ra-half">
+          <div class="ra-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>
+          <div class="ra-chart-sub">Distribution relative sur la période</div>
+          ${donut}
+        </div>` : ''}
+      </div>
+
+      ${areaDS.length ? `<div class="ra-chart-block">
+        <div class="ra-chart-ttl"><i class="fas fa-chart-area"></i> Évolution hebdomadaire</div>
+        <div class="ra-chart-sub">Consommations agrégées par semaine — détection de dérive</div>
+        ${areaChart}
+        <div class="ra-legend">${chartLeg}</div>
+      </div>` : ''}
+
+      ${ratioHtml ? `<div class="ra-chart-block">
+        <div class="ra-chart-ttl"><i class="fas fa-user-check"></i> Ratios par client hébergé</div>
+        <div class="ra-chart-sub">Consommation moyenne par client sur la période</div>
+        <div class="ra-ratio-grid">${ratioHtml}</div>
+      </div>` : ''}
+    </div>`;
   }
 
   // ── TAB: SUPERVISION (Alertes) ──
