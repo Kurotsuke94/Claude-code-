@@ -389,6 +389,7 @@
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'equipements\')" title="Équipements PMP"><i class="fas fa-wrench sx-ico"></i><span class="sx-lbl">Équipements</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'calendrier\')" title="Calendrier PMP"><i class="fas fa-calendar-days sx-ico"></i><span class="sx-lbl">Calendrier</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'interventions\')" title="Interventions PMP"><i class="fas fa-clipboard-list sx-ico"></i><span class="sx-lbl">Interventions</span></button>';
+      pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'file\')" title="File d\'attente PMP"><i class="fas fa-inbox sx-ico"></i><span class="sx-lbl">File d\'attente</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'retards\')" title="Retards PMP"><i class="fas fa-triangle-exclamation sx-ico"></i><span class="sx-lbl">Retards</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'modeles\')" title="Modèles PMP"><i class="fas fa-layer-group sx-ico"></i><span class="sx-lbl">Modèles</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'import\')" title="Import CSV"><i class="fas fa-file-import sx-ico"></i><span class="sx-lbl">Import CSV</span></button>';

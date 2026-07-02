@@ -90,6 +90,7 @@
     { id: 'equipements',   icon: 'fa-wrench',               l: 'Équipements',     mob: 'Équip.'   },
     { id: 'calendrier',    icon: 'fa-calendar-days',        l: 'Calendrier',      mob: 'Cal.'     },
     { id: 'interventions', icon: 'fa-clipboard-list',       l: 'Interventions',   mob: 'PMP'      },
+    { id: 'file',          icon: 'fa-inbox',                l: "File d'attente",  mob: 'File'     },
     { id: 'retards',       icon: 'fa-triangle-exclamation', l: 'Retards',         mob: 'Retards'  },
     { id: 'modeles',       icon: 'fa-layer-group',          l: 'Modèles',         mob: 'Modèles'  },
     { id: 'import',        icon: 'fa-file-excel',           l: 'Import Excel',    mob: 'Import'   },
@@ -172,35 +173,36 @@
       if (!eq.nextDue || eq.nextDue > today) continue;
       var existing = _pmpInt.find(function (x) {
         return x.equipmentId === eq.id && x.dueDate === eq.nextDue &&
-               (x.status === 'planifiee' || x.status === 'en_cours');
+               (x.status === 'planifiee' || x.status === 'en_cours' || x.status === 'en_retard');
       });
       if (existing) continue;
       try {
-        var intRef = await PMP_DB.int().add({
-          equipmentId:   eq.id,
-          equipmentName: eq.name,
-          type:          eq.type || 'divers',
-          zone:          eq.zone || '',
-          dueDate:       eq.nextDue,
-          frequency:     eq.frequency || 30,
-          technician:    eq.technician || '',
-          criticite:     eq.criticite || 'normale',
-          status:        eq.nextDue < today ? 'en_retard' : 'planifiee',
-          source:        'auto',
-          createdAt:     FV.serverTimestamp(),
-        });
-        if (eq.technician && MX.DB && MX.DB.addMission) {
-          await MX.DB.addMission({
-            text:       '🛠️ PMP - ' + eq.name,
-            dayId:      'all',
-            assignedTo: eq.technician,
-            priority:   eq.criticite === 'critique' ? 'urgent' : 'normale',
-            category:   'pmp',
-            isPmp:      true,
-            pmpIntId:   intRef.id,
-            createdBy:  'PMP Auto',
-          });
+        var checklistItems = [];
+        if (eq.templateId) {
+          var tpl = _pmpTpl.find(function (t) { return t.id === eq.templateId; });
+          if (tpl && tpl.items) {
+            checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
+          }
         }
+        await PMP_DB.int().add({
+          equipmentId:       eq.id,
+          equipmentName:     eq.name,
+          type:              eq.type     || 'divers',
+          zone:              eq.zone     || '',
+          subZone:           eq.subZone  || '',
+          ref:               eq.ref      || '',
+          dueDate:           eq.nextDue,
+          frequency:         eq.frequency || 30,
+          technician:        '',
+          criticite:         eq.criticite || 'normale',
+          status:            eq.nextDue < today ? 'en_retard' : 'planifiee',
+          source:            'auto',
+          checklistItems:    checklistItems,
+          estimatedDuration: eq.duration || '',
+          technicalNotes:    eq.technicalNotes || '',
+          templateId:        eq.templateId || '',
+          createdAt:         FV.serverTimestamp(),
+        });
       } catch (e) {
         console.warn('[PMP] auto-gen:', e.message);
       }
@@ -226,11 +228,15 @@
       })
       .sort(function (a, b) { return a.dueDate.localeCompare(b.dueDate); });
     var nextDue = upcoming.length ? upcoming[0].dueDate : null;
+    var enAttente = _pmpInt.filter(function (i) {
+      return i.status !== 'terminee' && i.status !== 'annulee' && !i.missionId;
+    }).length;
     return {
       totalEq:        activeEq.length,
       thisMonthCount: monthInts.length,
       realisees:      realisees,
       enRetard:       enRetard,
+      enAttente:      enAttente,
       conformite:     conformite,
       nextDue:        nextDue,
     };
@@ -287,6 +293,7 @@
     if (_curTab === 'equipements')   return _tEquipements();
     if (_curTab === 'calendrier')    return _tCalendrier();
     if (_curTab === 'interventions') return _tInterventions();
+    if (_curTab === 'file')          return _tQueue();
     if (_curTab === 'retards')       return _tRetards();
     if (_curTab === 'modeles')       return _tModeles();
     if (_curTab === 'import')        return _tImport();
@@ -346,6 +353,10 @@
       '<i class="fas fa-check-circle pmp-kpi-ico" style="color:var(--green)"></i>' +
       '<div class="pmp-kpi-val">' + kpi.realisees + '</div>' +
       '<div class="pmp-kpi-lbl">Réalisées</div></div>';
+    h += '<div class="pmp-kpi' + (kpi.enAttente > 0 ? ' pmp-kpi--alert' : '') + '" onclick="MX.Pages.PMP._tab(\'file\')">' +
+      '<i class="fas fa-inbox pmp-kpi-ico" style="color:' + (kpi.enAttente > 0 ? 'var(--orange)' : 'var(--text3)') + '"></i>' +
+      '<div class="pmp-kpi-val" style="color:' + (kpi.enAttente > 0 ? 'var(--orange)' : 'var(--text)') + '">' + kpi.enAttente + '</div>' +
+      '<div class="pmp-kpi-lbl">À affecter</div></div>';
     h += '<div class="pmp-kpi' + (kpi.enRetard > 0 ? ' pmp-kpi--alert' : '') + '" onclick="MX.Pages.PMP._tab(\'retards\')">' +
       '<i class="fas fa-triangle-exclamation pmp-kpi-ico" style="color:' + (kpi.enRetard > 0 ? 'var(--red)' : 'var(--text3)') + '"></i>' +
       '<div class="pmp-kpi-val" style="color:' + (kpi.enRetard > 0 ? 'var(--red)' : 'var(--text)') + '">' + kpi.enRetard + '</div>' +
@@ -401,6 +412,193 @@
 
     h += '</div>';
     return h;
+  }
+
+  // ── FILE D'ATTENTE ────────────────────────────────────────────────────────
+
+  function _tQueue() {
+    var today    = _today();
+    var active   = _pmpInt.filter(function (i) { return i.status !== 'terminee' && i.status !== 'annulee'; });
+    var toAssign = active.filter(function (i) { return !i.missionId; });
+    var assigned = active.filter(function (i) { return  i.missionId; });
+    var overdue  = active.filter(function (i) { return (i.dueDate || '') < today; }).length;
+    var todayDue = active.filter(function (i) { return  i.dueDate === today; }).length;
+
+    var h = '<div class="pmp-queue-page">';
+
+    h += '<div class="pmp-queue-stats">';
+    h += '<div class="pmp-queue-stat pmp-queue-stat--red"><div class="pmp-queue-stat-n">' + overdue + '</div><div class="pmp-queue-stat-l">En retard</div></div>';
+    h += '<div class="pmp-queue-stat pmp-queue-stat--orange"><div class="pmp-queue-stat-n">' + todayDue + '</div><div class="pmp-queue-stat-l">Aujourd\'hui</div></div>';
+    h += '<div class="pmp-queue-stat"><div class="pmp-queue-stat-n">' + toAssign.length + '</div><div class="pmp-queue-stat-l">À affecter</div></div>';
+    h += '<div class="pmp-queue-stat pmp-queue-stat--green"><div class="pmp-queue-stat-n">' + assigned.length + '</div><div class="pmp-queue-stat-l">Affectées</div></div>';
+    h += '</div>';
+
+    h += '<div class="pmp-section-ttl"><i class="fas fa-inbox"></i> À affecter (' + toAssign.length + ')</div>';
+    if (!toAssign.length) {
+      h += '<div class="pmp-empty" style="text-align:center;padding:16px;color:var(--green)"><i class="fas fa-circle-check" style="font-size:20px;margin-bottom:6px;display:block"></i>Toutes les interventions sont affectées</div>';
+    } else {
+      h += '<div class="pmp-queue-list">';
+      toAssign.sort(function (a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); });
+      toAssign.forEach(function (i) {
+        var ti     = EQ_TYPES[i.type] || { icon: '🔧' };
+        var cr     = CRIT[i.criticite] || CRIT.normale;
+        var isLate = (i.dueDate || '') < today;
+        var days   = isLate ? _daysLate(i.dueDate) : null;
+        h += '<div class="pmp-queue-item' + (isLate ? ' pmp-queue-item--late' : '') + '">' +
+          '<div class="pmp-queue-item-ico">' + ti.icon + '</div>' +
+          '<div class="pmp-queue-item-info">' +
+            '<div class="pmp-queue-item-name">' + esc(i.equipmentName || '—') + '</div>' +
+            '<div class="pmp-queue-item-sub">' + esc(i.zone || '') + (i.subZone ? ' · ' + esc(i.subZone) : '') + '</div>' +
+          '</div>' +
+          '<div class="pmp-queue-item-meta">' +
+            '<span class="pmp-queue-item-date' + (isLate ? ' pmp-queue-item-date--late' : '') + '">' + (isLate ? 'Retard ' + days + 'j' : _dateLbl(i.dueDate)) + '</span>' +
+            '<span class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</span>' +
+          '</div>' +
+          '<button class="pmp-assign-btn" onclick="MX.Pages.PMP._assignModal(\'' + esc(i.id) + '\')"><i class="fas fa-user-plus"></i> Affecter</button>' +
+          '</div>';
+      });
+      h += '</div>';
+    }
+
+    if (assigned.length) {
+      h += '<div class="pmp-section-ttl" style="margin-top:16px"><i class="fas fa-user-check"></i> Affectées (' + assigned.length + ')</div>';
+      h += '<div class="pmp-queue-list">';
+      assigned.sort(function (a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); });
+      assigned.forEach(function (i) {
+        var ti = EQ_TYPES[i.type] || { icon: '🔧' };
+        var st = INT_ST[i.status] || INT_ST.planifiee;
+        h += '<div class="pmp-queue-item pmp-queue-item--assigned">' +
+          '<div class="pmp-queue-item-ico">' + ti.icon + '</div>' +
+          '<div class="pmp-queue-item-info">' +
+            '<div class="pmp-queue-item-name">' + esc(i.equipmentName || '—') + '</div>' +
+            '<div class="pmp-queue-item-sub"><i class="fas fa-user" style="font-size:10px"></i> ' + esc(i.technician || '—') + '</div>' +
+          '</div>' +
+          '<div class="pmp-int-st" style="color:' + st.c + ';background:' + st.bg + '">' + st.l + '</div>' +
+          '<button class="pmp-act-btn" onclick="MX.Pages.PMP._assignModal(\'' + esc(i.id) + '\')" title="Réaffecter"><i class="fas fa-pen"></i></button>' +
+          '</div>';
+      });
+      h += '</div>';
+    }
+
+    h += '</div>';
+    return h;
+  }
+
+  async function _assignModal(intId) {
+    var i = _pmpInt.find(function (x) { return x.id === intId; });
+    if (!i) return;
+    var today = _today();
+    var users = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
+    var eq    = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
+    var cr    = CRIT[i.criticite] || CRIT.normale;
+
+    var presentNames = new Set();
+    try {
+      var snap = await db.collection('planning_entries').where('date', '==', today).get();
+      snap.forEach(function (d) { var p = d.data(); if (p.userName) presentNames.add(p.userName); });
+    } catch (e) { console.warn('[PMP] planning fetch:', e.message); }
+
+    var checklistItems = i.checklistItems || [];
+    if (!checklistItems.length && eq && eq.templateId) {
+      var tpl = _pmpTpl.find(function (t) { return t.id === eq.templateId; });
+      if (tpl && tpl.items) checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
+    }
+
+    var DURS = ['30 min','1h','1h30','2h','3h','4h','Journée'];
+    var curDur = i.estimatedDuration || (eq && eq.duration) || '';
+
+    var body =
+      '<div style="display:flex;flex-direction:column;gap:12px;max-height:70vh;overflow-y:auto;padding-right:4px">' +
+      '<div class="pmp-assign-eq-info">' +
+        '<div style="font-size:13px;font-weight:600">' + esc(i.equipmentName || '—') + '</div>' +
+        (i.zone ? '<div style="font-size:11px;color:var(--text3)">' + esc(i.zone) + (i.subZone ? ' · ' + esc(i.subZone) : '') + '</div>' : '') +
+        '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">' +
+          '<span class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</span>' +
+          '<span style="font-size:11px;color:var(--text3)"><i class="fas fa-calendar" style="font-size:9px"></i> Prévu: ' + _dateLbl(i.dueDate) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div><label class="pmp-form-lbl">Technicien *</label>' +
+        (presentNames.size ? '<div style="font-size:10.5px;color:var(--green);margin-bottom:5px"><i class="fas fa-circle-check"></i> ✓ = présent aujourd\'hui selon le planning</div>' : '') +
+        '<select class="fi" id="pmp-asgn-tech"><option value="">— Non assigné —</option>' +
+        users.map(function (u) {
+          var isP = presentNames.has(u.name);
+          return '<option value="' + esc(u.name) + '"' + (i.technician === u.name ? ' selected' : '') + '>' + esc(u.name) + (isP ? ' ✓' : '') + '</option>';
+        }).join('') + '</select></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+        '<div><label class="pmp-form-lbl">Priorité</label>' +
+          '<select class="fi" id="pmp-asgn-pri">' +
+          Object.entries(CRIT).map(function (kv) {
+            return '<option value="' + kv[0] + '"' + (i.criticite === kv[0] ? ' selected' : '') + '>' + kv[1].l + '</option>';
+          }).join('') + '</select></div>' +
+        '<div><label class="pmp-form-lbl">Durée estimée</label>' +
+          '<select class="fi" id="pmp-asgn-dur">' +
+          '<option value="">Non définie</option>' +
+          DURS.map(function (d) { return '<option value="' + d + '"' + (curDur === d ? ' selected' : '') + '>' + d + '</option>'; }).join('') +
+          '</select></div>' +
+      '</div>' +
+      ((eq && eq.technicalNotes) ?
+        '<div class="pmp-assign-notes"><div style="font-size:10.5px;font-weight:700;color:var(--orange);margin-bottom:4px"><i class="fas fa-note-sticky"></i> Consignes techniques</div>' +
+        '<div style="font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.5">' + esc(eq.technicalNotes) + '</div></div>' : '') +
+      '</div>';
+
+    MX.showModal({ title: "Affecter l'intervention", body: body, actions: [
+      { label: 'Affecter', cls: 'primary', fn: async function () {
+        var tech = document.getElementById('pmp-asgn-tech')?.value || '';
+        var pri  = document.getElementById('pmp-asgn-pri')?.value  || i.criticite || 'normale';
+        var dur  = document.getElementById('pmp-asgn-dur')?.value  || '';
+        if (!tech) { MX.toast('Technicien requis', true); return; }
+        try {
+          await PMP_DB.int().doc(intId).update({
+            technician:        tech,
+            criticite:         pri,
+            estimatedDuration: dur,
+            status:            (i.dueDate || '') < today ? 'en_retard' : 'en_cours',
+            assignedAt:        FV.serverTimestamp(),
+            assignedBy:        _author(),
+            updatedAt:         FV.serverTimestamp(),
+          });
+          var missionData = {
+            text:       '🛠️ PMP — ' + (i.equipmentName || ''),
+            dayId:      i.dueDate,
+            assignedTo: tech,
+            priority:   pri === 'critique' ? 'critique' : pri === 'haute' ? 'haute' : 'normale',
+            category:   'pmp',
+            isPmp:      true,
+            pmpIntId:   intId,
+            done:       false,
+            pmpData: {
+              equipmentId:       i.equipmentId,
+              equipmentName:     i.equipmentName,
+              type:              i.type      || 'divers',
+              zone:              i.zone      || '',
+              subZone:           i.subZone   || '',
+              ref:               i.ref       || '',
+              dueDate:           i.dueDate,
+              criticite:         pri,
+              estimatedDuration: dur,
+              technicalNotes:    (eq && eq.technicalNotes) || i.technicalNotes || '',
+              checklistItems:    checklistItems,
+            },
+            createdAt:  FV.serverTimestamp(),
+            createdBy:  _author(),
+          };
+          if (i.missionId) {
+            await db.collection('missions').doc(i.missionId).update({
+              assignedTo: tech,
+              priority:   missionData.priority,
+              pmpData:    missionData.pmpData,
+              updatedAt:  FV.serverTimestamp(),
+            });
+          } else {
+            var mRef = await db.collection('missions').add(missionData);
+            await PMP_DB.int().doc(intId).update({ missionId: mRef.id });
+          }
+          MX.toast('Affecté à ' + tech + ' ✓');
+          window._pmpGenDone = false;
+        } catch (e) { MX.toast('Erreur : ' + e.message, true); }
+      }},
+      { label: 'Annuler', cls: 'cancel' },
+    ]});
   }
 
   // ── ÉQUIPEMENTS ───────────────────────────────────────────────────────────
@@ -1035,11 +1233,20 @@
       tpls.map(function (t) {
         return '<option value="' + esc(t.id) + '"' + (eq && eq.templateId === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
       }).join('') + '</select></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<div><label class="pmp-form-lbl">Durée estimée</label>' +
+      '<select class="fi" id="pmp-f-dur">' +
+      '<option value="">Non définie</option>' +
+      ['30 min','1h','1h30','2h','3h','4h','Journée'].map(function (d) {
+        return '<option value="' + d + '"' + (eq && eq.duration === d ? ' selected' : '') + '>' + d + '</option>';
+      }).join('') + '</select></div>' +
       '<div><label class="pmp-form-lbl">Statut</label>' +
       '<select class="fi" id="pmp-f-status">' +
       '<option value="actif"' + (!eq || eq.status === 'actif' ? ' selected' : '') + '>Actif</option>' +
       '<option value="inactif"' + (eq && eq.status === 'inactif' ? ' selected' : '') + '>Inactif</option>' +
-      '</select></div>' +
+      '</select></div></div>' +
+      '<div><label class="pmp-form-lbl">Consignes techniques</label>' +
+      '<textarea class="fi" id="pmp-f-notes" rows="3" placeholder="Instructions, points d\'attention, consignes de sécurité…" style="resize:vertical">' + esc(eq ? eq.technicalNotes || '' : '') + '</textarea></div>' +
       '</div>';
 
     MX.showModal({ title: id ? "Modifier l'équipement" : 'Nouvel équipement', body: body, actions: [
@@ -1059,13 +1266,15 @@
     var tech      =  document.getElementById('pmp-f-tech')?.value      || '';
     var freq      = parseInt(document.getElementById('pmp-f-freq')?.value || '30') || 30;
     var nextDueEl =  document.getElementById('pmp-f-nextDue');
-    var tplId     =  document.getElementById('pmp-f-tpl')?.value       || '';
-    var status    =  document.getElementById('pmp-f-status')?.value    || 'actif';
+    var tplId          =  document.getElementById('pmp-f-tpl')?.value          || '';
+    var status         =  document.getElementById('pmp-f-status')?.value       || 'actif';
+    var duration       =  document.getElementById('pmp-f-dur')?.value          || '';
+    var technicalNotes = (document.getElementById('pmp-f-notes')?.value        || '').trim();
 
     if (!name) { MX.toast('Nom requis', true); return; }
     if (!type) { MX.toast('Type requis', true); return; }
 
-    var data = { name, type, criticite: crit, zone, subZone, ref, startDate, technician: tech, frequency: freq, templateId: tplId, status, updatedAt: FV.serverTimestamp() };
+    var data = { name, type, criticite: crit, zone, subZone, ref, startDate, technician: tech, frequency: freq, templateId: tplId, status, duration, technicalNotes, updatedAt: FV.serverTimestamp() };
     if (nextDueEl && nextDueEl.value) data.nextDue = nextDueEl.value;
 
     try {
@@ -1195,10 +1404,39 @@
               status: 'terminee', doneDate, observations: obs,
               doneBy: _author(), updatedAt: FV.serverTimestamp(),
             });
-            var eq = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
+            var eq      = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
+            var nextDue = _addDays(doneDate, eq ? (eq.frequency || 30) : 30);
             if (eq) {
-              var nextDue = _addDays(doneDate, eq.frequency || 30);
               await PMP_DB.eq().doc(i.equipmentId).update({ lastDone: doneDate, nextDue, updatedAt: FV.serverTimestamp() });
+            }
+            // Mark linked mission done
+            if (i.missionId) {
+              db.collection('missions').doc(i.missionId).update({
+                done: true, completedAt: FV.serverTimestamp(), completedBy: _author(),
+              }).catch(function (e) { console.warn('[PMP] mission done:', e.message); });
+            }
+            // Auto-create next intervention in queue
+            var nextExists = _pmpInt.some(function (x) {
+              return x.equipmentId === i.equipmentId && x.dueDate === nextDue &&
+                     x.status !== 'terminee' && x.status !== 'annulee';
+            });
+            if (!nextExists) {
+              var checklistItems = i.checklistItems || [];
+              if (!checklistItems.length && eq && eq.templateId) {
+                var tpl = _pmpTpl.find(function (t) { return t.id === (eq && eq.templateId); });
+                if (tpl && tpl.items) checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
+              }
+              PMP_DB.int().add({
+                equipmentId: i.equipmentId, equipmentName: i.equipmentName,
+                type: i.type || 'divers', zone: i.zone || '', subZone: i.subZone || '',
+                ref: i.ref || '', dueDate: nextDue, frequency: eq ? (eq.frequency || 30) : 30,
+                technician: '', criticite: i.criticite || 'normale', status: 'planifiee',
+                source: 'auto', checklistItems: checklistItems,
+                estimatedDuration: (eq && eq.duration) || '',
+                technicalNotes: (eq && eq.technicalNotes) || '',
+                templateId: (eq && eq.templateId) || '',
+                createdAt: FV.serverTimestamp(),
+              }).catch(function (e) { console.warn('[PMP] next-int:', e.message); });
             }
             MX.toast('Intervention validée ✓');
           } catch (e) { MX.toast('Erreur : ' + e.message, true); }
@@ -1564,6 +1802,7 @@
     render,
     _tab, _setEqSearch, _setEqType, _setIntFilter, _setCalMonth,
     _eqForm, _delEq, _createInt, _createIntManual, _markDone, _delInt,
+    _assignModal,
     _tplForm, _tplAddItem, _delTpl,
     _onImportFile, _onImportDrop, _runImport, _resetImport, _setImportUserMap, _downloadTemplate, _createDefaultTpls, _checkAndGenerate,
     getStats: function () {
