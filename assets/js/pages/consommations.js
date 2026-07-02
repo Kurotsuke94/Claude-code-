@@ -329,6 +329,111 @@
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rects}${rowLbls}${colLbls}</svg></div>`;
   }
 
+  // ── INTERACTIVE MAIN CHART SVG (v2) ──
+  function _anMainSVG(series, dates) {
+    const W = 700, H = 188, PADl = 40, PADr = 10, PADt = 16, PADb = 36;
+    const cW = W - PADl - PADr, cH = H - PADt - PADb;
+    const N = dates.length;
+    if (!series.length || !N) return '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucune donnée sur la période</div>';
+    const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
+    const py = v => PADt + cH - (v / 100) * cH;
+
+    // Normalize each series individually to 0-100
+    const normSeries = series.map(s => {
+      const mx = Math.max(...s.vals, 0.001);
+      return { ...s, normVals: s.vals.map(v => v / mx * 100), mx };
+    });
+
+    let defs = '', grid = '', areas = '', maLines = '', lines = '', dots = '', xlbls = '';
+
+    // Grid + Y-axis labels
+    for (let g = 0; g <= 4; g++) {
+      const y = PADt + (g / 4) * cH, v = 100 * (1 - g / 4);
+      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" fill="rgba(255,255,255,0.2)" font-size="8" font-family="monospace">${v.toFixed(0)}</text>`;
+    }
+
+    // X-axis date labels
+    const step = N <= 7 ? 1 : N <= 30 ? 5 : N <= 90 ? 14 : 30;
+    dates.forEach((ds, i) => {
+      if (i % step !== 0 && i !== N - 1) return;
+      const [, m, d] = ds.split('-');
+      xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 16).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="8" font-family="sans-serif">${d}/${m}</text>`;
+    });
+
+    normSeries.forEach(ds => {
+      if (!ds.normVals.some(v => v > 0)) return;
+      const pts = ds.normVals.map((v, i) => ({ x: px(i), y: py(v) }));
+      let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i-1], p1 = pts[i], cpx = (p0.x + p1.x) / 2;
+        d += ` C ${cpx.toFixed(1)},${p0.y.toFixed(1)} ${cpx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+      }
+      const bY = (PADt + cH).toFixed(1);
+      const gId = 'mc' + ds.color.replace('#', '');
+      defs += `<linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.2"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0.01"/></linearGradient>`;
+      areas += `<path d="${d} L ${pts[pts.length-1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
+      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="1.8" stroke-linecap="round" opacity="0.92"/>`;
+      // 7-day moving average
+      const MA = 7;
+      let maD = '';
+      ds.normVals.forEach((_, i) => {
+        const sl = ds.normVals.slice(Math.max(0, i - MA + 1), i + 1).filter(v => v > 0);
+        if (!sl.length) return;
+        const avg = sl.reduce((a, b) => a + b, 0) / sl.length;
+        maD += maD ? ` L ${px(i).toFixed(1)},${py(avg).toFixed(1)}` : `M ${px(i).toFixed(1)},${py(avg).toFixed(1)}`;
+      });
+      if (maD) maLines += `<path d="${maD}" fill="none" stroke="${ds.color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>`;
+      // Anomaly dots (> 110% of normalized)
+      ds.normVals.forEach((v, i) => {
+        if (v > 108) dots += `<circle cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="3.5" fill="#f87171" opacity="0.85" stroke="rgba(0,0,0,0.4)" stroke-width="1"/>`;
+      });
+      // Last point
+      const last = pts[pts.length-1];
+      lines += `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.8" fill="${ds.color}" stroke="rgba(0,0,0,0.4)" stroke-width="1"/>`;
+    });
+
+    const baseY = (PADt + cH).toFixed(1);
+    // Overlay for mouse events
+    const overlay = `<rect id="an2-overlay" x="${PADl}" y="${PADt}" width="${cW}" height="${cH}" fill="transparent" style="cursor:crosshair"/>`;
+    const vcursor = `<line id="an2-vcursor" x1="${PADl}" y1="${PADt}" x2="${PADl}" y2="${PADt+cH}" stroke="rgba(255,255,255,0.25)" stroke-width="1" stroke-dasharray="3,2" display="none"/>`;
+
+    // Store data for JS interactivity
+    window._anChartData = { dates, series, W, PADl, PADr, cW, N };
+
+    return `<div class="ra-svg-wrap an2-chart-svg-wrap">
+      <svg id="an2-svg" width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
+        <defs>${defs}</defs>
+        <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        ${grid}${areas}${maLines}${lines}${dots}${xlbls}${overlay}${vcursor}
+      </svg>
+    </div>`;
+  }
+
+  // ── SCORE GAUGE SVG (semi-circle) ──
+  function _anScoreGauge(score, grade, color) {
+    const W = 156, H = 88, cx = 78, cy = 80, R = 50, sw = 10;
+    const s = Math.min(100, Math.max(0, score));
+    // Arc goes from left (9 o'clock) CCW through top to right (3 o'clock)
+    // End angle in math convention: π - s/100*π
+    const endAng = Math.PI - (s / 100) * Math.PI;
+    const ex = (cx + R * Math.cos(endAng)).toFixed(1);
+    const ey = (cy - R * Math.sin(endAng)).toFixed(1); // SVG y inverted
+    const large = s >= 100 ? 1 : 0;
+    // Background full arc
+    const bgArc = `M ${cx-R},${cy} A ${R},${R} 0 0 0 ${cx+R},${cy}`;
+    // Filled arc (CCW sweep=0)
+    const fillArc = s <= 0 ? '' : s >= 100
+      ? `M ${cx-R},${cy} A ${R},${R} 0 1 0 ${cx+R},${cy}`
+      : `M ${cx-R},${cy} A ${R},${R} 0 ${large} 0 ${ex},${ey}`;
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+      <path d="${bgArc}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="${sw}" stroke-linecap="round"/>
+      ${fillArc ? `<path d="${fillArc}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"/>` : ''}
+      <text x="${cx}" y="${cy-10}" text-anchor="middle" fill="${color}" font-size="26" font-weight="700" font-family="monospace">${grade}</text>
+      <text x="${cx}" y="${cy+8}" text-anchor="middle" fill="rgba(255,255,255,0.42)" font-size="10" font-family="sans-serif">${score} / 100</text>
+    </svg>`;
+  }
+
   // ── ENERGY SCORE ──
   function _calcScore() {
     const today = _today();
@@ -520,10 +625,66 @@
     </div>`;
   }
 
+  // ── INTERACTIVE CHART INIT (v2) ──
+  function _anInit() {
+    const svg  = document.getElementById('an2-svg');
+    const tip  = document.getElementById('an2-tooltip');
+    const wrap = document.getElementById('an2-chart-wrap');
+    const data = window._anChartData;
+    if (!svg || !tip || !data || !data.dates.length) return;
+    const { W, PADl, PADr, cW, N, dates, series } = data;
+
+    function fmtN(n) { if (!n) return '0'; return n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
+    function getIdx(e) {
+      const rect = svg.getBoundingClientRect();
+      const vbX = (e.clientX - rect.left) / rect.width * W;
+      return Math.max(0, Math.min(N - 1, Math.round((vbX - PADl) / cW * (N - 1))));
+    }
+    function dateFull(ds) {
+      if (!ds) return '';
+      const [y, m, d] = ds.split('-');
+      const mn = ['jan.','fév.','mar.','avr.','mai','juin','juil.','aoû.','sep.','oct.','nov.','déc.'][parseInt(m)-1];
+      return `${d} ${mn} ${y}`;
+    }
+
+    const vcursor = document.getElementById('an2-vcursor');
+    svg.addEventListener('mousemove', function(e) {
+      const idx  = getIdx(e);
+      const date = dates[idx];
+      const rect = svg.getBoundingClientRect();
+      const vbX  = (e.clientX - rect.left) / rect.width * W;
+      const cx   = Math.max(PADl, Math.min(W - PADr, vbX));
+      if (vcursor) { vcursor.setAttribute('x1', cx.toFixed(1)); vcursor.setAttribute('x2', cx.toFixed(1)); vcursor.removeAttribute('display'); }
+
+      let html = `<div class="an2-tt-date">${dateFull(date)}</div>`;
+      series.forEach(s => {
+        const v = s.vals[idx] || 0;
+        if (!v) return;
+        const prev = idx > 0 ? (s.vals[idx-1]||0) : 0;
+        const evo  = prev > 0 ? ((v-prev)/prev*100) : null;
+        const ec   = evo !== null ? `<span style="color:${evo>5?'#f87171':evo<-5?'#34d399':'#94a3b8'};margin-left:4px;font-size:9px">${evo>0?'↑+':'↓'}${Math.abs(evo).toFixed(0)}%</span>` : '';
+        html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${s.label}</span><span class="an2-tt-val">${fmtN(v)} ${s.unit}${ec}</span></div>`;
+      });
+
+      tip.innerHTML = html;
+      tip.style.display = 'block';
+      const wRect = wrap.getBoundingClientRect();
+      let tx = e.clientX - wRect.left + 14;
+      if (tx + 200 > wRect.width) tx = e.clientX - wRect.left - 210;
+      tip.style.left = Math.max(0, tx) + 'px';
+      tip.style.top  = Math.max(0, e.clientY - wRect.top - 20) + 'px';
+    });
+    svg.addEventListener('mouseleave', function() {
+      tip.style.display = 'none';
+      if (vcursor) vcursor.setAttribute('display', 'none');
+    });
+  }
+
   function _rerender() {
     const el = document.getElementById('cso-body');
     if (el) el.innerHTML = _body();
     _checkCriticalBanner();
+    if (_curTab === 'analyses') setTimeout(_anInit, 30);
     if (MX.state && MX.state.currentPage === 'home') {
       MX.Pages && MX.Pages.Home && MX.Pages.Home.render();
     }
@@ -921,15 +1082,13 @@
     return html + '</div>';
   }
 
-  // ── TAB: ANALYSES — Dashboard énergétique ──
+  // ── TAB: ANALYSES — Dashboard supervision énergétique V2 ──
   function _tAnalyses() {
-    // ── Setup ─────────────────────────────────────────────
     const per  = window._csoPer || '30';
     const days = parseInt(per);
     const today = _today();
     const dates = Array.from({length: days}, (_, i) => _daysAgo(days - 1 - i));
     const ratioZone = window._csoRatioZone || 'all';
-
     const zones   = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
     const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.zone || '') === ratioZone);
 
@@ -939,17 +1098,7 @@
       MX.Pages.Conso._tab('analyses');
     };
 
-    const perBtns = ['7', '30', '90', '365'].map(p => {
-      const lbl = {7:'7j',30:'30j',90:'3m',365:'1an'}[p];
-      return `<button class="cso-per-btn${per===p?' active':''}" onclick="window._csoPer='${p}';MX.Pages.Conso._tab('analyses')">${lbl}</button>`;
-    }).join('');
-
-    const zoneBtns = zones.length > 1 ? ['all', ...zones].map(z => {
-      const lbl = z === 'all' ? 'Toutes' : z;
-      return `<button class="ra-zone-btn${ratioZone===z?' active':''}" onclick="window._csoRatioZone='${z}';MX.Pages.Conso._tab('analyses')">${esc(lbl)}</button>`;
-    }).join('') : '';
-
-    // ── Per-type data ──────────────────────────────────────
+    // ── Per-type data ──
     const typeData = {};
     Object.entries(MT).forEach(([type, meta]) => {
       const ids  = fMeters.filter(m => m.type === type).map(m => m.id);
@@ -968,209 +1117,374 @@
       const evoPct = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
       const todayVal = _readings.filter(r => ids.includes(r.meterId) && r.date === today)
         .reduce((s, r) => s + (r.consumption || 0), 0);
-      const n30 = Math.min(30, days);
-      const avg30Arr = Array.from({length: n30}, (_, i) => _daysAgo(n30 - 1 - i))
+      const avg30Arr = Array.from({length: 30}, (_, i) => _daysAgo(30 - 1 - i))
         .map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
           .reduce((s, r) => s + (r.consumption || 0), 0))
         .filter(v => v > 0);
-      const avg30Val  = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
+      const avg30Val   = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
       const todayEcart = avg30Val > 0 ? (todayVal - avg30Val) / avg30Val * 100 : null;
       const lvl = todayEcart === null ? 'na' : todayEcart > 50 ? 'crit' : todayEcart > 10 ? 'warn' : 'ok';
-      const isW = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
-      const dailyRatios = dates.map((ds, i) => {
-        const c = _clients[ds] || 0;
-        return c > 0 ? (isW ? daily[i] * 1000 / c : daily[i] / c) : null;
-      }).filter(v => v !== null);
-      const avgRatio = dailyRatios.length ? dailyRatios.reduce((a, b) => a + b, 0) / dailyRatios.length : 0;
-      const rUnit = isW ? 'L/client' : `${unit}/client`;
+      const nonZero = daily.filter(v => v > 0);
+      const minV = nonZero.length ? Math.min(...nonZero) : 0;
+      const maxV = nonZero.length ? Math.max(...nonZero) : 0;
+      const avgV = nonZero.length ? nonZero.reduce((a,b)=>a+b,0)/nonZero.length : 0;
+      const sorted = [...nonZero].sort((a,b)=>a-b);
+      const medV = sorted.length ? (sorted.length%2===0?(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2:sorted[Math.floor(sorted.length/2)]) : 0;
+      const stdV = nonZero.length>1 ? Math.sqrt(nonZero.reduce((s,v)=>s+(v-avgV)**2,0)/nonZero.length) : 0;
+      // Forecast = avg daily * days in month
+      const last7 = daily.slice(-7).filter(v=>v>0);
+      const dailyAvg7 = last7.length ? last7.reduce((a,b)=>a+b,0)/last7.length : avgV;
+      const todayDt = new Date(today);
+      const daysInMonth = new Date(todayDt.getFullYear(), todayDt.getMonth()+1, 0).getDate();
+      const forecastTotal = dailyAvg7 * daysInMonth;
+      const isW = ['eau_froide','eau_chaude','eau_glacee'].includes(type);
+      const dailyRatios = dates.map((ds,i)=>{
+        const c=_clients[ds]||0; return c>0?(isW?daily[i]*1000/c:daily[i]/c):null;
+      }).filter(v=>v!==null);
+      const avgRatio = dailyRatios.length?dailyRatios.reduce((a,b)=>a+b,0)/dailyRatios.length:0;
       typeData[type] = {
         meta, unit, daily, total, prevTotal, evoPct, todayVal, avg30Val,
-        todayEcart, lvl, avgRatio, rUnit, spark: daily.slice(-14),
+        todayEcart, lvl, avgRatio, rUnit: isW?'L/client':`${unit}/client`,
+        spark: daily.slice(-14), minV, maxV, avgV, medV, stdV, forecastTotal, dailyAvg7
       };
     });
 
+    const perBtns = ['7','30','90','365'].map(p => {
+      const lbl = {7:'7J',30:'30J',90:'3M',365:'1A'}[p];
+      return `<button class="an2-rb${per===p?' an2-rb--act':''}" onclick="window._csoPer='${p}';MX.Pages.Conso._tab('analyses')">${lbl}</button>`;
+    }).join('');
+
     if (!Object.keys(typeData).length) {
-      return `<div class="cso-inner"><div class="ra-toolbar"><div class="ra-per-row">${perBtns}</div></div>
+      return `<div class="cso-inner"><div class="an2-toolbar"><div class="an2-rb-group">${perBtns}</div></div>
         <div class="cso-empty-state"><i class="fas fa-chart-bar" style="font-size:32px;opacity:.2"></i>
         <p style="color:var(--text-3);margin-top:10px">Aucun compteur dans cette zone</p></div></div>`;
     }
 
-    // ── Performance score & grade ──────────────────────────
     const score = _calcScore();
-    const grade = score >= 95 ? 'A+' : score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 50 ? 'C' : 'D';
-    const gradeColor = score >= 85 ? '#34d399' : score >= 70 ? '#f59e0b' : score >= 50 ? '#fb923c' : '#f87171';
-
-    // ── Smart alerts ───────────────────────────────────────
+    const grade = score>=95?'A+':score>=85?'A':score>=70?'B':score>=50?'C':'D';
+    const gradeColor = score>=85?'#34d399':score>=70?'#f59e0b':score>=50?'#fb923c':'#f87171';
     const smartAlerts = _detectAlerts();
-    const critCount = smartAlerts.filter(a => a.level === 'critical').length;
-    const warnCount = smartAlerts.filter(a => a.level === 'warning').length;
+    const critCount = smartAlerts.filter(a=>a.level==='critical').length;
+    const warnCount = smartAlerts.filter(a=>a.level==='warning').length;
 
-    // ── ROW 1: KPI cards (4 main energies) ────────────────
-    const kpiTypes = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
+    // Zone selector
+    const zoneSelect = zones.length>1 ? `<select class="an2-zone-sel" onchange="window._csoRatioZone=this.value;MX.Pages.Conso._tab('analyses')">
+      <option value="all"${ratioZone==='all'?' selected':''}>Toutes les zones</option>
+      ${zones.map(z=>`<option value="${esc(z)}"${ratioZone===z?' selected':''}>${esc(z)}</option>`).join('')}
+    </select>` : '';
+
+    // ── KPI Cards ──
+    const kpiTypes = ['eau_froide','eau_chaude','chauffage','electricite'];
+    const stCol = {crit:'#f87171',warn:'#f59e0b',ok:'#34d399',na:'#475569'};
+    const stLbl = {crit:'Dérive',warn:'Attention',ok:'Normal',na:'—'};
     const kpiHtml = kpiTypes.map(type => {
-      const d = typeData[type];
-      if (!d) return '';
+      const d = typeData[type]; if (!d) return '';
       const { meta, unit, evoPct, todayVal, avg30Val, todayEcart, lvl, spark } = d;
-      const evoColor = evoPct === null ? '#64748b' : evoPct > 5 ? '#f87171' : evoPct < -5 ? '#34d399' : '#64748b';
-      const evoIcon  = evoPct === null ? 'fa-minus' : evoPct > 5 ? 'fa-arrow-trend-up' : evoPct < -5 ? 'fa-arrow-trend-down' : 'fa-minus';
-      const dotColor = {crit:'#f87171',warn:'#f59e0b',ok:'#34d399',na:'#475569'}[lvl];
-      const ecartTxt  = todayEcart !== null ? `${todayEcart>0?'+':''}${_fmt(todayEcart,0)}% / moy.` : 'Pas de moy.';
-      const ecartColor = {crit:'#f87171',warn:'#f59e0b',ok:'#34d399',na:'#64748b'}[lvl];
-      return `<div class="an-kpi-card" style="--kc:${meta.color}">
-        <div class="an-kpi-head">
-          <span class="an-kpi-ico">${meta.icon}</span>
-          <span class="an-kpi-lbl">${esc(meta.label)}</span>
-          <span class="an-kpi-dot" style="background:${dotColor}"></span>
+      const evoColor = evoPct===null?'#64748b':evoPct>5?'#f87171':evoPct<-5?'#34d399':'#64748b';
+      const evoIcon  = evoPct===null?'fa-minus':evoPct>5?'fa-arrow-trend-up':evoPct<-5?'fa-arrow-trend-down':'fa-minus';
+      return `<div class="an2-kpi" style="--kc:${meta.color}">
+        <div class="an2-kpi-hd">
+          <span class="an2-kpi-ico">${meta.icon}</span>
+          <span class="an2-kpi-lbl">${esc(meta.label)}</span>
+          <span class="an2-kpi-status" style="color:${stCol[lvl]}">● ${stLbl[lvl]}</span>
         </div>
-        <div class="an-kpi-val">${_fmt(todayVal, todayVal>=100?0:1)}<span class="an-kpi-u"> ${esc(unit)}</span></div>
-        <div class="an-kpi-spark">${_sparkSVG(spark, meta.color, 96, 24)}</div>
-        <div class="an-kpi-evo" style="color:${evoColor}"><i class="fas ${evoIcon}"></i> ${evoPct!==null?`${evoPct>0?'+':''}${_fmt(evoPct,1)}%`:'—'} pér. préc.</div>
-        <div class="an-kpi-ecart" style="color:${ecartColor}">${ecartTxt}</div>
+        <div class="an2-kpi-val">${_fmt(todayVal,todayVal>=100?0:1)}<span class="an2-kpi-u"> ${esc(unit)}</span></div>
+        <div class="an2-kpi-meta">
+          <span>Moy.30J ${_fmt(avg30Val,avg30Val>=100?1:2)} ${esc(unit)}</span>
+          ${todayEcart!==null?`<span style="color:${evoColor}"><i class="fas ${evoIcon}"></i> ${todayEcart>0?'+':''}${_fmt(todayEcart,0)}%</span>`:''}
+        </div>
+        <div class="an2-kpi-spark">${_sparkSVG(spark, meta.color, 100, 28)}</div>
       </div>`;
     }).filter(Boolean).join('');
 
-    // ── ROW 2: Normalized chart with interactive legend ────
-    const allChartDS = Object.entries(typeData)
-      .filter(([, d]) => d.daily.some(v => v > 0))
-      .map(([type, d]) => ({ type, color: d.meta.color, label: d.meta.label, vals: d.daily }));
+    // ── Summary bar ──
+    const summaryHtml = kpiTypes.map(type => {
+      const d = typeData[type]; if (!d) return '';
+      const { meta, todayVal, avg30Val, todayEcart, lvl, unit } = d;
+      const ecartStr = todayEcart!==null?`${todayEcart>0?'+':''}${_fmt(todayEcart,0)}% vs moy. 30j`:'';
+      const msgMap = {
+        ok:   `${meta.label} : ${_fmt(todayVal,todayVal>=100?0:1)} ${unit} (${ecartStr}). Consommation normale.`,
+        warn: `${meta.label} : ${_fmt(todayVal,todayVal>=100?0:1)} ${unit} (${ecartStr}). Vérifier si le relevé est correct ou si l'installation est à l'arrêt.`,
+        crit: `${meta.label} : ${_fmt(todayVal,todayVal>=100?0:1)} ${unit} (${ecartStr}). Surveillance recommandée.`,
+        na:   `${meta.label} : Pas de donnée suffisante pour aujourd'hui.`,
+      };
+      return `<div class="an2-sum-item" style="border-left:2px solid ${stCol[lvl]}">
+        <span style="color:${meta.color}">${meta.icon}</span>
+        <span class="an2-sum-txt">${esc(msgMap[lvl])}</span>
+      </div>`;
+    }).filter(Boolean).join('');
 
-    const visibleDS = allChartDS.filter(ds => !_anHiddenTypes.has(ds.type));
-    const normDS = visibleDS.map(ds => {
-      const mx = Math.max(...ds.vals, 0.001);
-      return { color: ds.color, label: ds.label, vals: ds.vals.map(v => v / mx * 100) };
-    });
+    // ── Main chart: visible series (legend-filtered) ──
+    const mainSeries = Object.entries(typeData)
+      .filter(([t,d]) => !_anHiddenTypes.has(t) && d.daily.some(v=>v>0))
+      .map(([t,d]) => ({ type:t, icon:d.meta.icon, label:d.meta.label, color:d.meta.color, unit:d.unit, vals:d.daily, avg30:d.avg30Val }));
 
-    const legendHtml = allChartDS.map(ds => {
-      const off = _anHiddenTypes.has(ds.type);
-      return `<span class="an-leg-item${off?' an-leg-item--off':''}" onclick="window._anToggle('${ds.type}')"><span class="an-leg-dot" style="background:${off?'transparent':ds.color};border:2px solid ${ds.color}"></span>${esc(ds.label)}</span>`;
+    const legendHtml = Object.entries(typeData)
+      .filter(([,d]) => d.daily.some(v=>v>0))
+      .map(([type,d]) => {
+        const off = _anHiddenTypes.has(type);
+        return `<label class="an2-ck${off?' an2-ck--off':''}">
+          <input type="checkbox" ${off?'':'checked'} onchange="window._anToggle('${type}')">
+          <span class="an2-ck-dot" style="background:${off?'transparent':d.meta.color};border-color:${d.meta.color}"></span>
+          <span>${esc(d.meta.label)}</span>
+        </label>`;
+      }).join('');
+
+    const mainChartSVG = _anMainSVG(mainSeries, dates);
+
+    // Main chart stats
+    const allVals = mainSeries.flatMap(s=>s.vals.filter(v=>v>0));
+    const stMin = allVals.length?Math.min(...allVals):0;
+    const stMax = allVals.length?Math.max(...allVals):0;
+    const stAvg = allVals.length?allVals.reduce((a,b)=>a+b,0)/allVals.length:0;
+    const stS = [...allVals].sort((a,b)=>a-b);
+    const stMed = stS.length?(stS.length%2===0?(stS[stS.length/2-1]+stS[stS.length/2])/2:stS[Math.floor(stS.length/2)]):0;
+    const stStd = allVals.length>1?Math.sqrt(allVals.reduce((s,v)=>s+(v-stAvg)**2,0)/allVals.length):0;
+    const stTot = mainSeries.reduce((s,sr)=>s+sr.vals.reduce((a,b)=>a+b,0),0);
+
+    // ── Alert panel (right sidebar) ──
+    const savedAlerts = _csoAlerts.filter(a=>!a.acknowledged&&(a.level==='critical'||a.level==='warning'));
+    const allAlerts   = [...smartAlerts,...savedAlerts.slice(0,4)];
+    const alertPanelHtml = allAlerts.slice(0,8).map(a => {
+      const mt = MT[a.metric||a.type||''] || {};
+      const isCrit = a.level==='critical';
+      const lc = isCrit?'#f87171':'#f59e0b';
+      const zone = a.zone?`<span class="an2-ap-zone">${esc(a.zone)}</span>`:'';
+      const ecart = a.ecart?`<span class="an2-ap-ecart" style="color:${lc}">+${a.ecart}%</span>`:'';
+      return `<div class="an2-ap-row">
+        <span class="an2-ap-dot" style="background:${lc}"></span>
+        <div class="an2-ap-body">
+          <span class="an2-ap-ico">${mt.icon||'⚠️'}</span>
+          <span class="an2-ap-lbl">${esc(mt.label||a.type||'Anomalie')}</span>${zone}
+        </div>
+        <div class="an2-ap-right">${ecart}
+          <span class="an2-ap-badge" style="background:${lc}20;color:${lc};border:1px solid ${lc}50">${isCrit?'Critique':'Attention'}</span>
+        </div>
+      </div>`;
+    }).join('') || '<div class="an2-ap-empty"><i class="fas fa-check-circle" style="color:#34d399"></i> Aucune anomalie</div>';
+
+    // ── Comparison bars (today vs avg) ──
+    const cmpHtml = Object.entries(typeData)
+      .filter(([,d])=>d.avg30Val>0||d.todayVal>0)
+      .map(([,d]) => {
+        const mx = Math.max(d.todayVal,d.avg30Val,0.001);
+        const tw = (d.todayVal/mx*100).toFixed(1), aw = (d.avg30Val/mx*100).toFixed(1);
+        const pct = d.avg30Val>0?(d.todayVal-d.avg30Val)/d.avg30Val*100:null;
+        const dc = pct===null?'#64748b':pct>10?'#f87171':pct<-10?'#34d399':'#94a3b8';
+        const dt = pct!==null?`${pct>0?'↑ +':'↓ '}${_fmt(pct,0)}%`:'—';
+        return `<div class="an2-cmp-row">
+          <div class="an2-cmp-lbl">${d.meta.icon} ${esc(d.meta.label)}</div>
+          <div class="an2-cmp-bars">
+            <div class="an2-cmp-bar-row"><span class="an2-cmp-bar-tag">Auj.</span>
+              <div class="an2-cmp-track"><div class="an2-cmp-fill" style="width:${tw}%;background:${d.meta.color}"></div></div>
+              <span class="an2-cmp-v">${_fmt(d.todayVal,d.todayVal>=100?0:1)} ${esc(d.unit)}</span>
+            </div>
+            <div class="an2-cmp-bar-row"><span class="an2-cmp-bar-tag">30J</span>
+              <div class="an2-cmp-track"><div class="an2-cmp-fill" style="width:${aw}%;background:${d.meta.color};opacity:0.32"></div></div>
+              <span class="an2-cmp-v" style="color:var(--text-3)">${_fmt(d.avg30Val,d.avg30Val>=100?0:1)} ${esc(d.unit)}</span>
+            </div>
+          </div>
+          <div class="an2-cmp-delta" style="color:${dc}">${dt}</div>
+        </div>`;
+      }).join('');
+
+    // ── Donut ──
+    const donutItems = Object.entries(typeData).filter(([,d])=>d.total>0)
+      .map(([,d])=>({label:d.meta.label,color:d.meta.color,val:d.total,unit:d.unit}));
+    const donutTotal = donutItems.reduce((s,it)=>s+it.val,0)||1;
+    const donutLeg = donutItems.map(it => {
+      const pct = (it.val/donutTotal*100).toFixed(1);
+      return `<div class="an2-dl-row">
+        <span class="an2-dl-dot" style="background:${it.color}"></span>
+        <span class="an2-dl-lbl">${esc(it.label)}</span>
+        <span class="an2-dl-pct">${pct}%</span>
+        <span class="an2-dl-v">${_fmt(it.val,it.val>=100?0:1)} ${esc(it.unit)}</span>
+      </div>`;
     }).join('');
 
-    // ── ROW 3: Comparison bars + donut ────────────────────
-    const cmpItems = Object.entries(typeData)
-      .filter(([, d]) => d.avg30Val > 0 || d.todayVal > 0)
-      .map(([, d]) => ({
-        label: d.meta.label, color: d.meta.color,
-        today: d.todayVal, avg: d.avg30Val, unit: d.unit,
-        pctDiff: d.avg30Val > 0 ? (d.todayVal - d.avg30Val) / d.avg30Val * 100 : null,
-      }));
-    const donutItems = Object.entries(typeData)
-      .filter(([, d]) => d.total > 0)
-      .map(([, d]) => ({ label: d.meta.label, color: d.meta.color, val: d.total, unit: d.unit }));
-
-    // ── ROW 4: Weekly evolution (normalized) ───────────────
-    const nW = Math.min(Math.ceil(days / 7), 16);
-    const normAreaDS = Object.entries(typeData)
-      .filter(([, d]) => d.daily.some(v => v > 0))
-      .map(([, d]) => {
-        const vals = Array.from({length: nW}, (_, wi) => {
-          const si = days - (nW - wi) * 7;
-          return d.daily.slice(Math.max(0, si), Math.max(0, si + 7)).reduce((a, b) => a + b, 0);
+    // ── Weekly chart ──
+    const nW = Math.min(Math.ceil(days/7), 8);
+    const wkLabels = Array.from({length:nW}, (_,i)=>`S.${i+1}`);
+    const wkSeries = Object.entries(typeData)
+      .filter(([,d])=>d.daily.some(v=>v>0))
+      .map(([,d]) => {
+        const rawVals = Array.from({length:nW},(_,wi) => {
+          const si = days-(nW-wi)*7;
+          return d.daily.slice(Math.max(0,si), Math.max(0,si+7)).reduce((a,b)=>a+b,0);
         });
-        const mx = Math.max(...vals, 0.001);
-        return { color: d.meta.color, label: d.meta.label, vals: vals.map(v => v / mx * 100) };
+        const mx = Math.max(...rawVals,0.001);
+        return { color:d.meta.color, label:d.meta.label, rawVals, vals:rawVals.map(v=>v/mx*100) };
       });
-    const wkLabels = Array.from({length: nW}, (_, i) => `S${i + 1}`);
+    const curWk = wkSeries.reduce((s,sr)=>s+(sr.rawVals[sr.rawVals.length-1]||0),0);
+    const prevWk = wkSeries.reduce((s,sr)=>s+(sr.rawVals[sr.rawVals.length-2]||0),0);
+    const wkEvo = prevWk>0?(curWk-prevWk)/prevWk*100:null;
+    const wkPrevFc = wkSeries.reduce((s,sr)=>s+(sr.rawVals[sr.rawVals.length-1]||0),0)*4;
 
-    // ── ROW 5: Heatmap (30j × 4 types) ───────────────────
-    const hmTypes  = ['eau_froide','eau_chaude','electricite','chauffage'].filter(t => typeData[t] && typeData[t].daily.some(v => v > 0));
-    const hmDays   = Math.min(30, days);
-    const hmDates  = Array.from({length: hmDays}, (_, i) => _daysAgo(hmDays - 1 - i));
-    const hmCells  = [];
-    hmTypes.forEach((type, ri) => {
-      const d = typeData[type];
-      hmDates.forEach((ds, ci) => {
-        const v   = d.daily[days - hmDays + ci] || 0;
-        const rel = d.avg30Val > 0 ? v / d.avg30Val : 0;
-        const lvl = !v ? 'none' : rel > 1.5 ? 'crit' : rel > 1.1 ? 'warn' : 'ok';
-        hmCells.push({ row: ri, col: ci, level: lvl, val: Math.min(rel, 2) / 2 });
+    // ── Heatmap ──
+    const hmTypes = ['eau_froide','eau_chaude','electricite','chauffage'].filter(t=>typeData[t]&&typeData[t].daily.some(v=>v>0));
+    const hmDays  = Math.min(30, days);
+    const hmDates = Array.from({length:hmDays},(_,i)=>_daysAgo(hmDays-1-i));
+    const hmCells = [];
+    hmTypes.forEach((type,ri) => {
+      const d=typeData[type];
+      hmDates.forEach((ds,ci) => {
+        const v=d.daily[days-hmDays+ci]||0, rel=d.avg30Val>0?v/d.avg30Val:0;
+        const lv=!v?'none':rel>1.5?'crit':rel>1.1?'warn':'ok';
+        hmCells.push({row:ri,col:ci,level:lv,val:Math.min(rel,2)/2});
       });
     });
-    const hmRowLabels = hmTypes.map(t => typeData[t].meta.icon);
-    const hmColLabels = hmDates.map((ds, i) => (i % 5 === 0 || i === hmDays - 1) ? ds.split('-')[2] : '');
+    const hmRowLabels = hmTypes.map(t=>typeData[t].meta.icon);
+    const hmColLabels = hmDates.map((ds,i)=>(i%5===0||i===hmDays-1)?ds.split('-')[2]:'');
 
-    // ── History: last 10 readings ──────────────────────────
-    const histReadings = [..._readings]
-      .filter(r => r.date)
-      .sort((a, b) => b.date > a.date ? 1 : b.date < a.date ? -1 : 0)
-      .slice(0, 10);
-    const histHtml = histReadings.length ? histReadings.map(r => {
-      const m    = _meters.find(me => me.id === r.meterId);
-      const meta = m ? (MT[m.type] || {}) : {};
-      return `<div class="an-hist-row"><span class="an-hist-ico">${meta.icon||'📊'}</span><span class="an-hist-body"><span class="an-hist-lbl">${esc(m?m.name:r.meterId)}</span><span class="an-hist-cso">${_fmt(r.consumption,1)} ${esc(m?(m.unit||''):'')}</span></span><span class="an-hist-date">${_dateLbl(r.date)}</span></div>`;
-    }).join('') : '<div class="an-hist-empty">Aucun relevé</div>';
+    // ── Alert history table ──
+    const histAlerts = [..._csoAlerts].sort((a,b)=>_tsMs(b.ts)-_tsMs(a.ts)).slice(0,12);
+    const histHtml = histAlerts.length ? histAlerts.map(a => {
+      const mt = MT[a.type||a.metric||'']||{};
+      const m  = _meters.find(me=>me.id===(a.meterId||''));
+      const isCrit=a.level==='critical', isSurv=a.level==='surveillance';
+      const lc=isCrit?'#f87171':isSurv?'#3B82F6':'#f59e0b';
+      const ll=isCrit?'Critique':isSurv?'Surveillance':'Attention';
+      const ts=_tsDate(a.ts);
+      const dStr=ts?ts.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}):'';
+      const tStr=ts?ts.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'';
+      const ec=a.ecart!=null?`${a.ecart>0?'+':''}${_fmt(a.ecart,0)}%`:'—';
+      return `<tr class="an2-hist-row">
+        <td><b>${tStr}</b><br><span style="color:var(--text-3);font-size:10px">${dStr}</span></td>
+        <td>${mt.icon||'⚠️'} ${esc(mt.label||a.type||'—')}</td>
+        <td class="an2-hist-zone">${esc(m?.zone||a.zone||'—')}</td>
+        <td style="color:${a.ecart>0?'#f87171':'#34d399'};font-weight:600">${ec}</td>
+        <td>${esc(a.alertType||a.type||'Dérive')}</td>
+        <td><span class="an2-hist-badge" style="background:${lc}20;color:${lc};border:1px solid ${lc}50">${ll}</span></td>
+        <td style="color:var(--text-3)">${esc(a.acknowledged?'Résolu':a.action||'—')}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="7" class="an2-hist-empty">Aucune alerte enregistrée</td></tr>`;
 
-    // ── Alert cards (smart + Firestore saved) ──────────────
-    const savedAlerts = _csoAlerts.filter(a => !a.acknowledged && (a.level === 'critical' || a.level === 'warning'));
-    const allAlerts   = [...smartAlerts, ...savedAlerts.slice(0, 4)];
-
-    const alertsHtml = allAlerts.length ? allAlerts.map(a => {
-      const metric = a.metric || a.type || 'default';
-      const meta   = MT[metric] || {};
-      const sug    = (_SUG[metric] || _SUG.default).slice(0, 3);
-      const isCrit = a.level === 'critical';
-      return `<div class="an-alert-card${isCrit?' an-alert-card--crit':' an-alert-card--warn'}">
-        <div class="an-alert-head">
-          <span class="an-alert-ico">${meta.icon||'⚠️'}</span>
-          <div class="an-alert-info"><div class="an-alert-ttl">${esc(a.title||a.type||'Anomalie')}</div><div class="an-alert-msg">${esc(a.msg||a.message||'')}</div></div>
-          <span class="an-alert-lvl${isCrit?' an-alert-lvl--crit':''}">${isCrit?'CRITIQUE':'ATTENTION'}</span>
+    // ── Forecast widgets ──
+    const forecastHtml = kpiTypes.filter(t=>typeData[t]).map(t => {
+      const d=typeData[t];
+      const todayDt = new Date(today);
+      const daysInMonth = new Date(todayDt.getFullYear(),todayDt.getMonth()+1,0).getDate();
+      const expected = d.avg30Val*daysInMonth;
+      const pct = expected>0?(d.forecastTotal-expected)/expected*100:null;
+      const col = pct===null?'#64748b':pct>10?'#f87171':pct<-10?'#34d399':'#f59e0b';
+      return `<div class="an2-fc-item" style="border-left:2px solid ${d.meta.color}">
+        <span>${d.meta.icon}</span>
+        <div class="an2-fc-body">
+          <div class="an2-fc-lbl">${esc(d.meta.label)}</div>
+          <div class="an2-fc-val">${_fmt(d.forecastTotal,d.forecastTotal>=100?0:1)} <span class="an2-fc-u">${esc(d.unit)}</span></div>
+          ${pct!==null?`<div style="color:${col};font-size:10px">${pct>0?'+':''}${_fmt(pct,0)}% vs attendu</div>`:''}
         </div>
-        ${sug.length?`<div class="an-alert-acts"><span class="an-alert-act-ttl">Actions :</span>${sug.map(s=>`<label class="an-alert-chk"><input type="checkbox"> ${esc(s)}</label>`).join('')}</div>`:''}
       </div>`;
-    }).join('') : '<div class="an-no-alerts"><i class="fas fa-check-circle"></i> Aucune anomalie détectée</div>';
+    }).join('');
 
-    // ── Score badge (toolbar) ─────────────────────────────
-    const scoreBadge = `<div class="an-score-badge" style="border-color:${gradeColor};color:${gradeColor}" title="Performance énergétique · ${score}/100"><span class="an-score-grade">${grade}</span><span class="an-score-pts">${score}pts</span></div>`;
-
-    // ── Assemble ───────────────────────────────────────────
-    return `<div class="cso-inner an-page">
-      <div class="an-toolbar">
-        <div class="ra-per-row">${perBtns}</div>
-        ${zoneBtns?`<div class="ra-zone-row">${zoneBtns}</div>`:''}
-        ${scoreBadge}
+    return `<div class="cso-inner an2-page">
+      <!-- Toolbar -->
+      <div class="an2-toolbar">
+        <span class="an2-toolbar-ttl"><i class="fas fa-chart-line"></i> Analyses énergétiques</span>
+        <div class="an2-rb-group">${perBtns}</div>
+        ${zoneSelect?`<div class="an2-zone-wrap"><i class="fas fa-filter"></i>${zoneSelect}</div>`:''}
       </div>
 
-      <div class="an-kpi-row">${kpiHtml||'<div class="ra-empty">Aucune donnée KPI</div>'}</div>
-
-      ${normDS.length?`<div class="an-chart-block">
-        <div class="an-chart-head">
-          <div><div class="an-chart-ttl"><i class="fas fa-chart-line"></i> Évolution normalisée ${days}j</div><div class="an-chart-sub">% du max individuel · cliquer sur la légende pour masquer/afficher</div></div>
-          <div class="an-chart-badges">${critCount?`<span class="an-badge an-badge--crit">${critCount} crit.</span>`:''} ${warnCount?`<span class="an-badge an-badge--warn">${warnCount} att.</span>`:''}</div>
+      <!-- KPI row + Score gauge -->
+      <div class="an2-kpi-row">
+        ${kpiHtml}
+        <div class="an2-score-widget">
+          <div class="an2-score-lbl">Score énergétique</div>
+          ${_anScoreGauge(score, grade, gradeColor)}
         </div>
-        <div class="an-legend">${legendHtml}</div>
-        ${_supLineSVG(normDS, dates, 155)}
-      </div>`:''}
-
-      <div class="an-row3">
-        ${cmpItems.length?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-chart-bar"></i> Aujourd'hui vs Moy. 30j</div>${_hBarSVG(cmpItems, 34)}</div>`:''}
-        ${donutItems.length>=2?`<div class="an-chart-block"><div class="an-chart-ttl"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>${_donutSVG(donutItems, 126)}</div>`:''}
       </div>
 
-      ${normAreaDS.length?`<div class="an-chart-block">
-        <div class="an-chart-ttl"><i class="fas fa-chart-area"></i> Évolution hebdomadaire</div>
-        <div class="an-chart-sub">Normalisé · tendance et détection de dérive</div>
-        ${_areaLineSVG(normAreaDS, wkLabels, 135)}
-        <div class="an-legend an-legend--sm">${allChartDS.map(ds=>`<span class="an-leg-item"><span class="an-leg-dot" style="background:${ds.color};border:2px solid ${ds.color}"></span>${esc(ds.label)}</span>`).join('')}</div>
-      </div>`:''}
+      <!-- Summary bar -->
+      <div class="an2-summary-bar">${summaryHtml}</div>
 
-      ${hmTypes.length?`<div class="an-row5">
-        <div class="an-chart-block">
-          <div class="an-chart-ttl"><i class="fas fa-th"></i> Carte thermique 30j</div>
-          <div class="an-chart-sub"><span style="color:#34d399">●</span> Normal &nbsp;<span style="color:#f59e0b">●</span> +10% &nbsp;<span style="color:#f87171">●</span> +50%</div>
-          ${_heatmapSVG(hmCells, hmRowLabels, hmColLabels, hmTypes.length, hmDays, 20)}
+      <!-- Main row: chart + alerts side panel -->
+      <div class="an2-main-row">
+        <div class="an2-chart-panel">
+          <div class="an2-chart-hdr">
+            <span class="an2-chart-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations</span>
+            <div class="an2-ck-group">${legendHtml}</div>
+            <div class="an2-chart-acts">
+              ${critCount?`<span class="an2-bdg an2-bdg--crit">${critCount} crit.</span>`:''}
+              ${warnCount?`<span class="an2-bdg an2-bdg--warn">${warnCount} att.</span>`:''}
+            </div>
+          </div>
+          <div class="an2-chart-wrap" id="an2-chart-wrap">
+            ${mainChartSVG}
+            <div class="an2-tooltip" id="an2-tooltip" style="display:none"></div>
+          </div>
+          <div class="an2-chart-stats">
+            <span><b>Min</b> ${_fmt(stMin,stMin>=100?0:1)}</span>
+            <span><b>Max</b> ${_fmt(stMax,stMax>=100?0:1)}</span>
+            <span><b>Moy.</b> ${_fmt(stAvg,stAvg>=100?1:2)}</span>
+            <span><b>Méd.</b> ${_fmt(stMed,stMed>=100?1:2)}</span>
+            <span><b>Total</b> ${_fmt(stTot,stTot>=1000?0:1)}</span>
+            <span><b>σ</b> ${_fmt(stStd,stStd>=100?1:2)}</span>
+            <span class="an2-stats-sub">% du max · — moy.mobile 7j · <span style="color:#f87171">●</span> dépassement</span>
+          </div>
         </div>
-        <div class="an-chart-block">
-          <div class="an-chart-ttl"><i class="fas fa-list"></i> Derniers relevés</div>
-          <div class="an-hist-list">${histHtml}</div>
-        </div>
-      </div>`:''}
 
-      <div class="an-chart-block">
-        <div class="an-chart-head">
-          <div class="an-chart-ttl"><i class="fas fa-triangle-exclamation"></i> Anomalies & alertes</div>
-          ${allAlerts.length?`<div class="an-chart-badges">${critCount?`<span class="an-badge an-badge--crit">${critCount}</span>`:''} ${warnCount?`<span class="an-badge an-badge--warn">${warnCount}</span>`:''}</div>`:''}
+        <!-- Alerts sidebar -->
+        <div class="an2-side-panel">
+          <div class="an2-ap-hdr">
+            <span><i class="fas fa-triangle-exclamation"></i> Alertes en cours${allAlerts.length?` (${allAlerts.length})`:''}</span>
+            <a class="an2-ap-link" onclick="MX.Pages.Conso._tab('alertes')">Voir toutes</a>
+          </div>
+          <div class="an2-ap-list">${alertPanelHtml}</div>
         </div>
-        <div class="an-alert-grid">${alertsHtml}</div>
       </div>
+
+      <!-- Row 3: comparison + donut + weekly -->
+      <div class="an2-row3">
+        <div class="an2-card">
+          <div class="an2-card-hdr"><i class="fas fa-chart-bar"></i> Aujourd'hui vs moy. 30 jours</div>
+          <div class="an2-cmp-list">${cmpHtml}</div>
+        </div>
+        <div class="an2-card">
+          <div class="an2-card-hdr"><i class="fas fa-circle-half-stroke"></i> Répartition par énergie</div>
+          <div class="an2-donut-wrap">
+            ${donutItems.length>=2?_donutSVG(donutItems,108):'<div class="an2-empty">Données insuffisantes</div>'}
+            <div class="an2-donut-leg">${donutLeg}</div>
+          </div>
+        </div>
+        <div class="an2-card">
+          <div class="an2-card-hdr"><i class="fas fa-chart-area"></i> Évolution hebdomadaire
+            ${wkEvo!==null?`<span class="an2-wk-evo" style="color:${wkEvo>5?'#f87171':wkEvo<-5?'#34d399':'#f59e0b'}">${wkEvo>0?'+':''}${_fmt(wkEvo,0)}% vs S.préc.</span>`:''}
+          </div>
+          ${_areaLineSVG(wkSeries, wkLabels, 110)}
+          <div class="an2-wk-stats">
+            <div class="an2-wk-stat"><span class="an2-wk-lbl">Cette semaine</span><span class="an2-wk-val">${_fmt(curWk,curWk>=1000?0:1)}</span></div>
+            <div class="an2-wk-stat"><span class="an2-wk-lbl">Moy. 30J</span><span class="an2-wk-val">${_fmt(prevWk,prevWk>=1000?0:1)}</span></div>
+            <div class="an2-wk-stat"><span class="an2-wk-lbl">Préd. fin mois</span><span class="an2-wk-val" style="color:#f59e0b">${_fmt(wkPrevFc,wkPrevFc>=1000?0:1)}</span><span class="an2-wk-lbl"> (+${_fmt(wkSeries.reduce((s,sr)=>s+(sr.rawVals[sr.rawVals.length-1]||0),0)/Math.max(prevWk,0.001)*100-100,0)}%)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 4: heatmap + alert history -->
+      <div class="an2-row4">
+        ${hmTypes.length?`<div class="an2-card">
+          <div class="an2-card-hdr"><i class="fas fa-th"></i> Carte thermique (30 derniers jours)
+            <span class="an2-hm-leg"><span style="color:#34d399">●</span> Normal <span style="color:#f59e0b">●</span> +10% <span style="color:#f87171">●</span> +50%</span>
+          </div>
+          ${_heatmapSVG(hmCells,hmRowLabels,hmColLabels,hmTypes.length,hmDays,22)}
+        </div>`:''}
+        <div class="an2-card an2-card--hist">
+          <div class="an2-card-hdr"><i class="fas fa-list-check"></i> Historique des alertes
+            <a class="an2-ap-link" onclick="MX.Pages.Conso._tab('alertes')">Voir tout</a>
+          </div>
+          <div class="an2-hist-wrap">
+            <table class="an2-hist-tbl">
+              <thead><tr><th>Heure</th><th>Compteur</th><th>Zone</th><th>Variation</th><th>Type</th><th>Statut</th><th>Action</th></tr></thead>
+              <tbody>${histHtml}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Forecast row -->
+      ${forecastHtml?`<div class="an2-card an2-card--fc">
+        <div class="an2-card-hdr"><i class="fas fa-arrow-trend-up"></i> Prévision fin de mois (extrapolation 7J)</div>
+        <div class="an2-fc-grid">${forecastHtml}</div>
+      </div>`:''}
     </div>`;
   }
 
