@@ -277,14 +277,14 @@
     let grid = '', areas = '', lines = '', xlbls = '', thrLines = '';
     for (let g = 0; g <= 4; g++) {
       const y = PADt + (g / 4) * cH, v = maxV * (1 - g / 4);
-      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
-      grid += `<text x="${(PADl+2).toFixed(1)}" y="${(y-3).toFixed(1)}" fill="rgba(255,255,255,0.22)" font-size="8" font-family="monospace">${_fmt(v,v>=100?0:1)}</text>`;
+      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>`;
+      grid += `<text x="${(PADl+2).toFixed(1)}" y="${(y-3).toFixed(1)}" class="an2-axis-lbl" font-size="8" font-family="monospace">${_fmt(v,v>=100?0:1)}</text>`;
     }
     const step = N<=7?1:N<=30?5:N<=90?14:30;
     (labels||[]).forEach((lb,i) => {
       if (i%step!==0&&i!==N-1) return;
       const parts=lb.split('-'); const lbl=parts.length===3?`${parts[2]}/${parts[1]}`:lb;
-      xlbls+=`<text x="${px(i).toFixed(1)}" y="${(H-PADb+16).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="8" font-family="sans-serif">${lbl}</text>`;
+      xlbls+=`<text x="${px(i).toFixed(1)}" y="${(H-PADb+16).toFixed(1)}" text-anchor="middle" class="an2-axis-lbl" font-size="8" font-family="sans-serif">${lbl}</text>`;
     });
     datasets.forEach(ds => {
       if (!ds.vals.some(v=>v>0)) return;
@@ -308,7 +308,7 @@
     });
     const baseY=(PADt+cH).toFixed(1);
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
-      <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
       ${grid}${thrLines}${areas}${lines}${xlbls}</svg></div>`;
   }
 
@@ -320,45 +320,70 @@
     let rects='', rowLbls='', colLbls='';
     cells.forEach(c => {
       const x=PAD_L+c.col*CELL_W, y=PAD_T+c.row*CELL_H;
-      const color=c.level==='crit'?'#f87171':c.level==='warn'?'#f59e0b':c.level==='ok'?'#34d399':'rgba(255,255,255,0.04)';
+      const color=c.level==='crit'?'#f87171':c.level==='warn'?'#f59e0b':c.level==='ok'?'#34d399':'rgba(0,0,0,0.04)';
       const opacity=c.level==='none'?1:(0.15+c.val*0.65).toFixed(2);
       rects+=`<rect x="${x+1}" y="${y+1}" width="${CELL_W-2}" height="${CELL_H-2}" rx="2" fill="${color}" opacity="${opacity}"/>`;
     });
-    rowLabels.forEach((l,i) => { rowLbls+=`<text x="${PAD_L-3}" y="${(PAD_T+i*CELL_H+CELL_H/2+4).toFixed(1)}" text-anchor="end" fill="rgba(255,255,255,0.45)" font-size="13" font-family="sans-serif">${l}</text>`; });
-    colLabels.forEach((l,i) => { if(!l)return; colLbls+=`<text x="${(PAD_L+i*CELL_W+CELL_W/2).toFixed(1)}" y="${(PAD_T-5).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.25)" font-size="7.5" font-family="sans-serif">${l}</text>`; });
+    rowLabels.forEach((l,i) => { rowLbls+=`<text x="${PAD_L-3}" y="${(PAD_T+i*CELL_H+CELL_H/2+4).toFixed(1)}" text-anchor="end" class="an2-axis-lbl" font-size="13" font-family="sans-serif">${l}</text>`; });
+    colLabels.forEach((l,i) => { if(!l)return; colLbls+=`<text x="${(PAD_L+i*CELL_W+CELL_W/2).toFixed(1)}" y="${(PAD_T-5).toFixed(1)}" text-anchor="middle" class="an2-axis-lbl" font-size="7.5" font-family="sans-serif">${l}</text>`; });
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rects}${rowLbls}${colLbls}</svg></div>`;
   }
 
   // ── INTERACTIVE MAIN CHART SVG (v2) ──
-  function _anMainSVG(series, dates) {
-    const W = 700, H = 188, PADl = 40, PADr = 10, PADt = 16, PADb = 36;
+  function _anMainSVG(series, dates, clients) {
+    const W = 700, H = 188, PADl = 56, PADr = 12, PADt = 16, PADb = 36;
     const cW = W - PADl - PADr, cH = H - PADt - PADb;
     const N = dates.length;
     if (!series.length || !N) return '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucune donnée sur la période</div>';
     const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
     const py = v => PADt + cH - (v / 100) * cH;
 
-    // Normalize each series individually to 0-100
+    // Normalize each series individually to 0-100, keep real max
     const normSeries = series.map(s => {
       const mx = Math.max(...s.vals, 0.001);
       return { ...s, normVals: s.vals.map(v => v / mx * 100), mx };
     });
 
+    // Primary series = first visible one → drives Y-axis labels
+    const primary = normSeries[0];
+
+    function fmtAxisVal(v, unit) {
+      if (v === 0) return '0';
+      if (unit === 'kWh' && v >= 1000) return `${(v/1000).toFixed(v>=10000?0:1).replace(/\.0$/,'')} MWh`;
+      if (v >= 10000) return `${Math.round(v/1000)}k`;
+      if (v >= 1000) return `${(v/1000).toFixed(1).replace(/\.0$/,'')}k`;
+      if (v >= 100) return Math.round(v).toString();
+      if (v >= 10) return v.toFixed(1).replace(/\.0$/,'');
+      return v.toFixed(2).replace(/\.?0+$/,'');
+    }
+
     let defs = '', grid = '', areas = '', maLines = '', lines = '', dots = '', xlbls = '';
 
-    // Grid + Y-axis labels
+    // Grid + Y-axis labels (real values from primary series)
     for (let g = 0; g <= 4; g++) {
-      const y = PADt + (g / 4) * cH, v = 100 * (1 - g / 4);
-      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
-      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" fill="rgba(255,255,255,0.2)" font-size="8" font-family="monospace">${v.toFixed(0)}</text>`;
+      const y = PADt + (g / 4) * cH;
+      const realVal = primary ? primary.mx * (1 - g / 4) : 0;
+      const lbl = primary ? fmtAxisVal(realVal, primary.unit) : '';
+      grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>`;
+      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" class="an2-axis-lbl">${lbl}</text>`;
+    }
+    // Unit label above Y-axis
+    if (primary) {
+      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(PADt-4).toFixed(1)}" text-anchor="end" class="an2-axis-unit">${primary.unit}</text>`;
     }
 
     // X-axis date labels
+    const MONTHS = ['jan','fév','mar','avr','mai','jui','jul','aoû','sep','oct','nov','déc'];
+    const DAYS   = ['dim','lun','mar','mer','jeu','ven','sam'];
     const step = N <= 7 ? 1 : N <= 30 ? 5 : N <= 90 ? 14 : 30;
     dates.forEach((ds, i) => {
       if (i % step !== 0 && i !== N - 1) return;
-      const [, m, d] = ds.split('-');
-      xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 16).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.28)" font-size="8" font-family="sans-serif">${d}/${m}</text>`;
+      const dt = new Date(ds + 'T12:00');
+      let lbl;
+      if (N <= 7) lbl = `${DAYS[dt.getDay()]} ${dt.getDate()}`;
+      else if (N <= 90) lbl = `${dt.getDate()} ${MONTHS[dt.getMonth()]}`;
+      else lbl = `${MONTHS[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`;
+      xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 16).toFixed(1)}" text-anchor="middle" class="an2-axis-lbl">${lbl}</text>`;
     });
 
     normSeries.forEach(ds => {
@@ -371,9 +396,9 @@
       }
       const bY = (PADt + cH).toFixed(1);
       const gId = 'mc' + ds.color.replace('#', '');
-      defs += `<linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.2"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0.01"/></linearGradient>`;
+      defs += `<linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.18"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0.01"/></linearGradient>`;
       areas += `<path d="${d} L ${pts[pts.length-1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
-      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="1.8" stroke-linecap="round" opacity="0.92"/>`;
+      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>`;
       // 7-day moving average
       const MA = 7;
       let maD = '';
@@ -383,28 +408,27 @@
         const avg = sl.reduce((a, b) => a + b, 0) / sl.length;
         maD += maD ? ` L ${px(i).toFixed(1)},${py(avg).toFixed(1)}` : `M ${px(i).toFixed(1)},${py(avg).toFixed(1)}`;
       });
-      if (maD) maLines += `<path d="${maD}" fill="none" stroke="${ds.color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.4"/>`;
-      // Anomaly dots (> 110% of normalized)
+      if (maD) maLines += `<path d="${maD}" fill="none" stroke="${ds.color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.35"/>`;
+      // Anomaly dots
       ds.normVals.forEach((v, i) => {
-        if (v > 108) dots += `<circle cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="3.5" fill="#f87171" opacity="0.85" stroke="rgba(0,0,0,0.4)" stroke-width="1"/>`;
+        if (v > 108) dots += `<circle cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="3.5" fill="#ef4444" opacity="0.85" stroke="white" stroke-width="1"/>`;
       });
       // Last point
       const last = pts[pts.length-1];
-      lines += `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.8" fill="${ds.color}" stroke="rgba(0,0,0,0.4)" stroke-width="1"/>`;
+      lines += `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.8" fill="${ds.color}" stroke="white" stroke-width="1.2"/>`;
     });
 
     const baseY = (PADt + cH).toFixed(1);
-    // Overlay for mouse events
     const overlay = `<rect id="an2-overlay" x="${PADl}" y="${PADt}" width="${cW}" height="${cH}" fill="transparent" style="cursor:crosshair"/>`;
-    const vcursor = `<line id="an2-vcursor" x1="${PADl}" y1="${PADt}" x2="${PADl}" y2="${PADt+cH}" stroke="rgba(255,255,255,0.25)" stroke-width="1" stroke-dasharray="3,2" display="none"/>`;
+    const vcursor = `<line id="an2-vcursor" x1="${PADl}" y1="${PADt}" x2="${PADl}" y2="${PADt+cH}" stroke="rgba(0,0,0,0.18)" stroke-width="1" stroke-dasharray="3,2" display="none"/>`;
 
     // Store data for JS interactivity
-    window._anChartData = { dates, series, W, PADl, PADr, cW, N };
+    window._anChartData = { dates, series, W, PADl, PADr, cW, N, clients: clients || {} };
 
     return `<div class="ra-svg-wrap an2-chart-svg-wrap">
       <svg id="an2-svg" width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
         <defs>${defs}</defs>
-        <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
         ${grid}${areas}${maLines}${lines}${dots}${xlbls}${overlay}${vcursor}
       </svg>
     </div>`;
@@ -427,10 +451,10 @@
       ? `M ${cx-R},${cy} A ${R},${R} 0 1 0 ${cx+R},${cy}`
       : `M ${cx-R},${cy} A ${R},${R} 0 ${large} 0 ${ex},${ey}`;
     return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-      <path d="${bgArc}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="${sw}" stroke-linecap="round"/>
+      <path d="${bgArc}" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="${sw}" stroke-linecap="round"/>
       ${fillArc ? `<path d="${fillArc}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round"/>` : ''}
       <text x="${cx}" y="${cy-10}" text-anchor="middle" fill="${color}" font-size="26" font-weight="700" font-family="monospace">${grade}</text>
-      <text x="${cx}" y="${cy+8}" text-anchor="middle" fill="rgba(255,255,255,0.42)" font-size="10" font-family="sans-serif">${score} / 100</text>
+      <text x="${cx}" y="${cy+8}" text-anchor="middle" class="an2-axis-lbl" font-size="10" font-family="sans-serif">${score} / 100</text>
     </svg>`;
   }
 
@@ -632,9 +656,9 @@
     const wrap = document.getElementById('an2-chart-wrap');
     const data = window._anChartData;
     if (!svg || !tip || !data || !data.dates.length) return;
-    const { W, PADl, PADr, cW, N, dates, series } = data;
+    const { W, PADl, PADr, cW, N, dates, series, clients } = data;
 
-    function fmtN(n) { if (!n) return '0'; return n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
+    function fmtN(n) { if (n == null || n === 0) return '0'; return n >= 1000 ? n.toFixed(0) : n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
     function getIdx(e) {
       const rect = svg.getBoundingClientRect();
       const vbX = (e.clientX - rect.left) / rect.width * W;
@@ -643,8 +667,8 @@
     function dateFull(ds) {
       if (!ds) return '';
       const [y, m, d] = ds.split('-');
-      const mn = ['jan.','fév.','mar.','avr.','mai','juin','juil.','aoû.','sep.','oct.','nov.','déc.'][parseInt(m)-1];
-      return `${d} ${mn} ${y}`;
+      const mn = ['Janv.','Févr.','Mars','Avr.','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'][parseInt(m)-1];
+      return `${parseInt(d)} ${mn} ${y}`;
     }
 
     const vcursor = document.getElementById('an2-vcursor');
@@ -656,21 +680,31 @@
       const cx   = Math.max(PADl, Math.min(W - PADr, vbX));
       if (vcursor) { vcursor.setAttribute('x1', cx.toFixed(1)); vcursor.setAttribute('x2', cx.toFixed(1)); vcursor.removeAttribute('display'); }
 
-      let html = `<div class="an2-tt-date">${dateFull(date)}</div>`;
+      const cli = (clients && clients[date]) || 0;
+      let html = `<div class="an2-tt-date">${dateFull(date)}${cli > 0 ? `<span class="an2-tt-cli">👥 ${cli} clients</span>` : ''}</div>`;
+      let hasAny = false;
       series.forEach(s => {
-        const v = s.vals[idx] || 0;
-        if (!v) return;
-        const prev = idx > 0 ? (s.vals[idx-1]||0) : 0;
-        const evo  = prev > 0 ? ((v-prev)/prev*100) : null;
-        const ec   = evo !== null ? `<span style="color:${evo>5?'#f87171':evo<-5?'#34d399':'#94a3b8'};margin-left:4px;font-size:9px">${evo>0?'↑+':'↓'}${Math.abs(evo).toFixed(0)}%</span>` : '';
-        html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${s.label}</span><span class="an2-tt-val">${fmtN(v)} ${s.unit}${ec}</span></div>`;
+        const v = s.vals[idx] ?? null;
+        const prev = idx > 0 ? (s.vals[idx-1] ?? null) : null;
+        const evo  = v != null && prev != null && prev > 0 ? ((v - prev) / prev * 100) : null;
+        const ec   = evo !== null ? `<span style="color:${evo>5?'var(--red)':evo<-5?'var(--green)':'var(--text3)'};margin-left:4px;font-size:9px">${evo>0?'↑ +':'↓ '}${Math.abs(evo).toFixed(0)}%</span>` : '';
+        const valStr = v != null && v > 0 ? `<b>${fmtN(v)}</b> ${s.unit}` : `<span style="color:var(--text3)">—</span>`;
+        const isW = s.unit === 'm³' || s.unit === 'L';
+        const ratio = v != null && v > 0 && cli > 0 ? (isW ? v * 1000 / cli : v / cli) : null;
+        const ratioStr = ratio !== null ? `<span class="an2-tt-sub">${fmtN(ratio)} ${isW ? 'L' : s.unit}/client</span>` : '';
+        const avg30 = s.avg30 ?? null;
+        const avgStr = avg30 != null && avg30 > 0 ? `<span class="an2-tt-sub">moy.30j : ${fmtN(avg30)} ${s.unit}</span>` : '';
+        html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${s.label}</span><span class="an2-tt-val">${valStr}${ec}</span></div>`;
+        if (ratioStr || avgStr) html += `<div class="an2-tt-subs">${avgStr}${ratioStr}</div>`;
+        if (v != null && v > 0) hasAny = true;
       });
+      if (!hasAny) html += `<div class="an2-tt-row" style="color:var(--text3);font-size:10px;justify-content:center">Aucune donnée ce jour</div>`;
 
       tip.innerHTML = html;
       tip.style.display = 'block';
       const wRect = wrap.getBoundingClientRect();
       let tx = e.clientX - wRect.left + 14;
-      if (tx + 200 > wRect.width) tx = e.clientX - wRect.left - 210;
+      if (tx + 220 > wRect.width) tx = e.clientX - wRect.left - 228;
       tip.style.left = Math.max(0, tx) + 'px';
       tip.style.top  = Math.max(0, e.clientY - wRect.top - 20) + 'px';
     });
@@ -1230,7 +1264,7 @@
         </label>`;
       }).join('');
 
-    const mainChartSVG = _anMainSVG(mainSeries, dates);
+    const mainChartSVG = _anMainSVG(mainSeries, dates, _clients);
 
     // Main chart stats
     const allVals = mainSeries.flatMap(s=>s.vals.filter(v=>v>0));
@@ -1518,12 +1552,12 @@
     const scoreSub   = score >= 90 ? 'Consommations dans les normes' : score >= 70 ? 'Légères anomalies détectées' : score >= 50 ? 'Anomalies à surveiller' : 'Interventions requises';
     const scoreR = 56, scoreCirc = 2 * Math.PI * scoreR;
     const scoreSVG = `<svg width="140" height="140" viewBox="0 0 140 140">
-      <circle cx="70" cy="70" r="${scoreR}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="10"/>
+      <circle cx="70" cy="70" r="${scoreR}" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="10"/>
       <circle cx="70" cy="70" r="${scoreR}" fill="none" stroke="${scoreColor}" stroke-width="10"
         stroke-dasharray="${(score/100*scoreCirc).toFixed(1)} ${scoreCirc.toFixed(1)}"
         stroke-linecap="round" transform="rotate(-90 70 70)"/>
       <text x="70" y="62" text-anchor="middle" fill="${scoreColor}" font-size="30" font-weight="700" font-family="Space Mono,monospace">${score}</text>
-      <text x="70" y="80" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-family="sans-serif">/100</text>
+      <text x="70" y="80" text-anchor="middle" class="an2-axis-lbl" font-size="10" font-family="sans-serif">/100</text>
       <text x="70" y="97" text-anchor="middle" fill="${scoreColor}" font-size="11" font-weight="600" font-family="sans-serif">${scoreLbl}</text>
     </svg>`;
 
