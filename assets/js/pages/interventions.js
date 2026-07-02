@@ -24,6 +24,23 @@
   };
   const FV = firebase.firestore.FieldValue;
 
+  // ── FIRESTORE ERROR HANDLER ──
+  function _fsErr(coll) {
+    return function (err) {
+      const code = err.code || '';
+      const link = (err.message || '').match(/https:\/\/\S+/)?.[0] || '';
+      if (code === 'failed-precondition') {
+        console.warn('────────────────────────\n⚠ Firestore\n\nCollection : ' + coll + '\n\nIndex manquant.\n' + (link ? 'Lien Firebase :\n' + link + '\n' : '') + '────────────────────────');
+      } else if (code === 'permission-denied') {
+        console.warn('[Firestore] ' + coll + ' — permission refusée :', err.message);
+      } else if (code === 'unavailable') {
+        console.warn('[Firestore] ' + coll + ' — service indisponible.');
+      } else {
+        console.error('[Firestore] ' + coll + ' — erreur listener :', err);
+      }
+    };
+  }
+
   // ── METADATA ──
   const STATUS = {
     planifiee: { l: 'Planifiée',  col: '#F59E0B', bg: 'rgba(245,158,11,.13)'  },
@@ -176,14 +193,14 @@
         _sendIntNotifs(_interventions);
         _autoRetard();
         _rerender();
-      });
+      }, _fsErr('interventions'));
 
     _unsubInt.xfr = DB.xfr()
       .where('status', '==', 'pending')
       .onSnapshot(snap => {
         _transfers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         _rerender();
-      });
+      }, _fsErr('int_transfers'));
 
     _users = MX.state.users || [];
   }

@@ -15,6 +15,30 @@
         { "fieldPath": "weekKey",  "order": "ASCENDING" },
         { "fieldPath": "isDefault","order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "triggered_alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dateKey", "order": "ASCENDING" },
+        { "fieldPath": "ts",      "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "bible_comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "articleId",  "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "user_badges",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "badgeId",   "order": "ASCENDING" },
+        { "fieldPath": "userName",  "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

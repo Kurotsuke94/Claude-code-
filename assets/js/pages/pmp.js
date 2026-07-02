@@ -3,6 +3,24 @@
 
   var FV = firebase.firestore.FieldValue;
 
+  // ── FIRESTORE ERROR HANDLER ──
+  function _fsErr(coll) {
+    return function (err) {
+      var code = err.code || '';
+      var link = (err.message || '').match(/https:\/\/\S+/);
+      link = link ? link[0] : '';
+      if (code === 'failed-precondition') {
+        console.warn('────────────────────────\n⚠ Firestore\n\nCollection : ' + coll + '\n\nIndex manquant.\n' + (link ? 'Lien Firebase :\n' + link + '\n' : '') + '────────────────────────');
+      } else if (code === 'permission-denied') {
+        console.warn('[Firestore] ' + coll + ' — permission refusée :', err.message);
+      } else if (code === 'unavailable') {
+        console.warn('[Firestore] ' + coll + ' — service indisponible.');
+      } else {
+        console.error('[Firestore] ' + coll + ' — erreur listener :', err);
+      }
+    };
+  }
+
   var _curTab          = 'dashboard';
   var _pmpEq           = [];
   var _pmpInt          = [];
@@ -129,15 +147,15 @@
     _unsubPmp.eq = PMP_DB.eq().onSnapshot(function (snap) {
       _pmpEq = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
       _rerender();
-    });
+    }, _fsErr('pmp_equipments'));
     _unsubPmp.int = PMP_DB.int().onSnapshot(function (snap) {
       _pmpInt = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
       _rerender();
-    });
+    }, _fsErr('pmp_interventions'));
     _unsubPmp.tpl = PMP_DB.tpl().onSnapshot(function (snap) {
       _pmpTpl = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
       _rerender();
-    });
+    }, _fsErr('pmp_templates'));
 
     setTimeout(_checkAndGenerate, 2500);
   }

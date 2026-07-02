@@ -21,6 +21,23 @@
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
 
+  // ── FIRESTORE ERROR HANDLER ──
+  function _fsErr(coll) {
+    return function (err) {
+      const code = err.code || '';
+      const link = (err.message || '').match(/https:\/\/\S+/)?.[0] || '';
+      if (code === 'failed-precondition') {
+        console.warn('────────────────────────\n⚠ Firestore\n\nCollection : ' + coll + '\n\nIndex manquant.\n' + (link ? 'Lien Firebase :\n' + link + '\n' : '') + '────────────────────────');
+      } else if (code === 'permission-denied') {
+        console.warn('[Firestore] ' + coll + ' — permission refusée :', err.message);
+      } else if (code === 'unavailable') {
+        console.warn('[Firestore] ' + coll + ' — service indisponible.');
+      } else {
+        console.error('[Firestore] ' + coll + ' — erreur listener :', err);
+      }
+    };
+  }
+
   // ── CONSTANTS ──
   const FV = firebase.firestore.FieldValue;
   const CSO = {
@@ -465,21 +482,21 @@
     _unsubCso.meters = CSO.meters().orderBy('name').onSnapshot(snap => {
       _meters = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _rerender();
-    });
+    }, _fsErr('cso_meters'));
     _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(500).onSnapshot(snap => {
       _readings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _rerender();
-    });
+    }, _fsErr('cso_readings'));
     _unsubCso.clients = CSO.clients().orderBy('date', 'desc').limit(90).onSnapshot(snap => {
       _clients = {};
       snap.docs.forEach(d => { _clients[d.id] = d.data().count; });
       _rerender();
-    });
+    }, _fsErr('cso_clients'));
     _unsubCso.alerts = CSO.alerts().orderBy('ts', 'desc').limit(100).onSnapshot(snap => {
       _csoAlerts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _checkCriticalBanner();
       _rerender();
-    });
+    }, _fsErr('cso_energy_alerts'));
   }
 
   // ── RENDER ──

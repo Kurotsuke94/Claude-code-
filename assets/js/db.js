@@ -1,6 +1,28 @@
 (function () {
   const { DAYS, DEFT, mkWeekLabel, uuid } = window.MX;
 
+  // ── FIRESTORE ERROR HANDLER ──
+  function _fsError(coll) {
+    return function (err) {
+      const code = err.code || '';
+      const link = (err.message || '').match(/https:\/\/\S+/)?.[0] || '';
+      if (code === 'failed-precondition') {
+        console.warn(
+          '────────────────────────\n⚠ Firestore\n\n' +
+          'Collection : ' + coll + '\n\nIndex manquant.\n' +
+          (link ? 'Lien Firebase :\n' + link + '\n' : '') +
+          '────────────────────────'
+        );
+      } else if (code === 'permission-denied') {
+        console.warn('[Firestore] ' + coll + ' — permission refusée :', err.message);
+      } else if (code === 'unavailable') {
+        console.warn('[Firestore] ' + coll + ' — service indisponible.');
+      } else {
+        console.error('[Firestore] ' + coll + ' — erreur listener :', err);
+      }
+    };
+  }
+
   // ── FIRESTORE REFS ──
   const R = {
     week:        () => db.collection("config").doc("week"),
@@ -602,7 +624,7 @@
   function listenBibleComments(articleId, cb) {
     return R_BIBLE_CMT().where('articleId', '==', articleId).orderBy('createdAt', 'asc').onSnapshot(snap => {
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, _fsError('bible_comments'));
   }
   async function addBibleComment(data) {
     await R_BIBLE_CMT().add({ ...data, createdAt: FV.serverTimestamp() });
@@ -1037,7 +1059,7 @@
   function listenTriggeredAlerts(dateKey, cb) {
     return R_TRIG().where('dateKey', '==', dateKey).orderBy('ts', 'desc').onSnapshot(snap => {
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, _fsError('triggered_alerts'));
   }
 
   async function createTriggeredAlert(data) {
