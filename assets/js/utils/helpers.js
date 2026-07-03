@@ -237,7 +237,7 @@
     // Object-style call: showModal({ title, sub, body, actions, noAutoClose })
     if (titleOrOpts && typeof titleOrOpts === 'object') {
       const o = titleOrOpts;
-      document.getElementById("m-title").textContent = o.title || '';
+      document.getElementById("m-title").innerHTML = o.title || '';
       document.getElementById("m-sub").innerHTML = o.sub || '';
       if (bodyEl) bodyEl.innerHTML = o.body || '';
       const ac = document.getElementById("m-actions");
@@ -251,6 +251,8 @@
           const b = document.createElement("button");
           b.className = "modal-btn " + (a.cls || "cancel");
           b.innerHTML = a.label;  // innerHTML for icon support
+          if (a.id)       b.id       = a.id;
+          if (a.disabled) b.disabled = true;
           b.onclick = () => { if (!o.noAutoClose) closeModal(); if (a.fn) a.fn(); };
           ac.appendChild(b);
         });

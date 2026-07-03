@@ -5,6 +5,7 @@
   let _curTab        = 'dashboard';
   let _csoSelDate    = ''; // '' = today; set to 'YYYY-MM-DD' when browsing a past date
   let _meters        = [];
+  let _archivedMeters = [];
   let _readings      = [];
   let _clients       = {};
   let _csoAlerts     = [];   // cso_energy_alerts documents
@@ -45,6 +46,7 @@
     readings: () => db.collection('cso_readings'),
     clients:  () => db.collection('cso_clients'),
     alerts:   () => db.collection('cso_energy_alerts'),
+    log:      () => db.collection('cso_activity_log'),
   };
 
   const MT = {
@@ -97,6 +99,23 @@
   function _author() {
     const cu = MX.state.currentUser, ad = MX.state.adminUser;
     return cu ? cu.name : (ad ? (ad.email || 'Admin').split('@')[0] : 'Anonyme');
+  }
+  function _isResp() {
+    if (MX.state.adminUser) return true;
+    return MX.Auth ? MX.Auth.isResponsable() : false;
+  }
+  function _logActivity(action, meterId, meterName, allowed) {
+    try {
+      CSO.log().add({
+        action,
+        meterId:   meterId   || null,
+        meterName: meterName || null,
+        by:        _author(),
+        allowed:   allowed !== false,
+        ts:        FV.serverTimestamp(),
+        date:      _today(),
+      });
+    } catch (e) { /* non-bloquant */ }
   }
   function esc(s) { return MX.esc ? MX.esc(s) : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -609,7 +628,9 @@
     if (_loaded) return;
     _loaded = true;
     _unsubCso.meters = CSO.meters().orderBy('name').onSnapshot(snap => {
-      _meters = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _meters         = all.filter(m => !m.archived);
+      _archivedMeters = all.filter(m =>  m.archived);
       _rerender();
     }, _fsErr('cso_meters'));
     _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(500).onSnapshot(snap => {
@@ -936,6 +957,7 @@
     const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
     const ratio    = cli > 0 && selConso > 0 ? (isW ? selConso * 1000 / cli : selConso / cli) : null;
     const hasRdg   = !!lr;
+    const resp     = _isResp();
     let valLine = '';
     if (lr) {
       valLine = `Index&thinsp;: <b>${_fmtIdx(lr.index)}&thinsp;${esc(unit)}</b>`;
@@ -944,6 +966,11 @@
     } else {
       valLine = `<span class="cso-mrow-empty"><i class="fas fa-circle-minus"></i> Aucun relevé${isToday ? '' : ' ce jour'}</span>`;
     }
+    const respBtns = resp ? `
+        <button class="cso-ibtn green" title="Modifier" onclick="MX.Pages.Conso._meterForm('${m.id}')"><i class="fas fa-pen"></i></button>
+        <span class="cso-mrow-acts-sep"></span>
+        <button class="cso-ibtn amber" title="Archiver" onclick="MX.Pages.Conso._archiveMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-box-archive"></i></button>
+        <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>` : '';
     return `<div class="cso-mrow ${hasRdg ? 'done' : 'pending'}" onclick="MX.Pages.Conso._newReading('${m.id}')">
       <div class="cso-mrow-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
       <div class="cso-mrow-info">
@@ -954,9 +981,9 @@
         <div class="cso-mrow-vals">${valLine}</div>
       </div>
       <div class="cso-mrow-acts" onclick="event.stopPropagation()">
-        <button class="cso-ibtn" title="Historique" onclick="MX.Pages.Conso._meterHistory('${m.id}')"><i class="fas fa-chart-line"></i></button>
-        <button class="cso-ibtn" title="Modifier" onclick="MX.Pages.Conso._meterForm('${m.id}')"><i class="fas fa-pen"></i></button>
-        <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>
+        <button class="cso-ibtn blue" title="Relevé" onclick="MX.Pages.Conso._newReading('${m.id}')"><i class="fas fa-camera"></i></button>
+        <button class="cso-ibtn orange" title="Historique" onclick="MX.Pages.Conso._meterHistory('${m.id}')"><i class="fas fa-chart-line"></i></button>
+        ${respBtns}
       </div>
     </div>`;
   }
@@ -993,7 +1020,7 @@
         <div class="cso-empty-ico"><i class="fas fa-gauge-high"></i></div>
         <div class="cso-empty-ttl">Aucun compteur configuré</div>
         <div class="cso-empty-sub">Ajoutez votre premier compteur pour commencer.</div>
-        <button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Ajouter un compteur</button>
+        ${_isResp() ? `<button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Ajouter un compteur</button>` : ''}
       </div>`;
     } else {
       // ── Barre de recherche ──
@@ -1062,8 +1089,42 @@
           <div class="cso-empty-ttl">Aucun résultat</div>
           <div class="cso-empty-sub">Modifiez le filtre ou la recherche.</div></div>`;
       }
-      html += `<button class="cso-add-meter-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>`;
+      if (_isResp()) {
+        html += `<button class="cso-add-meter-btn" onclick="MX.Pages.Conso._meterForm(null)"><i class="fas fa-plus"></i> Nouveau compteur</button>`;
+      }
     }
+
+    // ── Compteurs archivés (Responsable uniquement) ──
+    if (_isResp() && _archivedMeters.length) {
+      const isOpen = window._csoArchOpen === true;
+      html += `<div class="cso-arch-section">
+        <div class="cso-arch-hdr" onclick="window._csoArchOpen=!window._csoArchOpen;MX.Pages.Conso._rerender()">
+          <span class="cso-arch-chev">${isOpen ? '▼' : '▶'}</span>
+          <i class="fas fa-box-archive"></i> Compteurs archivés
+          <span class="cso-arch-badge">${_archivedMeters.length}</span>
+        </div>`;
+      if (isOpen) {
+        html += `<div class="cso-arch-list">`;
+        _archivedMeters.forEach(m => {
+          const meta = MT[m.type] || MT.eau_froide;
+          const rdgCount = _readings.filter(r => r.meterId === m.id).length;
+          html += `<div class="cso-arch-row">
+            <div class="cso-arch-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
+            <div class="cso-arch-info">
+              <div class="cso-arch-name">${esc(m.name)}</div>
+              <div class="cso-arch-meta">${esc(meta.label)}${m.location ? ' · ' + esc(m.location) : ''} · ${rdgCount} relevé${rdgCount !== 1 ? 's' : ''}</div>
+            </div>
+            <div class="cso-arch-acts">
+              <button class="cso-ibtn green" title="Restaurer" onclick="MX.Pages.Conso._restoreMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-rotate-left"></i> Restaurer</button>
+              <button class="cso-ibtn red" title="Supprimer définitivement" onclick="MX.Pages.Conso._delMeterPermanent('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>`;
+        });
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
     return html + '</div>';
   }
 
@@ -1952,6 +2013,7 @@
 
   // ── ACTIONS: METER FORM ──
   function _meterForm(id) {
+    if (!_isResp()) { MX.toast('Action réservée au responsable', true); return; }
     const m    = id ? _meters.find(x => x.id === id) : null;
     const opts = Object.entries(MT).map(([k, v]) => `<option value="${k}"${m?.type===k?' selected':''}>${v.icon} ${v.label}</option>`).join('');
     MX.showModal({
@@ -1981,17 +2043,163 @@
   }
 
   function _delMeter(id, name) {
-    MX.showModal('Supprimer le compteur', `Supprimer "${name}" et tous ses relevés ?`, [
-      { label: 'Supprimer', cls: 'danger', fn: async () => {
-        const snap = await CSO.readings().where('meterId', '==', id).get();
-        const b = db.batch();
-        snap.docs.forEach(d => b.delete(d.ref));
-        b.delete(CSO.meters().doc(id));
-        await b.commit();
-        MX.toast('Compteur supprimé');
+    // ── Role guard ──
+    if (!_isResp()) {
+      _logActivity('delete_refused', id, name, false);
+      MX.showModal({
+        title: '<i class="fas fa-lock" style="color:#EF4444"></i> Accès refusé',
+        body: `<div style="text-align:center;padding:12px 0">
+          <div style="font-size:40px;margin-bottom:12px">🔒</div>
+          <p style="color:var(--text);font-weight:600;margin-bottom:6px">Action réservée au Responsable</p>
+          <p style="color:var(--text3);font-size:13px">Seul un responsable peut supprimer un compteur.<br>Votre tentative a été enregistrée dans le journal.</p>
+        </div>`,
+        actions: [{ label: 'Compris', cls: 'cancel' }],
+      });
+      return;
+    }
+
+    // ── Protection : compteur avec données ──
+    const rdgCount   = _readings.filter(r => r.meterId === id).length;
+    const alertCount = _csoAlerts.filter(a => a.meterId === id || _meters.find(m => m.id === id && a.metric === m.type)).length;
+    const hasData    = rdgCount > 0;
+
+    if (hasData) {
+      MX.showModal({
+        title: '<i class="fas fa-shield-halved" style="color:#F59E0B"></i> Suppression impossible',
+        body: `<div style="padding:4px 0">
+          <p style="color:var(--text);font-weight:600;margin-bottom:10px">Ce compteur contient des données historiques.</p>
+          <p style="color:var(--text3);font-size:13px;margin-bottom:14px">Pour préserver l'intégrité des analyses, il ne peut pas être supprimé.</p>
+          <div class="cso-del-data-list">
+            ${rdgCount ? `<div class="cso-del-data-row"><i class="fas fa-check" style="color:#22C55E"></i> ${rdgCount} relevé${rdgCount>1?'s':''} enregistré${rdgCount>1?'s':''}</div>` : ''}
+            ${alertCount ? `<div class="cso-del-data-row"><i class="fas fa-check" style="color:#22C55E"></i> Alertes associées</div>` : ''}
+          </div>
+          <div class="cso-del-arch-tip"><i class="fas fa-box-archive"></i> Vous pouvez uniquement l'<strong>archiver</strong> pour le masquer tout en conservant l'historique.</div>
+        </div>`,
+        actions: [
+          { label: '<i class="fas fa-box-archive"></i> Archiver', cls: 'confirm', fn: () => _archiveMeter(id, name) },
+          { label: 'Annuler', cls: 'cancel' },
+        ],
+      });
+      return;
+    }
+
+    // ── Confirmation multi-étapes ──
+    _delMeterConfirm(id, name);
+  }
+
+  function _delMeterConfirm(id, name) {
+    const inputId = 'cso-del-confirm-inp';
+    const btnId   = 'cso-del-confirm-btn';
+    MX.showModal({
+      title: '<i class="fas fa-triangle-exclamation" style="color:#EF4444"></i> Supprimer ce compteur ?',
+      body: `<div class="cso-del-modal-body">
+        <div class="cso-del-warn-box">
+          <div class="cso-del-meter-name"><i class="fas fa-gauge-high"></i> ${esc(name)}</div>
+          <p style="color:var(--text3);font-size:13px;margin:10px 0 4px">Cette action supprimera définitivement :</p>
+          <ul class="cso-del-list">
+            <li>tous les relevés associés</li>
+            <li>l'historique complet</li>
+            <li>les graphiques</li>
+            <li>les ratios calculés</li>
+            <li>les alertes liées</li>
+          </ul>
+          <div class="cso-del-irreversible"><i class="fas fa-exclamation-circle"></i> Cette action est irréversible.</div>
+        </div>
+        <div class="cso-del-confirm-wrap">
+          <label class="cso-del-confirm-lbl">Pour confirmer, saisissez le nom du compteur :</label>
+          <div class="cso-del-confirm-hint">${esc(name)}</div>
+          <input id="${inputId}" class="cso-del-confirm-inp" type="text" placeholder="${esc(name)}" autocomplete="off"
+            oninput="(function(v){var b=document.getElementById('${btnId}');if(b)b.disabled=v.trim()!==decodeURIComponent('${encodeURIComponent(name)}')})(this.value)">
+        </div>
+      </div>`,
+      actions: [
+        { label: '<i class="fas fa-trash"></i> Supprimer définitivement', cls: 'danger', id: btnId, disabled: true, fn: async () => {
+          const inp = document.getElementById(inputId);
+          if (!inp || inp.value.trim() !== name) { MX.toast('Nom incorrect', true); return; }
+          if (!_isResp()) { MX.toast('Accès refusé', true); return; }
+          const snap = await CSO.readings().where('meterId', '==', id).get();
+          const b = db.batch();
+          snap.docs.forEach(d => b.delete(d.ref));
+          b.delete(CSO.meters().doc(id));
+          await b.commit();
+          _logActivity('delete', id, name, true);
+          MX.toast('Compteur supprimé');
+        }},
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+  }
+
+  function _archiveMeter(id, name) {
+    if (!_isResp()) { MX.toast('Accès refusé', true); return; }
+    MX.showModal('Archiver ce compteur', `<div style="color:var(--text3);font-size:13px">
+      <p style="margin-bottom:10px">Le compteur <strong style="color:var(--text)">${esc(name)}</strong> sera masqué de la liste active.</p>
+      <ul class="cso-del-list">
+        <li>L'historique et les relevés sont conservés</li>
+        <li>Les ratios et graphiques restent accessibles</li>
+        <li>Vous pourrez le restaurer à tout moment</li>
+      </ul>
+    </div>`, [
+      { label: '<i class="fas fa-box-archive"></i> Archiver', cls: 'confirm', fn: async () => {
+        await CSO.meters().doc(id).update({ archived: true, archivedAt: FV.serverTimestamp(), archivedBy: _author() });
+        _logActivity('archive', id, name, true);
+        MX.toast('Compteur archivé');
       }},
-      { label: 'Annuler', cls: 'cancel' }
+      { label: 'Annuler', cls: 'cancel' },
     ]);
+  }
+
+  function _restoreMeter(id, name) {
+    if (!_isResp()) { MX.toast('Accès refusé', true); return; }
+    MX.showModal('Restaurer ce compteur', `Remettre <strong>${esc(name)}</strong> dans la liste active ?`, [
+      { label: '<i class="fas fa-rotate-left"></i> Restaurer', cls: 'confirm', fn: async () => {
+        await CSO.meters().doc(id).update({ archived: false, archivedAt: FV.delete(), archivedBy: FV.delete() });
+        _logActivity('restore', id, name, true);
+        MX.toast('Compteur restauré');
+      }},
+      { label: 'Annuler', cls: 'cancel' },
+    ]);
+  }
+
+  function _delMeterPermanent(id, name) {
+    if (!_isResp()) { MX.toast('Accès refusé', true); return; }
+    const inputId = 'cso-delp-inp';
+    const btnId   = 'cso-delp-btn';
+    MX.showModal({
+      title: '<i class="fas fa-skull-crossbones" style="color:#EF4444"></i> Suppression définitive',
+      body: `<div class="cso-del-modal-body">
+        <div class="cso-del-warn-box">
+          <div class="cso-del-meter-name"><i class="fas fa-box-archive"></i> ${esc(name)}</div>
+          <p style="color:var(--text3);font-size:13px;margin:10px 0 4px">Suppression définitive de l'archive et de toutes ses données :</p>
+          <ul class="cso-del-list">
+            <li>Tous les relevés archivés</li>
+            <li>L'historique complet</li>
+          </ul>
+          <div class="cso-del-irreversible"><i class="fas fa-exclamation-circle"></i> Cette action est irréversible.</div>
+        </div>
+        <div class="cso-del-confirm-wrap">
+          <label class="cso-del-confirm-lbl">Saisissez le nom pour confirmer :</label>
+          <div class="cso-del-confirm-hint">${esc(name)}</div>
+          <input id="${inputId}" class="cso-del-confirm-inp" type="text" placeholder="${esc(name)}" autocomplete="off"
+            oninput="(function(v){var b=document.getElementById('${btnId}');if(b)b.disabled=v.trim()!==decodeURIComponent('${encodeURIComponent(name)}')})(this.value)">
+        </div>
+      </div>`,
+      actions: [
+        { label: '<i class="fas fa-skull-crossbones"></i> Supprimer définitivement', cls: 'danger', id: btnId, disabled: true, fn: async () => {
+          const inp = document.getElementById(inputId);
+          if (!inp || inp.value.trim() !== name) { MX.toast('Nom incorrect', true); return; }
+          if (!_isResp()) { MX.toast('Accès refusé', true); return; }
+          const snap = await CSO.readings().where('meterId', '==', id).get();
+          const b = db.batch();
+          snap.docs.forEach(d => b.delete(d.ref));
+          b.delete(CSO.meters().doc(id));
+          await b.commit();
+          _logActivity('delete_permanent', id, name, true);
+          MX.toast('Compteur supprimé définitivement');
+        }},
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
   }
 
   function _delReading(id) {
@@ -2227,5 +2435,6 @@
     _csoSetSearch, _csoSetFilter, _toggleZone, _releverZone,
     _resolveAlert, _createIntFromAlert, _critDismiss, _supView,
     _salCreateInt, _salSave,
+    _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
   };
 })();

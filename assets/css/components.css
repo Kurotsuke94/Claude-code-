@@ -4897,10 +4897,24 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg4); color: var(--text2); font-size: 12px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap; gap: 5px;
 }
-.cso-ibtn:hover     { background: var(--bg5, var(--bg4)); color: var(--text1); }
-.cso-ibtn.red:hover { background: rgba(239,68,68,0.15); color: #f87171; border-color: rgba(239,68,68,0.3); }
+.cso-ibtn:hover        { background: var(--bg5, var(--bg4)); color: var(--text1); }
+.cso-ibtn.red          { color: #f87171; }
+.cso-ibtn.red:hover    { background: rgba(239,68,68,0.15); color: #f87171; border-color: rgba(239,68,68,0.3); }
+.cso-ibtn.green        { color: #22C55E; }
+.cso-ibtn.green:hover  { background: rgba(34,197,94,0.12); color: #22C55E; border-color: rgba(34,197,94,0.3); }
+.cso-ibtn.blue         { color: #3B82F6; }
+.cso-ibtn.blue:hover   { background: rgba(59,130,246,0.12); color: #3B82F6; border-color: rgba(59,130,246,0.3); }
+.cso-ibtn.orange       { color: #F59E0B; }
+.cso-ibtn.orange:hover { background: rgba(245,158,11,0.12); color: #F59E0B; border-color: rgba(245,158,11,0.3); }
+.cso-ibtn.amber        { color: #6B7280; }
+.cso-ibtn.amber:hover  { background: rgba(107,114,128,0.12); color: #6B7280; border-color: rgba(107,114,128,0.3); }
+
+/* ── Row action separator ── */
+.cso-mrow-acts-sep {
+  width: 1px; height: 18px; background: var(--border); flex-shrink: 0; margin: 0 2px;
+}
 
 /* ── Ratios tab extras ── */
 .cso-sec-ttl {
@@ -11330,3 +11344,127 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .pmdb-filter-sel { flex: 1; }
   .pmdb-pg-info { display: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CSO SECURITY — archived section + delete modal
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Archived section ── */
+.cso-arch-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.cso-arch-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  background: var(--bg3);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  user-select: none;
+  transition: background .13s;
+}
+.cso-arch-hdr:hover { background: var(--bg4); }
+.cso-arch-chev { font-size: 10px; color: var(--text3); }
+.cso-arch-badge {
+  margin-left: auto;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  color: var(--text3);
+}
+.cso-arch-list { padding: 4px 0; }
+.cso-arch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  transition: background .12s;
+}
+.cso-arch-row:hover { background: var(--bg3); }
+.cso-arch-ico {
+  width: 32px; height: 32px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0;
+}
+.cso-arch-info { flex: 1; min-width: 0; }
+.cso-arch-name {
+  font-size: 13px; font-weight: 600; color: var(--text1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cso-arch-meta { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.cso-arch-acts { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.cso-arch-acts .cso-ibtn { width: auto; padding: 0 10px; font-size: 11.5px; }
+
+/* ── Delete confirmation modal ── */
+.cso-del-modal-body { display: flex; flex-direction: column; gap: 14px; }
+.cso-del-warn-box {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 10px;
+  padding: 14px;
+}
+.cso-del-meter-name {
+  font-size: 14px; font-weight: 700; color: var(--text1);
+  display: flex; align-items: center; gap: 7px; margin-bottom: 6px;
+}
+.cso-del-list {
+  margin: 6px 0 10px 18px; padding: 0;
+  color: var(--text2); font-size: 12.5px; line-height: 1.8;
+}
+.cso-del-irreversible {
+  display: flex; align-items: center; gap: 6px;
+  color: #EF4444; font-size: 12px; font-weight: 600; margin-top: 8px;
+}
+.cso-del-confirm-wrap {
+  background: var(--bg3);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cso-del-confirm-lbl {
+  font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 6px;
+}
+.cso-del-confirm-hint {
+  font-size: 12px; font-family: monospace; color: #EF4444; font-weight: 700;
+  background: rgba(239,68,68,0.08); padding: 4px 8px; border-radius: 6px;
+  margin-bottom: 8px; display: inline-block;
+}
+.cso-del-confirm-inp {
+  width: 100%; height: 36px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg2);
+  padding: 0 10px; font-size: 13px; color: var(--text1); outline: none;
+  box-sizing: border-box; transition: border-color .15s;
+}
+.cso-del-confirm-inp:focus { border-color: #EF4444; }
+.modal-btn.danger:disabled,
+.modal-btn.danger[disabled] {
+  opacity: .35; cursor: not-allowed; pointer-events: none;
+}
+
+/* ── Data-block modal ── */
+.cso-del-data-list {
+  margin: 6px 0 10px; display: flex; flex-direction: column; gap: 4px;
+}
+.cso-del-data-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text2);
+}
+.cso-del-arch-tip {
+  background: rgba(91,61,245,0.07);
+  border: 1px solid rgba(91,61,245,0.2);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--text2);
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 8px;
+}
+.cso-del-arch-tip .fas { color: #5B3DF5; }
