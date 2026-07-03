@@ -9977,8 +9977,8 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .an2-sum-item { display:flex; align-items:flex-start; gap:5px; background:var(--bg3); border:1px solid var(--border); border-radius:5px; padding:5px 8px; font-size:10.5px; border-left-width:2px; border-left-style:solid; }
 .an2-sum-txt { color:var(--text2); line-height:1.4; }
 
-/* Main row */
-.an2-main-row { display:grid; grid-template-columns:1fr 240px; gap:7px; padding:0 10px; }
+/* Main row: chart (≈70%) + right column (≈30%) */
+.an2-main-row { display:grid; grid-template-columns:1fr 300px; gap:7px; padding:0 10px; }
 .an2-chart-panel { background:var(--bg3); border:1px solid var(--border); border-radius:7px; display:flex; flex-direction:column; gap:0; overflow:hidden; box-shadow:var(--shadow-card); }
 .an2-chart-hdr { display:flex; align-items:center; gap:6px; padding:7px 10px 5px; flex-wrap:wrap; border-bottom:1px solid var(--border); }
 .an2-chart-ttl { font-size:11.5px; font-weight:600; color:var(--text1); white-space:nowrap; }
@@ -10008,7 +10008,64 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .an2-chart-stats b { color:var(--text2); }
 .an2-stats-sub { margin-left:auto; font-size:9.5px; }
 
-/* Side panel */
+/* Right column (replaces side panel) */
+.an2-right-col { display:flex; flex-direction:column; gap:6px; overflow-y:auto; max-height:none; }
+.an2-rc-card { background:var(--bg3); border:1px solid var(--border); border-radius:7px; overflow:hidden; box-shadow:var(--shadow-card); flex-shrink:0; }
+.an2-rc-hdr { display:flex; align-items:center; justify-content:space-between; gap:5px; padding:6px 9px; font-size:10.5px; font-weight:600; color:var(--text1); border-bottom:1px solid var(--border); }
+.an2-rc-hdr i { font-size:10px; color:var(--text3); }
+.an2-rc-empty { padding:10px 9px; font-size:10px; color:var(--text3); text-align:center; display:flex; align-items:center; justify-content:center; gap:5px; }
+
+/* Score card */
+.an2-rc-score-row { display:flex; align-items:center; gap:8px; padding:8px 9px; }
+.an2-rc-score-num { font-size:26px; font-weight:700; font-family:var(--ffm); line-height:1; flex-shrink:0; }
+.an2-rc-score-max { font-size:11px; font-weight:400; color:var(--text3); }
+.an2-rc-score-right { flex:1; display:flex; flex-direction:column; gap:3px; }
+.an2-rc-score-bar-wrap { height:6px; background:var(--border); border-radius:4px; overflow:hidden; }
+.an2-rc-score-bar { height:100%; border-radius:4px; transition:width .5s; }
+.an2-rc-score-lbl { font-size:10px; color:var(--text3); }
+
+/* Alerts (reuse existing an2-ap-* classes) */
+.an2-rc-alerts { max-height:130px; overflow-y:auto; }
+
+/* Today evolution bars */
+.an2-rc-evo-list { display:flex; flex-direction:column; gap:4px; padding:6px 9px; }
+.an2-rc-evo-row { display:flex; align-items:center; gap:6px; }
+.an2-rc-evo-ico { font-size:12px; flex-shrink:0; width:16px; text-align:center; }
+.an2-rc-evo-track { flex:1; height:5px; background:var(--border); border-radius:3px; overflow:hidden; }
+.an2-rc-evo-fill { height:100%; border-radius:3px; transition:width .4s; }
+.an2-rc-evo-val { font-size:9.5px; font-family:var(--ffm); font-weight:600; width:65px; text-align:right; flex-shrink:0; }
+
+/* Top 5 meters */
+.an2-rc-top5 { display:flex; flex-direction:column; gap:4px; padding:6px 9px; }
+.an2-rc-top-row { display:flex; align-items:center; gap:5px; }
+.an2-rc-rank { font-size:9.5px; font-weight:700; color:var(--text3); width:12px; flex-shrink:0; }
+.an2-rc-top-body { flex:1; display:flex; flex-direction:column; gap:2px; min-width:0; }
+.an2-rc-top-nm { font-size:9.5px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.an2-rc-top-bar-wrap { height:4px; background:var(--border); border-radius:3px; overflow:hidden; }
+.an2-rc-top-bar { height:100%; border-radius:3px; transition:width .4s; }
+.an2-rc-top-v { font-size:9px; font-family:var(--ffm); color:var(--text3); width:52px; text-align:right; flex-shrink:0; }
+
+/* Anomaly meters */
+.an2-rc-anom-list { display:flex; flex-direction:column; gap:1px; }
+.an2-rc-anom-row { display:flex; align-items:center; gap:6px; padding:5px 9px; border-bottom:1px solid var(--border); }
+.an2-rc-anom-row:last-child { border-bottom:none; }
+.an2-rc-anom-ico { font-size:12px; flex-shrink:0; }
+.an2-rc-anom-body { flex:1; min-width:0; }
+.an2-rc-anom-nm { font-size:10px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.an2-rc-anom-sub { font-size:9px; color:var(--text3); }
+.an2-rc-anom-ecart { font-size:10.5px; font-weight:700; font-family:var(--ffm); flex-shrink:0; }
+
+/* Recent readings */
+.an2-rc-rel-list { display:flex; flex-direction:column; gap:1px; }
+.an2-rc-rel-row { display:flex; align-items:center; gap:6px; padding:5px 9px; border-bottom:1px solid var(--border); }
+.an2-rc-rel-row:last-child { border-bottom:none; }
+.an2-rc-rel-ico { font-size:13px; flex-shrink:0; width:16px; text-align:center; }
+.an2-rc-rel-body { flex:1; min-width:0; }
+.an2-rc-rel-nm { font-size:10px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.an2-rc-rel-meta { font-size:9px; color:var(--text3); }
+.an2-rc-rel-v { font-size:9.5px; font-family:var(--ffm); color:var(--text2); flex-shrink:0; text-align:right; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Side panel (kept for backward compat) */
 .an2-side-panel { background:var(--bg3); border:1px solid var(--border); border-radius:7px; display:flex; flex-direction:column; overflow:hidden; box-shadow:var(--shadow-card); }
 .an2-ap-hdr { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; font-size:11px; font-weight:600; color:var(--text1); border-bottom:1px solid var(--border); }
 .an2-ap-link { font-size:10px; font-weight:400; color:var(--accent-cso); cursor:pointer; text-decoration:none; }
@@ -10085,11 +10142,13 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 @media (max-width: 1200px) {
   .an2-kpi-row { grid-template-columns:repeat(2,1fr) 156px; }
   .an2-summary-bar { grid-template-columns:repeat(2,1fr); }
-  .an2-main-row { grid-template-columns:1fr 210px; }
+  .an2-main-row { grid-template-columns:1fr 260px; }
   .an2-row3 { grid-template-columns:repeat(3,1fr); }
 }
 @media (max-width: 900px) {
   .an2-main-row { grid-template-columns:1fr; }
+  .an2-right-col { flex-direction:row; flex-wrap:wrap; }
+  .an2-rc-card { min-width:240px; flex:1; }
   .an2-side-panel { max-height:180px; }
   .an2-row3 { grid-template-columns:1fr 1fr; }
   .an2-row4 { grid-template-columns:1fr; }

@@ -1411,6 +1411,87 @@
       </div>`;
     }).join('');
 
+    // ── Right column cards ──
+    const scoreLblCompact = score>=95?'Excellent':score>=85?'Très bon':score>=70?'Bon':score>=50?'Moyen':'Critique';
+
+    // Top 5 meters by period consumption
+    const _rcTop5Raw = _meters.map(m => {
+      const total = dates.reduce((s,ds) =>
+        s + _readings.filter(r=>r.meterId===m.id&&r.date===ds).reduce((a,r)=>a+(r.consumption||0),0), 0);
+      return {name:m.name||m.id, type:m.type, total, unit:m.unit||((MT[m.type]||{}).unit||'')};
+    }).filter(m=>m.total>0).sort((a,b)=>b.total-a.total).slice(0,5);
+    const _rcTop5Max = _rcTop5Raw.length ? _rcTop5Raw[0].total : 1;
+    const rcTop5Html = _rcTop5Raw.length ? _rcTop5Raw.map((m,i) => {
+      const mt = MT[m.type]||{};
+      const pct = (m.total/_rcTop5Max*100).toFixed(1);
+      return `<div class="an2-rc-top-row">
+        <span class="an2-rc-rank">${i+1}</span>
+        <div class="an2-rc-top-body">
+          <div class="an2-rc-top-nm">${mt.icon||''} ${esc(m.name)}</div>
+          <div class="an2-rc-top-bar-wrap"><div class="an2-rc-top-bar" style="width:${pct}%;background:${mt.color||'var(--accent)'}"></div></div>
+        </div>
+        <span class="an2-rc-top-v">${_fmt(m.total,m.total>=100?0:1)} ${esc(m.unit)}</span>
+      </div>`;
+    }).join('') : '<div class="an2-rc-empty">Aucune donnée</div>';
+
+    // Meters in anomaly today vs 30-day average
+    const _rcAnomRaw = _meters.map(m => {
+      const todayV = _readings.filter(r=>r.meterId===m.id&&r.date===today).reduce((s,r)=>s+(r.consumption||0),0);
+      const a30 = Array.from({length:30},(_,i)=>_daysAgo(30-1-i))
+        .map(ds=>_readings.filter(r=>r.meterId===m.id&&r.date===ds).reduce((s,r)=>s+(r.consumption||0),0))
+        .filter(v=>v>0);
+      const avg30 = a30.length ? a30.reduce((a,b)=>a+b,0)/a30.length : 0;
+      const ecart = avg30>0 ? (todayV-avg30)/avg30*100 : null;
+      return {name:m.name||m.id, type:m.type, todayV, ecart, unit:m.unit||((MT[m.type]||{}).unit||'')};
+    }).filter(m=>m.ecart!==null&&Math.abs(m.ecart)>20&&m.todayV>0)
+      .sort((a,b)=>Math.abs(b.ecart)-Math.abs(a.ecart)).slice(0,5);
+    const rcAnomHtml = _rcAnomRaw.length ? _rcAnomRaw.map(m => {
+      const mt = MT[m.type]||{};
+      const col = m.ecart>50?'#f87171':m.ecart>20?'#f59e0b':'#34d399';
+      return `<div class="an2-rc-anom-row">
+        <span class="an2-rc-anom-ico">${mt.icon||'⚠️'}</span>
+        <div class="an2-rc-anom-body">
+          <div class="an2-rc-anom-nm">${esc(m.name)}</div>
+          <div class="an2-rc-anom-sub">${_fmt(m.todayV,1)} ${esc(m.unit)}</div>
+        </div>
+        <span class="an2-rc-anom-ecart" style="color:${col}">${m.ecart>0?'+':''}${_fmt(m.ecart,0)}%</span>
+      </div>`;
+    }).join('') : '<div class="an2-rc-empty"><i class="fas fa-check-circle" style="color:#34d399"></i> Aucune anomalie</div>';
+
+    // Last 6 readings sorted by createdAt
+    const _rcRecentRaw = [..._readings].sort((a,b) => {
+      const ta = a.createdAt&&a.createdAt.toMillis ? a.createdAt.toMillis() : _tsMs(a.createdAt);
+      const tb = b.createdAt&&b.createdAt.toMillis ? b.createdAt.toMillis() : _tsMs(b.createdAt);
+      return tb-ta;
+    }).slice(0,6);
+    const rcRecentHtml = _rcRecentRaw.length ? _rcRecentRaw.map(r => {
+      const m = _meters.find(me=>me.id===r.meterId);
+      const mt = MT[m?.type||'']||{};
+      const unit = m?.unit||mt.unit||'';
+      const d = _tsDate(r.createdAt);
+      const tStr = d ? d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+      const dStr = d ? d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) : (r.date||'');
+      return `<div class="an2-rc-rel-row">
+        <span class="an2-rc-rel-ico" style="color:${mt.color||'var(--text3)'}">${mt.icon||'📊'}</span>
+        <div class="an2-rc-rel-body">
+          <div class="an2-rc-rel-nm">${esc(m?.name||r.meterName||'—')}</div>
+          <div class="an2-rc-rel-meta">${dStr} ${tStr}</div>
+        </div>
+        <span class="an2-rc-rel-v">${r.index!=null?_fmtIdx(r.index):'—'} ${esc(unit)}</span>
+      </div>`;
+    }).join('') : '<div class="an2-rc-empty">Aucun relevé</div>';
+
+    // Today evolution per type (compact progress bars)
+    const rcEvoHtml = Object.entries(typeData).filter(([,d])=>d.avg30Val>0||d.todayVal>0).map(([,d]) => {
+      const pct = d.avg30Val>0 ? Math.min(130,d.todayVal/d.avg30Val*100).toFixed(0) : (d.todayVal>0?50:0);
+      const col = d.avg30Val<=0?'#64748b':d.todayVal>d.avg30Val*1.1?'#f87171':d.todayVal<d.avg30Val*0.9?'#34d399':'#64748b';
+      return `<div class="an2-rc-evo-row">
+        <span class="an2-rc-evo-ico">${d.meta.icon}</span>
+        <div class="an2-rc-evo-track"><div class="an2-rc-evo-fill" style="width:${Math.min(100,pct)}%;background:${d.meta.color}"></div></div>
+        <span class="an2-rc-evo-val" style="color:${col}">${_fmt(d.todayVal,d.todayVal>=100?0:1)} ${esc(d.unit)}</span>
+      </div>`;
+    }).join('') || '<div class="an2-rc-empty">Pas de données</div>';
+
     return `<div class="cso-inner an2-page">
       <!-- Toolbar -->
       <div class="an2-toolbar">
@@ -1431,7 +1512,7 @@
       <!-- Summary bar -->
       <div class="an2-summary-bar">${summaryHtml}</div>
 
-      <!-- Main row: chart + alerts side panel -->
+      <!-- Main row: chart (70%) + right column dashboard (30%) -->
       <div class="an2-main-row">
         <div class="an2-chart-panel">
           <div class="an2-chart-hdr">
@@ -1457,13 +1538,41 @@
           </div>
         </div>
 
-        <!-- Alerts sidebar -->
-        <div class="an2-side-panel">
-          <div class="an2-ap-hdr">
-            <span><i class="fas fa-triangle-exclamation"></i> Alertes en cours${allAlerts.length?` (${allAlerts.length})`:''}</span>
-            <a class="an2-ap-link" onclick="MX.Pages.Conso._tab('alertes')">Voir toutes</a>
+        <!-- Right column: 6 compact dashboard cards -->
+        <div class="an2-right-col">
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr"><i class="fas fa-star"></i> Score énergétique</div>
+            <div class="an2-rc-score-row">
+              <div class="an2-rc-score-num" style="color:${gradeColor}">${score}<span class="an2-rc-score-max">/100</span></div>
+              <div class="an2-rc-score-right">
+                <div class="an2-rc-score-bar-wrap"><div class="an2-rc-score-bar" style="width:${score}%;background:${gradeColor}"></div></div>
+                <div class="an2-rc-score-lbl">${scoreLblCompact} · <b style="font-size:13px;color:${gradeColor}">${grade}</b></div>
+              </div>
+            </div>
           </div>
-          <div class="an2-ap-list">${alertPanelHtml}</div>
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr">
+              <span><i class="fas fa-triangle-exclamation"></i> Alertes${allAlerts.length?` (${allAlerts.length})`:''}</span>
+              <a class="an2-ap-link" onclick="MX.Pages.Conso._tab('alertes')">Tout voir</a>
+            </div>
+            <div class="an2-rc-alerts">${alertPanelHtml}</div>
+          </div>
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr"><i class="fas fa-chart-bar"></i> Évolution aujourd'hui</div>
+            <div class="an2-rc-evo-list">${rcEvoHtml}</div>
+          </div>
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr"><i class="fas fa-ranking-star"></i> Top 5 compteurs (${per}J)</div>
+            <div class="an2-rc-top5">${rcTop5Html}</div>
+          </div>
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr"><i class="fas fa-circle-exclamation"></i> Compteurs en anomalie</div>
+            <div class="an2-rc-anom-list">${rcAnomHtml}</div>
+          </div>
+          <div class="an2-rc-card">
+            <div class="an2-rc-hdr"><i class="fas fa-clock-rotate-left"></i> Derniers relevés</div>
+            <div class="an2-rc-rel-list">${rcRecentHtml}</div>
+          </div>
         </div>
       </div>
 
