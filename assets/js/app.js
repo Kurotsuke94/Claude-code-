@@ -515,6 +515,14 @@
     const _hasNewVer = localStorage.getItem('mx_last_ver') !== _APP_VER;
 
     el.innerHTML = `
+      <div class="dh-search-wrap" onclick="document.getElementById('dh-search-inp') && document.getElementById('dh-search-inp').focus()" title="Rechercher une page">
+        <i class="fas fa-search dh-search-ico"></i>
+        <input id="dh-search-inp" class="dh-search-input" type="text" placeholder="Rechercher…" autocomplete="off"
+          oninput="MX._dhSearch && MX._dhSearch(this.value)"
+          onblur="setTimeout(function(){var d=document.getElementById('dh-search-drop');if(d)d.style.display='none'},180)"
+          onfocus="MX._dhSearch && MX._dhSearch(this.value)">
+      </div>
+      <div class="dh-spacer"></div>
       <div class="dh-week" id="dh-week-label">
         <i class="fas fa-calendar-week" style="font-size:10px"></i>
         ${MX.esc(state.weekLabel || MX.mkWeekLabel())}
@@ -522,7 +530,7 @@
       <div class="dh-spacer"></div>
       ${_hasNewVer ? `<button class="dh-btn dh-ver-btn" id="dh-ver-badge" onclick="MX.Updates.showModal()" title="Nouvelle version disponible">
         <i class="fas fa-rocket"></i>
-        <span class="nav-badge show" style="background:var(--cyan);color:#0C0C0E;font-size:9px;font-weight:800">NEW</span>
+        <span class="nav-badge show" style="background:var(--cyan);color:#fff;font-size:9px;font-weight:800">NEW</span>
       </button>` : ''}
       <button class="dh-btn" id="notif-bell-btn" onclick="MX.Notifs.toggleDrop()" title="Notifications">
         <i class="fas fa-bell"></i>
@@ -2083,6 +2091,50 @@
   window.MX.closeFabMenu       = closeFabMenu;
   window.MX.openPilotageMenu   = openPilotageMenu;
   window.MX.closePilotageMenu  = closePilotageMenu;
+
+  // ── DESK HEADER SEARCH ──
+  (function() {
+    const _NAV_LABELS = [
+      { id: 'home',          label: 'Tableau de bord', icon: 'fa-house' },
+      { id: 'checklist',     label: 'Missions',         icon: 'fa-list-check' },
+      { id: 'planning',      label: 'Planning',         icon: 'fa-calendar' },
+      { id: 'pmp',           label: 'Maintenance PMP',  icon: 'fa-screwdriver-wrench' },
+      { id: 'counters',      label: 'Compteurs',        icon: 'fa-gauge' },
+      { id: 'interventions', label: 'Interventions',    icon: 'fa-bolt' },
+      { id: 'resources',     label: 'Ressources',       icon: 'fa-book' },
+      { id: 'documents',     label: 'Documents',        icon: 'fa-book' },
+      { id: 'msgs',          label: 'Messages',         icon: 'fa-comments' },
+      { id: 'badges',        label: 'Badges',           icon: 'fa-trophy' },
+      { id: 'admin',         label: 'Administration',   icon: 'fa-shield' },
+      { id: 'utilisateurs',  label: 'Utilisateurs',     icon: 'fa-users' },
+      { id: 'consumption',   label: 'Consommations',    icon: 'fa-chart-bar' },
+    ];
+    window.MX._dhSearch = function(q) {
+      const wrap = document.getElementById('dh-search-inp');
+      if (!wrap) return;
+      let drop = document.getElementById('dh-search-drop');
+      if (!q || !q.trim()) { if (drop) drop.style.display = 'none'; return; }
+      const lq = q.toLowerCase();
+      const matches = _NAV_LABELS.filter(n => n.label.toLowerCase().includes(lq)).slice(0, 6);
+      if (!drop) {
+        drop = document.createElement('div');
+        drop.id = 'dh-search-drop';
+        drop.style.cssText = 'position:absolute;top:calc(100% + 6px);left:0;min-width:200px;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;box-shadow:var(--shadow-hover);z-index:5000;overflow:hidden;font-family:var(--ffs)';
+        const searchWrap = document.querySelector('.dh-search-wrap');
+        if (searchWrap) { searchWrap.style.position = 'relative'; searchWrap.appendChild(drop); }
+      }
+      if (!matches.length) { drop.style.display = 'none'; return; }
+      drop.innerHTML = matches.map(m =>
+        `<button onclick="MX.showPage('${MX.esc(m.id)}');document.getElementById('dh-search-inp').value='';document.getElementById('dh-search-drop').style.display='none'"
+          style="display:flex;align-items:center;gap:9px;width:100%;padding:9px 14px;background:transparent;border:none;color:var(--text1);font-size:13px;cursor:pointer;text-align:left;font-family:var(--ffs);transition:background .12s"
+          onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='transparent'">
+          <i class="fas ${MX.esc(m.icon)}" style="font-size:12px;color:var(--cyan);width:16px;text-align:center;flex-shrink:0"></i>
+          ${MX.esc(m.label)}
+        </button>`
+      ).join('');
+      drop.style.display = 'block';
+    };
+  })();
 
   document.addEventListener("DOMContentLoaded", init);
 })();

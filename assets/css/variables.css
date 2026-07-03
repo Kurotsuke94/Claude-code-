@@ -10,28 +10,28 @@ html.theme-switching *::after {
 }
 
 :root {
-  /* Backgrounds — dark navy SaaS */
-  --bg:   #08111F;
-  --bg2:  #0D1424;
-  --bg3:  #121A29;
-  --bg4:  #1A2540;
-  --bg5:  #243252;
+  /* Backgrounds — near-black charcoal with micro-violet warmth */
+  --bg:   #0D0D11;
+  --bg2:  #12121A;
+  --bg3:  #18181F;
+  --bg4:  #1F1F2B;
+  --bg5:  #28283A;
 
   /* Borders */
-  --border:  #1A2540;
-  --border2: #243252;
-  --border3: #2D3F6E;
+  --border:  #1C1C28;
+  --border2: #25253A;
+  --border3: #32324E;
 
   /* Text */
   --text:  #F1F5F9;
   --text1: #E2E8F0;
   --text2: #94A3B8;
-  --text3: #475569;
+  --text3: #4A5568;
 
-  /* Brand */
-  --cyan:        #00F5D4;
-  --cyan-dim:    rgba(0,245,212,0.10);
-  --cyan-border: rgba(0,245,212,0.30);
+  /* Brand — Violet Maintix */
+  --cyan:        #8B5CF6;
+  --cyan-dim:    rgba(139,92,246,0.10);
+  --cyan-border: rgba(139,92,246,0.28);
 
   /* Slots */
   --matin:        #F59E0B;
@@ -55,19 +55,19 @@ html.theme-switching *::after {
   --orange-dim:   #1C0A00;
   --orange-border: #7C2D12;
 
-  /* Shadows & glows */
-  --shadow-card:  0 2px 8px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
-  --shadow-hover: 0 8px 28px rgba(0,0,0,0.55), 0 4px 8px rgba(0,0,0,0.3);
-  --shadow-lift:  0 16px 40px rgba(0,0,0,0.65), 0 6px 12px rgba(0,0,0,0.4);
-  --glow-cyan:    0 0 24px rgba(0,245,212,0.14);
+  /* Shadows — soft premium */
+  --shadow-card:  0 8px 30px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.14);
+  --shadow-hover: 0 12px 40px rgba(0,0,0,0.32), 0 4px 8px rgba(0,0,0,0.18);
+  --shadow-lift:  0 20px 60px rgba(0,0,0,0.44), 0 8px 16px rgba(0,0,0,0.26);
+  --glow-cyan:    0 0 24px rgba(139,92,246,0.20);
   --glow-green:   0 0 24px rgba(34,197,94,0.14);
   --glow-red:     0 0 24px rgba(239,68,68,0.14);
 
-  /* Radius */
-  --r:   14px;
-  --rs:   9px;
-  --rx:  20px;
-  --rxx: 28px;
+  /* Radius — harmonized scale */
+  --r:    12px;
+  --rs:    8px;
+  --rx:   16px;
+  --rxx:  24px;
 
   /* Page accent colors (section identity) */
   --accent-home:     #7C3AED;
@@ -82,8 +82,8 @@ html.theme-switching *::after {
   --accent-planning: #10B981;
 
   /* Glass morphism */
-  --glass-bg:     rgba(13,20,36,0.78);
-  --glass-border: rgba(255,255,255,0.07);
+  --glass-bg:     rgba(18,18,26,0.82);
+  --glass-border: rgba(255,255,255,0.06);
   --glass-blur:   18px;
 
   /* Animation easings */
@@ -126,9 +126,9 @@ html.theme-switching *::after {
   --text2: #475569;
   --text3: #94A3B8;
 
-  --cyan:        #00897B;
-  --cyan-dim:    rgba(0,137,123,0.09);
-  --cyan-border: rgba(0,137,123,0.28);
+  --cyan:        #7C3AED;
+  --cyan-dim:    rgba(124,58,237,0.09);
+  --cyan-border: rgba(124,58,237,0.26);
 
   --matin:        #D97706;
   --matin-dim:    rgba(217,119,6,0.08);
@@ -153,7 +153,7 @@ html.theme-switching *::after {
   --shadow-card:  0 1px 4px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.05);
   --shadow-hover: 0 4px 20px rgba(0,0,0,0.13), 0 2px 6px rgba(0,0,0,0.06);
   --shadow-lift:  0 8px 32px rgba(0,0,0,0.16), 0 4px 8px rgba(0,0,0,0.08);
-  --glow-cyan:    0 0 16px rgba(0,137,123,0.10);
+  --glow-cyan:    0 0 16px rgba(124,58,237,0.12);
   --glow-green:   0 0 16px rgba(22,163,74,0.10);
   --glow-red:     0 0 16px rgba(220,38,38,0.10);
 
