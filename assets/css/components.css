@@ -11467,4 +11467,136 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   display: flex; align-items: center; gap: 7px;
   margin-top: 8px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SLOT-CARD — créneau horaire assignment  (sc-*)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Slot assignment header (responsable / planning mode) */
+.sc-assign-hdr {
+  padding: 10px 14px 9px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+.sc-plan-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--orange);
+  margin-bottom: 7px;
+}
+.sc-plan-sugg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 7px;
+  flex-wrap: wrap;
+}
+.sc-assign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sc-tech-sel {
+  flex: 1;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  color: var(--text1);
+  font-size: 12px;
+  font-family: var(--ffs);
+  cursor: pointer;
+  transition: border-color .15s;
+  min-width: 0;
+}
+.sc-tech-sel:focus { border-color: var(--cyan); outline: none; }
+.sc-apply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: var(--cyan-dim);
+  border: 1px solid var(--cyan-border);
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--ffs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.sc-apply-btn:hover { background: rgba(0,245,212,.18); }
+
+/* Task row — assignment badges & controls */
+.sc-custom-bdg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(0,245,212,.10);
+  color: var(--cyan);
+  border: 1px solid var(--cyan-border);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.sc-inh-bdg {
+  font-size: 11px;
+  color: var(--text3);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.sc-uncustom-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: rgba(239,68,68,.10);
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: background .15s;
+  padding: 0;
+}
+.sc-uncustom-btn:hover { background: rgba(239,68,68,.22); }
+.sc-pen-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: all .15s;
+  padding: 0;
+}
+.sc-pen-btn:hover {
+  background: var(--bg4);
+  border-color: var(--border2);
+  color: var(--cyan);
+}
+.sc-pen-btn.active {
+  background: var(--cyan-dim);
+  border-color: var(--cyan-border);
+  color: var(--cyan);
+}
 .cso-del-arch-tip .fas { color: #5B3DF5; }

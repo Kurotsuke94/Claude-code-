@@ -24,11 +24,13 @@
     const pct   = visibleTasks.length ? Math.round(done / visibleTasks.length * 100) : 0;
     const level = alertLevel(slot, pct, state.alerts);
 
+    const _slotTimes = { matin: '06h – 14h', journee: '14h – 18h', soir: '18h – 22h' };
+
     let h = `<div class="slot-card">
       <div class="slot-head ${s.c}">
         <div class="ch-ico ${s.c}">${s.e}</div>
         <div style="flex:1">
-          <div style="font-size:14px;font-weight:700">${s.l}</div>
+          <div style="font-size:14px;font-weight:700">${s.l}<span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:7px">${_slotTimes[slot] || ''}</span></div>
           <div class="slot-dl">${done}/${visibleTasks.length} tâches</div>
           <span class="slot-chip ${level}">
             <i class="fas fa-${level==='ok'?'check':level==='warn'?'triangle-exclamation':'circle-exclamation'}"></i>
@@ -41,18 +43,34 @@
     if (isToday) {
       h += _dailyClaimRow(slot, dailyClaim, cu, showAssign, todayPlanSuggestions || {}, s, esc, chipHtml, planSuggestions || []);
     } else if (showAssign) {
-      // Planning info banner — no slot-level dropdown (assignment is per task below)
-      const suggs = planSuggestions || [];
-      const _assignAllBtn = `<button onclick="event.stopPropagation();MX.Pages.Checklist.promptAssignAll('${esc(dayId)}','${esc(slot)}')" style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 9px;border-radius:6px;background:var(--cyan-dim);border:1px solid var(--cyan-border);color:var(--cyan);cursor:pointer;font-family:var(--ffs);white-space:nowrap;flex-shrink:0"><i class="fas fa-user-check" style="font-size:10px"></i>Assigner tout</button>`;
-      if (suggs.length) {
-        h += `<div class="arow">
-          <span class="arow-lbl"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px;margin-right:4px"></i>Planning</span>
-          ${suggs.map(n => chipHtml(n)).join('')}
-          ${_assignAllBtn}
-        </div>`;
-      } else {
-        h += `<div class="arow">${_assignAllBtn}</div>`;
-      }
+      // Slot-first assignment header: single tech selector + "Appliquer aux tâches"
+      const suggs  = planSuggestions || [];
+      const _users = (state.users || []).filter(u => u.name && !u.hidden);
+      const _selId = `sc-sel-${dayId}-${slot}`;
+
+      const _planRow = suggs.length
+        ? `<div class="sc-plan-sugg"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px"></i>${suggs.map(n => chipHtml(n)).join('')}</div>`
+        : `<div class="sc-plan-warn"><i class="fas fa-triangle-exclamation"></i> Aucun technicien planifié sur ce créneau</div>`;
+
+      const _opts = `<option value="">— Non assigné —</option>` +
+        _users.map(u => {
+          const lbl = esc(u.name) + (suggs.includes(u.name) ? ' 📅' : '');
+          return `<option value="${esc(u.name)}"${u.name === assignment ? ' selected' : ''}>${lbl}</option>`;
+        }).join('');
+
+      h += `<div class="sc-assign-hdr">
+        ${_planRow}
+        <div class="sc-assign-row">
+          <select id="${_selId}" class="sc-tech-sel"
+            onchange="MX.Pages.Checklist.assign('${esc(dayId)}','${esc(slot)}',this.value)">
+            ${_opts}
+          </select>
+          <button class="sc-apply-btn"
+            onclick="MX.Pages.Checklist.applySlotTech('${esc(dayId)}','${esc(slot)}',document.getElementById('${_selId}').value)">
+            <i class="fas fa-user-check"></i> Appliquer aux tâches
+          </button>
+        </div>
+      </div>`;
     } else if (assignment) {
       h += `<div class="arow"><span class="arow-lbl">Assigné à</span>${chipHtml(assignment)}</div>`;
     }
