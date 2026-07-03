@@ -301,117 +301,449 @@
     return '';
   }
 
-  // ── DASHBOARD ─────────────────────────────────────────────────────────────
+  // ── DASHBOARD V2 — helpers ───────────────────────────────────────────────
 
-  function _tDashboard() {
-    var kpi   = _kpiData();
+  function _parseDurMins(s) {
+    if (!s) return 0;
+    if (s === '30 min') return 30;
+    if (s === 'Journée') return 480;
+    var m = s.match(/^(\d+)h(\d+)?$/i);
+    if (m) return parseInt(m[1]) * 60 + parseInt(m[2] || 0);
+    m = s.match(/^(\d+)\s*min$/i);
+    if (m) return parseInt(m[1]);
+    return 0;
+  }
+
+  function _eqHealthScore(eq) {
     var today = _today();
-    var R = 34, CX = 50, CY = 50, C = 2 * Math.PI * R;
-    var dc    = kpi.conformite >= 80 ? '#22C55E' : kpi.conformite >= 50 ? '#F97316' : '#EF4444';
-    var dashD = (kpi.conformite / 100) * C;
-    var dashR = C - dashD;
-    var donut =
-      '<svg viewBox="0 0 100 100" width="88" height="88" style="flex-shrink:0">' +
-        '<circle cx="' + CX + '" cy="' + CY + '" r="' + R + '" fill="none" stroke="var(--bg4)" stroke-width="10"/>' +
-        '<circle cx="' + CX + '" cy="' + CY + '" r="' + R + '" fill="none" stroke="' + dc + '" stroke-width="10"' +
-        ' stroke-dasharray="' + dashD.toFixed(1) + ' ' + dashR.toFixed(1) + '"' +
-        ' stroke-linecap="round" transform="rotate(-90 ' + CX + ' ' + CY + ')"/>' +
-        '<text x="' + CX + '" y="' + (CY - 4) + '" text-anchor="middle" font-size="17" font-weight="700" fill="var(--text)" font-family="var(--ffm)">' + kpi.conformite + '</text>' +
-        '<text x="' + CX + '" y="' + (CY + 11) + '" text-anchor="middle" font-size="8" fill="var(--text3)" font-family="var(--ffm)">%</text>' +
-      '</svg>';
+    if (eq.status === 'inactif') return 50;
+    var lates = _pmpInt.filter(function (i) {
+      return i.equipmentId === eq.id &&
+             (i.status === 'en_retard' || (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee'));
+    });
+    if (!lates.length) {
+      if (!eq.nextDue) return 90;
+      var daysAhead = Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+      return daysAhead > 30 ? 96 : daysAhead > 7 ? 88 : daysAhead >= 0 ? 78 : 65;
+    }
+    var maxLate = Math.max.apply(null, lates.map(function (i) { return _daysLate(i.dueDate); }));
+    return maxLate <= 3 ? 70 : maxLate <= 7 ? 55 : maxLate <= 14 ? 40 : 25;
+  }
 
-    var upcoming7 = _pmpInt
-      .filter(function (i) {
-        return i.dueDate >= today && i.dueDate <= _addDays(today, 7) && i.status !== 'terminee';
-      })
-      .sort(function (a, b) { return a.dueDate.localeCompare(b.dueDate); })
-      .slice(0, 5);
+  function _pmdbKpiCard(icon, color, val, lbl, sub, tab, alert) {
+    var isAlert = alert && Number(val) > 0;
+    var onclick = tab ? ' onclick="MX.Pages.PMP._tab(\'' + tab + '\')" style="cursor:pointer"' : '';
+    return '<div class="pmdb-kpi-card' + (isAlert ? ' pmdb-kpi-card--alert' : '') + '"' + onclick + '>' +
+      '<div class="pmdb-kpi-ico" style="background:' + color + '20"><i class="fas ' + icon + '" style="color:' + color + '"></i></div>' +
+      '<div class="pmdb-kpi-body">' +
+        '<div class="pmdb-kpi-val" style="color:' + (isAlert ? '#EF4444' : color) + '">' + val + '</div>' +
+        '<div class="pmdb-kpi-lbl">' + lbl + '</div>' +
+        '<div class="pmdb-kpi-sub">' + sub + '</div>' +
+      '</div></div>';
+  }
 
-    var lateInts = _pmpInt.filter(function (i) {
-      return i.status === 'en_retard' ||
-             (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee');
+  function _pmdbChartSVG(series, dates) {
+    var W = 700, H = 200, ML = 40, MR = 15, MT = 14, MB = 36;
+    var PW = W - ML - MR, PH = H - MT - MB;
+    var maxV = 1;
+    series.forEach(function (s) { s.vals.forEach(function (v) { if (v > maxV) maxV = v; }); });
+    maxV = Math.max(Math.ceil(maxV * 1.3), 5);
+    var today = _today();
+
+    function px(i) { return ML + (i / Math.max(dates.length - 1, 1)) * PW; }
+    function py(v) { return MT + PH - (v / maxV * PH); }
+
+    var grid = '';
+    for (var g = 0; g <= 4; g++) {
+      var yV = g * maxV / 4;
+      var yG = py(yV).toFixed(1);
+      grid += '<line x1="' + ML + '" y1="' + yG + '" x2="' + (W - MR) + '" y2="' + yG + '" stroke="var(--border)" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.7"/>';
+      if (g > 0) grid += '<text x="' + (ML - 5) + '" y="' + (parseFloat(yG) + 3).toFixed(0) + '" text-anchor="end" font-size="9" fill="var(--text3)">' + Math.round(yV) + '</text>';
+    }
+
+    var xlbl = '';
+    var xstep = Math.max(1, Math.floor(dates.length / 8));
+    dates.forEach(function (ds, i) {
+      if (i % xstep === 0 || i === dates.length - 1) {
+        var p = ds.split('-');
+        xlbl += '<text x="' + px(i).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="9" fill="var(--text3)">' + p[2] + '/' + p[1] + '</text>';
+      }
     });
 
-    var h = '<div class="pmp-dash">';
+    var todayIdx = dates.indexOf(today);
+    var todayMk = '';
+    if (todayIdx >= 0) {
+      var tx = px(todayIdx).toFixed(1);
+      todayMk = '<line x1="' + tx + '" y1="' + MT + '" x2="' + tx + '" y2="' + (MT + PH) + '" stroke="#5B3DF5" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.45"/>' +
+        '<rect x="' + (parseFloat(tx) - 13) + '" y="' + (MT - 12) + '" width="26" height="12" rx="3" fill="#5B3DF5" opacity="0.85"/>' +
+        '<text x="' + tx + '" y="' + (MT - 3) + '" text-anchor="middle" font-size="8" fill="#fff" font-weight="600">Auj.</text>';
+    }
 
-    // ── Conformité + KPI grid ──
-    h += '<div class="pmp-dash-top">';
-    h += '<div class="pmp-conf-card">' + donut +
-      '<div><div class="pmp-conf-lbl">Conformité ' + today.slice(0, 7).replace('-', '/') + '</div>' +
-      '<div class="pmp-conf-sub">' + kpi.realisees + ' / ' + kpi.thisMonthCount + ' réalisées</div></div></div>';
+    function buildPath(vals) {
+      var pts = vals.map(function (v, i) { return { x: px(i), y: py(v) }; });
+      if (!pts.length) return '';
+      var d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+      for (var j = 1; j < pts.length; j++) {
+        var cpx = ((pts[j - 1].x + pts[j].x) / 2).toFixed(1);
+        d += ' C' + cpx + ',' + pts[j - 1].y.toFixed(1) + ' ' + cpx + ',' + pts[j].y.toFixed(1) + ' ' + pts[j].x.toFixed(1) + ',' + pts[j].y.toFixed(1);
+      }
+      return d;
+    }
 
-    h += '<div class="pmp-kpi-grid">';
-    h += '<div class="pmp-kpi" onclick="MX.Pages.PMP._tab(\'equipements\')">' +
-      '<i class="fas fa-wrench pmp-kpi-ico" style="color:var(--cyan)"></i>' +
-      '<div class="pmp-kpi-val">' + kpi.totalEq + '</div>' +
-      '<div class="pmp-kpi-lbl">Équipements</div></div>';
-    h += '<div class="pmp-kpi" onclick="MX.Pages.PMP._tab(\'interventions\')">' +
-      '<i class="fas fa-clipboard-list pmp-kpi-ico" style="color:var(--jour)"></i>' +
-      '<div class="pmp-kpi-val">' + kpi.thisMonthCount + '</div>' +
-      '<div class="pmp-kpi-lbl">Du mois</div></div>';
-    h += '<div class="pmp-kpi" onclick="MX.Pages.PMP._tab(\'historique\')">' +
-      '<i class="fas fa-check-circle pmp-kpi-ico" style="color:var(--green)"></i>' +
-      '<div class="pmp-kpi-val">' + kpi.realisees + '</div>' +
-      '<div class="pmp-kpi-lbl">Réalisées</div></div>';
-    h += '<div class="pmp-kpi' + (kpi.enAttente > 0 ? ' pmp-kpi--alert' : '') + '" onclick="MX.Pages.PMP._tab(\'file\')">' +
-      '<i class="fas fa-inbox pmp-kpi-ico" style="color:' + (kpi.enAttente > 0 ? 'var(--orange)' : 'var(--text3)') + '"></i>' +
-      '<div class="pmp-kpi-val" style="color:' + (kpi.enAttente > 0 ? 'var(--orange)' : 'var(--text)') + '">' + kpi.enAttente + '</div>' +
-      '<div class="pmp-kpi-lbl">À affecter</div></div>';
-    h += '<div class="pmp-kpi' + (kpi.enRetard > 0 ? ' pmp-kpi--alert' : '') + '" onclick="MX.Pages.PMP._tab(\'retards\')">' +
-      '<i class="fas fa-triangle-exclamation pmp-kpi-ico" style="color:' + (kpi.enRetard > 0 ? 'var(--red)' : 'var(--text3)') + '"></i>' +
-      '<div class="pmp-kpi-val" style="color:' + (kpi.enRetard > 0 ? 'var(--red)' : 'var(--text)') + '">' + kpi.enRetard + '</div>' +
-      '<div class="pmp-kpi-lbl">En retard</div></div>';
-    h += '<div class="pmp-kpi">' +
-      '<i class="fas fa-calendar-check pmp-kpi-ico" style="color:var(--orange)"></i>' +
-      '<div class="pmp-kpi-val" style="font-size:13px">' + (kpi.nextDue ? _dateLbl(kpi.nextDue) : '—') + '</div>' +
-      '<div class="pmp-kpi-lbl">Prochaine</div></div>';
-    h += '</div></div>';
+    function areaPath(vals) {
+      var base = (MT + PH).toFixed(1);
+      var p = buildPath(vals);
+      return p ? p + ' L' + px(vals.length - 1).toFixed(1) + ',' + base + ' L' + ML + ',' + base + ' Z' : '';
+    }
 
-    // ── À venir — 7 jours ──
-    h += '<div class="pmp-dash-section"><div class="pmp-section-ttl"><i class="fas fa-calendar-days"></i> À venir — 7 jours</div>';
-    if (!upcoming7.length) {
-      h += '<div class="pmp-empty">Aucune intervention dans les 7 prochains jours</div>';
+    var seriesSvg = '';
+    series.forEach(function (s) {
+      var dash = s.dashed ? ' stroke-dasharray="7,4"' : '';
+      if (s.area) seriesSvg += '<path d="' + areaPath(s.vals) + '" fill="' + s.color + '" fill-opacity="0.09"/>';
+      var linePath = buildPath(s.vals);
+      if (linePath) seriesSvg += '<path d="' + linePath + '" fill="none" stroke="' + s.color + '" stroke-width="' + (s.w || 2.5) + '" stroke-linecap="round" stroke-linejoin="round"' + dash + '/>';
+    });
+
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="display:block" id="pmdb-svg">' +
+      '<rect x="' + ML + '" y="' + MT + '" width="' + PW + '" height="' + PH + '" fill="var(--bg4)" rx="4" opacity="0.25"/>' +
+      grid +
+      '<line x1="' + ML + '" y1="' + MT + '" x2="' + ML + '" y2="' + (MT + PH) + '" stroke="var(--border)" stroke-width="1"/>' +
+      '<line x1="' + ML + '" y1="' + (MT + PH) + '" x2="' + (W - MR) + '" y2="' + (MT + PH) + '" stroke="var(--border)" stroke-width="1"/>' +
+      todayMk + seriesSvg + xlbl + '</svg>';
+  }
+
+  // ── DASHBOARD V2 ──────────────────────────────────────────────────────────
+
+  function _tDashboard() {
+    var today   = _today();
+    var per     = window._pmpDashPer   || '30';
+    var page    = parseInt(window._pmpDashPage || 1);
+    var srch    = window._pmpDashSrch  || '';
+    var eqType  = window._pmpDashType  || 'all';
+    var eqSite  = window._pmpDashSite  || 'all';
+    var eqStat  = window._pmpDashStat  || 'all';
+    var PER     = parseInt(per);
+    var kpi     = _kpiData();
+    var weekEnd = _addDays(today, 6);
+
+    // ── KPI computations ──
+    var todayCount = _pmpInt.filter(function (i) {
+      return i.dueDate === today && i.status !== 'terminee' && i.status !== 'annulee';
+    }).length;
+    var weekCount = _pmpInt.filter(function (i) {
+      return i.dueDate >= today && i.dueDate <= weekEnd && i.status !== 'terminee' && i.status !== 'annulee';
+    }).length;
+    var totalMins = _pmpInt.filter(function (i) { return i.status !== 'annulee'; }).reduce(function (s, i) {
+      return s + _parseDurMins(i.estimatedDuration);
+    }, 0);
+    var chargeH = Math.round(totalMins / 60);
+
+    // ── Chart data ──
+    var chartDates = [];
+    for (var ci = -5; ci < PER; ci++) chartDates.push(_addDays(today, ci));
+
+    function _chartCount(ds, filter) {
+      return _pmpInt.filter(function (i) { return i.dueDate === ds && filter(i); }).length;
+    }
+    var chartSeries = [
+      {
+        vals: chartDates.map(function (ds) { return _chartCount(ds, function (i) { return i.status !== 'annulee'; }); }),
+        color: '#3B82F6', w: 2.5, area: true
+      },
+      {
+        vals: chartDates.map(function (ds) {
+          return _chartCount(ds, function (i) { return i.status === 'en_retard' || (i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee'); });
+        }),
+        color: '#EF4444', w: 2
+      },
+      {
+        vals: chartDates.map(function (ds) {
+          return (ds >= today && ds <= weekEnd) ? _chartCount(ds, function (i) { return i.status !== 'terminee' && i.status !== 'annulee'; }) : 0;
+        }),
+        color: '#F59E0B', w: 2
+      },
+      {
+        vals: chartDates.map(function (ds) {
+          var nm = _addDays(today, 30), nme = _addDays(today, 60);
+          return (ds >= nm && ds <= nme) ? _chartCount(ds, function (i) { return i.status !== 'annulee'; }) : 0;
+        }),
+        color: '#22C55E', w: 2, dashed: true
+      },
+    ];
+    var chartSVG = _pmdbChartSVG(chartSeries, chartDates);
+
+    // ── À surveiller ──
+    var lateInts = _pmpInt.filter(function (i) {
+      return i.status === 'en_retard' || (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee');
+    }).sort(function (a, b) { return _daysLate(b.dueDate) - _daysLate(a.dueDate); }).slice(0, 5);
+
+    var watchHtml = lateInts.length ? lateInts.map(function (i) {
+      var days = _daysLate(i.dueDate);
+      var ti   = EQ_TYPES[i.type] || { icon: '🔧' };
+      var col  = days >= 7 ? '#EF4444' : '#F59E0B';
+      var nxt  = _pmpInt.filter(function (x) { return x.equipmentId === i.equipmentId && x.dueDate >= today && x.status !== 'annulee'; })
+                         .sort(function (a, b) { return a.dueDate.localeCompare(b.dueDate); })[0];
+      return '<div class="pmdb-watch-row">' +
+        '<div class="pmdb-watch-ico" style="background:' + col + '18;color:' + col + '">' + ti.icon + '</div>' +
+        '<div class="pmdb-watch-info">' +
+          '<div class="pmdb-watch-name">' + esc(i.equipmentName || '—') + '</div>' +
+          '<div class="pmdb-watch-sub"><span style="color:' + col + ';font-weight:600">Retard : ' + days + 'j</span>' +
+          (nxt ? ' · Prochaine : ' + _dateLbl(nxt.dueDate) : '') + '</div>' +
+        '</div></div>';
+    }).join('') : '<div class="pmdb-empty-sm"><i class="fas fa-check-circle" style="color:#22C55E"></i> Aucun retard en cours</div>';
+
+    // ── Top 5 interventions les plus longues ──
+    var top5 = _pmpInt.filter(function (i) { return i.estimatedDuration; })
+      .map(function (i) { return { name: i.equipmentName || '—', dur: i.estimatedDuration, mins: _parseDurMins(i.estimatedDuration) }; })
+      .filter(function (x) { return x.mins > 0; })
+      .sort(function (a, b) { return b.mins - a.mins; }).slice(0, 5);
+
+    var top5Html = top5.length ? top5.map(function (item, idx) {
+      return '<div class="pmdb-top5-row">' +
+        '<span class="pmdb-top5-rank">' + (idx + 1) + '</span>' +
+        '<span class="pmdb-top5-name">' + esc(item.name) + '</span>' +
+        '<span class="pmdb-top5-dur">' + esc(item.dur) + '</span></div>';
+    }).join('') : '<div class="pmdb-empty-sm">Aucune durée renseignée</div>';
+
+    // ── Score de fiabilité donut ──
+    var score      = kpi.conformite;
+    var scoreColor = score >= 90 ? '#22C55E' : score >= 70 ? '#3B82F6' : score >= 50 ? '#F59E0B' : '#EF4444';
+    var scoreLbl   = score >= 90 ? 'Excellent' : score >= 80 ? 'Très bon' : score >= 70 ? 'Bon' : score >= 50 ? 'Moyen' : 'Critique';
+    var SR = 60, SCX = 75, SCY = 75, SCIRC = 2 * Math.PI * SR;
+    var SdashD = (score / 100) * SCIRC;
+    var donutSVG = '<svg viewBox="0 0 150 150" width="120" height="120" style="flex-shrink:0">' +
+      '<circle cx="' + SCX + '" cy="' + SCY + '" r="' + SR + '" fill="none" stroke="var(--border)" stroke-width="13"/>' +
+      '<circle cx="' + SCX + '" cy="' + SCY + '" r="' + SR + '" fill="none" stroke="' + scoreColor + '" stroke-width="13"' +
+      ' stroke-dasharray="' + SdashD.toFixed(1) + ' ' + (SCIRC - SdashD).toFixed(1) + '"' +
+      ' stroke-linecap="round" transform="rotate(-90 ' + SCX + ' ' + SCY + ')"/>' +
+      '<text x="' + SCX + '" y="' + (SCY - 6) + '" text-anchor="middle" font-size="24" font-weight="700" fill="' + scoreColor + '" font-family="monospace">' + score + '%</text>' +
+      '<text x="' + SCX + '" y="' + (SCY + 13) + '" text-anchor="middle" font-size="11" fill="var(--text3)">' + scoreLbl + '</text>' +
+      '</svg>';
+
+    var excellent = 0, bonne = 0, moyenne = 0, faible = 0;
+    _pmpEq.forEach(function (eq) {
+      var s = _eqHealthScore(eq);
+      if (s >= 90) excellent++; else if (s >= 70) bonne++; else if (s >= 50) moyenne++; else faible++;
+    });
+    var totEq = _pmpEq.length || 1;
+    var scoreBreak = [
+      { lbl: 'Excellente', count: excellent, color: '#22C55E' },
+      { lbl: 'Bonne',      count: bonne,     color: '#3B82F6' },
+      { lbl: 'Moyenne',    count: moyenne,   color: '#F59E0B' },
+      { lbl: 'Faible',     count: faible,    color: '#EF4444' },
+    ].map(function (b) {
+      return '<div class="pmdb-score-brow">' +
+        '<span class="pmdb-score-bdot" style="background:' + b.color + '"></span>' +
+        '<span class="pmdb-score-blbl">' + b.lbl + '</span>' +
+        '<span class="pmdb-score-bcnt">' + b.count + ' (' + Math.round(b.count / totEq * 100) + '%)</span>' +
+        '</div>';
+    }).join('');
+
+    // ── Equipment grid (filtered + paginated) ──
+    var PER_PAGE = 8;
+    var zonesArr = [];
+    _pmpEq.forEach(function (e) { if (e.zone && zonesArr.indexOf(e.zone) < 0) zonesArr.push(e.zone); });
+    zonesArr.sort();
+
+    var filtered = _pmpEq.filter(function (eq) {
+      if (srch) {
+        var sv = srch.toLowerCase();
+        if (!(eq.name || '').toLowerCase().includes(sv) && !(eq.zone || '').toLowerCase().includes(sv) && !(eq.ref || '').toLowerCase().includes(sv)) return false;
+      }
+      if (eqType !== 'all' && eq.type !== eqType) return false;
+      if (eqSite !== 'all' && eq.zone !== eqSite) return false;
+      if (eqStat !== 'all') {
+        var isLateF = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
+        var isSoonF = !isLateF && eq.nextDue && eq.nextDue >= today && eq.nextDue <= weekEnd;
+        if (eqStat === 'late' && !isLateF) return false;
+        if (eqStat === 'soon' && !isSoonF) return false;
+        if (eqStat === 'ok' && (isLateF || isSoonF)) return false;
+      }
+      return true;
+    }).sort(function (a, b) {
+      var aL = (a.nextDue && a.nextDue < today) ? 1 : 0;
+      var bL = (b.nextDue && b.nextDue < today) ? 1 : 0;
+      if (bL !== aL) return bL - aL;
+      return (a.nextDue || 'z').localeCompare(b.nextDue || 'z');
+    });
+
+    var totalEqs   = filtered.length;
+    var totalPages = Math.max(1, Math.ceil(totalEqs / PER_PAGE));
+    var safeP      = Math.min(Math.max(1, page), totalPages);
+    var startIdx   = (safeP - 1) * PER_PAGE;
+    var pageEqs    = filtered.slice(startIdx, startIdx + PER_PAGE);
+
+    var eqCardsHtml = '';
+    if (!pageEqs.length) {
+      eqCardsHtml = '<div class="pmdb-empty"><i class="fas fa-wrench"></i>' +
+        '<div>' + (!_pmpEq.length ? 'Aucun équipement configuré' : 'Aucun résultat pour cette recherche') + '</div>' +
+        (!_pmpEq.length ? '<button class="pmdb-add-btn" style="margin-top:6px" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter</button>' : '') +
+        '</div>';
     } else {
-      h += '<div class="pmp-int-list">';
-      upcoming7.forEach(function (i) {
-        var st = INT_ST[i.status] || INT_ST.planifiee;
-        var eq = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
-        var ti = eq ? (EQ_TYPES[eq.type] || { icon: '🔧' }) : { icon: '🔧' };
-        h += '<div class="pmp-int-row" onclick="MX.Pages.PMP._tab(\'interventions\')">' +
-          '<div class="pmp-int-type">' + ti.icon + '</div>' +
-          '<div class="pmp-int-info"><div class="pmp-int-name">' + esc(i.equipmentName || '—') + '</div>' +
-          '<div class="pmp-int-sub">' + esc(i.zone || '') + (i.technician ? ' · ' + esc(i.technician) : '') + '</div></div>' +
-          '<div class="pmp-int-date">' + _dateLbl(i.dueDate) + '</div>' +
-          '<div class="pmp-int-st" style="color:' + st.c + ';background:' + st.bg + '">' + st.l + '</div>' +
+      eqCardsHtml = '<div class="pmdb-eq-grid">';
+      pageEqs.forEach(function (eq) {
+        var ti       = EQ_TYPES[eq.type] || { icon: '🔧', l: eq.type || 'Divers' };
+        var isLate   = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
+        var daysOff  = eq.nextDue ? Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
+        var health   = _eqHealthScore(eq);
+        var hColor   = health >= 80 ? '#22C55E' : health >= 60 ? '#F59E0B' : health >= 40 ? '#F97316' : '#EF4444';
+        var badgeT   = eq.status === 'inactif' ? 'off' : isLate ? 'late' : (daysOff !== null && daysOff <= 7) ? 'soon' : 'ok';
+        var badgeLbl = { off:'Inactif', late:'En retard', soon:'À venir', ok:'OK' }[badgeT];
+        var nextStr  = !eq.nextDue ? '—' : isLate ? '<span style="color:#EF4444">' + _dateLbl(eq.nextDue) + ' (' + Math.abs(daysOff) + 'j)</span>' :
+                       daysOff === 0 ? "Aujourd'hui" : _dateLbl(eq.nextDue);
+        var latestInt = _pmpInt.filter(function (i) { return i.equipmentId === eq.id && i.technician; })
+                               .sort(function (a, b) { return (b.dueDate || '').localeCompare(a.dueDate || ''); })[0];
+        var tech = latestInt ? latestInt.technician : (eq.technician || '');
+        var dur  = latestInt ? (latestInt.estimatedDuration || '') : (eq.duration || '');
+        var initials = tech ? tech.split(' ').map(function (w) { return w ? w[0].toUpperCase() : ''; }).join('').slice(0, 2) : '';
+
+        eqCardsHtml +=
+          '<div class="pmdb-eq-card' + (isLate ? ' pmdb-eq-card--late' : '') + '">' +
+            '<div class="pmdb-eq-card-top">' +
+              '<div class="pmdb-eq-ico">' + ti.icon + '</div>' +
+              '<div class="pmdb-eq-head">' +
+                '<div class="pmdb-eq-name">' + esc(eq.name) + '</div>' +
+                '<div class="pmdb-eq-ref">' + (eq.ref ? esc(eq.ref) + ' · ' : '') + esc(ti.l) + '</div>' +
+              '</div>' +
+              '<span class="pmdb-eq-badge pmdb-eq-badge--' + badgeT + '">' + badgeLbl + '</span>' +
+            '</div>' +
+            (eq.zone ? '<div class="pmdb-eq-zone"><i class="fas fa-location-dot"></i> ' + esc(eq.zone) + (eq.subZone ? ' · ' + esc(eq.subZone) : '') + '</div>' : '') +
+            '<div class="pmdb-eq-health-row" style="--hw:' + health + '%;--hc:' + hColor + '">' +
+              '<div class="pmdb-eq-health-bar"><div class="pmdb-eq-health-fill"></div></div>' +
+              '<span class="pmdb-eq-health-pct" style="color:' + hColor + '">' + health + '%</span>' +
+            '</div>' +
+            '<div class="pmdb-eq-meta">' +
+              '<div class="pmdb-eq-meta-item"><i class="fas fa-calendar-check"></i> ' + nextStr + '</div>' +
+              (dur ? '<div class="pmdb-eq-meta-item"><i class="fas fa-clock"></i> ' + esc(dur) + '</div>' : '') +
+            '</div>' +
+            (tech ? '<div class="pmdb-eq-tech"><div class="pmdb-eq-tech-av">' + initials + '</div><span>' + esc(tech) + '</span></div>' : '') +
+            '<div class="pmdb-eq-actions">' +
+              '<button class="pmdb-eq-btn-int" onclick="MX.Pages.PMP._createInt(\'' + esc(eq.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
+              '<button class="pmdb-eq-btn-ico" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')" title="Modifier"><i class="fas fa-pen"></i></button>' +
+              '<button class="pmdb-eq-btn-ico pmdb-eq-btn-del" onclick="MX.Pages.PMP._delEq(\'' + eq.id + '\')" title="Supprimer"><i class="fas fa-trash"></i></button>' +
+            '</div>' +
           '</div>';
       });
-      h += '</div>';
-    }
-    h += '</div>';
-
-    // ── Retards ──
-    if (lateInts.length > 0) {
-      h += '<div class="pmp-dash-section"><div class="pmp-section-ttl pmp-section-ttl--alert">' +
-        '<i class="fas fa-triangle-exclamation"></i> Retards (' + lateInts.length + ')</div>';
-      h += '<div class="pmp-int-list">';
-      lateInts.slice(0, 5).forEach(function (i) {
-        var d  = _daysLate(i.dueDate);
-        var eq = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
-        var ti = eq ? (EQ_TYPES[eq.type] || { icon: '🔧' }) : { icon: '🔧' };
-        h += '<div class="pmp-int-row pmp-int-row--late">' +
-          '<div class="pmp-int-type">' + ti.icon + '</div>' +
-          '<div class="pmp-int-info"><div class="pmp-int-name">' + esc(i.equipmentName || '—') + '</div>' +
-          '<div class="pmp-int-sub">' + esc(i.technician || '—') + '</div></div>' +
-          '<div class="pmp-retard-days">' + d + 'j</div>' +
-          '<button class="pmp-done-btn" onclick="event.stopPropagation();MX.Pages.PMP._markDone(\'' + esc(i.id) + '\')">' +
-          '<i class="fas fa-check"></i> Valider</button>' +
-          '</div>';
-      });
-      h += '</div></div>';
+      eqCardsHtml += '</div>';
     }
 
-    h += '</div>';
-    return h;
+    // ── Pagination ──
+    var pgHtml = '';
+    if (totalPages > 1) {
+      var pageNums = '';
+      var prev = -1;
+      for (var p = 1; p <= totalPages; p++) {
+        var show = p === 1 || p === totalPages || (p >= safeP - 1 && p <= safeP + 1);
+        if (show) {
+          if (prev > 0 && p - prev > 1) pageNums += '<span class="pmdb-pg-dots">…</span>';
+          pageNums += '<button class="pmdb-pg-btn' + (p === safeP ? ' pmdb-pg-btn--act' : '') + '"' +
+            ' onclick="window._pmpDashPage=' + p + ';MX.Pages.PMP._tab(\'dashboard\')">' + p + '</button>';
+          prev = p;
+        }
+      }
+      pgHtml = '<div class="pmdb-pg-row">' +
+        '<div class="pmdb-pagination">' +
+          '<button class="pmdb-pg-btn"' + (safeP <= 1 ? ' disabled' : ' onclick="window._pmpDashPage=' + (safeP - 1) + ';MX.Pages.PMP._tab(\'dashboard\')"') + '><i class="fas fa-chevron-left"></i></button>' +
+          pageNums +
+          '<button class="pmdb-pg-btn"' + (safeP >= totalPages ? ' disabled' : ' onclick="window._pmpDashPage=' + (safeP + 1) + ';MX.Pages.PMP._tab(\'dashboard\')"') + '><i class="fas fa-chevron-right"></i></button>' +
+        '</div>' +
+        '<div class="pmdb-pg-info">Afficher ' + (startIdx + 1) + '-' + Math.min(startIdx + PER_PAGE, totalEqs) + ' sur ' + totalEqs + ' équipements</div>' +
+      '</div>';
+    }
+
+    // ── Toolbar selectors ──
+    var perBtns = ['7','30','90','365'].map(function (p) {
+      var lbl = { 7:'7J', 30:'30J', 90:'3M', 365:'1A' }[p];
+      return '<button class="pmdb-per-btn' + (per === p ? ' pmdb-per-btn--act' : '') + '" onclick="window._pmpDashPer=\'' + p + '\';MX.Pages.PMP._tab(\'dashboard\')">' + lbl + '</button>';
+    }).join('');
+
+    var typeOpts = '<option value="all"' + (eqType === 'all' ? ' selected' : '') + '>Tous les types</option>' +
+      Object.entries(EQ_TYPES).map(function (kv) {
+        return '<option value="' + kv[0] + '"' + (eqType === kv[0] ? ' selected' : '') + '>' + kv[1].icon + ' ' + kv[1].l + '</option>';
+      }).join('');
+    var siteOpts = '<option value="all"' + (eqSite === 'all' ? ' selected' : '') + '>Tous les sites</option>' +
+      zonesArr.map(function (z) { return '<option value="' + esc(z) + '"' + (eqSite === z ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('');
+    var statOpts = '<option value="all"' + (eqStat === 'all' ? ' selected' : '') + '>Tous les statuts</option>' +
+      '<option value="late"' + (eqStat === 'late' ? ' selected' : '') + '>En retard</option>' +
+      '<option value="soon"' + (eqStat === 'soon' ? ' selected' : '') + '>À venir (7j)</option>' +
+      '<option value="ok"' + (eqStat === 'ok' ? ' selected' : '') + '>OK</option>';
+
+    var filterChange = ';window._pmpDashPage=1;MX.Pages.PMP._tab(\'dashboard\')';
+
+    // ── Assemble ──
+    return '<div class="pmdb">' +
+
+      '<div class="pmdb-kpi-row">' +
+        _pmdbKpiCard('fa-screwdriver-wrench', '#3B82F6', kpi.totalEq,       'Équipements',          'Tous sites confondus',      'equipements') +
+        _pmdbKpiCard('fa-calendar-day',       '#8B5CF6', todayCount,        'Interventions auj.',   'Planifiées',                null) +
+        _pmdbKpiCard('fa-triangle-exclamation','#EF4444', kpi.enRetard,     'En retard',            'À traiter',                 'retards', true) +
+        _pmdbKpiCard('fa-calendar-week',       '#22C55E', weekCount,        'Cette semaine',        'Interventions',             null) +
+        _pmdbKpiCard('fa-calendar',            '#F59E0B', kpi.thisMonthCount,'Ce mois',             'Interventions',             null) +
+        _pmdbKpiCard('fa-clock',               '#06B6D4', (chargeH || '0') + ' h', 'Charge annuelle', 'Temps estimé', null) +
+      '</div>' +
+
+      '<div class="pmdb-main-grid">' +
+        '<div class="pmdb-left-col">' +
+
+          '<div class="pmdb-chart-card">' +
+            '<div class="pmdb-chart-hdr">' +
+              '<div>' +
+                '<div class="pmdb-chart-ttl">Évolution des prochaines interventions</div>' +
+                '<div class="pmdb-chart-leg">' +
+                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#3B82F6"></span>Tous</span>' +
+                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#EF4444"></span>En retard</span>' +
+                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#F59E0B"></span>Cette semaine</span>' +
+                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot--dash" style="border-color:#22C55E"></span>Mois prochain</span>' +
+                '</div>' +
+              '</div>' +
+              '<div class="pmdb-chart-acts">' +
+                '<div class="pmdb-per-group">' + perBtns + '</div>' +
+                '<button class="pmdb-chart-ico-btn" onclick="MX.Pages.PMP._tab(\'dashboard\')" title="Actualiser"><i class="fas fa-rotate"></i></button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="pmdb-chart-wrap">' + chartSVG + '</div>' +
+          '</div>' +
+
+          '<div class="pmdb-eq-section">' +
+            '<div class="pmdb-eq-toolbar">' +
+              '<input type="text" class="pmdb-filter-search" placeholder="Rechercher un équipement…" value="' + esc(srch) + '" oninput="window._pmpDashSrch=this.value' + filterChange + '">' +
+              '<select class="pmdb-filter-sel" onchange="window._pmpDashType=this.value' + filterChange + '">' + typeOpts + '</select>' +
+              '<select class="pmdb-filter-sel" onchange="window._pmpDashSite=this.value' + filterChange + '">' + siteOpts + '</select>' +
+              '<select class="pmdb-filter-sel" onchange="window._pmpDashStat=this.value' + filterChange + '">' + statOpts + '</select>' +
+              '<button class="pmdb-add-btn" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter un équipement</button>' +
+            '</div>' +
+            eqCardsHtml +
+            pgHtml +
+          '</div>' +
+
+        '</div>' +
+
+        '<div class="pmdb-right-col">' +
+
+          '<div class="pmdb-widget">' +
+            '<div class="pmdb-widget-hdr"><i class="fas fa-triangle-exclamation"></i> À surveiller</div>' +
+            '<div class="pmdb-watch-list">' + watchHtml + '</div>' +
+            (lateInts.length ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'retards\')" class="pmdb-widget-link">Voir toutes les alertes (' + kpi.enRetard + ') →</a></div>' : '') +
+          '</div>' +
+
+          '<div class="pmdb-widget">' +
+            '<div class="pmdb-widget-hdr"><i class="fas fa-ranking-star"></i> Top 5 interventions les plus longues</div>' +
+            '<div class="pmdb-top5-list">' + top5Html + '</div>' +
+            (top5.length >= 5 ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'interventions\')" class="pmdb-widget-link">Voir le classement complet →</a></div>' : '') +
+          '</div>' +
+
+          '<div class="pmdb-widget">' +
+            '<div class="pmdb-widget-hdr"><i class="fas fa-star-half-stroke"></i> Score de fiabilité global</div>' +
+            '<div class="pmdb-score-body">' +
+              '<div class="pmdb-score-donut">' + donutSVG + '</div>' +
+              '<div class="pmdb-score-breakdown">' + scoreBreak + '</div>' +
+            '</div>' +
+            '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'equipements\')" class="pmdb-widget-link">Voir le détail par équipement →</a></div>' +
+          '</div>' +
+
+        '</div>' +
+      '</div>' +
+    '</div>';
   }
 
   // ── FILE D'ATTENTE ────────────────────────────────────────────────────────
