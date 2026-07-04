@@ -980,18 +980,13 @@
     var pmpComments = m.pmpComments || [];
     var parts       = m.usedParts || [];
     var history     = m.interventionHistory || [];
-    var cu          = MX.state.currentUser;
-    var curName     = cu ? cu.name : null;
-
-    _diagPmpValidation(m, curName);
-
-    // Lifecycle state
+    // Lifecycle state (for header badge only)
     var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
     var lcLabel   = lifecycle === 'terminee' ? 'Terminée 🟢' : (lifecycle === 'en_cours' ? 'En cours 🟠' : 'Disponible 🟣');
     var lcColor   = lifecycle === 'terminee' ? '#22c55e' : (lifecycle === 'en_cours' ? '#f97316' : '#a855f7');
 
-    // Checklist (editable only when mission is mine)
-    var canEdit = lifecycle === 'en_cours' && _canTerminate(m, curName);
+    // Checklist (toujours éditable sauf si mission terminée)
+    var canEdit = !m.done;
     var checklist = items.map(function (it, idx) {
       var ck = completed[String(idx)] || completed[idx];
       return '<label class="pmp-ck-item' + (ck ? ' pmp-ck-item--done' : '') + '">'
@@ -1144,9 +1139,9 @@
     }
     h += '</div>';
 
-    // ── Footer lifecycle ──
+    // ── Footer ──
     h += '<div class="pmp-detail-footer" id="pmp-detail-footer-' + missionId + '">'
-      + _buildPmpFooter(m, missionId, curName)
+      + _buildPmpFooter(m, missionId)
       + '</div>';
 
     h += '</div></div></div>';
@@ -1274,65 +1269,15 @@
   // LIFECYCLE HELPERS v1.0.40
   // ══════════════════════════════════════════════
 
-  function _normName(n) {
-    return (n || '').trim().toLowerCase();
-  }
-
-  function _canTerminate(m, curName) {
-    if (!curName || m.done) return false;
-    if (MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll()) return true;
-    if (_normName(m.takenBy) === _normName(curName)) return true;
-    if (!m.takenBy && _normName(m.assignedTo) === _normName(curName)) return true;
-    return false;
-  }
-
-  function _diagPmpValidation(m, curName) {
-    var pd = m.pmpData || {};
-    console.group('[MX PMP] Diagnostic validation — ' + (pd.equipmentName || m.id || '?'));
-    console.log('curName:', curName, '| takenBy:', m.takenBy, '| assignedTo:', m.assignedTo, '| done:', m.done);
-    var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
-    console.log('lifecycle:', lifecycle, '| _canTerminate:', _canTerminate(m, curName));
-    var completed = m.completedChecklist || {};
-    var items = pd.checklistItems || [];
-    var doneCnt = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
-    var pmpPhotos = m.pmpPhotos || {};
-    var photoCount = Object.keys(pmpPhotos).reduce(function (s, k) {
-      return s + (Array.isArray(pmpPhotos[k]) ? pmpPhotos[k].length : 0);
-    }, 0) + (m.photoAvant ? 1 : 0) + (m.photoPendant ? 1 : 0) + (m.photoApres ? 1 : 0);
-    console.log('Checklist:', doneCnt + '/' + items.length, '| Journal:', (m.pmpComments || []).length + ' entrée(s)', '| Photos:', photoCount, '| Pièces:', (m.usedParts || []).length);
-    console.log('OBLIGATOIRE — Mission prise :', _canTerminate(m, curName) ? 'OK ✔' : 'BLOQUÉ ✗ (prendre la mission d\'abord)');
-    console.log('OPTIONNEL — Checklist, Journal, Photos, Pièces : jamais bloquants');
-    console.groupEnd();
-  }
-
-  function _buildPmpFooter(m, missionId, curName) {
-    var e = MX.esc;
-    var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
-    var canAll = !!(MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll());
-    var isMine = _canTerminate(m, curName);
-    var h = '';
-    if (lifecycle === 'terminee') {
-      h += '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
-        + '<i class="fas fa-circle-check"></i> Mission validée</button>';
-    } else if (lifecycle === 'en_cours') {
-      if (isMine || canAll) {
-        h += '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
-          + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
-          + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
-          + '<i class="fas fa-check"></i> Terminer</button>';
-      } else {
-        h += '<div class="pmp-taken-info"><i class="fas fa-user-clock"></i> Prise par <strong>' + e(m.takenBy || '') + '</strong></div>';
-      }
-    } else {
-      // disponible
-      h += '<button class="pmp-take-btn" onclick="MX.MM._takePmpMission(\'' + missionId + '\')">'
-        + '<i class="fas fa-hand-pointer"></i> Prendre la mission</button>';
-      if (isMine || canAll) {
-        h += '<button class="pmp-validate-btn" style="margin-top:8px" onclick="MX.MM._terminerAssigned(\'' + missionId + '\')">'
-          + '<i class="fas fa-check"></i> Terminer directement</button>';
-      }
+  function _buildPmpFooter(m, missionId) {
+    if (m.done) {
+      return '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
+        + '<i class="fas fa-circle-check"></i> Maintenance terminée</button>';
     }
-    return h;
+    return '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
+      + '<i class="fas fa-arrow-rotate-left"></i> Rendre la maintenance</button>'
+      + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
+      + '<i class="fas fa-check-circle"></i> Valider la maintenance</button>';
   }
 
   function _updatePmpFooter(missionId) {
@@ -1340,21 +1285,7 @@
     if (!footerEl) return;
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m) return;
-    var cu = MX.state.currentUser;
-    footerEl.innerHTML = _buildPmpFooter(m, missionId, cu ? cu.name : null);
-  }
-
-  function _terminerAssigned(missionId) {
-    var cu = MX.state.currentUser;
-    if (!cu) { MX.toast('Connectez-vous pour valider une mission', true); return; }
-    var now = Date.now();
-    db.collection('missions').doc(missionId).update({ takenBy: cu.name, takenAt: now })
-      .then(function () {
-        var m = _allMissions.find(function (x) { return x.id === missionId; });
-        if (m) { m.takenBy = cu.name; m.takenAt = now; }
-        _updatePmpFooter(missionId);
-        _confirmTerminePmp(missionId);
-      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    footerEl.innerHTML = _buildPmpFooter(m, missionId);
   }
 
   // ══════════════════════════════════════════════
@@ -1378,27 +1309,12 @@
   }
 
   // ══════════════════════════════════════════════
-  // LIFECYCLE — TAKE / RELEASE / CONFIRM / VALIDATE
+  // LIFECYCLE — RELEASE / CONFIRM / VALIDATE
   // ══════════════════════════════════════════════
 
-  function _takePmpMission(missionId) {
-    var cu = MX.state.currentUser;
-    if (!cu) { MX.toast('Connectez-vous pour prendre une mission', true); return; }
-    var now = Date.now();
-    db.collection('missions').doc(missionId).update({ takenBy: cu.name, takenAt: now })
-      .then(function () {
-        var m = _allMissions.find(function (x) { return x.id === missionId; });
-        if (m) { m.takenBy = cu.name; m.takenAt = now; }
-        MX.toast('Mission prise ✓');
-        _updatePmpFooter(missionId);
-        var ov = document.getElementById('pmp-detail-ov');
-        if (ov) ov.querySelectorAll('.pmp-ck-item input[type=checkbox]').forEach(function (cb) { cb.disabled = false; });
-      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
-  }
-
   function _releasePmpMission(missionId) {
-    document.getElementById('m-title').textContent = 'Rendre la mission';
-    document.getElementById('m-sub').innerHTML = '<p style="margin:0;color:var(--text2)">Voulez-vous rendre cette mission ? Elle repassera en statut <strong style="color:var(--text1)">Disponible 🟣</strong>.</p>';
+    document.getElementById('m-title').textContent = 'Rendre la maintenance';
+    document.getElementById('m-sub').innerHTML = '<p style="margin:0;color:var(--text2)">La maintenance sera remise disponible pour un autre technicien.<br>Vos commentaires, photos et pièces sont conservés.</p>';
     document.getElementById('m-actions').innerHTML =
       '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.MM._doReleasePmp(\'' + missionId + '\')">'
       + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
@@ -1412,77 +1328,54 @@
       .then(function () {
         var m = _allMissions.find(function (x) { return x.id === missionId; });
         if (m) { m.takenBy = null; m.takenAt = null; }
-        MX.toast('Mission rendue ✓');
+        MX.toast('Maintenance rendue ✓');
         _updatePmpFooter(missionId);
-        var ov = document.getElementById('pmp-detail-ov');
-        if (ov) ov.querySelectorAll('.pmp-ck-item input[type=checkbox]').forEach(function (cb) { cb.disabled = true; });
       }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 
   function _confirmTerminePmp(missionId) {
-    var m = _allMissions.find(function (x) { return x.id === missionId; });
-    if (!m) return;
-    var pmpComments = m.pmpComments || [];
-    var parts       = m.usedParts || [];
-    var pmpPhotos   = m.pmpPhotos || {};
-    var completed   = m.completedChecklist || {};
-    var items       = (m.pmpData && m.pmpData.checklistItems) || [];
-    var doneCnt     = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
-    var photoCount  = Object.keys(pmpPhotos).reduce(function (s, k) { return s + (Array.isArray(pmpPhotos[k]) ? pmpPhotos[k].length : 0); }, 0)
-      + (m.photoAvant ? 1 : 0) + (m.photoPendant ? 1 : 0) + (m.photoApres ? 1 : 0);
-    var cu2 = MX.state.currentUser;
-    var curName2 = cu2 ? cu2.name : null;
-    var checkHtml = '<div class="pmp-confirm-checks">'
-      + '<div class="pmp-confirm-row ok">✓ Mission prise' + (m.takenBy ? ' par ' + MX.esc(m.takenBy) : '') + '</div>'
-      + '<div class="pmp-confirm-row ' + (pmpComments.length ? 'ok' : 'warn') + '">'
-      + (pmpComments.length ? '✓' : '⚠') + ' Journal : ' + (pmpComments.length ? pmpComments.length + ' entrée(s)' : 'aucun commentaire (facultatif)') + '</div>'
-      + '<div class="pmp-confirm-row ' + (photoCount ? 'ok' : 'warn') + '">'
-      + (photoCount ? '✓' : '⚠') + ' Photos : ' + (photoCount ? photoCount + ' photo(s)' : 'aucune photo (facultatif)') + '</div>'
-      + (items.length ? '<div class="pmp-confirm-row ' + (doneCnt === items.length ? 'ok' : 'warn') + '">'
-      + (doneCnt === items.length ? '✓' : '⚠') + ' Checklist : ' + doneCnt + '/' + items.length + ' (facultatif)</div>' : '')
-      + '<div class="pmp-confirm-row ' + (parts.length ? 'ok' : 'info') + '">'
-      + (parts.length ? '✓' : '—') + ' Pièces : ' + (parts.length ? parts.map(function (p) { return p.name + ' ×' + (p.qty || 1); }).join(', ') : 'aucune (facultatif)') + '</div>'
+    document.getElementById('m-title').textContent = 'Valider cette maintenance ?';
+    document.getElementById('m-sub').innerHTML =
+      '<p style="margin:0 0 12px;color:var(--text2);font-size:13px">Cette action :</p>'
+      + '<div class="pmp-confirm-checks">'
+      + '<div class="pmp-confirm-row ok">✓ clôture le PMP</div>'
+      + '<div class="pmp-confirm-row ok">✓ programme automatiquement la prochaine maintenance</div>'
+      + '<div class="pmp-confirm-row ok">✓ archive cette intervention</div>'
       + '</div>';
-    document.getElementById('m-title').textContent = 'Valider la mission';
-    document.getElementById('m-sub').innerHTML = checkHtml
-      + '<p style="margin:12px 0 0;font-size:12px;color:var(--text3)">La mission sera marquée <strong>Terminée 🟢</strong>. Cette action est irréversible.</p>';
     document.getElementById('m-actions').innerHTML =
       '<button class="modal-btn confirm" onclick="MX.MM._validatePmpMission(\'' + missionId + '\');MX.closeModal()">'
       + '<i class="fas fa-check"></i> Valider</button>'
-      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Continuer</button>';
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
     document.getElementById('modal-bg').classList.add('show');
   }
 
   async function _validatePmpMission(missionId) {
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m || m.done) return;
-    var cu    = MX.state.currentUser;
-    var curName = cu ? cu.name : null;
-    _diagPmpValidation(m, curName);
-    if (!_canTerminate(m, curName)) {
-      MX.toast('Prenez d\'abord la mission pour pouvoir la valider', true);
-      return;
-    }
-    var today = new Date().toISOString().slice(0, 10);
-    var lastObs = (m.pmpComments && m.pmpComments.length)
+    var cu          = MX.state.currentUser;
+    var completedBy = cu ? cu.name : (m.takenBy || m.assignedTo || '');
+    var today       = new Date().toISOString().slice(0, 10);
+    var lastObs     = (m.pmpComments && m.pmpComments.length)
       ? m.pmpComments[m.pmpComments.length - 1].text
       : (m.observations || '');
+    var nextDue = null;
     try {
       await db.collection('missions').doc(missionId).update({
         done: true,
+        takenBy: m.takenBy || completedBy,
         completedAt: FV.serverTimestamp(),
-        completedBy: cu ? cu.name : (m.takenBy || m.assignedTo || ''),
+        completedBy: completedBy,
       });
       if (m.pmpIntId) {
         var histEntry = {
           date: today,
-          by: cu ? cu.name : (m.takenBy || m.assignedTo || ''),
+          by: completedBy,
           observations: lastObs,
           completedChecklist: m.completedChecklist || {},
         };
         await db.collection('pmp_interventions').doc(m.pmpIntId).update({
           status: 'terminee', doneDate: today, observations: lastObs,
-          doneBy: cu ? cu.name : '',
+          doneBy: completedBy,
           completedChecklist: m.completedChecklist || {},
           interventionHistory: FV.arrayUnion(histEntry),
           updatedAt: FV.serverTimestamp(),
@@ -1493,15 +1386,17 @@
           var eqSnap = await db.collection('pmp_equipments').doc(intData.equipmentId).get();
           var eqData = eqSnap.exists ? eqSnap.data() : null;
           if (eqData) {
-            var freq    = eqData.frequency || 30;
-            var nextDue = _addDaysMM(today, freq);
+            var freq = eqData.frequency || 30;
+            nextDue  = _addDaysMM(today, freq);
             await db.collection('pmp_equipments').doc(intData.equipmentId).update({
               lastDone: today, nextDue: nextDue, updatedAt: FV.serverTimestamp(),
             });
           }
         }
       }
-      MX.toast('Mission PMP validée ✓');
+      var toastMsg = '✅ Maintenance terminée'
+        + (nextDue ? ' — Prochaine : ' + _fmtDate(nextDue) : ' ✓');
+      MX.toast(toastMsg);
       _closePmpDetail();
     } catch (err) {
       MX.toast('Erreur validation : ' + err.message, true);
@@ -1650,9 +1545,8 @@
     _openInterventionDetail: _openInterventionDetail, _closeInterventionDetail: _closeInterventionDetail,
     _triggerPmpPhoto: _triggerPmpPhoto, _onPmpPh: _onPmpPh, _viewPhoto: _viewPhoto,
     _toggleCheck: _toggleCheck,
-    _takePmpMission: _takePmpMission, _releasePmpMission: _releasePmpMission,
+    _releasePmpMission: _releasePmpMission,
     _doReleasePmp: _doReleasePmp, _confirmTerminePmp: _confirmTerminePmp,
-    _terminerAssigned: _terminerAssigned,
     _addPmpComment: _addPmpComment, _addIntComment: _addIntComment,
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,
