@@ -41,11 +41,17 @@
   var _intStatusFilter = 'all';
   var _eqFormMode      = null;   // null | 'new' | '<docId>'
   var _eqFormDraft     = {};
+  var _pmpPlans        = [];
+  var _planFormMode    = null;   // null | 'new' | '<planId>'
+  var _planFormEqId    = null;
+  var _planFormDraft   = {};
+  var _viewEqId        = null;
 
   var PMP_DB = {
-    eq:  function () { return db.collection('pmp_equipments');   },
-    int: function () { return db.collection('pmp_interventions'); },
-    tpl: function () { return db.collection('pmp_templates');    },
+    eq:    function () { return db.collection('pmp_equipments');   },
+    int:   function () { return db.collection('pmp_interventions'); },
+    tpl:   function () { return db.collection('pmp_templates');    },
+    plans: function () { return db.collection('pmp_plans');        },
   };
 
   var EQ_TYPES = {
@@ -234,7 +240,13 @@
       _rerender();
     }, _fsErr('pmp_templates'));
 
+    _unsubPmp.plans = PMP_DB.plans().onSnapshot(function (snap) {
+      _pmpPlans = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      _rerender();
+    }, _fsErr('pmp_plans'));
+
     setTimeout(_checkAndGenerate, 2500);
+    setTimeout(_migrateLegacyEquipments, 5000);
   }
 
   // ── AUTO-GENERATION ───────────────────────────────────────────────────────
@@ -242,45 +254,81 @@
   async function _checkAndGenerate() {
     if (window._pmpGenDone) return;
     window._pmpGenDone = true;
-    var today    = _today();
-    var activeEq = _pmpEq.filter(function (e) { return e.status !== 'inactif'; });
-    for (var i = 0; i < activeEq.length; i++) {
-      var eq = activeEq[i];
-      if (!eq.nextDue || eq.nextDue > today) continue;
+    var today       = _today();
+    var activePlans = _pmpPlans.filter(function (p) { return p.status !== 'inactif'; });
+    for (var i = 0; i < activePlans.length; i++) {
+      var plan = activePlans[i];
+      if (!plan.nextDue || plan.nextDue > today) continue;
+      var eq = _pmpEq.find(function (e) { return e.id === plan.equipmentId; });
+      if (eq && eq.status === 'inactif') continue;
       var existing = _pmpInt.find(function (x) {
-        return x.equipmentId === eq.id && x.dueDate === eq.nextDue &&
+        return x.planId === plan.id && x.dueDate === plan.nextDue &&
                (x.status === 'planifiee' || x.status === 'en_cours' || x.status === 'en_retard');
       });
       if (existing) continue;
       try {
         var checklistItems = [];
-        if (eq.templateId) {
-          var tpl = _pmpTpl.find(function (t) { return t.id === eq.templateId; });
+        if (plan.templateId) {
+          var tpl = _pmpTpl.find(function (t) { return t.id === plan.templateId; });
           if (tpl && tpl.items) {
             checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
           }
         }
         await PMP_DB.int().add({
-          equipmentId:       eq.id,
-          equipmentName:     eq.name,
-          type:              eq.type     || 'divers',
-          zone:              eq.zone     || '',
-          subZone:           eq.subZone  || '',
-          ref:               eq.ref      || '',
-          dueDate:           eq.nextDue,
-          frequency:         eq.frequency || 30,
-          technician:        '',
-          criticite:         eq.criticite || 'normale',
-          status:            eq.nextDue < today ? 'en_retard' : 'planifiee',
+          equipmentId:       plan.equipmentId,
+          equipmentName:     plan.equipmentName || (eq && eq.name) || '',
+          planId:            plan.id,
+          planName:          plan.name,
+          type:              (eq && eq.type)    || 'divers',
+          zone:              (eq && eq.zone)    || '',
+          subZone:           (eq && eq.subZone) || '',
+          ref:               (eq && eq.ref)     || '',
+          dueDate:           plan.nextDue,
+          frequency:         plan.frequency || 30,
+          technician:        plan.technician || '',
+          criticite:         (eq && eq.criticite) || 'normale',
+          status:            plan.nextDue < today ? 'en_retard' : 'planifiee',
           source:            'auto',
           checklistItems:    checklistItems,
-          estimatedDuration: eq.duration || '',
-          technicalNotes:    eq.technicalNotes || '',
-          templateId:        eq.templateId || '',
+          estimatedDuration: plan.duration || '',
+          technicalNotes:    plan.technicalNotes || '',
+          templateId:        plan.templateId || '',
           createdAt:         FV.serverTimestamp(),
         });
       } catch (e) {
         console.warn('[PMP] auto-gen:', e.message);
+      }
+    }
+  }
+
+  // ── MIGRATION LEGACY (v1.0.36 → v1.0.37) ───────────────────────────────
+
+  async function _migrateLegacyEquipments() {
+    if (window._pmpMigrated) return;
+    window._pmpMigrated = true;
+    for (var i = 0; i < _pmpEq.length; i++) {
+      var eq = _pmpEq[i];
+      if (!eq.frequency) continue;
+      var hasPlan = _pmpPlans.some(function (p) { return p.equipmentId === eq.id; });
+      if (hasPlan) continue;
+      try {
+        await PMP_DB.plans().add({
+          equipmentId:    eq.id,
+          equipmentName:  eq.name || '',
+          name:           'Plan de maintenance — ' + (eq.name || ''),
+          frequency:      eq.frequency || 30,
+          duration:       eq.duration || '',
+          technician:     eq.technician || '',
+          templateId:     eq.templateId || '',
+          technicalNotes: eq.technicalNotes || '',
+          lastDone:       eq.lastDone || '',
+          nextDue:        eq.nextDue || '',
+          status:         'actif',
+          createdAt:      FV.serverTimestamp(),
+          createdBy:      'Migration automatique v1.0.37',
+        });
+      } catch (e) {
+        console.warn('[PMP] migrate eq ' + eq.id + ':', e.message);
       }
     }
   }
@@ -362,21 +410,25 @@
     if (tabs) tabs.innerHTML = _tabsHtml();
   }
 
-  function _tab(id) { _eqFormMode = null; _curTab = id; _rerender(); }
+  function _tab(id) { _eqFormMode = null; _planFormMode = null; _viewEqId = null; _curTab = id; _rerender(); }
 
   function _body() {
-    if (_eqFormMode !== null)        return _tEqFormPage();
-    if (_curTab === 'dashboard')     return _tDashboard();
-    if (_curTab === 'equipements')   return _tEquipements();
-    if (_curTab === 'calendrier')    return _tCalendrier();
-    if (_curTab === 'interventions') return _tInterventions();
-    if (_curTab === 'file')          return _tQueue();
-    if (_curTab === 'retards')       return _tRetards();
-    if (_curTab === 'modeles')       return _tModeles();
-    if (_curTab === 'import')        return _tImport();
-    if (_curTab === 'historique')    return _tHistorique();
+    if (_planFormMode !== null)       return _tPlanFormPage();
+    if (_viewEqId !== null)           return _tEqDetail(_viewEqId);
+    if (_eqFormMode !== null)         return _tEqFormPage();
+    if (_curTab === 'dashboard')      return _tDashboard();
+    if (_curTab === 'equipements')    return _tEquipements();
+    if (_curTab === 'calendrier')     return _tCalendrier();
+    if (_curTab === 'interventions')  return _tInterventions();
+    if (_curTab === 'file')           return _tQueue();
+    if (_curTab === 'retards')        return _tRetards();
+    if (_curTab === 'modeles')        return _tModeles();
+    if (_curTab === 'import')         return _tImport();
+    if (_curTab === 'historique')     return _tHistorique();
     return '';
   }
+
+  function _viewEq(eqId) { _viewEqId = eqId; _eqFormMode = null; _planFormMode = null; _rerender(); }
 
   // ── DASHBOARD V2 — helpers ───────────────────────────────────────────────
 
@@ -399,6 +451,18 @@
     return 0;
   }
 
+  function _eqPlanNextDue(eqId) {
+    var plans = _pmpPlans.filter(function (p) { return p.equipmentId === eqId && p.status !== 'inactif'; });
+    if (!plans.length) return null;
+    return plans.reduce(function (min, p) {
+      return (p.nextDue && (!min || p.nextDue < min)) ? p.nextDue : min;
+    }, null);
+  }
+
+  function _eqPlanCount(eqId) {
+    return _pmpPlans.filter(function (p) { return p.equipmentId === eqId && p.status !== 'inactif'; }).length;
+  }
+
   function _eqHealthScore(eq) {
     var today = _today();
     if (eq.status === 'inactif') return 50;
@@ -407,8 +471,9 @@
              (i.status === 'en_retard' || (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee'));
     });
     if (!lates.length) {
-      if (!eq.nextDue) return 90;
-      var daysAhead = Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+      var nextDue = _eqPlanNextDue(eq.id) || eq.nextDue;
+      if (!nextDue) return 90;
+      var daysAhead = Math.round((new Date(nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
       return daysAhead > 30 ? 96 : daysAhead > 7 ? 88 : daysAhead >= 0 ? 78 : 65;
     }
     var maxLate = Math.max.apply(null, lates.map(function (i) { return _daysLate(i.dueDate); }));
@@ -645,18 +710,21 @@
       if (eqType !== 'all' && eq.type !== eqType) return false;
       if (eqSite !== 'all' && eq.zone !== eqSite) return false;
       if (eqStat !== 'all') {
-        var isLateF = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
-        var isSoonF = !isLateF && eq.nextDue && eq.nextDue >= today && eq.nextDue <= weekEnd;
+        var eqNd    = _eqPlanNextDue(eq.id) || eq.nextDue;
+        var isLateF = eqNd && eqNd < today && eq.status !== 'inactif';
+        var isSoonF = !isLateF && eqNd && eqNd >= today && eqNd <= weekEnd;
         if (eqStat === 'late' && !isLateF) return false;
         if (eqStat === 'soon' && !isSoonF) return false;
         if (eqStat === 'ok' && (isLateF || isSoonF)) return false;
       }
       return true;
     }).sort(function (a, b) {
-      var aL = (a.nextDue && a.nextDue < today) ? 1 : 0;
-      var bL = (b.nextDue && b.nextDue < today) ? 1 : 0;
+      var aNd = _eqPlanNextDue(a.id) || a.nextDue;
+      var bNd = _eqPlanNextDue(b.id) || b.nextDue;
+      var aL = (aNd && aNd < today) ? 1 : 0;
+      var bL = (bNd && bNd < today) ? 1 : 0;
       if (bL !== aL) return bL - aL;
-      return (a.nextDue || 'z').localeCompare(b.nextDue || 'z');
+      return (aNd || 'z').localeCompare(bNd || 'z');
     });
 
     var totalEqs   = filtered.length;
@@ -675,19 +743,23 @@
       eqCardsHtml = '<div class="pmdb-eq-grid">';
       pageEqs.forEach(function (eq) {
         var ti       = EQ_TYPES[eq.type] || { icon: '🔧', l: eq.type || 'Divers' };
-        var isLate   = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
-        var daysOff  = eq.nextDue ? Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
+        var nextDue  = _eqPlanNextDue(eq.id) || eq.nextDue;
+        var planCnt  = _eqPlanCount(eq.id);
+        var isLate   = nextDue && nextDue < today && eq.status !== 'inactif';
+        var daysOff  = nextDue ? Math.round((new Date(nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
         var eqHs     = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
         var health   = eqHs.pts;
         var hColor   = eqHs.c;
         var badgeT   = eq.status === 'inactif' ? 'off' : isLate ? 'late' : (daysOff !== null && daysOff <= 7) ? 'soon' : 'ok';
         var badgeLbl = { off:'Inactif', late:'En retard', soon:'À venir', ok:'OK' }[badgeT];
-        var nextStr  = !eq.nextDue ? '—' : isLate ? '<span style="color:#EF4444">' + _dateLbl(eq.nextDue) + ' (' + Math.abs(daysOff) + 'j)</span>' :
-                       daysOff === 0 ? "Aujourd'hui" : _dateLbl(eq.nextDue);
+        var nextStr  = !nextDue ? '—' : isLate ? '<span style="color:#EF4444">' + _dateLbl(nextDue) + ' (' + Math.abs(daysOff) + 'j)</span>' :
+                       daysOff === 0 ? "Aujourd'hui" : _dateLbl(nextDue);
         var latestInt = _pmpInt.filter(function (i) { return i.equipmentId === eq.id && i.technician; })
                                .sort(function (a, b) { return (b.dueDate || '').localeCompare(a.dueDate || ''); })[0];
-        var tech = latestInt ? latestInt.technician : (eq.technician || '');
-        var dur  = latestInt ? (latestInt.estimatedDuration || '') : (eq.duration || '');
+        var eqPlans  = _pmpPlans.filter(function (p) { return p.equipmentId === eq.id; });
+        var planTech = eqPlans.length === 1 ? eqPlans[0].technician : '';
+        var tech = latestInt ? latestInt.technician : (planTech || eq.technician || '');
+        var dur  = latestInt ? (latestInt.estimatedDuration || '') : (eqPlans.length === 1 ? eqPlans[0].duration || '' : eq.duration || '');
         var initials = tech ? tech.split(' ').map(function (w) { return w ? w[0].toUpperCase() : ''; }).join('').slice(0, 2) : '';
 
         eqCardsHtml +=
@@ -711,7 +783,7 @@
             '</div>' +
             (tech ? '<div class="pmdb-eq-tech"><div class="pmdb-eq-tech-av">' + initials + '</div><span>' + esc(tech) + '</span></div>' : '') +
             '<div class="pmdb-eq-actions">' +
-              '<button class="pmdb-eq-btn-int" onclick="MX.Pages.PMP._createInt(\'' + esc(eq.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
+              '<button class="pmdb-eq-btn-int" onclick="MX.Pages.PMP._viewEq(\'' + esc(eq.id) + '\')"><i class="fas fa-list-check"></i> ' + planCnt + ' plan' + (planCnt !== 1 ? 's' : '') + '</button>' +
               '<button class="pmdb-eq-btn-ico" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')" title="Modifier"><i class="fas fa-pen"></i></button>' +
               '<button class="pmdb-eq-btn-ico pmdb-eq-btn-del" onclick="MX.Pages.PMP._delEq(\'' + eq.id + '\')" title="Supprimer"><i class="fas fa-trash"></i></button>' +
             '</div>' +
@@ -1066,24 +1138,25 @@
     } else {
       h += '<div class="pmp-eq-list">';
       filtered.forEach(function (eq) {
-        var ti      = EQ_TYPES[eq.type]  || { icon: '🔧', l: eq.type || 'Divers' };
-        var cr      = CRIT[eq.criticite] || CRIT.normale;
-        var hs      = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
-        var isLate  = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
-        var daysOff = eq.nextDue ? Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
+        var ti       = EQ_TYPES[eq.type]  || { icon: '🔧', l: eq.type || 'Divers' };
+        var cr       = CRIT[eq.criticite] || CRIT.normale;
+        var hs       = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
+        var nextDue  = _eqPlanNextDue(eq.id) || eq.nextDue;
+        var planCnt  = _eqPlanCount(eq.id);
+        var isLate   = nextDue && nextDue < today && eq.status !== 'inactif';
+        var daysOff  = nextDue ? Math.round((new Date(nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
         h += '<div class="pmp-eq-card' + (isLate ? ' pmp-eq-card--late' : '') + '">' +
           '<div class="pmp-eq-card-head">' +
           '<div class="pmp-eq-ico">' + ti.icon + '</div>' +
-          '<div class="pmp-eq-info"><div class="pmp-eq-name">' + esc(eq.name) + '</div>' +
+          '<div class="pmp-eq-info"><div class="pmp-eq-name" style="cursor:pointer" onclick="MX.Pages.PMP._viewEq(\'' + esc(eq.id) + '\')">' + esc(eq.name) + '</div>' +
           '<div class="pmp-eq-type">' + esc(ti.l) + (eq.zone ? ' · ' + esc(eq.zone) : '') + '</div></div>' +
           '<div class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</div>' +
           '</div>' +
           '<div class="pmp-eq-card-body">' +
-          (eq.ref        ? '<span class="pmp-eq-meta"><i class="fas fa-tag"></i> ' + esc(eq.ref) + '</span>' : '') +
-          (eq.technician ? '<span class="pmp-eq-meta"><i class="fas fa-user"></i> ' + esc(eq.technician) + '</span>' : '') +
+          (eq.ref ? '<span class="pmp-eq-meta"><i class="fas fa-tag"></i> ' + esc(eq.ref) + '</span>' : '') +
           '<span class="pmp-eq-meta" style="color:' + hs.c + '">' + hs.dot + ' ' + hs.l + '</span>' +
-          '<span class="pmp-eq-meta"><i class="fas fa-rotate"></i> ' + _freqLbl(eq.frequency) + '</span>' +
-          (eq.nextDue ? '<span class="pmp-eq-meta' +
+          '<span class="pmp-eq-meta"><i class="fas fa-list-check"></i> ' + planCnt + ' plan' + (planCnt !== 1 ? 's' : '') + '</span>' +
+          (nextDue ? '<span class="pmp-eq-meta' +
             (isLate ? ' pmp-eq-meta--late' : daysOff !== null && daysOff <= 7 ? ' pmp-eq-meta--warn' : '') + '">' +
             '<i class="fas fa-calendar-check"></i> ' +
             (isLate ? 'En retard de ' + Math.abs(daysOff) + 'j' : daysOff === 0 ? "Aujourd'hui" : 'Dans ' + daysOff + 'j') +
@@ -1092,7 +1165,7 @@
           '<div class="pmp-eq-card-footer">' +
           '<span class="pmp-eq-status pmp-eq-status--' + (eq.status || 'actif') + '">' + (eq.status === 'inactif' ? 'Inactif' : 'Actif') + '</span>' +
           '<div class="pmp-eq-actions">' +
-          '<button class="pmp-act-btn" onclick="MX.Pages.PMP._createInt(\'' + esc(eq.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
+          '<button class="pmp-act-btn" onclick="MX.Pages.PMP._viewEq(\'' + esc(eq.id) + '\')"><i class="fas fa-list-check"></i> Plans</button>' +
           '<button class="pmp-act-btn" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')"><i class="fas fa-pen"></i></button>' +
           '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delEq(\'' + eq.id + '\')"><i class="fas fa-trash"></i></button>' +
           '</div></div></div>';
@@ -1164,9 +1237,11 @@
         '<div class="pmp-cal-day">' + day + '</div>' +
         (dotColor ? '<div class="pmp-cal-dot" style="background:' + dotColor + '"></div>' : '') +
         ints.slice(0, 2).map(function (i) {
-          var st = INT_ST[i.status] || INT_ST.planifiee;
-          return '<div class="pmp-cal-event" style="background:' + st.bg + ';color:' + st.c + '" title="' + esc(i.equipmentName || '') + '">' +
-            esc((i.equipmentName || '').slice(0, 9)) + '</div>';
+          var st    = INT_ST[i.status] || INT_ST.planifiee;
+          var lbl   = i.planName ? i.planName : i.equipmentName || '';
+          var title = i.equipmentName + (i.planName ? ' — ' + i.planName : '');
+          return '<div class="pmp-cal-event" style="background:' + st.bg + ';color:' + st.c + '" title="' + esc(title) + '">' +
+            esc(lbl.slice(0, 9)) + '</div>';
         }).join('') +
         (ints.length > 2 ? '<div class="pmp-cal-more">+' + (ints.length - 2) + '</div>' : '') +
         '</div>';
@@ -1650,11 +1725,6 @@
     var users  = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
     var tpls   = _pmpTpl;
 
-    var eqDur      = eq ? (eq.duration || '') : '';
-    var durIsOther = eqDur !== '' && !DURATIONS.includes(eqDur);
-    var durSel     = durIsOther ? 'Autre' : eqDur;
-    var durOther   = durIsOther ? eqDur : '';
-
     var h = '<div class="pmp-eqfm-page">';
 
     // ── header bar
@@ -1741,80 +1811,7 @@
 
       '</div></div>';
 
-    // ── section 2 : Organisation maintenance
-    h += '<div class="pmp-eqfm-section">' +
-      '<div class="pmp-eqfm-section-title"><i class="fas fa-calendar-alt"></i> Organisation maintenance</div>' +
-      '<div class="pmp-eqfm-grid">' +
-
-      '<div class="pmp-eqfm-field">' +
-        '<label class="pmp-eqfm-lbl">Fréquence <span class="pmp-eqfm-req">*</span></label>' +
-        '<select class="pmp-eqfm-select" id="pmp-f-freq">' +
-          FREQS.map(function (f) {
-            var sel = eq ? eq.frequency === f.v : f.v === 30;
-            return '<option value="' + f.v + '"' + (sel ? ' selected' : '') + '>' + f.l + '</option>';
-          }).join('') +
-        '</select>' +
-      '</div>' +
-
-      '<div class="pmp-eqfm-field">' +
-        '<label class="pmp-eqfm-lbl">Durée estimée</label>' +
-        '<select class="pmp-eqfm-select" id="pmp-f-dur" onchange="MX.Pages.PMP._onDurChange(this.value)">' +
-          '<option value="">— Non définie —</option>' +
-          DURATIONS.map(function (d) {
-            return '<option value="' + d + '"' + (durSel === d ? ' selected' : '') + '>' + d + '</option>';
-          }).join('') +
-        '</select>' +
-        '<input class="pmp-eqfm-input" id="pmp-f-dur-other" placeholder="Préciser la durée…"' +
-          ' style="margin-top:6px;display:' + (durSel === 'Autre' ? 'block' : 'none') + '"' +
-          ' value="' + esc(durOther) + '">' +
-      '</div>' +
-
-      (isEdit ? '<div class="pmp-eqfm-field">' +
-        '<label class="pmp-eqfm-lbl">Prochaine échéance <span class="pmp-eqfm-req">*</span></label>' +
-        '<input class="pmp-eqfm-input" type="date" id="pmp-f-nextDue" value="' + esc(eq ? eq.nextDue || '' : '') + '">' +
-      '</div>' : '') +
-
-      '<div class="pmp-eqfm-field">' +
-        '<label class="pmp-eqfm-lbl">Modèle de checklist</label>' +
-        '<select class="pmp-eqfm-select" id="pmp-f-tpl">' +
-          '<option value="">— Aucun —</option>' +
-          tpls.map(function (t) {
-            return '<option value="' + esc(t.id) + '"' + (eq && eq.templateId === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-          }).join('') +
-        '</select>' +
-      '</div>' +
-
-      '</div></div>';
-
-    // ── section 3 : Documents (placeholder)
-    h += '<div class="pmp-eqfm-section">' +
-      '<div class="pmp-eqfm-section-title">' +
-        '<i class="fas fa-folder-open"></i> Documents' +
-        ' <span class="pmp-soon-tag">Bientôt disponible</span>' +
-      '</div>' +
-      '<div class="pmp-eqfm-docs-placeholder">' +
-        '<div class="pmp-eqfm-docs-grid">' +
-          ['PDF', 'Notice', 'Schéma', 'Photo', 'Vidéo', 'Manuel'].map(function (d) {
-            return '<div class="pmp-eqfm-doc-slot">' +
-              '<i class="fas fa-file-circle-plus"></i>' +
-              '<span>' + d + '</span>' +
-            '</div>';
-          }).join('') +
-        '</div>' +
-        '<p class="pmp-eqfm-docs-note">La gestion documentaire sera activée dans une prochaine mise à jour.</p>' +
-      '</div>' +
-    '</div>';
-
-    // ── section 4 : Consignes techniques
-    h += '<div class="pmp-eqfm-section">' +
-      '<div class="pmp-eqfm-section-title"><i class="fas fa-clipboard-list"></i> Consignes techniques</div>' +
-      '<textarea class="pmp-eqfm-textarea" id="pmp-f-notes"' +
-        ' placeholder="Instructions de maintenance, points d\'attention, consignes de sécurité, procédures spécifiques…">' +
-        esc(eq ? eq.technicalNotes || '' : '') +
-      '</textarea>' +
-    '</div>';
-
-    // ── section 5 : Commentaires
+    // ── section 2 : Commentaires
     h += '<div class="pmp-eqfm-section">' +
       '<div class="pmp-eqfm-section-title"><i class="fas fa-comment-dots"></i> Commentaires</div>' +
       '<textarea class="pmp-eqfm-textarea pmp-eqfm-textarea--sm" id="pmp-f-comments"' +
@@ -1839,36 +1836,27 @@
 
   function _collectEqForm() {
     var isEdit = _eqFormMode !== 'new';
-    var durSel = document.getElementById('pmp-f-dur')?.value || '';
-    var durOther = (document.getElementById('pmp-f-dur-other')?.value || '').trim();
     return {
-      isEdit:         isEdit,
-      id:             isEdit ? _eqFormMode : null,
-      name:           (document.getElementById('pmp-f-name')?.value    || '').trim(),
-      type:            document.getElementById('pmp-f-type')?.value    || '',
-      criticite:       document.getElementById('pmp-f-crit')?.value    || 'normale',
-      zone:           (document.getElementById('pmp-f-zone')?.value    || '').trim(),
-      subZone:        (document.getElementById('pmp-f-subzone')?.value || '').trim(),
-      ref:            (document.getElementById('pmp-f-ref')?.value     || '').trim(),
-      status:          document.getElementById('pmp-f-status')?.value  || 'actif',
-      healthState:     document.getElementById('pmp-f-health')?.value  || 'bon',
-      technician:      document.getElementById('pmp-f-tech')?.value    || '',
-      frequency:      parseInt(document.getElementById('pmp-f-freq')?.value || '30') || 30,
-      nextDue:         document.getElementById('pmp-f-nextDue')?.value || '',
-      templateId:      document.getElementById('pmp-f-tpl')?.value     || '',
-      duration:        durSel === 'Autre' ? durOther : durSel,
-      technicalNotes: (document.getElementById('pmp-f-notes')?.value    || '').trim(),
-      comments:       (document.getElementById('pmp-f-comments')?.value || '').trim(),
+      isEdit:      isEdit,
+      id:          isEdit ? _eqFormMode : null,
+      name:        (document.getElementById('pmp-f-name')?.value    || '').trim(),
+      type:         document.getElementById('pmp-f-type')?.value    || '',
+      criticite:    document.getElementById('pmp-f-crit')?.value    || 'normale',
+      zone:        (document.getElementById('pmp-f-zone')?.value    || '').trim(),
+      subZone:     (document.getElementById('pmp-f-subzone')?.value || '').trim(),
+      ref:         (document.getElementById('pmp-f-ref')?.value     || '').trim(),
+      status:       document.getElementById('pmp-f-status')?.value  || 'actif',
+      healthState:  document.getElementById('pmp-f-health')?.value  || 'bon',
+      technician:   document.getElementById('pmp-f-tech')?.value    || '',
+      comments:    (document.getElementById('pmp-f-comments')?.value || '').trim(),
     };
   }
 
   function _saveEqForm() {
     var d = _collectEqForm();
-    if (!d.name)      { MX.toast('Nom requis', true);      return; }
-    if (!d.type)      { MX.toast('Famille requise', true);  return; }
-    if (!d.zone)      { MX.toast('Zone requise', true);     return; }
-    if (!d.frequency) { MX.toast('Fréquence requise', true); return; }
-    if (d.isEdit && !d.nextDue) { MX.toast('Prochaine échéance requise', true); return; }
+    if (!d.name) { MX.toast('Nom requis', true);   return; }
+    if (!d.type) { MX.toast('Famille requise', true); return; }
+    if (!d.zone) { MX.toast('Zone requise', true);    return; }
 
     var ti = EQ_TYPES[d.type] || { icon: '🔧', l: d.type };
     var cr = CRIT[d.criticite] || CRIT.normale;
@@ -1887,10 +1875,7 @@
       '<div class="pmp-eqfm-preview-rows">' +
         '<div class="pmp-eqfm-preview-row"><i class="fas fa-map-marker-alt"></i><span>' + esc(d.zone) + (d.subZone ? ' · ' + esc(d.subZone) : '') + '</span></div>' +
         '<div class="pmp-eqfm-preview-row"><i class="fas fa-heart-pulse" style="color:' + hs.c + '"></i><span style="color:' + hs.c + '">' + hs.dot + ' ' + hs.l + '</span></div>' +
-        '<div class="pmp-eqfm-preview-row"><i class="fas fa-rotate"></i><span>' + _freqLbl(d.frequency) + '</span></div>' +
-        (d.duration ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-clock"></i><span>' + esc(d.duration) + '</span></div>' : '') +
         (d.technician ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-user"></i><span>' + esc(d.technician) + '</span></div>' : '') +
-        (d.nextDue ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-calendar-check"></i><span>' + _dateLbl(d.nextDue) + '</span></div>' : '') +
       '</div>' +
     '</div>';
 
@@ -1911,27 +1896,28 @@
       name: d.name, type: d.type, criticite: d.criticite,
       zone: d.zone, subZone: d.subZone, ref: d.ref,
       status: d.status, healthState: d.healthState, technician: d.technician,
-      frequency: d.frequency, templateId: d.templateId,
-      duration: d.duration,
-      technicalNotes: d.technicalNotes, comments: d.comments,
+      comments: d.comments,
       updatedAt: FV.serverTimestamp(),
     };
-    if (d.nextDue) data.nextDue = d.nextDue;
     try {
       if (d.isEdit) {
         await PMP_DB.eq().doc(d.id).update(data);
         MX.toast('Équipement mis à jour ✓');
+        _eqFormMode  = null;
+        _eqFormDraft = {};
+        _viewEqId    = d.id;
       } else {
         data.createdAt = FV.serverTimestamp();
         data.lastDone  = '';
-        data.nextDue   = _addDays(_today(), d.frequency);
+        data.nextDue   = '';
         data.createdBy = _author();
-        await PMP_DB.eq().add(data);
-        MX.toast('Équipement créé ✓');
+        var ref = await PMP_DB.eq().add(data);
+        MX.toast('Équipement créé — ajoutez maintenant un plan de maintenance ✓');
+        _eqFormMode  = null;
+        _eqFormDraft = {};
+        _viewEqId    = ref.id;
+        _curTab      = 'equipements';
       }
-      _eqFormMode  = null;
-      _eqFormDraft = {};
-      _curTab = 'equipements';
     } catch (e) { console.error(e); MX.toast('Erreur : ' + e.message, true); }
   }
 
@@ -1948,7 +1934,10 @@
             batch.delete(PMP_DB.eq().doc(id));
             _pmpInt.filter(function (i) { return i.equipmentId === id; })
                    .forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
+            _pmpPlans.filter(function (p) { return p.equipmentId === id; })
+                     .forEach(function (p) { batch.delete(PMP_DB.plans().doc(p.id)); });
             await batch.commit();
+            if (_viewEqId === id) { _viewEqId = null; }
             MX.toast('Équipement supprimé');
           } catch (e) { console.error('[PMP] delEq:', e); MX.toast('Erreur suppression : ' + e.message, true); }
         }},
@@ -1957,14 +1946,337 @@
     );
   }
 
+  // ── ÉQUIPEMENT DETAIL + PLANS ─────────────────────────────────────────────
+
+  function _tEqDetail(eqId) {
+    var eq = _pmpEq.find(function (e) { return e.id === eqId; });
+    if (!eq) { _viewEqId = null; return _tEquipements(); }
+    var ti     = EQ_TYPES[eq.type]  || { icon: '🔧', l: eq.type || 'Divers' };
+    var cr     = CRIT[eq.criticite] || CRIT.normale;
+    var hs     = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
+    var plans  = _pmpPlans.filter(function (p) { return p.equipmentId === eqId; })
+                          .sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    var today  = _today();
+
+    var h = '<div class="pmp-eq-detail-page">';
+
+    // ── header
+    h += '<div class="pmp-eqfm-header">' +
+      '<button class="pmp-eqfm-back" onclick="MX.Pages.PMP._backToEq()">' +
+        '<i class="fas fa-arrow-left"></i> Équipements' +
+      '</button>' +
+      '<h2 class="pmp-eqfm-title">' + ti.icon + ' ' + esc(eq.name) + '</h2>' +
+      '<button class="pmp-eqfm-save-btn" onclick="MX.Pages.PMP._planForm(null, \'' + esc(eq.id) + '\')">' +
+        '<i class="fas fa-plus"></i> Nouveau plan' +
+      '</button>' +
+    '</div>';
+
+    // ── equipment identity card
+    h += '<div class="pmp-eq-id-card">' +
+      '<div class="pmp-eq-id-row">' +
+        '<span class="pmp-eq-id-lbl"><i class="fas fa-tag"></i> Famille</span>' +
+        '<span class="pmp-eq-id-val">' + esc(ti.l) + '</span>' +
+      '</div>' +
+      (eq.zone ? '<div class="pmp-eq-id-row"><span class="pmp-eq-id-lbl"><i class="fas fa-location-dot"></i> Zone</span><span class="pmp-eq-id-val">' + esc(eq.zone) + (eq.subZone ? ' · ' + esc(eq.subZone) : '') + '</span></div>' : '') +
+      (eq.ref  ? '<div class="pmp-eq-id-row"><span class="pmp-eq-id-lbl"><i class="fas fa-barcode"></i> Référence</span><span class="pmp-eq-id-val">' + esc(eq.ref) + '</span></div>' : '') +
+      '<div class="pmp-eq-id-row">' +
+        '<span class="pmp-eq-id-lbl"><i class="fas fa-circle-dot"></i> Criticité</span>' +
+        '<span class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</span>' +
+      '</div>' +
+      '<div class="pmp-eq-id-row">' +
+        '<span class="pmp-eq-id-lbl"><i class="fas fa-heart-pulse"></i> Santé</span>' +
+        '<span style="color:' + hs.c + '">' + hs.dot + ' ' + hs.l + '</span>' +
+      '</div>' +
+      '<div class="pmp-eq-id-row">' +
+        '<span class="pmp-eq-id-lbl"><i class="fas fa-toggle-on"></i> Statut</span>' +
+        '<span class="pmp-eq-status pmp-eq-status--' + (eq.status || 'actif') + '">' + (eq.status === 'inactif' ? 'Inactif' : 'Actif') + '</span>' +
+      '</div>' +
+      '<div class="pmp-eq-id-actions">' +
+        '<button class="pmp-act-btn" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')"><i class="fas fa-pen"></i> Modifier l\'équipement</button>' +
+        '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delEq(\'' + esc(eq.id) + '\')"><i class="fas fa-trash"></i></button>' +
+      '</div>' +
+    '</div>';
+
+    // ── plans list
+    h += '<div class="pmp-section-ttl"><i class="fas fa-list-check"></i> Plans de maintenance (' + plans.length + ')</div>';
+
+    if (!plans.length) {
+      h += '<div class="pmp-empty pmp-empty--big">' +
+        '<i class="fas fa-clipboard-list" style="font-size:32px;opacity:0.3;margin-bottom:12px;display:block"></i>' +
+        '<div style="font-size:14px">Aucun plan de maintenance</div>' +
+        '<button class="pmp-add-btn" style="margin-top:12px" onclick="MX.Pages.PMP._planForm(null, \'' + esc(eq.id) + '\')">' +
+          '<i class="fas fa-plus"></i> Créer le premier plan' +
+        '</button>' +
+      '</div>';
+    } else {
+      h += '<div class="pmp-plan-list">';
+      plans.forEach(function (plan) {
+        var nextDue  = plan.nextDue;
+        var isLate   = nextDue && nextDue < today;
+        var daysOff  = nextDue ? Math.round((new Date(nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
+        var planInts = _pmpInt.filter(function (i) { return i.planId === plan.id && i.status === 'terminee'; }).length;
+        h += '<div class="pmp-plan-card' + (isLate ? ' pmp-plan-card--late' : '') + '">' +
+          '<div class="pmp-plan-card-head">' +
+            '<div class="pmp-plan-name">' + esc(plan.name) + '</div>' +
+            '<span class="pmp-plan-status-badge pmp-plan-status-badge--' + (plan.status || 'actif') + '">' +
+              (plan.status === 'inactif' ? 'Inactif' : 'Actif') +
+            '</span>' +
+          '</div>' +
+          '<div class="pmp-plan-meta-row">' +
+            '<span class="pmp-plan-meta"><i class="fas fa-rotate"></i> ' + _freqLbl(plan.frequency) + '</span>' +
+            (plan.duration ? '<span class="pmp-plan-meta"><i class="fas fa-clock"></i> ' + esc(plan.duration) + '</span>' : '') +
+            (plan.technician ? '<span class="pmp-plan-meta"><i class="fas fa-user"></i> ' + esc(plan.technician) + '</span>' : '') +
+            '<span class="pmp-plan-meta"><i class="fas fa-check-double"></i> ' + planInts + ' réalisée' + (planInts !== 1 ? 's' : '') + '</span>' +
+          '</div>' +
+          '<div class="pmp-plan-due-row">' +
+            (nextDue ? '<span class="pmp-plan-due' + (isLate ? ' pmp-plan-due--late' : daysOff !== null && daysOff <= 7 ? ' pmp-plan-due--soon' : '') + '">' +
+              '<i class="fas fa-calendar-check"></i> ' +
+              (isLate ? 'En retard de ' + Math.abs(daysOff) + 'j — ' + _dateLbl(nextDue) : daysOff === 0 ? "Aujourd'hui" : 'Dans ' + daysOff + 'j — ' + _dateLbl(nextDue)) +
+            '</span>' : '<span class="pmp-plan-due" style="color:var(--text3)"><i class="fas fa-calendar"></i> Aucune échéance</span>') +
+            (plan.lastDone ? '<span class="pmp-plan-lastdone"><i class="fas fa-history"></i> Dernière : ' + _dateLbl(plan.lastDone) + '</span>' : '') +
+          '</div>' +
+          '<div class="pmp-plan-actions">' +
+            '<button class="pmp-act-btn" onclick="MX.Pages.PMP._createInt(\'' + esc(plan.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
+            '<button class="pmp-act-btn" onclick="MX.Pages.PMP._planForm(\'' + esc(plan.id) + '\', \'' + esc(eq.id) + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
+            '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delPlan(\'' + esc(plan.id) + '\')"><i class="fas fa-trash"></i></button>' +
+          '</div>' +
+        '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _backToEq() { _viewEqId = null; _curTab = 'equipements'; _rerender(); }
+
+  function _planForm(planId, eqId) {
+    _planFormMode  = planId || 'new';
+    _planFormEqId  = eqId;
+    _planFormDraft = {};
+    _rerender();
+  }
+
+  function _tPlanFormPage() {
+    var isEdit = _planFormMode !== 'new';
+    var plan   = isEdit ? _pmpPlans.find(function (p) { return p.id === _planFormMode; }) : null;
+    var eqId   = _planFormEqId || (plan && plan.equipmentId) || null;
+    var eq     = eqId ? _pmpEq.find(function (e) { return e.id === eqId; }) : null;
+    var users  = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
+    var tpls   = _pmpTpl;
+
+    var planDur     = plan ? (plan.duration || '') : '';
+    var durIsOther  = planDur !== '' && !DURATIONS.includes(planDur);
+    var durSel      = durIsOther ? 'Autre' : planDur;
+    var durOther    = durIsOther ? planDur : '';
+
+    var h = '<div class="pmp-eqfm-page">';
+
+    h += '<div class="pmp-eqfm-header">' +
+      '<button class="pmp-eqfm-back" onclick="MX.Pages.PMP._planFormBack()">' +
+        '<i class="fas fa-arrow-left"></i> ' + (eq ? esc(eq.name) : 'Équipement') +
+      '</button>' +
+      '<h2 class="pmp-eqfm-title">' + (isEdit ? 'Modifier le plan' : 'Nouveau plan') + '</h2>' +
+      '<button class="pmp-eqfm-save-btn" onclick="MX.Pages.PMP._savePlanForm()">' +
+        '<i class="fas fa-check"></i> ' + (isEdit ? 'Enregistrer' : 'Créer') +
+      '</button>' +
+    '</div>';
+
+    // ── section 1 : Identification
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-info-circle"></i> Identification</div>' +
+      '<div class="pmp-eqfm-grid">' +
+
+      '<div class="pmp-eqfm-field pmp-eqfm-field--full">' +
+        '<label class="pmp-eqfm-lbl">Nom du plan <span class="pmp-eqfm-req">*</span></label>' +
+        '<input class="pmp-eqfm-input" id="pmp-pf-name" placeholder="Ex: Entretien mensuel CTA, Inspection annuelle…" value="' + esc(plan ? plan.name || '' : '') + '">' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Statut</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-pf-status">' +
+          '<option value="actif"' + (!plan || plan.status === 'actif' ? ' selected' : '') + '>Actif</option>' +
+          '<option value="inactif"' + (plan && plan.status === 'inactif' ? ' selected' : '') + '>Inactif</option>' +
+        '</select>' +
+      '</div>' +
+
+      '</div></div>';
+
+    // ── section 2 : Organisation
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-calendar-alt"></i> Organisation</div>' +
+      '<div class="pmp-eqfm-grid">' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Fréquence <span class="pmp-eqfm-req">*</span></label>' +
+        '<select class="pmp-eqfm-select" id="pmp-pf-freq">' +
+          FREQS.map(function (f) {
+            var sel = plan ? plan.frequency === f.v : f.v === 30;
+            return '<option value="' + f.v + '"' + (sel ? ' selected' : '') + '>' + f.l + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Durée estimée</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-pf-dur" onchange="MX.Pages.PMP._onDurChange2(this.value)">' +
+          '<option value="">— Non définie —</option>' +
+          DURATIONS.map(function (d) {
+            return '<option value="' + d + '"' + (durSel === d ? ' selected' : '') + '>' + d + '</option>';
+          }).join('') +
+        '</select>' +
+        '<input class="pmp-eqfm-input" id="pmp-pf-dur-other" placeholder="Préciser la durée…"' +
+          ' style="margin-top:6px;display:' + (durSel === 'Autre' ? 'block' : 'none') + '"' +
+          ' value="' + esc(durOther) + '">' +
+      '</div>' +
+
+      (isEdit ? '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Prochaine échéance</label>' +
+        '<input class="pmp-eqfm-input" type="date" id="pmp-pf-nextDue" value="' + esc(plan ? plan.nextDue || '' : '') + '">' +
+      '</div>' : '') +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Technicien référent</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-pf-tech">' +
+          '<option value="">— Non assigné —</option>' +
+          users.map(function (u) {
+            return '<option value="' + esc(u.name) + '"' + (plan && plan.technician === u.name ? ' selected' : '') + '>' + esc(u.name) + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Modèle de checklist</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-pf-tpl">' +
+          '<option value="">— Aucun —</option>' +
+          tpls.map(function (t) {
+            return '<option value="' + esc(t.id) + '"' + (plan && plan.templateId === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '</div></div>';
+
+    // ── section 3 : Consignes techniques
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-clipboard-list"></i> Consignes techniques</div>' +
+      '<textarea class="pmp-eqfm-textarea" id="pmp-pf-notes"' +
+        ' placeholder="Instructions de maintenance, points d\'attention, consignes de sécurité…">' +
+        esc(plan ? plan.technicalNotes || '' : '') +
+      '</textarea>' +
+    '</div>';
+
+    h += '<div class="pmp-eqfm-footer">' +
+      '<button class="pmp-eqfm-cancel-btn" onclick="MX.Pages.PMP._planFormBack()">' +
+        '<i class="fas fa-times"></i> Annuler' +
+      '</button>' +
+      '<button class="pmp-eqfm-save-btn pmp-eqfm-save-btn--lg" onclick="MX.Pages.PMP._savePlanForm()">' +
+        '<i class="fas fa-check"></i> ' + (isEdit ? 'Enregistrer le plan' : 'Créer le plan') +
+      '</button>' +
+    '</div>';
+
+    h += '</div>';
+    return h;
+  }
+
+  function _planFormBack() { _planFormMode = null; _rerender(); }
+
+  function _onDurChange2(v) {
+    var el = document.getElementById('pmp-pf-dur-other');
+    if (el) el.style.display = v === 'Autre' ? 'block' : 'none';
+  }
+
+  function _savePlanForm() {
+    var isEdit   = _planFormMode !== 'new';
+    var durSel   = document.getElementById('pmp-pf-dur')?.value || '';
+    var durOther = (document.getElementById('pmp-pf-dur-other')?.value || '').trim();
+    var d = {
+      isEdit:         isEdit,
+      id:             isEdit ? _planFormMode : null,
+      eqId:           _planFormEqId,
+      name:           (document.getElementById('pmp-pf-name')?.value  || '').trim(),
+      status:          document.getElementById('pmp-pf-status')?.value || 'actif',
+      frequency:      parseInt(document.getElementById('pmp-pf-freq')?.value || '30') || 30,
+      duration:        durSel === 'Autre' ? durOther : durSel,
+      nextDue:         document.getElementById('pmp-pf-nextDue')?.value || '',
+      technician:      document.getElementById('pmp-pf-tech')?.value   || '',
+      templateId:      document.getElementById('pmp-pf-tpl')?.value    || '',
+      technicalNotes: (document.getElementById('pmp-pf-notes')?.value  || '').trim(),
+    };
+    if (!d.name)      { MX.toast('Nom du plan requis', true);  return; }
+    if (!d.frequency) { MX.toast('Fréquence requise', true);   return; }
+    _planFormDraft = d;
+    _doSavePlan();
+  }
+
+  async function _doSavePlan() {
+    var d = _planFormDraft;
+    if (!d || !d.name) return;
+    var eqId = d.eqId || (d.isEdit ? (_pmpPlans.find(function (p) { return p.id === d.id; }) || {}).equipmentId : null);
+    var eq   = eqId ? _pmpEq.find(function (e) { return e.id === eqId; }) : null;
+    var data = {
+      equipmentId:    eqId || '',
+      equipmentName:  eq ? eq.name : '',
+      name:           d.name,
+      status:         d.status,
+      frequency:      d.frequency,
+      duration:       d.duration || '',
+      technician:     d.technician || '',
+      templateId:     d.templateId || '',
+      technicalNotes: d.technicalNotes || '',
+      updatedAt:      FV.serverTimestamp(),
+    };
+    if (d.nextDue) data.nextDue = d.nextDue;
+    try {
+      if (d.isEdit) {
+        await PMP_DB.plans().doc(d.id).update(data);
+        MX.toast('Plan mis à jour ✓');
+      } else {
+        data.lastDone  = '';
+        if (!data.nextDue) data.nextDue = _addDays(_today(), d.frequency);
+        data.createdAt = FV.serverTimestamp();
+        data.createdBy = _author();
+        await PMP_DB.plans().add(data);
+        MX.toast('Plan créé ✓');
+        window._pmpGenDone = false;
+      }
+      _planFormMode  = null;
+      _planFormDraft = {};
+    } catch (e) { console.error(e); MX.toast('Erreur : ' + e.message, true); }
+  }
+
+  function _delPlan(planId) {
+    if (!planId) { MX.toast('Identifiant introuvable', true); return; }
+    var plan = _pmpPlans.find(function (p) { return p.id === planId; });
+    var name = plan ? plan.name : '';
+    MX.showModal('Supprimer ce plan ?',
+      '"' + esc(name) + '" et ses interventions associées seront supprimés définitivement.',
+      [
+        { label: 'Supprimer', cls: 'danger', fn: async function () {
+          try {
+            var batch = db.batch();
+            batch.delete(PMP_DB.plans().doc(planId));
+            _pmpInt.filter(function (i) { return i.planId === planId; })
+                   .forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
+            await batch.commit();
+            MX.toast('Plan supprimé');
+          } catch (e) { console.error('[PMP] delPlan:', e); MX.toast('Erreur suppression : ' + e.message, true); }
+        }},
+        { label: 'Annuler', cls: 'cancel' },
+      ]
+    );
+  }
+
   // ── INTERVENTION ACTIONS ──────────────────────────────────────────────────
 
-  function _createInt(eqId) {
-    var eq = _pmpEq.find(function (e) { return e.id === eqId; });
-    if (!eq) return;
+  function _createInt(planId) {
+    var plan = _pmpPlans.find(function (p) { return p.id === planId; });
+    if (!plan) return;
+    var eq = _pmpEq.find(function (e) { return e.id === plan.equipmentId; });
     MX.showModal({ title: 'Nouvelle intervention PMP',
       body: '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<p style="color:var(--text2);font-size:13px;margin:0">Équipement : <strong>' + esc(eq.name) + '</strong></p>' +
+      '<p style="color:var(--text2);font-size:13px;margin:0">Plan : <strong>' + esc(plan.name) + '</strong></p>' +
+      (eq ? '<p style="color:var(--text3);font-size:11px;margin:0">Équipement : ' + esc(eq.name) + '</p>' : '') +
       '<div><label class="pmp-form-lbl">Date prévue</label>' +
       '<input class="fi" type="date" id="pmp-ci-date" value="' + _today() + '"></div>' +
       '</div>',
@@ -1973,11 +2285,22 @@
           var date = document.getElementById('pmp-ci-date')?.value || _today();
           try {
             await PMP_DB.int().add({
-              equipmentId: eq.id, equipmentName: eq.name, type: eq.type || 'divers',
-              zone: eq.zone || '', dueDate: date, frequency: eq.frequency || 30,
-              technician: eq.technician || '', criticite: eq.criticite || 'normale',
-              status: date < _today() ? 'en_retard' : 'planifiee',
-              source: 'manual', createdAt: FV.serverTimestamp(), createdBy: _author(),
+              equipmentId:       plan.equipmentId,
+              equipmentName:     plan.equipmentName || (eq && eq.name) || '',
+              planId:            plan.id,
+              planName:          plan.name,
+              type:              (eq && eq.type) || 'divers',
+              zone:              (eq && eq.zone) || '', subZone: (eq && eq.subZone) || '',
+              ref:               (eq && eq.ref) || '',
+              dueDate:           date, frequency: plan.frequency || 30,
+              technician:        plan.technician || '',
+              criticite:         (eq && eq.criticite) || 'normale',
+              status:            date < _today() ? 'en_retard' : 'planifiee',
+              source:            'manual',
+              estimatedDuration: plan.duration || '',
+              technicalNotes:    plan.technicalNotes || '',
+              templateId:        plan.templateId || '',
+              createdAt:         FV.serverTimestamp(), createdBy: _author(),
             });
             MX.toast('Intervention créée ✓');
           } catch (e) { MX.toast('Erreur : ' + e.message, true); }
@@ -1988,15 +2311,24 @@
   }
 
   function _createIntManual() {
-    var users     = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
-    var activeEqs = _pmpEq.filter(function (e) { return e.status !== 'inactif'; })
-                          .sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    var users      = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
+    var activeEqs  = _pmpEq.filter(function (e) { return e.status !== 'inactif'; })
+                           .sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    var planOpts   = '';
+    activeEqs.forEach(function (e) {
+      var eqPlans = _pmpPlans.filter(function (p) { return p.equipmentId === e.id; });
+      if (eqPlans.length) {
+        eqPlans.forEach(function (p) {
+          planOpts += '<option value="' + esc(p.id) + '">' + esc(e.name) + ' — ' + esc(p.name) + '</option>';
+        });
+      } else {
+        planOpts += '<option value="eq_' + esc(e.id) + '">' + esc(e.name) + ' (sans plan)</option>';
+      }
+    });
     MX.showModal({ title: 'Nouvelle intervention',
       body: '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<div><label class="pmp-form-lbl">Équipement *</label>' +
-      '<select class="fi" id="pmp-ci-eq"><option value="">— Sélectionner —</option>' +
-      activeEqs.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>'; }).join('') +
-      '</select></div>' +
+      '<div><label class="pmp-form-lbl">Équipement / Plan *</label>' +
+      '<select class="fi" id="pmp-ci-plan"><option value="">— Sélectionner —</option>' + planOpts + '</select></div>' +
       '<div><label class="pmp-form-lbl">Date prévue *</label>' +
       '<input class="fi" type="date" id="pmp-ci-date2" value="' + _today() + '"></div>' +
       '<div><label class="pmp-form-lbl">Technicien</label>' +
@@ -2005,20 +2337,42 @@
       '</select></div></div>',
       actions: [
         { label: 'Créer', cls: 'primary', fn: async function () {
-          var eqId = document.getElementById('pmp-ci-eq')?.value;
-          var date = document.getElementById('pmp-ci-date2')?.value || _today();
-          var tech = document.getElementById('pmp-ci-tech')?.value  || '';
-          if (!eqId) { MX.toast('Équipement requis', true); return; }
-          var eq = _pmpEq.find(function (e) { return e.id === eqId; });
-          if (!eq) return;
+          var planVal = document.getElementById('pmp-ci-plan')?.value;
+          var date    = document.getElementById('pmp-ci-date2')?.value || _today();
+          var tech    = document.getElementById('pmp-ci-tech')?.value  || '';
+          if (!planVal) { MX.toast('Plan requis', true); return; }
           try {
-            await PMP_DB.int().add({
-              equipmentId: eq.id, equipmentName: eq.name, type: eq.type || 'divers',
-              zone: eq.zone || '', dueDate: date, frequency: eq.frequency || 30,
-              technician: tech || eq.technician || '', criticite: eq.criticite || 'normale',
-              status: date < _today() ? 'en_retard' : 'planifiee',
-              source: 'manual', createdAt: FV.serverTimestamp(), createdBy: _author(),
-            });
+            var intData;
+            if (planVal.indexOf('eq_') === 0) {
+              var eqId = planVal.slice(3);
+              var eq   = _pmpEq.find(function (e) { return e.id === eqId; });
+              if (!eq) return;
+              intData = {
+                equipmentId: eq.id, equipmentName: eq.name,
+                planId: '', planName: '',
+                type: eq.type || 'divers', zone: eq.zone || '',
+                dueDate: date, frequency: eq.frequency || 30,
+                technician: tech || eq.technician || '', criticite: eq.criticite || 'normale',
+                status: date < _today() ? 'en_retard' : 'planifiee',
+                source: 'manual', createdAt: FV.serverTimestamp(), createdBy: _author(),
+              };
+            } else {
+              var plan = _pmpPlans.find(function (p) { return p.id === planVal; });
+              if (!plan) return;
+              var eq   = _pmpEq.find(function (e) { return e.id === plan.equipmentId; });
+              intData = {
+                equipmentId: plan.equipmentId, equipmentName: plan.equipmentName || (eq && eq.name) || '',
+                planId: plan.id, planName: plan.name,
+                type: (eq && eq.type) || 'divers', zone: (eq && eq.zone) || '',
+                dueDate: date, frequency: plan.frequency || 30,
+                technician: tech || plan.technician || '', criticite: (eq && eq.criticite) || 'normale',
+                status: date < _today() ? 'en_retard' : 'planifiee',
+                source: 'manual', estimatedDuration: plan.duration || '',
+                technicalNotes: plan.technicalNotes || '', templateId: plan.templateId || '',
+                createdAt: FV.serverTimestamp(), createdBy: _author(),
+              };
+            }
+            await PMP_DB.int().add(intData);
             MX.toast('Intervention créée ✓');
           } catch (e) { MX.toast('Erreur : ' + e.message, true); }
         }},
@@ -2044,13 +2398,17 @@
           var obs      = (document.getElementById('pmp-done-obs')?.value || '').trim();
           try {
             await PMP_DB.int().doc(intId).update({
-              status: 'terminee', doneDate, observations: obs,
+              status: 'terminee', doneDate: doneDate, observations: obs,
               doneBy: _author(), updatedAt: FV.serverTimestamp(),
             });
+            var plan    = i.planId ? _pmpPlans.find(function (p) { return p.id === i.planId; }) : null;
             var eq      = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
-            var nextDue = _addDays(doneDate, eq ? (eq.frequency || 30) : 30);
-            if (eq) {
-              await PMP_DB.eq().doc(i.equipmentId).update({ lastDone: doneDate, nextDue, updatedAt: FV.serverTimestamp() });
+            var freq    = plan ? (plan.frequency || 30) : (eq ? (eq.frequency || 30) : 30);
+            var nextDue = _addDays(doneDate, freq);
+            if (plan) {
+              await PMP_DB.plans().doc(plan.id).update({ lastDone: doneDate, nextDue: nextDue, updatedAt: FV.serverTimestamp() });
+            } else if (eq) {
+              await PMP_DB.eq().doc(i.equipmentId).update({ lastDone: doneDate, nextDue: nextDue, updatedAt: FV.serverTimestamp() });
             }
             // Mark linked mission done
             if (i.missionId) {
@@ -2058,27 +2416,32 @@
                 done: true, completedAt: FV.serverTimestamp(), completedBy: _author(),
               }).catch(function (e) { console.warn('[PMP] mission done:', e.message); });
             }
-            // Auto-create next intervention in queue
+            // Auto-create next intervention
             var nextExists = _pmpInt.some(function (x) {
-              return x.equipmentId === i.equipmentId && x.dueDate === nextDue &&
-                     x.status !== 'terminee' && x.status !== 'annulee';
+              return (plan ? x.planId === plan.id : x.equipmentId === i.equipmentId) &&
+                     x.dueDate === nextDue && x.status !== 'terminee' && x.status !== 'annulee';
             });
             if (!nextExists) {
               var checklistItems = i.checklistItems || [];
-              if (!checklistItems.length && eq && eq.templateId) {
-                var tpl = _pmpTpl.find(function (t) { return t.id === (eq && eq.templateId); });
+              if (!checklistItems.length && (plan ? plan.templateId : (eq && eq.templateId))) {
+                var tplId = plan ? plan.templateId : (eq && eq.templateId);
+                var tpl   = _pmpTpl.find(function (t) { return t.id === tplId; });
                 if (tpl && tpl.items) checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
               }
               PMP_DB.int().add({
-                equipmentId: i.equipmentId, equipmentName: i.equipmentName,
-                type: i.type || 'divers', zone: i.zone || '', subZone: i.subZone || '',
-                ref: i.ref || '', dueDate: nextDue, frequency: eq ? (eq.frequency || 30) : 30,
-                technician: '', criticite: i.criticite || 'normale', status: 'planifiee',
-                source: 'auto', checklistItems: checklistItems,
-                estimatedDuration: (eq && eq.duration) || '',
-                technicalNotes: (eq && eq.technicalNotes) || '',
-                templateId: (eq && eq.templateId) || '',
-                createdAt: FV.serverTimestamp(),
+                equipmentId:       i.equipmentId,
+                equipmentName:     i.equipmentName,
+                planId:            plan ? plan.id : '',
+                planName:          plan ? plan.name : '',
+                type:              i.type || 'divers', zone: i.zone || '', subZone: i.subZone || '',
+                ref:               i.ref || '', dueDate: nextDue, frequency: freq,
+                technician:        plan ? (plan.technician || '') : '',
+                criticite:         i.criticite || 'normale', status: 'planifiee',
+                source:            'auto', checklistItems: checklistItems,
+                estimatedDuration: plan ? (plan.duration || '') : (eq && eq.duration) || '',
+                technicalNotes:    plan ? (plan.technicalNotes || '') : (eq && eq.technicalNotes) || '',
+                templateId:        plan ? (plan.templateId || '') : (eq && eq.templateId) || '',
+                createdAt:         FV.serverTimestamp(),
               }).catch(function (e) { console.warn('[PMP] next-int:', e.message); });
             }
             MX.toast('Intervention validée ✓');
@@ -2454,7 +2817,10 @@
   window.MX.Pages.PMP = {
     render,
     _tab, _setEqSearch, _setEqType, _setIntFilter, _setCalMonth,
-    _eqForm, _eqFormBack, _onDurChange, _saveEqForm, _delEq, _createInt, _createIntManual, _markDone, _delInt,
+    _eqForm, _eqFormBack, _onDurChange, _saveEqForm, _delEq,
+    _viewEq, _backToEq,
+    _planForm, _planFormBack, _onDurChange2, _savePlanForm, _delPlan,
+    _createInt, _createIntManual, _markDone, _delInt,
     _assignModal,
     _tplForm, _tplAddItem, _delTpl,
     _onImportFile, _onImportDrop, _runImport, _resetImport, _setImportUserMap, _downloadTemplate, _createDefaultTpls, _checkAndGenerate,

@@ -14772,3 +14772,130 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   50%  { width: 70%; margin-left: 0; }
   100% { width: 0; margin-left: 100%; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PMP v1.0.37 — Equipment detail + Plan cards (.pmp-eq-detail-*, .pmp-plan-*)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Equipment detail page ── */
+.pmp-eq-detail-page { display: flex; flex-direction: column; gap: 16px; padding-bottom: 32px; }
+
+.pmp-eq-id-card {
+  background: var(--bg2);
+  border: 1px solid var(--border1);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pmp-eq-id-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.pmp-eq-id-lbl {
+  color: var(--text3);
+  min-width: 110px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmp-eq-id-val { color: var(--text1); font-weight: 500; }
+.pmp-eq-id-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Plan list ── */
+.pmp-plan-list { display: flex; flex-direction: column; gap: 12px; }
+
+.pmp-plan-card {
+  background: var(--bg2);
+  border: 1px solid var(--border1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color .15s;
+}
+.pmp-plan-card:hover { border-color: var(--cyan-border); }
+.pmp-plan-card--late { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.04); }
+
+.pmp-plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pmp-plan-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text1);
+  flex: 1;
+}
+.pmp-plan-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.pmp-plan-status-badge--actif  { background: rgba(34,197,94,.12); color: #22C55E; }
+.pmp-plan-status-badge--inactif{ background: rgba(107,114,128,.12); color: #6B7280; }
+
+.pmp-plan-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pmp-plan-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text2);
+  background: var(--bg3);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.pmp-plan-meta i { color: var(--text3); font-size: 10px; }
+
+.pmp-plan-due-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.pmp-plan-due {
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pmp-plan-due i { font-size: 11px; }
+.pmp-plan-due--late { color: var(--red); }
+.pmp-plan-due--soon { color: var(--orange); }
+.pmp-plan-lastdone {
+  font-size: 11px;
+  color: var(--text3);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pmp-plan-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}

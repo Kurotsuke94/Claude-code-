@@ -762,6 +762,22 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.37', date: '2026-07-04', emoji: '🏭',
+      title: 'PMP : plusieurs plans de maintenance par équipement',
+      changes: [
+        'Refonte du système PMP : 1 équipement → ∞ plans de maintenance indépendants',
+        'Nouveau formulaire de plan : fréquence, durée, technicien, checklist, consignes',
+        'Vue détail équipement : liste de tous les plans avec statut, échéances, historique',
+        'Migration automatique des équipements existants vers le nouveau système',
+        'Calendrier : affichage du nom du plan dans les événements',
+        'Création d\'intervention directement depuis la fiche plan',
+        'Génération automatique adaptée aux plans (planId/planName dans chaque intervention)',
+        'Formulaire équipement simplifié : informations identitaires uniquement',
+        'Suppression d\'un équipement : supprime aussi tous ses plans associés',
+        'Collection Firestore pmp_plans : architecture multi-plans industrielle',
+      ]
+    },
+    {
       ver: '1.0.36', date: '2026-07-04', emoji: '⚡',
       title: 'Moteur de recalcul intelligent des compteurs',
       changes: [
@@ -872,11 +888,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.36";
+  window.MX.appVer = window.MX_VERSION || "1.0.37";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.36";
-  const _APP_BUILD = window.MX_BUILD   || 136;
+  const _APP_VER   = window.MX_VERSION || "1.0.37";
+  const _APP_BUILD = window.MX_BUILD   || 137;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
