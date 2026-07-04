@@ -1,4 +1,6 @@
 (function () {
+  var _clWsSelKey = null;
+
   function render(dayId) {
     const { state, DAYS, getDaySlots, esc, Widgets } = MX;
     const day    = DAYS.find(d => d.id === dayId);
@@ -55,149 +57,177 @@
     const pendingIn  = cu ? (state.transfers || []).filter(tr => tr.toUser === cu.name && tr.status === "pending"  && tr.dayId === dayId) : [];
     const acceptedIn = cu ? (state.transfers || []).filter(tr => tr.toUser === cu.name && tr.status === "accepted" && tr.dayId === dayId) : [];
 
-    let h = `
-      <div class="ph">
-        <div class="ph-eye">${esc(state.weekLabel)}</div>
-        <div class="ph-row">
-          <div>
-            <div class="ph-title">${esc(day.l)}</div>
-            <div class="ph-sub">${done} / ${total} tâches complétées</div>
-          </div>
-          <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pct>=80?'var(--green)':pct>=40?'var(--orange)':'var(--red)'}">${pct}%</div>
-        </div>
-        <div style="margin-top:10px">
-          <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
-        </div>
-      </div>
-      <div class="page-body" style="max-width:760px">
-        ${banner}
-        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-          <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Faites</div></div>
-          <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
-          <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
-        </div>`;
+    const _currK = _weekKey(new Date());
 
-    // ── Incoming transfers section ──
+    // ── Page header ──
+    let h = '<div class="ph">';
+    h += '<div class="ph-eye">' + esc(state.weekLabel) + '</div>';
+    h += '<div class="ph-row">';
+    h +=   '<div>';
+    h +=     '<div class="ph-title">' + esc(day.l) + '</div>';
+    h +=     '<div class="ph-sub">' + done + ' / ' + total + ' tâches complétées</div>';
+    h +=   '</div>';
+    h +=   '<div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:' + (pct>=80?'var(--green)':pct>=40?'var(--orange)':'var(--red)') + '">' + pct + '%</div>';
+    h += '</div>';
+    h += '<div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:' + pct + '%"></div></div></div>';
+    h += '</div>';
+
+    // ── Split layout ──
+    h += '<div class="cl-ws-body">';
+    h += '<div class="cl-ws-left">';
+
+    // User banner
+    h += banner;
+
+    // Stats row
+    h += '<div class="cl-ws-stats">';
+    h += '<div class="cl-ws-stat cl-ws-stat--g"><div class="cl-ws-stat-n">' + done + '</div><div class="cl-ws-stat-l">Faites</div></div>';
+    h += '<div class="cl-ws-stat cl-ws-stat--b"><div class="cl-ws-stat-n">' + total + '</div><div class="cl-ws-stat-l">Total</div></div>';
+    h += '<div class="cl-ws-stat cl-ws-stat--r"><div class="cl-ws-stat-n">' + (total - done) + '</div><div class="cl-ws-stat-l">Restantes</div></div>';
+    h += '</div>';
+
+    // ── Incoming transfers ──
     if (pendingIn.length || acceptedIn.length) {
-      h += `<div class="section-label" style="margin-bottom:8px">
-        <i class="fas fa-share" style="margin-right:6px;color:var(--cyan)"></i>
-        Tâches reçues (${pendingIn.length + acceptedIn.length})
-      </div>`;
-
-      pendingIn.forEach(tr => {
+      h += '<div class="cl-ws-xfer-hd"><i class="fas fa-share" style="margin-right:5px;color:var(--cyan)"></i>Tâches reçues (' + (pendingIn.length + acceptedIn.length) + ')</div>';
+      pendingIn.forEach(function(tr) {
         const slotObj = MX.SLOTS[tr.slot];
-        h += `<div class="transfer-card">
-          <div class="transfer-meta">
-            <span class="transfer-from">${esc(tr.fromUser)}</span>
-            <span class="transfer-day">${slotObj ? slotObj.l : tr.slot}</span>
-          </div>
-          <div class="transfer-task">${esc(tr.taskText)}</div>
-          <div class="transfer-actions">
-            <button class="primary-btn" style="flex:1;padding:8px 12px;font-size:13px" onclick="MX.Pages.Checklist.acceptTransfer('${esc(tr.id)}')">
-              <i class="fas fa-check"></i> Accepter
-            </button>
-            <button class="danger-btn" style="flex:1;padding:8px 12px;font-size:13px" onclick="MX.Pages.Checklist.rejectTransfer('${esc(tr.id)}')">
-              <i class="fas fa-times"></i> Refuser
-            </button>
-          </div>
-        </div>`;
+        h += '<div class="transfer-card">' +
+          '<div class="transfer-meta"><span class="transfer-from">' + esc(tr.fromUser) + '</span><span class="transfer-day">' + (slotObj ? slotObj.l : tr.slot) + '</span></div>' +
+          '<div class="transfer-task">' + esc(tr.taskText) + '</div>' +
+          '<div class="transfer-actions">' +
+            '<button class="primary-btn" style="flex:1;padding:8px 12px;font-size:13px" onclick="MX.Pages.Checklist.acceptTransfer(\'' + esc(tr.id) + '\')">' +
+              '<i class="fas fa-check"></i> Accepter</button>' +
+            '<button class="danger-btn" style="flex:1;padding:8px 12px;font-size:13px" onclick="MX.Pages.Checklist.rejectTransfer(\'' + esc(tr.id) + '\')">' +
+              '<i class="fas fa-times"></i> Refuser</button>' +
+          '</div></div>';
       });
-
-      acceptedIn.forEach(tr => {
-        const isChecked = !!state.checks[`${tr.dayId}_${tr.slot}_${tr.taskId}`];
-        const slotObj   = MX.SLOTS[tr.slot];
-        h += `<div class="trow ${isChecked ? 'done' : ''}" id="trr_${esc(tr.id)}" onclick="MX.Pages.Checklist.toggleTransferred('${esc(tr.dayId)}','${esc(tr.slot)}','${esc(tr.taskId)}','${esc(tr.id)}')">
-          <div class="tcb ${isChecked ? 'on' : ''}"><i class="fas fa-check"></i></div>
-          <span class="ttext">${esc(tr.taskText)}</span>
-          <span class="twho" style="color:var(--text3);background:var(--bg4)">${slotObj ? slotObj.l : tr.slot}</span>
-        </div>`;
+      acceptedIn.forEach(function(tr) {
+        const isChk  = !!state.checks[tr.dayId + '_' + tr.slot + '_' + tr.taskId];
+        const slotObj = MX.SLOTS[tr.slot];
+        h += '<div class="trow ' + (isChk ? 'done' : '') + '" id="trr_' + esc(tr.id) + '" onclick="MX.Pages.Checklist.toggleTransferred(\'' + esc(tr.dayId) + '\',\'' + esc(tr.slot) + '\',\'' + esc(tr.taskId) + '\',\'' + esc(tr.id) + '\')">' +
+          '<div class="tcb ' + (isChk ? 'on' : '') + '"><i class="fas fa-check"></i></div>' +
+          '<span class="ttext">' + esc(tr.taskText) + '</span>' +
+          '<span class="twho" style="color:var(--text3);background:var(--bg4)">' + (slotObj ? slotObj.l : tr.slot) + '</span>' +
+          '</div>';
       });
-
-      h += `<div style="height:12px"></div>`;
     }
 
+    // ── Compact slot groups ──
+    const _slotTimes = { matin: '06h – 14h', journee: '14h – 18h', soir: '18h – 22h' };
     let anyVisible = false;
-    const _currK = _weekKey(new Date());
-    slots.forEach(sl => {
-      const tasks      = state.tasks[`${dayId}_${sl}`] || [];
-      const asn        = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
-      const dailyClaim = isToday ? (dailyClaims[sl] || null) : null;
-      const planSugg   = canAll ? _getPlanSuggestions(_currK, dayId, sl) : [];
-      const html  = Widgets.slotCard({
-        dayId, slot: sl,
-        tasks, assignment: asn,
-        checks:       state.checks,
-        showAssign:   canAll,
-        workerFilter: worker,
-        isToday,
-        dailyClaim,
-        todayPlanSuggestions,
-        planSuggestions: planSugg
-      });
-      if (html) { anyVisible = true; h += html; }
+
+    slots.forEach(function(sl) {
+      const slotTasks    = state.tasks[dayId + '_' + sl] || [];
+      const slAsn        = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || '') : (state.assignments[dayId + '_' + sl] || '');
+      const slDailyClaim = isToday ? (dailyClaims[sl] || null) : null;
+      const slPlanSugg   = canAll ? _getPlanSuggestions(_currK, dayId, sl) : [];
+      const s            = MX.SLOTS[sl] || { l: sl, e: '', c: '', icon: '' };
+
+      // Visibility filter (mirrors slotCard logic)
+      const hasPerTask = worker && slotTasks.some(function(t) { return t.assignedTo === worker; });
+      if (worker && !MX.Auth.canSeeAll() && slAsn !== worker && !hasPerTask && !(isToday && !slAsn)) return;
+
+      const visTasks = (worker && !MX.Auth.canSeeAll() && slAsn !== worker)
+        ? slotTasks.filter(function(t) { return t.assignedTo === worker; })
+        : slotTasks;
+
+      let slDone = 0;
+      visTasks.forEach(function(t) { if (state.checks[dayId + '_' + sl + '_' + t.id]) slDone++; });
+      const slPct = visTasks.length ? Math.round(slDone / visTasks.length * 100) : 0;
+      anyVisible = true;
+
+      h += '<div class="cl-ws-sg">';
+
+      // Slot header
+      h += '<div class="cl-ws-sg-hd">';
+      h +=   '<div class="cl-ws-sg-ico ' + s.c + '">' + s.e + '</div>';
+      h +=   '<div class="cl-ws-sg-info">';
+      h +=     '<div class="cl-ws-sg-lbl">' + esc(s.l) + '<span class="cl-ws-sg-time">' + (_slotTimes[sl] || '') + '</span></div>';
+      h +=     '<div class="cl-ws-sg-sub">' + slDone + '/' + visTasks.length + ' tâches</div>';
+      h +=   '</div>';
+      h +=   '<div class="cl-ws-sg-pct ' + (slPct>=80?'g':slPct>=40?'o':'r') + '">' + slPct + '%</div>';
+      h += '</div>';
+
+      // Assignment row
+      if (canAll) {
+        if (isToday) {
+          const claimName = (slDailyClaim && slDailyClaim.name) || '';
+          const lockIcon  = (slDailyClaim && slDailyClaim.lockedBy) ? '<i class="fas fa-lock" style="color:var(--orange);font-size:10px"></i> ' : '';
+          if (claimName) {
+            h += '<div class="cl-ws-asgn-row">' + lockIcon + '<span class="cl-ws-asgn-chip">' + esc(claimName) + '</span></div>';
+          } else if (slPlanSugg.length) {
+            h += '<div class="cl-ws-asgn-row"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px"></i>&nbsp;<span class="cl-ws-asgn-chip" style="border-color:rgba(0,245,212,.3)">' + esc(slPlanSugg[0]) + '</span></div>';
+          } else {
+            h += '<div class="cl-ws-asgn-row"><span style="font-size:11px;color:var(--text3)">Non assigné</span></div>';
+          }
+        } else {
+          const slUsers  = (state.users || []).filter(function(u) { return u.name && !u.hidden; });
+          const slSelId  = 'cws-sel-' + dayId + '-' + sl;
+          let slOpts = '<option value="">— Non assigné —</option>';
+          slUsers.forEach(function(u) {
+            slOpts += '<option value="' + esc(u.name) + '"' + (u.name === slAsn ? ' selected' : '') + '>' + esc(u.name) + (slPlanSugg.includes(u.name) ? ' 📅' : '') + '</option>';
+          });
+          h += '<div class="cl-ws-asgn-row">' +
+            '<select id="' + slSelId + '" class="cl-ws-asgn-sel" onchange="MX.Pages.Checklist.assign(\'' + esc(dayId) + '\',\'' + esc(sl) + '\',this.value)">' + slOpts + '</select>' +
+            '</div>';
+        }
+      } else if (slAsn) {
+        h += '<div class="cl-ws-asgn-row"><i class="fas fa-user" style="color:var(--text3);font-size:10px"></i>&nbsp;<span class="cl-ws-asgn-chip">' + esc(slAsn) + '</span></div>';
+      }
+
+      // Compact task rows
+      if (visTasks.length) {
+        h += '<div class="cl-ws-sg-tasks">';
+        visTasks.forEach(function(t) {
+          const tKey    = dayId + '_' + sl + '_' + t.id;
+          const isChk   = !!state.checks[tKey];
+          const hasNote = !!((state.notes || {})[tKey]);
+          const isSel   = _clWsSelKey === tKey;
+          const hasAsgn = !!(t.assignedTo || slAsn);
+          const stripeC = isChk ? 'done' : (hasAsgn ? 'asgn' : 'todo');
+          h += '<div class="cl-ws-tr cl-ws-tr--' + stripeC + (isSel ? ' cl-ws-tr--sel' : '') +
+            '" id="cl-ws-tr-' + esc(t.id) + '" data-base="cl-ws-tr--' + (hasAsgn ? 'asgn' : 'todo') +
+            '" onclick="MX.Pages.Checklist._clWsOpen(\'' + esc(dayId) + '\',\'' + esc(sl) + '\',\'' + esc(t.id) + '\',true)">';
+          h +=   '<div class="cl-ws-tr-stripe"></div>';
+          h +=   '<div class="cl-ws-tr-cb' + (isChk ? ' on' : '') + '"><i class="fas fa-check"></i></div>';
+          h +=   '<span class="cl-ws-tr-text">' + esc(t.text) + '</span>';
+          if (hasNote) h += '<i class="fas fa-note-sticky cl-ws-tr-note" title="Note"></i>';
+          h +=   '<div class="cl-ws-tr-arr"><i class="fas fa-chevron-right"></i></div>';
+          h += '</div>';
+        });
+        h += '</div>';
+      } else {
+        h += '<div class="cl-ws-sg-empty">Aucune tâche configurée</div>';
+      }
+
+      // Slot progress footer
+      h += '<div class="cl-ws-sg-prog"><div class="cl-ws-sg-prog-fill" style="width:' + slPct + '%"></div></div>';
+      h += '</div>'; // cl-ws-sg
     });
 
     if (!anyVisible && worker && !pendingIn.length && !acceptedIn.length) {
-      h += `<div style="text-align:center;padding:60px 20px">
-        <div style="font-size:40px;margin-bottom:16px">✅</div>
-        <div style="font-size:16px;font-weight:700;margin-bottom:8px">Aucun créneau assigné</div>
-        <div style="font-size:13px;color:var(--text2)">Aucun créneau n'est assigné à <strong>${esc(worker)}</strong> ce ${esc(day.l)}.</div>
-      </div>`;
+      h += '<div style="text-align:center;padding:40px 16px">' +
+        '<div style="font-size:36px;margin-bottom:12px">✅</div>' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:6px">Aucun créneau assigné</div>' +
+        '<div style="font-size:12px;color:var(--text2)">Aucun créneau n\'est assigné à <strong>' + esc(worker) + '</strong> ce ' + esc(day.l) + '.</div>' +
+        '</div>';
     }
 
-    // ── Interventions summary (Responsable / Admin only) ──
+    // ── Interventions summary (admin/responsable) ──
     if (canAll && window.MX.Pages && window.MX.Pages.Int) {
       const iv = MX.Pages.Int._getSummary();
-      h += `<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:20px">
-        <div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">
-          <div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:700;color:#a78bfa">INTERVENTIONS</div>
-            <div class="slot-dl">Synthèse globale</div>
-          </div>
-          <div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">${iv.total}</div>
-        </div>
-        <div style="padding:12px 14px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--orange-dim);border-radius:8px;border:1px solid var(--orange-border)">
-            <span style="font-size:18px">🟡</span>
-            <div>
-              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En attente</div>
-              <div style="font-size:20px;font-weight:700;color:var(--orange);line-height:1.1">${iv.en_attente}</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(249,115,22,.1);border-radius:8px;border:1px solid rgba(249,115,22,.3)">
-            <span style="font-size:18px">🟢</span>
-            <div>
-              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En cours</div>
-              <div style="font-size:20px;font-weight:700;color:#F97316;line-height:1.1">${iv.en_cours}</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--red-dim);border-radius:8px;border:1px solid var(--red-border)">
-            <span style="font-size:18px">🔴</span>
-            <div>
-              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">En retard</div>
-              <div style="font-size:20px;font-weight:700;color:var(--red);line-height:1.1">${iv.en_retard}</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg4);border-radius:8px;border:1px solid var(--border2)">
-            <span style="font-size:18px">⚪</span>
-            <div>
-              <div style="font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Terminées</div>
-              <div style="font-size:20px;font-weight:700;color:var(--text1);line-height:1.1">${iv.terminee}</div>
-            </div>
-          </div>
-        </div>
-        <div style="padding:0 14px 14px">
-          <div style="margin-bottom:10px;padding:6px 12px;background:var(--bg3);border-radius:8px;font-size:12px;color:var(--text2);display:flex;align-items:center;justify-content:space-between">
-            <span><i class="fas fa-list" style="color:var(--text3);margin-right:5px"></i>Total</span>
-            <strong style="color:var(--text1)">${iv.total} intervention${iv.total!==1?'s':''}</strong>
-          </div>
-          <button onclick="MX.showPage('interventions')"
-            style="width:100%;padding:11px;border:1.5px solid rgba(124,58,237,.5);border-radius:10px;background:rgba(124,58,237,.12);color:#a78bfa;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:8px">
-            <i class="fas fa-wrench"></i> Ouvrir les interventions
-          </button>
-        </div>
-      </div>`;
+      h += '<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:16px">' +
+        '<div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">' +
+          '<div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:700;color:#a78bfa">INTERVENTIONS</div><div class="slot-dl">Synthèse globale</div></div>' +
+          '<div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">' + iv.total + '</div>' +
+        '</div>' +
+        '<div style="padding:10px 14px">' +
+          '<button onclick="MX.showPage(\'interventions\')" style="width:100%;padding:9px;border:1.5px solid rgba(124,58,237,.3);border-radius:8px;background:rgba(124,58,237,.08);color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:6px">' +
+            '<i class="fas fa-external-link-alt"></i> Voir les interventions (' + iv.total + ')' +
+          '</button>' +
+        '</div>' +
+        '</div>';
     }
 
     // ── Mes interventions (technicien uniquement) ──
@@ -205,45 +235,225 @@
       const myIv = MX.Pages.Int._getSummary(cu.name);
       if (myIv.total > 0) {
         const ST_C = {
-          planifiee: { l:'Planifiée', c:'var(--text2)',   bg:'var(--bg4)'                 },
-          affectee:  { l:'Affectée',  c:'var(--orange)',  bg:'var(--orange-dim)'           },
-          en_cours:  { l:'En cours',  c:'#F97316',        bg:'rgba(249,115,22,.13)'        },
-          terminee:  { l:'Terminée',  c:'#22C55E',        bg:'rgba(34,197,94,.13)'         },
-          en_retard: { l:'En retard', c:'var(--red)',      bg:'var(--red-dim)'             },
-          annulee:   { l:'Annulée',   c:'var(--text3)',   bg:'var(--bg4)'                 }
+          planifiee: { l:'Planifiée', c:'var(--text2)',  bg:'var(--bg4)'          },
+          affectee:  { l:'Affectée',  c:'var(--orange)', bg:'var(--orange-dim)'   },
+          en_cours:  { l:'En cours',  c:'#F97316',       bg:'rgba(249,115,22,.13)' },
+          terminee:  { l:'Terminée',  c:'#22C55E',       bg:'rgba(34,197,94,.13)' },
+          en_retard: { l:'En retard', c:'var(--red)',     bg:'var(--red-dim)'      },
+          annulee:   { l:'Annulée',   c:'var(--text3)',   bg:'var(--bg4)'          }
         };
-        h += `<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:20px">
-          <div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">
-            <div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>
-            <div style="flex:1">
-              <div style="font-size:14px;font-weight:700;color:#a78bfa">MES INTERVENTIONS</div>
-              <div class="slot-dl">${myIv.total} affectée${myIv.total!==1?'s':''}</div>
-            </div>
-            <div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">${myIv.total}</div>
-          </div>`;
-        myIv.items.forEach(iv => {
+        h += '<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:16px">' +
+          '<div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">' +
+            '<div class="ch-ico" style="background:rgba(124,58,237,.2);color:#a78bfa"><i class="fas fa-wrench"></i></div>' +
+            '<div style="flex:1"><div style="font-size:14px;font-weight:700;color:#a78bfa">MES INTERVENTIONS</div>' +
+            '<div class="slot-dl">' + myIv.total + ' affectée' + (myIv.total!==1?'s':'') + '</div></div>' +
+            '<div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">' + myIv.total + '</div>' +
+          '</div>';
+        myIv.items.forEach(function(iv) {
           const sc = ST_C[iv.effStatus] || ST_C.planifiee;
-          h += `<div class="trow" onclick="MX.showPage('interventions')" style="cursor:pointer">
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:var(--text1)">${esc(iv.title)}</div>
-              ${iv.startDate ? `<div style="font-size:11px;color:var(--text3);margin-top:2px"><i class="fas fa-calendar-day" style="margin-right:4px"></i>${esc(iv.startDate)}</div>` : ''}
-            </div>
-            <span style="padding:2px 9px;border-radius:6px;font-size:10px;font-weight:700;font-family:var(--ffm);background:${sc.bg};color:${sc.c};white-space:nowrap;flex-shrink:0">${sc.l}</span>
-          </div>`;
+          h += '<div class="trow" onclick="MX.showPage(\'interventions\')" style="cursor:pointer">' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text1)">' + esc(iv.title) + '</div>' +
+              (iv.startDate ? '<div style="font-size:11px;color:var(--text3);margin-top:2px"><i class="fas fa-calendar-day" style="margin-right:4px"></i>' + esc(iv.startDate) + '</div>' : '') +
+            '</div>' +
+            '<span style="padding:2px 9px;border-radius:6px;font-size:10px;font-weight:700;font-family:var(--ffm);background:' + sc.bg + ';color:' + sc.c + ';white-space:nowrap;flex-shrink:0">' + sc.l + '</span>' +
+          '</div>';
         });
-        h += `<div style="padding:8px 14px">
-          <button onclick="MX.showPage('interventions')"
-            style="width:100%;padding:9px;border:1.5px solid rgba(124,58,237,.3);border-radius:8px;background:rgba(124,58,237,.08);color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:6px">
-            <i class="fas fa-external-link-alt"></i> Voir mes interventions
-          </button>
-        </div>
-        </div>`;
+        h += '<div style="padding:8px 14px">' +
+          '<button onclick="MX.showPage(\'interventions\')" style="width:100%;padding:9px;border:1.5px solid rgba(124,58,237,.3);border-radius:8px;background:rgba(124,58,237,.08);color:#a78bfa;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;justify-content:center;gap:6px">' +
+            '<i class="fas fa-external-link-alt"></i> Voir mes interventions' +
+          '</button>' +
+        '</div></div>';
       }
     }
 
-    h += `</div>`;
+    // Close left panel, open right panel placeholder
+    h += '</div>'; // cl-ws-left
+    h += '<div class="cl-ws-rp-wrap"><div id="cl-ws-rp" class="cl-ws-rp"></div></div>';
+    h += '</div>'; // cl-ws-body
     el.innerHTML = h;
     el.dataset.dayId = dayId;
+    _clWsRpPlaceholder();
+  }
+
+  function _clWsRpPlaceholder() {
+    const rp = document.getElementById('cl-ws-rp');
+    if (!rp) return;
+    rp.innerHTML = '<div class="cl-ws-ph">' +
+      '<div class="cl-ws-ph-icon"><i class="fas fa-clipboard-list"></i></div>' +
+      '<div class="cl-ws-ph-title">Sélectionnez une tâche</div>' +
+      '<div class="cl-ws-ph-sub">Cliquez sur une tâche pour accéder à l\'espace de travail</div>' +
+      '<div class="cl-ws-ph-hints">' +
+        '<div class="cl-ws-ph-hint"><i class="fas fa-check-circle"></i> Valider une tâche</div>' +
+        '<div class="cl-ws-ph-hint"><i class="fas fa-note-sticky"></i> Ajouter une note</div>' +
+        '<div class="cl-ws-ph-hint"><i class="fas fa-ban"></i> Signaler un problème</div>' +
+      '</div>' +
+      '</div>';
+  }
+
+  function _clWsOpen(dayId, slot, taskId, animate) {
+    const { state, DAYS, SLOTS, esc } = MX;
+    const key  = dayId + '_' + slot + '_' + taskId;
+    const task = (state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
+    if (!task) return;
+
+    _clWsSelKey = key;
+
+    // Highlight selected row in left panel
+    document.querySelectorAll('.cl-ws-tr').forEach(function(el) {
+      el.classList.toggle('cl-ws-tr--sel', el.id === 'cl-ws-tr-' + taskId);
+    });
+
+    const isChecked = !!state.checks[key];
+    const note      = (state.notes || {})[key] || '';
+    const day       = DAYS.find(function(d) { return d.id === dayId; });
+    const s         = SLOTS[slot] || { l: slot, e: '', c: '', icon: '' };
+    const cu        = state.currentUser;
+    const isToday   = dayId === MX.todayId();
+    const asn       = isToday
+      ? (((state.dailyClaims || {})[slot] || {}).name || '')
+      : (state.assignments[dayId + '_' + slot] || '');
+    const effectiveAsn = task.assignedTo || asn || '';
+    const canNote   = !!(cu || MX.Auth.isAdmin());
+
+    const rp = document.getElementById('cl-ws-rp');
+    if (!rp) return;
+
+    // Status badge
+    const statusBadge = isChecked
+      ? '<span class="cl-ws-status-badge cl-ws-status-badge--done"><i class="fas fa-check-circle"></i> Validée</span>'
+      : '<span class="cl-ws-status-badge cl-ws-status-badge--todo"><i class="fas fa-clock"></i> À faire</span>';
+
+    // Meta badges
+    let metaHtml = '<div class="cl-ws-meta-row">';
+    metaHtml += '<span class="cl-ws-mb cl-ws-mb--slot"><i class="fas ' + (s.icon || 'fa-circle') + '" style="font-size:10px;margin-right:3px"></i>' + esc(s.l) + '</span>';
+    if (effectiveAsn) metaHtml += '<span class="cl-ws-mb cl-ws-mb--tech"><i class="fas fa-user" style="font-size:10px;margin-right:3px"></i>' + esc(effectiveAsn) + '</span>';
+    if (day) metaHtml += '<span class="cl-ws-mb cl-ws-mb--date"><i class="fas fa-calendar-day" style="font-size:10px;margin-right:3px"></i>' + esc(day.l) + '</span>';
+    metaHtml += '</div>';
+
+    // Consigne card
+    const consigneHtml = '<div class="cl-ws-card">' +
+      '<div class="cl-ws-card-hd"><i class="fas fa-list-check"></i> Consigne</div>' +
+      '<div class="cl-ws-card-body"><p class="cl-ws-bullet">' + esc(task.text) + '</p></div>' +
+      '</div>';
+
+    // Note card
+    let noteHtml = '<div class="cl-ws-card">';
+    noteHtml += '<div class="cl-ws-card-hd"><i class="fas fa-note-sticky"></i> Note</div>';
+    noteHtml += '<div class="cl-ws-card-body">';
+    if (note) {
+      noteHtml += '<div class="cl-ws-note-text">' + esc(note) + '</div>';
+    } else {
+      noteHtml += '<div class="cl-ws-no-note">Aucune note pour cette tâche</div>';
+    }
+    noteHtml += '</div>';
+    if (canNote) {
+      noteHtml += '<div class="cl-ws-card-action">' +
+        '<button class="cl-ws-note-btn" onclick="MX.Pages.Checklist.openNote(\'' + esc(dayId) + '\',\'' + esc(slot) + '\',\'' + esc(taskId) + '\')">' +
+          '<i class="fas fa-pen"></i> ' + (note ? 'Modifier la note' : 'Ajouter une note') +
+        '</button>' +
+        '</div>';
+    }
+    noteHtml += '</div>';
+
+    // Action buttons
+    const actionsHtml = '<div class="cl-ws-actions">' +
+      '<button class="cl-ws-btn-validate' + (isChecked ? ' cl-ws-btn-validate--done' : '') + '" onclick="MX.Pages.Checklist._clWsToggle(\'' + esc(dayId) + '\',\'' + esc(slot) + '\',\'' + esc(taskId) + '\')">' +
+        '<i class="fas fa-' + (isChecked ? 'rotate-left' : 'check-circle') + '"></i> ' + (isChecked ? 'Dévalider' : 'Valider la tâche') +
+      '</button>' +
+      '<button class="cl-ws-btn-block" onclick="MX.Pages.Checklist._clWsBlockTask(\'' + esc(dayId) + '\',\'' + esc(slot) + '\',\'' + esc(taskId) + '\')">' +
+        '<i class="fas fa-ban"></i> Mission impossible' +
+      '</button>' +
+      '</div>';
+
+    rp.innerHTML = '<div class="cl-ws-ws' + (animate ? ' cl-ws-ws--anim' : '') + '">' +
+      '<div class="cl-ws-ws-hdr">' +
+        statusBadge +
+        '<button class="cl-ws-close-btn" onclick="MX.Pages.Checklist._clWsClose()" title="Fermer"><i class="fas fa-xmark"></i></button>' +
+      '</div>' +
+      '<div class="cl-ws-ws-title">' + esc(task.text) + '</div>' +
+      metaHtml +
+      consigneHtml +
+      noteHtml +
+      actionsHtml +
+      '</div>';
+
+    // Scroll workspace into view on mobile
+    if (window.innerWidth < 900) {
+      rp.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function _clWsClose() {
+    _clWsSelKey = null;
+    document.querySelectorAll('.cl-ws-tr--sel').forEach(function(el) {
+      el.classList.remove('cl-ws-tr--sel');
+    });
+    _clWsRpPlaceholder();
+  }
+
+  async function _clWsToggle(dayId, slot, taskId) {
+    await toggle(dayId, slot, taskId);
+    const key       = dayId + '_' + slot + '_' + taskId;
+    const isChecked = !!MX.state.checks[key];
+    // Update left panel row stripe + checkbox
+    const row = document.getElementById('cl-ws-tr-' + taskId);
+    if (row) {
+      const baseClass = row.dataset.base || 'cl-ws-tr--todo';
+      row.classList.toggle('cl-ws-tr--done', isChecked);
+      row.classList.toggle(baseClass, !isChecked);
+      const cb = row.querySelector('.cl-ws-tr-cb');
+      if (cb) cb.classList.toggle('on', isChecked);
+    }
+    // Refresh workspace panel
+    if (_clWsSelKey === key) _clWsOpen(dayId, slot, taskId, false);
+  }
+
+  function _clWsBlockTask(dayId, slot, taskId) {
+    const { esc } = MX;
+    const task = (MX.state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
+    document.getElementById('m-title').textContent = 'Mission impossible';
+    document.getElementById('m-sub').innerHTML =
+      '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">' +
+        (task ? '<strong>' + esc(task.text) + '</strong>' : '') +
+      '</div>' +
+      '<textarea id="note-ta" class="fi" style="width:100%;min-height:80px;resize:vertical;font-size:13px;line-height:1.5;margin-top:4px" placeholder="Décrivez la raison du blocage…" maxlength="500"></textarea>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.Pages.Checklist._clWsConfirmBlock(\'' + esc(dayId) + '\',\'' + esc(slot) + '\',\'' + esc(taskId) + '\')">' +
+        '<i class="fas fa-ban"></i> Signaler</button>' +
+      '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  async function _clWsConfirmBlock(dayId, slot, taskId) {
+    const ta     = document.getElementById('note-ta');
+    const reason = ta ? ta.value.trim() : '';
+    MX.closeModal();
+    if (!reason) return;
+    const key      = dayId + '_' + slot + '_' + taskId;
+    const existing = (MX.state.notes || {})[key] || '';
+    const newNote  = (existing ? existing + '\n' : '') + '[BLOQUÉ] ' + reason;
+    MX.state.notes = MX.state.notes || {};
+    MX.state.notes[key] = newNote;
+    try {
+      await MX.DB.setNote(key, newNote);
+      MX.toast('Mission signalée ✓');
+    } catch(e) {
+      MX.toast('Erreur', true);
+    }
+    // Add note icon to left panel row if not already there
+    const row = document.getElementById('cl-ws-tr-' + taskId);
+    if (row && !row.querySelector('.cl-ws-tr-note')) {
+      const arr = row.querySelector('.cl-ws-tr-arr');
+      if (arr) {
+        const ni = document.createElement('i');
+        ni.className = 'fas fa-note-sticky cl-ws-tr-note';
+        ni.title = 'Note';
+        row.insertBefore(ni, arr);
+      }
+    }
+    // Refresh workspace panel
+    if (_clWsSelKey === key) _clWsOpen(dayId, slot, taskId, false);
   }
 
   async function toggle(dayId, slot, taskId) {
@@ -2135,5 +2345,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg };
+  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg, _clWsOpen, _clWsClose, _clWsToggle, _clWsBlockTask, _clWsConfirmBlock };
 })();
