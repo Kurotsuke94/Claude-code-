@@ -1425,6 +1425,7 @@
     if (!mc) return;
     const { state, DAYS, getDaySlots, esc } = MX;
 
+    // ── Global week progress (current week) ──
     let totalW = 0, doneW = 0;
     const currSlot = slots.find(s => s.wk === currKey);
     if (currSlot) {
@@ -1438,19 +1439,105 @@
         });
       });
     }
-    const wPct = totalW ? Math.round(doneW / totalW * 100) : 0;
+    const wPct  = totalW ? Math.round(doneW / totalW * 100) : 0;
     const wPctC = wPct >= 80 ? 'var(--green)' : wPct >= 40 ? 'var(--orange)' : 'var(--red)';
 
+    // ── Right panel: today stats ──
+    const todayId = MX.todayId ? MX.todayId() : '';
+    let todayTotal = 0, todayDone = 0;
+    (getDaySlots(todayId) || []).forEach(sl => {
+      const k = `${todayId}_${sl}`;
+      (state.tasks[k] || []).forEach(t => {
+        todayTotal++;
+        if (state.checks[`${k}_${t.id}`]) todayDone++;
+      });
+    });
+
+    // ── Right panel: planning ──
+    const claims    = state.dailyClaims || {};
+    const SLOT_DEFS = [
+      { key: 'matin',   label: 'Matin',      icon: '☀️' },
+      { key: 'journee', label: 'Après-midi',  icon: '🌤️' },
+      { key: 'soir',    label: 'Soir',        icon: '🌙' }
+    ];
+
+    // ── Right panel: missions / interventions / PMP ──
+    const allMissions = state.missions || [];
+    const ints        = allMissions.filter(m => !(m.isPmp || m.missionType === 'pmp') && !m.done);
+    const pmps        = allMissions.filter(m => m.isPmp || m.missionType === 'pmp');
+    const pmpsActive  = pmps.filter(m => !m.done);
+    const pmpsDone    = pmps.length - pmpsActive.length;
+    const urgentInts  = ints.filter(m => m.priority === 'haute' || m.priority === 'critique');
+
+    // ── Archive / future counts for subtitle ──
+    const archiveCount = slots.filter(s => s.offset < 0).length;
+    const futureCount  = slots.filter(s => s.offset > 0).length;
+
+    // ── Pre-build right panel sections ──
+    const planningRowsHtml = SLOT_DEFS.map(sd => {
+      const asn     = (claims[sd.key] && claims[sd.key].name)
+                    || (state.assignments && state.assignments[`${todayId}_${sd.key}`])
+                    || '';
+      const slTasks = state.tasks[`${todayId}_${sd.key}`] || [];
+      const slDone  = slTasks.filter(t => state.checks[`${todayId}_${sd.key}_${t.id}`]).length;
+      return `<div class="cl-v2-rp-slot">
+          <span class="cl-v2-rp-slot-ico">${sd.icon}</span>
+          <div class="cl-v2-rp-slot-info">
+            <span class="cl-v2-rp-slot-lbl">${sd.label}</span>
+            <span class="cl-v2-rp-slot-user">${asn ? esc(asn) : '<em style="opacity:.55">Non assigné</em>'}</span>
+          </div>
+          <span class="cl-v2-rp-slot-ct">${slDone}/${slTasks.length}</span>
+        </div>`;
+    }).join('');
+
+    const intsListHtml = ints.length === 0
+      ? '<div class="cl-v2-rp-empty">Aucune intervention active</div>'
+      : '<div class="cl-v2-rp-list">'
+        + ints.slice(0, 3).map(m =>
+            '<div class="cl-v2-rp-item">'
+            + '<div class="cl-v2-rp-dot' + (urgentInts.includes(m) ? ' cl-v2-rp-dot--red' : '') + '"></div>'
+            + '<span class="cl-v2-rp-item-ttl">' + esc(m.text || '—') + '</span>'
+            + '</div>'
+          ).join('')
+        + (ints.length > 3 ? '<div class="cl-v2-rp-more">+' + (ints.length - 3) + ' de plus</div>' : '')
+        + '</div>';
+
+    const pmpsListHtml = pmpsActive.length === 0
+      ? '<div class="cl-v2-rp-empty">' + (pmps.length ? 'Tous les PMP terminés ✓' : 'Aucun PMP planifié') + '</div>'
+      : '<div class="cl-v2-rp-list">'
+        + pmpsActive.slice(0, 3).map(m => {
+            const pd = m.pmpData || {};
+            return '<div class="cl-v2-rp-item">'
+              + '<div class="cl-v2-rp-dot" style="background:#a855f7"></div>'
+              + '<span class="cl-v2-rp-item-ttl">' + esc(pd.equipmentName || m.text || '—') + '</span>'
+              + '</div>';
+          }).join('')
+        + (pmpsActive.length > 3 ? '<div class="cl-v2-rp-more">+' + (pmpsActive.length - 3) + ' de plus</div>' : '')
+        + '</div>';
+
+    const intsBadgeHtml = urgentInts.length
+      ? '<span class="cl-v2-rp-badge cl-v2-rp-badge--red">' + urgentInts.length + ' urgent' + (urgentInts.length > 1 ? 's' : '') + '</span>'
+      : '<span class="cl-v2-rp-badge cl-v2-rp-badge--blue">' + ints.length + '</span>';
+
+    const pmpsBadgeHtml = '<span class="cl-v2-rp-badge' + (pmpsActive.length ? ' cl-v2-rp-badge--purple' : '') + '">' + pmpsDone + '/' + pmps.length + '</span>';
+
+    // ── Build HTML ──
     let h = `<div class="ph">
       <div class="ph-eye">Vue d'ensemble</div>
       <div class="ph-row">
-        <div><div class="ph-title">Check-lists</div><div class="ph-sub">4 archives · semaine en cours · 3 à venir</div></div>
-        <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${wPctC}">${wPct}%</div>
+        <div>
+          <div class="ph-title">Check-lists</div>
+          <div class="ph-sub">${archiveCount} archive${archiveCount !== 1 ? 's' : ''} · semaine en cours · ${futureCount} à venir</div>
+        </div>
+        <div class="cl-v2-pct" style="color:${wPctC}">${wPct}%</div>
       </div>
-      <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${wPct}%"></div></div></div>
+      <div class="cl-v2-ph-prog-wrap">
+        <div class="cl-v2-ph-prog-track"><div class="cl-v2-ph-prog-fill" style="width:${wPct}%"></div></div>
+      </div>
     </div>
-    <div class="page-body" style="max-width:760px">
-    <div class="cl-wslots">`;
+    <div class="cl-v2-layout">
+      <div class="cl-v2-list">
+        <div class="cl-v2-cards">`;
 
     slots.reverse().forEach(({ wk, offset }) => {
       const isCurr   = wk === currKey;
@@ -1469,35 +1556,78 @@
           });
         });
       });
-      const pct  = total ? Math.round(done / total * 100) : (isFuture ? -1 : 0);
-      const pctC = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
+      const pct    = total ? Math.round(done / total * 100) : (isFuture ? -1 : 0);
+      const pctC   = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
       const wLabel = (data && data.weekLabel) || _weekLabel(wk);
 
       let statusLabel, statusCls;
-      if (isCurr)        { statusLabel = 'En cours'; statusCls = 'cl-wslot-status--curr'; }
-      else if (isFuture) { statusLabel = 'À venir';  statusCls = 'cl-wslot-status--future'; }
-      else               { statusLabel = 'Archive';  statusCls = 'cl-wslot-status--arch'; }
+      if (isCurr)        { statusLabel = 'En cours'; statusCls = 'cl-v2-badge--curr'; }
+      else if (isFuture) { statusLabel = 'À venir';  statusCls = 'cl-v2-badge--future'; }
+      else               { statusLabel = 'Archive';  statusCls = 'cl-v2-badge--arch'; }
 
-      h += `<div class="cl-wslot${isCurr?' cl-wslot--curr':isFuture?' cl-wslot--future':' cl-wslot--arch'}" onclick="MX.Pages.Checklist._showWeekDayGrid('${esc(wk)}')">
-        <div class="cl-wslot-header">
-          <div>
-            <div class="cl-wslot-label">${esc(wLabel)}</div>
-            <div class="cl-wslot-sub">${
-              isFuture  ? `${total} tâche${total!==1?'s':''} programmée${total!==1?'s':''}` :
-              isCurr    ? `${done}/${total} complétées${pct>=0?' · '+pct+'%':''}` :
-                          `${done}/${total}${pct>=0?' · '+pct+'%':' — aucune donnée'}`
-            }</div>
+      // Team avatars — current week from dailyClaims + assignments
+      let avatarsHtml = '';
+      if (isCurr) {
+        const weekUsers = {};
+        DAYS.forEach(day => {
+          (getDaySlots(day.id) || []).forEach(sl => {
+            const dc  = state.dailyClaims[sl];
+            const asn = (dc && dc.name) || (state.assignments && state.assignments[`${day.id}_${sl}`]) || '';
+            if (asn) weekUsers[asn] = true;
+          });
+        });
+        const userList = Object.keys(weekUsers);
+        const showList = userList.slice(0, 4);
+        const overflow = userList.length - showList.length;
+        if (showList.length) {
+          avatarsHtml = '<div class="cl-v2-avatars">';
+          showList.forEach(name => {
+            const nc = MX.userColors ? MX.userColors(name) : { bg: '#4338CA', fg: '#fff' };
+            avatarsHtml += `<span class="cl-v2-av" style="background:${nc.bg};color:${nc.fg}" title="${esc(name)}">${esc(name.substring(0, 2).toUpperCase())}</span>`;
+          });
+          if (overflow > 0) avatarsHtml += `<span class="cl-v2-av cl-v2-av--more">+${overflow}</span>`;
+          avatarsHtml += '</div>';
+        }
+      }
+
+      // Count chips — current week only
+      let countsHtml = '';
+      if (isCurr && (ints.length || pmpsActive.length)) {
+        countsHtml = '<div class="cl-v2-counts">';
+        if (ints.length)       countsHtml += '<span class="cl-v2-cnt cl-v2-cnt--int"><i class="fas fa-wrench"></i>' + ints.length + ' interv.</span>';
+        if (pmpsActive.length) countsHtml += '<span class="cl-v2-cnt cl-v2-cnt--pmp"><i class="fas fa-screwdriver-wrench"></i>' + pmpsActive.length + ' PMP</span>';
+        countsHtml += '</div>';
+      }
+
+      const subText = isFuture
+        ? (total + ' tâche' + (total !== 1 ? 's' : '') + ' programmée' + (total !== 1 ? 's' : ''))
+        : pct >= 0
+          ? ('<span class="cl-v2-done-n">' + done + '</span><span class="cl-v2-sep">/</span>' + total + ' · <span style="color:' + pctC + ';font-weight:700">' + pct + '%</span>')
+          : 'Aucune donnée';
+
+      const progBar = (!isFuture && pct >= 0)
+        ? '<div class="cl-v2-card-prog-track"><div class="cl-v2-card-prog-fill" style="width:' + pct + '%"></div></div>'
+        : '';
+
+      h += `<div class="cl-v2-card${isCurr ? ' cl-v2-card--curr' : isFuture ? ' cl-v2-card--future' : ' cl-v2-card--arch'}"
+          onclick="MX.Pages.Checklist._showWeekDayGrid('${esc(wk)}')">
+        <div class="cl-v2-card-body">
+          <div class="cl-v2-card-left">
+            <div class="cl-v2-card-label">${esc(wLabel)}</div>
+            <div class="cl-v2-card-sub">${subText}</div>
+            ${countsHtml}
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span class="cl-wslot-status ${statusCls}">${statusLabel}</span>
-            <i class="fas fa-chevron-right" style="color:var(--text3);font-size:11px"></i>
+          <div class="cl-v2-card-right">
+            ${avatarsHtml}
+            <span class="cl-v2-badge ${statusCls}">${statusLabel}</span>
+            <i class="fas fa-chevron-right cl-v2-chev"></i>
           </div>
         </div>
-        ${!isFuture && pct >= 0 ? `<div class="cl-wslot-bar"><div class="cl-wslot-bar-fill" style="width:${pct}%;background:${pctC}"></div></div>` : ''}
+        ${progBar}
       </div>`;
     });
 
-    h += `</div>`;
+    h += '</div>';
 
     if (MX.Auth.isAdmin()) {
       h += `<div class="cl-archive-hint" style="margin-top:16px">
@@ -1510,7 +1640,36 @@
       </div>`;
     }
 
-    h += `</div>`;
+    // ── Right panel ──
+    h += `</div>
+      <aside class="cl-v2-rp">
+        <div class="cl-v2-rp-section">
+          <div class="cl-v2-rp-hd"><i class="fas fa-calendar-day cl-v2-rp-ico"></i><span>Journée du jour</span></div>
+          <div class="cl-v2-rp-stats">
+            <div class="cl-v2-rps"><strong style="color:var(--green)">${todayDone}</strong><span>Terminées</span></div>
+            <div class="cl-v2-rps"><strong style="color:var(--red)">${todayTotal - todayDone}</strong><span>Restantes</span></div>
+            <div class="cl-v2-rps"><strong>${todayTotal}</strong><span>Total</span></div>
+          </div>
+        </div>
+        <div class="cl-v2-rp-section">
+          <div class="cl-v2-rp-hd"><i class="fas fa-clock cl-v2-rp-ico"></i><span>Planning</span></div>
+          <div class="cl-v2-rp-slots">${planningRowsHtml}</div>
+        </div>
+        <div class="cl-v2-rp-section">
+          <div class="cl-v2-rp-hd">
+            <i class="fas fa-wrench cl-v2-rp-ico" style="color:#3b82f6"></i><span>Interventions</span>${intsBadgeHtml}
+          </div>
+          ${intsListHtml}
+        </div>
+        <div class="cl-v2-rp-section">
+          <div class="cl-v2-rp-hd">
+            <i class="fas fa-screwdriver-wrench cl-v2-rp-ico" style="color:#a855f7"></i><span>Maintenance PMP</span>${pmpsBadgeHtml}
+          </div>
+          ${pmpsListHtml}
+        </div>
+      </aside>
+    </div>`;
+
     mc.innerHTML = h;
   }
 
