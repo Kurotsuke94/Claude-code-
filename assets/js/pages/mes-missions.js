@@ -17,9 +17,7 @@
   var _missionsLoaded = false;
   var _missionsUnsub  = null;
 
-  // ── Chrono + photo state ──
-  var _chronoTimer  = null;
-  var _chronoMId    = null;
+  // ── Photo state ──
   var _pendingPmpPh = null;
 
   // ── Notification tracking ──
@@ -204,9 +202,8 @@
           pmpData:          pd,
           pmpIntId:         m.pmpIntId || '',
           completedChecklist: m.completedChecklist || {},
-          elapsedSeconds:   m.elapsedSeconds || 0,
-          chronoRunning:    m.chronoRunning || false,
-          chronoStart:      m.chronoStart || null,
+          takenBy:          m.takenBy || null,
+          takenAt:          m.takenAt || null,
           observations:     m.observations || '',
           photoAvant:       m.photoAvant || null,
           photoPendant:     m.photoPendant || null,
@@ -759,7 +756,6 @@
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m) return;
     var e = MX.esc;
-    var elapsed = m.elapsedSeconds || 0;
     var comments = m.interventionComments || [];
     var parts    = m.usedParts || [];
 
@@ -796,16 +792,6 @@
           }).join('')
         + '</div></div>';
     }
-
-    // Temps passé / chrono
-    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-stopwatch"></i> Temps passé</div>'
-      + '<div class="pmp-chrono" id="int-chrono-' + missionId + '">'
-      + '<div class="pmp-chrono-display" id="int-cd-' + missionId + '">' + _fmtDur(elapsed) + '</div>'
-      + '<div class="pmp-chrono-btns" id="int-cb-' + missionId + '">'
-      + (m.chronoRunning
-          ? '<button class="pmp-chrono-btn pmp-chrono-btn--pause" onclick="MX.MM._pauseIntChrono(\'' + missionId + '\')"><i class="fas fa-pause"></i> Pause</button>'
-          : '<button class="pmp-chrono-btn pmp-chrono-btn--start" onclick="MX.MM._startIntChrono(\'' + missionId + '\')"><i class="fas fa-play"></i> Démarrer</button>')
-      + '</div></div></div>';
 
     // Comments
     h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-comment"></i> Commentaires</div>';
@@ -857,51 +843,15 @@
 
     h += '</div></div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
-
-    if (m.chronoRunning && m.chronoStart) _resumeIntChronoUI(missionId, m.chronoStart, elapsed);
   }
 
   function _closeInterventionDetail() {
-    if (_chronoTimer) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
     var ov = document.getElementById('mm-detail-ov');
     if (ov) ov.remove();
   }
 
-  function _startIntChrono(missionId) {
-    var m = _allMissions.find(function (x) { return x.id === missionId; });
-    var now = Date.now();
-    db.collection('missions').doc(missionId).update({ chronoRunning: true, chronoStart: now })
-      .catch(function (err) { console.warn('[MM] int chrono start:', err.message); });
-    if (m) { m.chronoRunning = true; m.chronoStart = now; }
-    _resumeIntChronoUI(missionId, now, m ? (m.elapsedSeconds || 0) : 0);
-  }
-
-  function _pauseIntChrono(missionId) {
-    var m = _allMissions.find(function (x) { return x.id === missionId; });
-    if (_chronoTimer) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
-    var prev    = m ? (m.elapsedSeconds || 0) : 0;
-    var start   = m ? (m.chronoStart || Date.now()) : Date.now();
-    var elapsed = prev + Math.floor((Date.now() - start) / 1000);
-    db.collection('missions').doc(missionId).update({ chronoRunning: false, elapsedSeconds: elapsed })
-      .catch(function (err) { console.warn('[MM] int chrono pause:', err.message); });
-    if (m) { m.chronoRunning = false; m.elapsedSeconds = elapsed; }
-    var display = document.getElementById('int-cd-' + missionId);
-    if (display) display.textContent = _fmtDur(elapsed);
-    var btns = document.getElementById('int-cb-' + missionId);
-    if (btns) btns.innerHTML = '<button class="pmp-chrono-btn pmp-chrono-btn--start" onclick="MX.MM._startIntChrono(\'' + missionId + '\')"><i class="fas fa-play"></i> Reprendre</button>';
-  }
-
   function _resumeIntChronoUI(missionId, start, prevElapsed) {
-    if (_chronoTimer) clearInterval(_chronoTimer);
-    _chronoMId = missionId;
-    var btns = document.getElementById('int-cb-' + missionId);
-    if (btns) btns.innerHTML = '<button class="pmp-chrono-btn pmp-chrono-btn--pause" onclick="MX.MM._pauseIntChrono(\'' + missionId + '\')"><i class="fas fa-pause"></i> Pause</button>';
-    _chronoTimer = setInterval(function () {
-      var elapsed = prevElapsed + Math.floor((Date.now() - start) / 1000);
-      var display = document.getElementById('int-cd-' + missionId);
-      if (display) display.textContent = _fmtDur(elapsed);
-      else { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
-    }, 1000);
+    // kept as no-op for any remaining callers
   }
 
   function _addIntComment(missionId) {
@@ -958,16 +908,12 @@
   async function _validateIntMission(missionId) {
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m || m.done) return;
-    var elapsed = m.elapsedSeconds || 0;
-    if (m.chronoRunning && m.chronoStart) elapsed += Math.floor((Date.now() - m.chronoStart) / 1000);
-    if (_chronoTimer && _chronoMId === missionId) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
+    var cu = MX.state.currentUser;
     try {
       await db.collection('missions').doc(missionId).update({
         done: true, status: 'terminee',
         completedAt: FV.serverTimestamp(),
-        completedBy: m.assignedTo || '',
-        elapsedSeconds: elapsed,
-        chronoRunning: false,
+        completedBy: cu ? cu.name : (m.assignedTo || ''),
       });
       MX.toast('Intervention validée ✓');
       _closeInterventionDetail();
@@ -980,32 +926,84 @@
   // PMP DETAIL PANEL
   // ══════════════════════════════════════════════
 
+  function _avatarColor(name) {
+    var colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#06b6d4'];
+    var hash = 0;
+    for (var i = 0; i < (name || '').length; i++) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
+    return colors[hash % colors.length];
+  }
+
+  function _avatarInitials(name) {
+    var parts = (name || '?').trim().split(/\s+/);
+    return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : (name || '?').slice(0, 2).toUpperCase();
+  }
+
+  function _pmpMiniInsights(m, history) {
+    var insights = [];
+    if (!history.length) return insights;
+    var ANOM_KW = ['panne','anomalie','défaut','cassé','cassée','fuite','rouillé','bloqué','bloquée','dysfonctionnement','problème','bruit'];
+    var PARTS_KW = ['filtre','courroie','roulement','joint','fusible','relais','sonde','pompe','vanne','condensateur','moteur','courroie'];
+    var anomCount = 0;
+    var partCounts = {};
+    history.forEach(function (hx) {
+      var obs = (hx.observations || '').toLowerCase();
+      if (ANOM_KW.some(function (kw) { return obs.indexOf(kw) !== -1; })) anomCount++;
+      PARTS_KW.forEach(function (kw) { if (obs.indexOf(kw) !== -1) partCounts[kw] = (partCounts[kw] || 0) + 1; });
+    });
+    var pd = m.pmpData || {};
+    var dueDate = pd.dueDate;
+    if (dueDate) {
+      var today = new Date().toISOString().slice(0, 10);
+      if (dueDate < today) {
+        var diff = Math.round((new Date(today) - new Date(dueDate)) / 86400000);
+        insights.push({ level: 'high', icon: '⚠️', text: 'Intervention en retard de ' + diff + ' jour' + (diff > 1 ? 's' : ''), why: 'car la date prévue (' + _fmtDate(dueDate) + ') est dépassée.' });
+      }
+    }
+    if (history.length >= 3) {
+      var rate = Math.round(anomCount / history.length * 100);
+      if (rate >= 50) insights.push({ level: 'high', icon: '🔴', text: 'Taux d\'anomalies élevé : ' + rate + '%', why: 'car ' + anomCount + ' interventions sur ' + history.length + ' mentionnent une anomalie.' });
+    }
+    var recurring = Object.keys(partCounts).filter(function (k) { return partCounts[k] >= 2; });
+    if (recurring.length) insights.push({ level: 'medium', icon: '🔧', text: 'Composant récurrent : ' + recurring[0], why: 'car "' + recurring[0] + '" apparaît dans ' + partCounts[recurring[0]] + ' rapports d\'intervention.' });
+    if (!insights.length && history.length >= 2) insights.push({ level: 'ok', icon: '✅', text: 'Maintenance bien assurée (' + history.length + ' interventions)', why: 'car l\'historique ne signale aucune anomalie récurrente.' });
+    return insights;
+  }
+
   function _openPmpDetail(missionId) {
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m) return;
     var e  = MX.esc;
     var pd = m.pmpData || {};
-    var items     = pd.checklistItems || [];
-    var completed = m.completedChecklist || {};
-    var doneCnt   = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
-    var elapsed   = m.elapsedSeconds || 0;
+    var items       = pd.checklistItems || [];
+    var completed   = m.completedChecklist || {};
+    var doneCnt     = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
     var pmpComments = m.pmpComments || [];
     var parts       = m.usedParts || [];
     var history     = m.interventionHistory || [];
+    var cu          = MX.state.currentUser;
+    var curName     = cu ? cu.name : null;
 
+    // Lifecycle state
+    var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
+    var lcLabel   = lifecycle === 'terminee' ? 'Terminée 🟢' : (lifecycle === 'en_cours' ? 'En cours 🟠' : 'Disponible 🟣');
+    var lcColor   = lifecycle === 'terminee' ? '#22c55e' : (lifecycle === 'en_cours' ? '#f97316' : '#a855f7');
+
+    // Checklist (editable only when en cours by current user)
+    var canEdit = lifecycle === 'en_cours' && m.takenBy === curName;
     var checklist = items.map(function (it, idx) {
       var ck = completed[String(idx)] || completed[idx];
       return '<label class="pmp-ck-item' + (ck ? ' pmp-ck-item--done' : '') + '">'
-        + '<input type="checkbox"' + (ck ? ' checked' : '')
+        + '<input type="checkbox"' + (ck ? ' checked' : '') + (canEdit ? '' : ' disabled')
         + ' onchange="MX.MM._toggleCheck(\'' + missionId + '\',' + idx + ',this.checked)">'
         + '<span>' + e(it.text || it) + '</span></label>';
     }).join('');
 
+    // Header
     var h = '<div class="pmp-detail-overlay" id="pmp-detail-ov">'
       + '<div class="pmp-detail-modal">'
       + '<div class="pmp-detail-header">'
       + '<div class="pmp-detail-header-l">'
-      + '<div class="pmp-detail-badge">🛠️ Préventif</div>'
+      + '<div class="pmp-detail-badge" style="background:' + lcColor + '22;color:' + lcColor + ';border:1px solid ' + lcColor + '55">' + lcLabel + '</div>'
       + '<div class="pmp-detail-ttl">' + e(pd.equipmentName || '—') + '</div>'
       + (pd.zone ? '<div class="pmp-detail-sub"><i class="fas fa-location-dot" style="font-size:9px"></i> ' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</div>' : '')
       + '</div>'
@@ -1013,115 +1011,162 @@
       + '</div>'
       + '<div class="pmp-detail-body">';
 
-    // Équipement info
-    var infoItems = [];
-    if (pd.ref)               infoItems.push({ l: 'Référence',       v: pd.ref });
-    if (pd.family)            infoItems.push({ l: 'Famille',         v: pd.family });
-    if (pd.frequency)         infoItems.push({ l: 'Fréquence',       v: pd.frequency + ' jours' });
-    if (pd.lastDone)          infoItems.push({ l: 'Dernière inter.',  v: _fmtDate(pd.lastDone) });
-    if (pd.dueDate)           infoItems.push({ l: 'Date prévue',     v: _fmtDate(pd.dueDate) });
-    if (pd.estimatedDuration) infoItems.push({ l: 'Durée estimée',   v: pd.estimatedDuration });
-    if (m.assignedTo)         infoItems.push({ l: 'Technicien',      v: m.assignedTo });
-    if (infoItems.length) {
-      h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-info-circle"></i> Équipement</div>'
-        + '<div class="pmp-detail-info-grid">'
-        + infoItems.map(function (it) {
-            return '<div class="pmp-detail-info-item"><span class="pmp-detail-info-lbl">' + e(it.l) + '</span><span>' + e(it.v) + '</span></div>';
-          }).join('')
-        + '</div></div>';
+    // ── 1. Informations équipement ──
+    var lastTech = history.length ? history[history.length - 1].by : (m.assignedTo || null);
+    var lastDate = history.length ? history[history.length - 1].date : pd.lastDone;
+    h += '<div class="pmp-eq-info-block"><div class="pmp-eq-info-grid">'
+      + (pd.ref ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Référence</span><span>' + e(pd.ref) + '</span></div>' : '')
+      + (pd.zone ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Local</span><span>' + e(pd.zone) + (pd.subZone ? ' / ' + e(pd.subZone) : '') + '</span></div>' : '')
+      + (pd.frequency ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Fréquence</span><span>' + e(String(pd.frequency)) + ' jours</span></div>' : '')
+      + (lastDate ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Dernière maintenance</span><span>' + e(_fmtDate(lastDate)) + '</span></div>' : '')
+      + (lastTech ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Dernier technicien</span><span>' + e(lastTech) + '</span></div>' : '')
+      + (pd.estimatedDuration ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Durée estimée</span><span>' + e(pd.estimatedDuration) + '</span></div>' : '')
+      + '</div></div>';
+
+    // ── 2. Historique stats ──
+    if (history.length) {
+      var ANOM_KW2 = ['panne','anomalie','défaut','cassé','cassée','fuite','rouillé','bloqué','dysfonctionnement','problème'];
+      var anomCount2 = 0;
+      var dernierePanne = '—';
+      history.forEach(function (hx) {
+        var obs = (hx.observations || '').toLowerCase();
+        if (ANOM_KW2.some(function (kw) { return obs.indexOf(kw) !== -1; })) anomCount2++;
+      });
+      for (var hi = history.length - 1; hi >= 0; hi--) {
+        var obs2 = (history[hi].observations || '').toLowerCase();
+        if (ANOM_KW2.some(function (kw) { return obs2.indexOf(kw) !== -1; })) {
+          dernierePanne = _fmtDate(history[hi].date) || history[hi].date || '—';
+          break;
+        }
+      }
+      h += '<div class="pmp-history-stats">'
+        + '<div class="pmp-hist-stat"><span class="pmp-hist-val">' + history.length + '</span><span class="pmp-hist-lbl">interventions</span></div>'
+        + '<div class="pmp-hist-stat"><span class="pmp-hist-val' + (anomCount2 > 0 ? ' pmp-hist-val--warn' : '') + '">' + anomCount2 + '</span><span class="pmp-hist-lbl">anomalies</span></div>'
+        + '<div class="pmp-hist-stat"><span class="pmp-hist-val" style="font-size:12px">' + e(dernierePanne) + '</span><span class="pmp-hist-lbl">dernière panne</span></div>'
+        + '</div>';
     }
 
-    // Consignes techniques
+    // ── 3. Consignes techniques ──
     if (pd.technicalNotes) {
       h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-note-sticky"></i> Consignes techniques</div>'
-        + '<div class="pmp-detail-notes">' + e(pd.technicalNotes) + '</div></div>';
+        + '<div class="pmp-detail-notes pmp-detail-notes--alert">' + e(pd.technicalNotes) + '</div></div>';
     }
 
-    // Checklist interactive
+    // ── 4. Checklist ──
     if (items.length) {
       h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-list-check"></i> Checklist (' + doneCnt + '/' + items.length + ')</div>'
         + '<div class="pmp-ck-list">' + checklist + '</div></div>';
     }
 
-    // Chrono
-    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-stopwatch"></i> Chrono</div>'
-      + '<div class="pmp-chrono" id="pmp-chrono-' + missionId + '">'
-      + '<div class="pmp-chrono-display" id="pmp-cd-' + missionId + '">' + _fmtDur(elapsed) + '</div>'
-      + (pd.estimatedDuration ? '<div class="pmp-chrono-ref">Estimé: ' + e(pd.estimatedDuration) + '</div>' : '')
-      + '<div class="pmp-chrono-btns" id="pmp-cb-' + missionId + '">'
-      + (m.chronoRunning
-          ? '<button class="pmp-chrono-btn pmp-chrono-btn--pause" onclick="MX.MM._pauseChrono(\'' + missionId + '\')"><i class="fas fa-pause"></i> Pause</button>'
-          : '<button class="pmp-chrono-btn pmp-chrono-btn--start" onclick="MX.MM._startChrono(\'' + missionId + '\')"><i class="fas fa-play"></i> Démarrer</button>')
-      + '</div></div></div>';
-
-    // Commentaires horodatés
-    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-comment"></i> Commentaires terrain</div>';
-    if (pmpComments.length) {
-      h += '<div class="int-comments-list">';
-      pmpComments.forEach(function (c) {
-        h += '<div class="int-comment"><div class="int-comment-meta"><span class="int-comment-by">' + e(c.by || '') + '</span>'
-          + '<span class="int-comment-ts">' + (c.ts ? new Date(c.ts).toLocaleString('fr-FR') : '') + '</span></div>'
-          + '<div class="int-comment-text">' + e(c.text || '') + '</div></div>';
-      });
-      h += '</div>';
-    }
-    h += '<div class="int-comment-add">'
-      + '<textarea class="fi" id="pmp-obs-' + missionId + '" rows="2" placeholder="Observations, anomalies, travaux effectués…" style="resize:vertical;width:100%;box-sizing:border-box;margin-bottom:5px">' + e(m.observations || '') + '</textarea>'
+    // ── 5. Journal technique ──
+    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-book-open"></i> Journal technique</div>';
+    h += '<div class="pmp-journal-list" id="pmp-journal-' + missionId + '">';
+    pmpComments.forEach(function (c) {
+      var initials = _avatarInitials(c.by || '?');
+      var color    = _avatarColor(c.by || '?');
+      var d        = c.ts ? new Date(c.ts) : null;
+      var dateStr  = d ? d.toLocaleDateString('fr-FR') : '';
+      var timeStr  = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+      h += '<div class="pmp-journal-entry">'
+        + '<div class="pmp-journal-avatar" style="background:' + color + '">' + initials + '</div>'
+        + '<div class="pmp-journal-content">'
+        + '<div class="pmp-journal-meta"><span class="pmp-journal-author">' + e(c.by || '?') + '</span>'
+        + '<span class="pmp-journal-date">' + dateStr + (timeStr ? ' · ' + timeStr : '') + '</span></div>'
+        + '<div class="pmp-journal-text">' + e(c.text || '') + '</div>'
+        + '</div></div>';
+    });
+    h += '</div>';
+    h += '<div class="pmp-journal-add">'
+      + '<textarea class="fi" id="pmp-obs-' + missionId + '" rows="2" placeholder="Observations, anomalies, travaux effectués…" style="resize:vertical;width:100%;box-sizing:border-box;margin-bottom:5px"></textarea>'
       + '<button class="pmp-chrono-btn pmp-chrono-btn--start" style="width:100%" onclick="MX.MM._addPmpComment(\'' + missionId + '\')">'
-      + '<i class="fas fa-paper-plane"></i> Ajouter</button>'
+      + '<i class="fas fa-paper-plane"></i> Ajouter au journal</button>'
       + '</div></div>';
 
-    // Photos avant/pendant/après
-    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-camera"></i> Photos</div>'
-      + '<div class="pmp-photo-row">'
-      + _photoCell(missionId, 'avant',   m.photoAvant   || null, 'Avant')
-      + _photoCell(missionId, 'pendant', m.photoPendant || null, 'Pendant')
-      + _photoCell(missionId, 'apres',   m.photoApres   || null, 'Après')
-      + '</div></div>';
-
-    // Pièces utilisées
-    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-tools"></i> Pièces utilisées</div>';
-    if (parts.length) {
-      h += '<div class="int-parts-list">';
-      parts.forEach(function (p) {
-        h += '<div class="int-part-item"><span class="int-part-name">' + e(p.name || '') + '</span>'
-          + '<span class="int-part-qty">× ' + (p.qty || 1) + '</span>'
-          + (p.cost ? '<span class="int-part-cost">' + p.cost + ' €</span>' : '') + '</div>';
+    // ── 6. Photos (5 catégories) ──
+    var pmpPhotos = m.pmpPhotos || {};
+    var photoCats = [
+      { key: 'avant',   label: 'Avant',              icon: 'fa-circle-arrow-right' },
+      { key: 'pendant', label: 'Pendant',             icon: 'fa-spinner' },
+      { key: 'apres',   label: 'Après',               icon: 'fa-circle-check' },
+      { key: 'plaque',  label: 'Plaque signalétique', icon: 'fa-id-badge' },
+      { key: 'schema',  label: 'Schéma électrique',   icon: 'fa-bolt' },
+    ];
+    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-camera"></i> Photos</div>';
+    h += '<div class="pmp-photo-cats">';
+    photoCats.forEach(function (cat) {
+      var photos = (pmpPhotos[cat.key] || []).slice();
+      if (!photos.length && cat.key === 'avant'   && m.photoAvant)   photos = [m.photoAvant];
+      if (!photos.length && cat.key === 'pendant' && m.photoPendant) photos = [m.photoPendant];
+      if (!photos.length && cat.key === 'apres'   && m.photoApres)   photos = [m.photoApres];
+      h += '<div class="pmp-photo-cat">'
+        + '<div class="pmp-photo-cat-hdr"><i class="fas ' + cat.icon + '"></i> ' + cat.label + '</div>'
+        + '<div class="pmp-photo-cat-imgs" id="pmp-phcat-' + missionId + '-' + cat.key + '">';
+      photos.forEach(function (url) {
+        h += '<img src="' + url + '" class="pmp-photo-thumb" onclick="MX.MM._viewPhoto(this.src)">';
       });
-      h += '</div>';
-    }
+      h += '</div>'
+        + '<button class="pmp-photo-add-btn" onclick="MX.MM._triggerPmpPhoto(\'' + missionId + '\',\'' + cat.key + '\')">'
+        + '<i class="fas fa-plus"></i> Ajouter</button>'
+        + '</div>';
+    });
+    h += '</div></div>';
+
+    // ── 7. Pièces utilisées ──
+    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-tools"></i> Pièces utilisées</div>';
+    h += '<div class="int-parts-list" id="pmp-parts-' + missionId + '">';
+    parts.forEach(function (p) {
+      h += '<div class="int-part-item"><span class="int-part-name">' + e(p.name || '') + '</span>'
+        + '<span class="int-part-qty">× ' + (p.qty || 1) + '</span></div>';
+    });
+    h += '</div>';
     h += '<div class="int-part-add">'
-      + '<input class="fi" id="pmp-p-name-' + missionId + '" placeholder="Pièce" style="flex:1;min-width:0">'
-      + '<input class="fi" id="pmp-p-qty-'  + missionId + '" placeholder="Qté" type="number" min="1" style="width:64px">'
+      + '<input class="fi" id="pmp-p-name-' + missionId + '" placeholder="Nom de la pièce…" style="flex:1;min-width:0">'
+      + '<input class="fi" id="pmp-p-qty-'  + missionId + '" placeholder="Qté" type="number" min="1" value="1" style="width:64px">'
       + '<button class="pmp-chrono-btn pmp-chrono-btn--start" onclick="MX.MM._addPmpPart(\'' + missionId + '\')" style="flex-shrink:0"><i class="fas fa-plus"></i></button>'
       + '</div></div>';
 
-    // Historique des interventions précédentes
-    if (history.length) {
-      h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-history"></i> Historique</div>'
-        + '<div class="int-comments-list">';
-      history.slice(-3).reverse().forEach(function (hx) {
-        h += '<div class="int-comment"><div class="int-comment-meta"><span class="int-comment-by">' + e(hx.by || '') + '</span>'
-          + '<span class="int-comment-ts">' + e(hx.date || '') + '</span></div>'
-          + '<div class="int-comment-text">Durée: ' + _fmtDur(hx.realDuration || 0) + (hx.observations ? ' · ' + e(hx.observations) : '') + '</div></div>';
+    // ── 8. Assistant Maintix ──
+    var insights = _pmpMiniInsights(m, history);
+    h += '<div class="pmp-ai-mini">'
+      + '<div class="pmp-ai-mini-hdr"><span class="ai-icon-pulse">🤖</span> Assistant Maintix</div>';
+    if (insights.length) {
+      insights.forEach(function (ins) {
+        h += '<div class="pmp-ai-mini-row pmp-ai-mini-row--' + ins.level + '">'
+          + ins.icon + ' ' + e(ins.text)
+          + '<div class="pmp-ai-mini-why">Pourquoi : ' + e(ins.why) + '</div>'
+          + '</div>';
       });
-      h += '</div></div>';
+    } else {
+      h += '<div class="pmp-ai-mini-row pmp-ai-mini-row--info">💡 Aucun historique disponible pour ' + e(pd.equipmentName || 'cet équipement') + '.'
+        + '<div class="pmp-ai-mini-why">Pourquoi : car c\'est la première intervention enregistrée sur cet équipement.</div></div>';
     }
+    h += '</div>';
 
-    // Validate footer
-    h += '<div class="pmp-detail-footer">'
-      + '<button class="pmp-validate-btn' + (m.done ? ' pmp-validate-btn--done' : '') + '" onclick="MX.MM._validatePmpMission(\'' + missionId + '\')">'
-      + (m.done ? '<i class="fas fa-circle-check"></i> Mission validée' : '<i class="fas fa-check"></i> Valider la mission')
-      + '</button></div>';
+    // ── Footer lifecycle ──
+    h += '<div class="pmp-detail-footer" id="pmp-detail-footer-' + missionId + '">';
+    if (lifecycle === 'disponible') {
+      h += '<button class="pmp-validate-btn" style="background:#a855f7;border-color:#a855f7" onclick="MX.MM._takePmpMission(\'' + missionId + '\')">'
+        + '<i class="fas fa-hand-pointer"></i> Prendre la mission</button>';
+    } else if (lifecycle === 'en_cours') {
+      if (m.takenBy === curName) {
+        h += '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
+          + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
+          + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
+          + '<i class="fas fa-check"></i> Terminer</button>';
+      } else {
+        h += '<div class="pmp-taken-info"><i class="fas fa-user-clock"></i> Prise par <strong>' + e(m.takenBy || '') + '</strong></div>';
+      }
+    } else {
+      h += '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
+        + '<i class="fas fa-circle-check"></i> Mission validée</button>';
+    }
+    h += '</div>';
 
     h += '</div></div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
-
-    if (m.chronoRunning && m.chronoStart) _resumeChronoUI(missionId, m.chronoStart, elapsed);
   }
 
   function _closePmpDetail() {
-    if (_chronoTimer) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
     var ov = document.getElementById('pmp-detail-ov');
     if (ov) ov.remove();
   }
@@ -1134,23 +1179,28 @@
     var cu = MX.state.currentUser;
     var comment = { text: text, by: cu ? cu.name : '?', ts: Date.now() };
     db.collection('missions').doc(missionId).update({
-      pmpComments: FV.arrayUnion(comment), observations: text,
+      pmpComments: FV.arrayUnion(comment),
     }).then(function () {
       ta.value = '';
       MX.toast('Commentaire ajouté ✓');
       var m = _allMissions.find(function (x) { return x.id === missionId; });
       if (m) { if (!m.pmpComments) m.pmpComments = []; m.pmpComments.push(comment); }
-      var listEl = document.querySelector('#pmp-detail-ov .int-comments-list');
-      if (!listEl) {
-        var addEl = document.querySelector('#pmp-detail-ov .int-comment-add');
-        if (addEl) { var nl = document.createElement('div'); nl.className = 'int-comments-list'; addEl.parentNode.insertBefore(nl, addEl); listEl = nl; }
-      }
+      var listEl = document.getElementById('pmp-journal-' + missionId);
       if (listEl) {
-        var e = MX.esc;
+        var e2 = MX.esc;
+        var initials = _avatarInitials(comment.by);
+        var color    = _avatarColor(comment.by);
+        var d        = new Date(comment.ts);
+        var dateStr  = d.toLocaleDateString('fr-FR');
+        var timeStr  = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         listEl.insertAdjacentHTML('beforeend',
-          '<div class="int-comment"><div class="int-comment-meta"><span class="int-comment-by">' + e(comment.by) + '</span>'
-          + '<span class="int-comment-ts">' + new Date(comment.ts).toLocaleString('fr-FR') + '</span></div>'
-          + '<div class="int-comment-text">' + e(comment.text) + '</div></div>');
+          '<div class="pmp-journal-entry">'
+          + '<div class="pmp-journal-avatar" style="background:' + color + '">' + initials + '</div>'
+          + '<div class="pmp-journal-content">'
+          + '<div class="pmp-journal-meta"><span class="pmp-journal-author">' + e2(comment.by) + '</span>'
+          + '<span class="pmp-journal-date">' + dateStr + ' · ' + timeStr + '</span></div>'
+          + '<div class="pmp-journal-text">' + e2(comment.text) + '</div>'
+          + '</div></div>');
       }
     }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
@@ -1165,10 +1215,15 @@
     var part = { name: name, qty: qty };
     db.collection('missions').doc(missionId).update({ usedParts: FV.arrayUnion(part) })
       .then(function () {
-        nameEl.value = ''; if (qtyEl) qtyEl.value = '';
+        nameEl.value = ''; if (qtyEl) qtyEl.value = '1';
         MX.toast('Pièce ajoutée ✓');
         var m = _allMissions.find(function (x) { return x.id === missionId; });
         if (m) { if (!m.usedParts) m.usedParts = []; m.usedParts.push(part); }
+        var listEl = document.getElementById('pmp-parts-' + missionId);
+        if (listEl) {
+          var e = MX.esc;
+          listEl.insertAdjacentHTML('beforeend', '<div class="int-part-item"><span class="int-part-name">' + e(part.name) + '</span><span class="int-part-qty">× ' + part.qty + '</span></div>');
+        }
       }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 
@@ -1198,11 +1253,16 @@
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
         var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         var upd = {};
-        var cap = ph.category.charAt(0).toUpperCase() + ph.category.slice(1);
-        upd['photo' + cap] = dataUrl;
+        upd['pmpPhotos.' + ph.category] = FV.arrayUnion(dataUrl);
         db.collection('missions').doc(ph.missionId).update(upd).then(function () {
-          var cell = document.querySelector('.pmp-photo-cell[data-cat="' + ph.category + '"]');
-          if (cell) cell.innerHTML = '<img src="' + dataUrl + '" class="pmp-photo-thumb">';
+          var container = document.getElementById('pmp-phcat-' + ph.missionId + '-' + ph.category);
+          if (container) {
+            var imgEl = document.createElement('img');
+            imgEl.src = dataUrl;
+            imgEl.className = 'pmp-photo-thumb';
+            imgEl.onclick = function () { MX.MM._viewPhoto(dataUrl); };
+            container.appendChild(imgEl);
+          }
           MX.toast('Photo jointe ✓');
         }).catch(function (err) { MX.toast('Erreur photo: ' + err.message, true); });
       };
@@ -1210,6 +1270,17 @@
     };
     reader.readAsDataURL(file);
     input.value = '';
+  }
+
+  function _viewPhoto(src) {
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    ov.onclick = function () { ov.remove(); };
+    var img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'max-width:90vw;max-height:90vh;border-radius:8px;object-fit:contain';
+    ov.appendChild(img);
+    document.body.appendChild(ov);
   }
 
   // ══════════════════════════════════════════════
@@ -1233,75 +1304,100 @@
   }
 
   // ══════════════════════════════════════════════
-  // PMP CHRONO
+  // LIFECYCLE — TAKE / RELEASE / CONFIRM / VALIDATE
   // ══════════════════════════════════════════════
 
-  function _startChrono(missionId) {
-    var m   = _allMissions.find(function (x) { return x.id === missionId; });
+  function _takePmpMission(missionId) {
+    var cu = MX.state.currentUser;
+    if (!cu) { MX.toast('Connectez-vous pour prendre une mission', true); return; }
     var now = Date.now();
-    db.collection('missions').doc(missionId).update({ chronoRunning: true, chronoStart: now })
-      .catch(function (err) { console.warn('[MM] chrono start:', err.message); });
-    if (m) { m.chronoRunning = true; m.chronoStart = now; }
-    _resumeChronoUI(missionId, now, m ? (m.elapsedSeconds || 0) : 0);
+    db.collection('missions').doc(missionId).update({ takenBy: cu.name, takenAt: now })
+      .then(function () {
+        var m = _allMissions.find(function (x) { return x.id === missionId; });
+        if (m) { m.takenBy = cu.name; m.takenAt = now; }
+        MX.toast('Mission prise ✓');
+        _closePmpDetail();
+        _openPmpDetail(missionId);
+      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 
-  function _pauseChrono(missionId) {
+  function _releasePmpMission(missionId) {
+    document.getElementById('m-title').textContent = 'Rendre la mission';
+    document.getElementById('m-sub').innerHTML = '<p style="margin:0;color:var(--text2)">Voulez-vous rendre cette mission ? Elle repassera en statut <strong style="color:var(--text1)">Disponible 🟣</strong>.</p>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.MM._doReleasePmp(\'' + missionId + '\')">'
+      + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  function _doReleasePmp(missionId) {
+    MX.closeModal();
+    db.collection('missions').doc(missionId).update({ takenBy: null, takenAt: null })
+      .then(function () {
+        var m = _allMissions.find(function (x) { return x.id === missionId; });
+        if (m) { m.takenBy = null; m.takenAt = null; }
+        MX.toast('Mission rendue ✓');
+        _closePmpDetail();
+        _openPmpDetail(missionId);
+      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  function _confirmTerminePmp(missionId) {
     var m = _allMissions.find(function (x) { return x.id === missionId; });
-    if (_chronoTimer) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
-    var prev    = m ? (m.elapsedSeconds || 0) : 0;
-    var start   = m ? (m.chronoStart || Date.now()) : Date.now();
-    var elapsed = prev + Math.floor((Date.now() - start) / 1000);
-    db.collection('missions').doc(missionId).update({ chronoRunning: false, elapsedSeconds: elapsed })
-      .catch(function (err) { console.warn('[MM] chrono pause:', err.message); });
-    if (m) { m.chronoRunning = false; m.elapsedSeconds = elapsed; }
-    var display = document.getElementById('pmp-cd-' + missionId);
-    if (display) display.textContent = _fmtDur(elapsed);
-    var btns = document.getElementById('pmp-cb-' + missionId);
-    if (btns) btns.innerHTML = '<button class="pmp-chrono-btn pmp-chrono-btn--start" onclick="MX.MM._startChrono(\'' + missionId + '\')"><i class="fas fa-play"></i> Reprendre</button>';
+    if (!m) return;
+    var pmpComments = m.pmpComments || [];
+    var parts       = m.usedParts || [];
+    var pmpPhotos   = m.pmpPhotos || {};
+    var completed   = m.completedChecklist || {};
+    var items       = (m.pmpData && m.pmpData.checklistItems) || [];
+    var doneCnt     = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
+    var photoCount  = Object.keys(pmpPhotos).reduce(function (s, k) { return s + (Array.isArray(pmpPhotos[k]) ? pmpPhotos[k].length : 0); }, 0)
+      + (m.photoAvant ? 1 : 0) + (m.photoPendant ? 1 : 0) + (m.photoApres ? 1 : 0);
+    var checkHtml = '<div class="pmp-confirm-checks">'
+      + '<div class="pmp-confirm-row ' + (pmpComments.length ? 'ok' : 'ko') + '">'
+      + (pmpComments.length ? '✓' : '✗') + ' Journal : ' + (pmpComments.length ? pmpComments.length + ' entrée(s)' : 'aucun commentaire') + '</div>'
+      + '<div class="pmp-confirm-row ' + (photoCount ? 'ok' : 'ko') + '">'
+      + (photoCount ? '✓' : '✗') + ' Photos : ' + (photoCount ? photoCount + ' photo(s)' : 'aucune photo') + '</div>'
+      + (items.length ? '<div class="pmp-confirm-row ' + (doneCnt === items.length ? 'ok' : 'warn') + '">'
+      + (doneCnt === items.length ? '✓' : '⚠') + ' Checklist : ' + doneCnt + '/' + items.length + '</div>' : '')
+      + '<div class="pmp-confirm-row ' + (parts.length ? 'ok' : 'info') + '">'
+      + (parts.length ? '✓' : '—') + ' Pièces : ' + (parts.length ? parts.map(function (p) { return p.name + ' ×' + (p.qty || 1); }).join(', ') : 'aucune') + '</div>'
+      + '</div>';
+    document.getElementById('m-title').textContent = 'Valider la mission';
+    document.getElementById('m-sub').innerHTML = checkHtml
+      + '<p style="margin:12px 0 0;font-size:12px;color:var(--text3)">La mission sera marquée <strong>Terminée 🟢</strong>. Cette action est irréversible.</p>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" onclick="MX.MM._validatePmpMission(\'' + missionId + '\');MX.closeModal()">'
+      + '<i class="fas fa-check"></i> Valider</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Continuer</button>';
+    document.getElementById('modal-bg').classList.add('show');
   }
-
-  function _resumeChronoUI(missionId, start, prevElapsed) {
-    if (_chronoTimer) clearInterval(_chronoTimer);
-    _chronoMId = missionId;
-    var btns = document.getElementById('pmp-cb-' + missionId);
-    if (btns) btns.innerHTML = '<button class="pmp-chrono-btn pmp-chrono-btn--pause" onclick="MX.MM._pauseChrono(\'' + missionId + '\')"><i class="fas fa-pause"></i> Pause</button>';
-    _chronoTimer = setInterval(function () {
-      var elapsed = prevElapsed + Math.floor((Date.now() - start) / 1000);
-      var display = document.getElementById('pmp-cd-' + missionId);
-      if (display) display.textContent = _fmtDur(elapsed);
-      else { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
-    }, 1000);
-  }
-
-  // ══════════════════════════════════════════════
-  // VALIDATE PMP MISSION
-  // ══════════════════════════════════════════════
 
   async function _validatePmpMission(missionId) {
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m || m.done) return;
-    var obsEl   = document.getElementById('pmp-obs-' + missionId);
-    var obs     = obsEl ? obsEl.value.trim() : (m.observations || '');
-    var today   = new Date().toISOString().slice(0, 10);
-    var elapsed = m.elapsedSeconds || 0;
-    if (m.chronoRunning && m.chronoStart) elapsed += Math.floor((Date.now() - m.chronoStart) / 1000);
-    if (_chronoTimer && _chronoMId === missionId) { clearInterval(_chronoTimer); _chronoTimer = null; _chronoMId = null; }
+    var cu    = MX.state.currentUser;
+    var today = new Date().toISOString().slice(0, 10);
+    var lastObs = (m.pmpComments && m.pmpComments.length)
+      ? m.pmpComments[m.pmpComments.length - 1].text
+      : (m.observations || '');
     try {
       await db.collection('missions').doc(missionId).update({
-        done: true, observations: obs,
+        done: true,
         completedAt: FV.serverTimestamp(),
-        completedBy: m.assignedTo || '',
-        elapsedSeconds: elapsed, chronoRunning: false,
+        completedBy: cu ? cu.name : (m.takenBy || m.assignedTo || ''),
       });
       if (m.pmpIntId) {
         var histEntry = {
-          date: today, by: m.assignedTo || '',
-          realDuration: elapsed, observations: obs,
+          date: today,
+          by: cu ? cu.name : (m.takenBy || m.assignedTo || ''),
+          observations: lastObs,
           completedChecklist: m.completedChecklist || {},
         };
         await db.collection('pmp_interventions').doc(m.pmpIntId).update({
-          status: 'terminee', doneDate: today, observations: obs,
-          doneBy: m.assignedTo || '', realDuration: elapsed,
+          status: 'terminee', doneDate: today, observations: lastObs,
+          doneBy: cu ? cu.name : '',
           completedChecklist: m.completedChecklist || {},
           interventionHistory: FV.arrayUnion(histEntry),
           updatedAt: FV.serverTimestamp(),
@@ -1467,10 +1563,10 @@
     _acceptMission: _acceptMission,
     _openPmpDetail: _openPmpDetail, _closePmpDetail: _closePmpDetail,
     _openInterventionDetail: _openInterventionDetail, _closeInterventionDetail: _closeInterventionDetail,
-    _triggerPmpPhoto: _triggerPmpPhoto, _onPmpPh: _onPmpPh,
+    _triggerPmpPhoto: _triggerPmpPhoto, _onPmpPh: _onPmpPh, _viewPhoto: _viewPhoto,
     _toggleCheck: _toggleCheck,
-    _startChrono: _startChrono, _pauseChrono: _pauseChrono,
-    _startIntChrono: _startIntChrono, _pauseIntChrono: _pauseIntChrono,
+    _takePmpMission: _takePmpMission, _releasePmpMission: _releasePmpMission,
+    _doReleasePmp: _doReleasePmp, _confirmTerminePmp: _confirmTerminePmp,
     _addPmpComment: _addPmpComment, _addIntComment: _addIntComment,
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,

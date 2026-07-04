@@ -762,6 +762,27 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.39', date: '2026-07-04', emoji: '🔄',
+      title: 'Refonte du panneau mission PMP — workflow simplifié sans chrono',
+      changes: [
+        'Suppression complète du chrono dans les missions PMP et interventions',
+        'Nouveau cycle de vie en 3 états : Disponible 🟣 → En cours 🟠 → Terminée 🟢',
+        'Bouton "Prendre la mission" pour s\'attribuer une mission disponible',
+        'Bouton "Rendre" pour libérer une mission prise (repassage en Disponible)',
+        'Dialogue de confirmation avant validation : résumé journal, photos, checklist, pièces',
+        'Bloc Informations équipement : référence, local, fréquence, dernière maintenance, dernier tech',
+        'Bloc Historique : nb interventions, nb anomalies, date dernière panne',
+        'Consignes techniques remontées en tête du panneau (priorité technicien)',
+        'Journal technique avec avatars colorés (initiales), auteur et horodatage',
+        'Galerie photos en 5 catégories : Avant, Pendant, Après, Plaque signalétique, Schéma électrique',
+        'Photos multiples par catégorie — stockage en tableau Firestore (pmpPhotos)',
+        'Visionneuse photo en lightbox au clic sur une miniature',
+        'Sélecteur de pièces amélioré avec mise à jour temps réel de la liste',
+        'Assistant Maintix intégré dans le panneau : retard, anomalies, composants récurrents',
+        'Chaque recommandation IA explique son raisonnement (Pourquoi : …)',
+      ]
+    },
+    {
       ver: '1.0.38', date: '2026-07-04', emoji: '🤖',
       title: 'Assistant IA Maintix — analyse intelligente du parc',
       changes: [
@@ -904,11 +925,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.38";
+  window.MX.appVer = window.MX_VERSION || "1.0.39";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.38";
-  const _APP_BUILD = window.MX_BUILD   || 138;
+  const _APP_VER   = window.MX_VERSION || "1.0.39";
+  const _APP_BUILD = window.MX_BUILD   || 139;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
