@@ -21,6 +21,7 @@
   let _currentCritAlert = null;
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
+  let _recalcInProgress = false;
 
   // ── FIRESTORE ERROR HANDLER ──
   function _fsErr(coll) {
@@ -116,6 +117,45 @@
         date:      _today(),
       });
     } catch (e) { /* non-bloquant */ }
+  }
+
+  function _logReadingEdit(meterId, meterName, oldIndex, newIndex, motif) {
+    try {
+      CSO.log().add({
+        action:    'edit_reading',
+        meterId:   meterId   || null,
+        meterName: meterName || null,
+        oldIndex,
+        newIndex,
+        motif:     motif || '',
+        by:        _author(),
+        allowed:   true,
+        ts:        FV.serverTimestamp(),
+        date:      _today(),
+      });
+    } catch (e) { /* non-bloquant */ }
+  }
+
+  function _showRecalcProgress(msg) {
+    let ov = document.getElementById('cso-recalc-ov');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'cso-recalc-ov';
+      ov.className = 'cso-recalc-ov';
+      document.body.appendChild(ov);
+    }
+    ov.innerHTML = `<div class="cso-recalc-inner">
+      <i class="fas fa-calculator" style="font-size:28px;color:var(--cyan);margin-bottom:10px"></i>
+      <div class="cso-recalc-msg">${esc(msg || 'Recalcul en cours…')}</div>
+      <div class="cso-recalc-bar"><div class="cso-recalc-bar-inner"></div></div>
+      <div class="cso-recalc-sub">Recalcul chronologique des consommations</div>
+    </div>`;
+    ov.style.display = 'flex';
+  }
+
+  function _hideRecalcProgress() {
+    const ov = document.getElementById('cso-recalc-ov');
+    if (ov) ov.style.display = 'none';
   }
   function esc(s) { return MX.esc ? MX.esc(s) : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -1169,6 +1209,7 @@
           </div>
           <div class="cso-rbtns">
             ${hasPhoto ? `<button class="cso-ibtn" title="Photo" onclick="MX.Pages.Conso._showPhoto('${r.id}')"><i class="fas fa-image"></i></button>` : ''}
+            <button class="cso-ibtn" title="Modifier l'index" onclick="MX.Pages.Conso._editReading('${r.id}')"><i class="fas fa-pen"></i></button>
             <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delReading('${r.id}')"><i class="fas fa-trash"></i></button>
           </div>
         </div>`;
@@ -2202,6 +2243,122 @@
     });
   }
 
+  function _editReading(id) {
+    if (!_isResp()) {
+      _logActivity('edit_reading_denied', null, null, false);
+      MX.showModal({
+        title: '<i class="fas fa-lock" style="color:#EF4444"></i> Accès refusé',
+        body: `<div style="text-align:center;padding:12px 0">
+          <div style="font-size:36px;margin-bottom:10px">🔒</div>
+          <p style="color:var(--text);font-weight:600;margin-bottom:6px">Action réservée au Responsable</p>
+          <p style="color:var(--text3);font-size:13px">Seul un responsable peut modifier un relevé.<br>Votre tentative a été enregistrée dans le journal.</p>
+        </div>`,
+        actions: [{ label: 'Compris', cls: 'cancel' }],
+      });
+      return;
+    }
+    const r = _readings.find(x => x.id === id);
+    if (!r) return;
+    const m    = _meters.find(x => x.id === r.meterId);
+    if (!m) return;
+    const meta = MT[m.type] || MT.eau_froide;
+    const unit = m.unit || meta.unit;
+    MX.showModal({
+      title: `<i class="fas fa-pen" style="color:${meta.color}"></i> Modifier le relevé`,
+      sub: `${esc(r.meterName || m.name)} · ${_dateLbl(r.date)}`,
+      body: `<div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg3);border-radius:8px;font-size:13px">
+          <span style="color:var(--text3)">Index actuel</span>
+          <span style="font-family:var(--ffm);font-weight:700;color:var(--text)">${_fmtIdx(r.index)} <span style="color:var(--text3)">${esc(unit)}</span></span>
+        </div>
+        <label style="color:var(--text2);font-size:13px;font-weight:500">Nouvel index</label>
+        <input type="number" id="cso-ei" class="fi" step="0.001" value="${r.index}"
+          style="text-align:center;font-size:22px;font-family:var(--ffm)">
+        <label style="color:var(--text2);font-size:13px;font-weight:500">Motif de la correction <span style="color:#EF4444">*</span></label>
+        <input type="text" id="cso-em" class="fi" placeholder="Ex : erreur de saisie, remise à zéro…" maxlength="200">
+        <div style="font-size:11px;color:var(--text3);padding:4px 0">
+          <i class="fas fa-info-circle"></i> La modification recalculera automatiquement toutes les consommations de ce compteur.
+        </div>
+      </div>`,
+      actions: [
+        { label: '<i class="fas fa-calculator"></i> Enregistrer & recalculer', cls: 'confirm', fn: () => _doEditReading(id, r) },
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+  }
+
+  async function _doEditReading(id, r) {
+    const newIndexRaw = document.getElementById('cso-ei')?.value;
+    const motif       = (document.getElementById('cso-em')?.value || '').trim();
+    const newIndex    = parseFloat(newIndexRaw);
+
+    if (!newIndexRaw || isNaN(newIndex)) { MX.toast('Saisissez le nouvel index', true); return; }
+    if (!motif)                          { MX.toast('Le motif est obligatoire', true); return; }
+    if (newIndex === r.index)            { MX.toast('L\'index n\'a pas changé', true); return; }
+
+    const m = _meters.find(x => x.id === r.meterId);
+    if (!m) return;
+
+    _showRecalcProgress('Mise à jour de l\'index… ███░░░');
+    try {
+      await CSO.readings().doc(id).update({
+        index:     newIndex,
+        consumption: null,
+        editedAt:  FV.serverTimestamp(),
+        editedBy:  _author(),
+        motif,
+      });
+      _logReadingEdit(r.meterId, r.meterName || m.name, r.index, newIndex, motif);
+      _showRecalcProgress('Recalcul des analyses… ███████');
+      await _recalcMeter(r.meterId);
+      _hideRecalcProgress();
+      MX.toast('Relevé modifié · Recalcul terminé');
+    } catch(e) {
+      _hideRecalcProgress();
+      MX.toast('Erreur lors de la modification', true);
+      console.error(e);
+    }
+  }
+
+  async function _recalcMeter(meterId) {
+    if (_recalcInProgress) return;
+    _recalcInProgress = true;
+    try {
+      const snap = await CSO.readings().where('meterId', '==', meterId).get();
+      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      all.sort((a, b) => {
+        if ((a.date || '') < (b.date || '')) return -1;
+        if ((a.date || '') > (b.date || '')) return 1;
+        return _tsMs(a.createdAt) - _tsMs(b.createdAt);
+      });
+
+      const CHUNK = 499;
+      let batchStart   = 0;
+      let lastIndex    = null;
+      let newLastIndex = null;
+
+      while (batchStart < all.length) {
+        const b     = db.batch();
+        const chunk = all.slice(batchStart, batchStart + CHUNK);
+        chunk.forEach(r => {
+          const newCons = (lastIndex !== null && r.index != null && r.index >= lastIndex)
+            ? Math.round((r.index - lastIndex) * 1000) / 1000
+            : null;
+          b.update(CSO.readings().doc(r.id), { consumption: newCons });
+          if (r.index != null) { lastIndex = r.index; newLastIndex = r.index; }
+        });
+        await b.commit();
+        batchStart += CHUNK;
+      }
+
+      if (newLastIndex !== null) {
+        await CSO.meters().doc(meterId).update({ lastIndex: newLastIndex });
+      }
+    } finally {
+      _recalcInProgress = false;
+    }
+  }
+
   function _delReading(id) {
     MX.showModal('Supprimer le relevé', 'Cette action est irréversible.', [
       { label: 'Supprimer', cls: 'danger', fn: async () => {
@@ -2428,6 +2585,7 @@
   window.MX.Pages.Conso = {
     render,
     _tab, _editCli, _meterForm, _delMeter, _delReading,
+    _editReading, _recalcMeter,
     _newReading, _onPhoto, _showPhoto, _meterHistory,
     _allMeters, _csv, _pdf,
     _csoDateSet, _csoDatePrev, _csoDateNext,

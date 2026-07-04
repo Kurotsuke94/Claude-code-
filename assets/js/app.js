@@ -762,6 +762,20 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.36', date: '2026-07-04', emoji: '⚡',
+      title: 'Moteur de recalcul intelligent des compteurs',
+      changes: [
+        'Modification d\'un relevé : correction de l\'index avec motif obligatoire',
+        'Recalcul automatique chronologique de toutes les consommations du compteur',
+        'Batch Firestore optimisé (500 opérations/lot) pour les grands historiques',
+        'Journal d\'audit enrichi : ancienne valeur, nouvelle valeur, motif, auteur',
+        'Overlay animé pendant le recalcul (Recalcul des analyses… ███████)',
+        'Protection anti-concurrence : un seul recalcul à la fois par session',
+        'Bouton "Modifier" sur chaque relevé (accès réservé au Responsable)',
+        'Mise à jour automatique du lastIndex du compteur après recalcul',
+      ]
+    },
+    {
       ver: '1.0.35', date: '2026-07-04', emoji: '🛠️',
       title: 'Refonte module Maintenance Préventive',
       changes: [
@@ -858,11 +872,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.35";
+  window.MX.appVer = window.MX_VERSION || "1.0.36";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.35";
-  const _APP_BUILD = window.MX_BUILD   || 135;
+  const _APP_VER   = window.MX_VERSION || "1.0.36";
+  const _APP_BUILD = window.MX_BUILD   || 136;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

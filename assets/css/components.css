@@ -14714,3 +14714,61 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* Equipment form — health select */
 .pmp-eqfm-select--health option { font-size: 14px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CSO v1.0.36 — Recalculation overlay (.cso-recalc-*)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.cso-recalc-ov {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.cso-recalc-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border1);
+  border-radius: 16px;
+  padding: 32px 40px;
+  min-width: 280px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,.5);
+}
+.cso-recalc-msg {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: var(--ffm, monospace);
+  letter-spacing: 0.02em;
+}
+.cso-recalc-sub {
+  font-size: 11px;
+  color: var(--text3);
+}
+.cso-recalc-bar {
+  width: 200px;
+  height: 4px;
+  background: var(--bg4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cso-recalc-bar-inner {
+  height: 100%;
+  width: 0;
+  background: var(--cyan);
+  border-radius: 2px;
+  animation: cso-recalc-sweep 1.4s ease-in-out infinite;
+}
+@keyframes cso-recalc-sweep {
+  0%   { width: 0; margin-left: 0; }
+  50%  { width: 70%; margin-left: 0; }
+  100% { width: 0; margin-left: 100%; }
+}
