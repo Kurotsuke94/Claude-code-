@@ -4,10 +4,13 @@
   var FV = firebase.firestore.FieldValue;
 
   // ── UI state ──
-  var _activeTab    = 'all';     // 'all' | 'checklist' | 'intervention' | 'pmp'
-  var _curFilter    = 'all';
-  var _pendingPhKey = null;
-  var _pendingSignal = null;
+  var _activeTab      = 'checklist'; // 'checklist' | 'intervention' | 'pmp'
+  var _curFilter      = 'all';
+  var _pendingPhKey   = null;
+  var _pendingSignal  = null;
+  var _activeFilter   = 'all';    // 'all' | 'urgent' | 'retard' | 'done' | 'todo'
+  var _searchQuery    = '';
+  var _lastConfettiAt = 0;
 
   // ── Mission state (single Firestore listener) ──
   var _allMissions    = [];
@@ -246,6 +249,78 @@
   // RENDER — TECHNICIAN VIEW
   // ══════════════════════════════════════════════
 
+  function _applyFilters(tasks, todayISO) {
+    var filtered = tasks;
+    if (_searchQuery) {
+      var q = _searchQuery.toLowerCase();
+      filtered = filtered.filter(function (t) {
+        return (t.text || '').toLowerCase().indexOf(q) !== -1
+          || (t.desc || '').toLowerCase().indexOf(q) !== -1
+          || (t.zone || '').toLowerCase().indexOf(q) !== -1;
+      });
+    }
+    if (_activeFilter === 'urgent') {
+      filtered = filtered.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; });
+    } else if (_activeFilter === 'retard') {
+      filtered = filtered.filter(function (t) { return t.dueDate && t.dueDate < todayISO && !t.done; });
+    } else if (_activeFilter === 'done') {
+      filtered = filtered.filter(function (t) { return t.done; });
+    } else if (_activeFilter === 'todo') {
+      filtered = filtered.filter(function (t) { return !t.done; });
+    }
+    return filtered;
+  }
+
+  function _confetti() {
+    var now = Date.now();
+    if (now - _lastConfettiAt < 5000) return;
+    _lastConfettiAt = now;
+    var canvas = document.getElementById('mm-confetti-canvas');
+    if (!canvas) return;
+    canvas.style.display = 'block';
+    var ctx = canvas.getContext('2d');
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    var particles = [];
+    var colors    = ['#8B5CF6','#22c55e','#f97316','#3b82f6','#ec4899','#fbbf24'];
+    for (var i = 0; i < 120; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height - canvas.height,
+        r: Math.random() * 6 + 4,
+        d: Math.random() * 120 + 60,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        tilt: Math.floor(Math.random() * 10) - 10,
+        tiltInc: 0.07 * (Math.random() - 0.5),
+      });
+    }
+    var angle = 0, frame = 0;
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      angle += 0.01;
+      frame++;
+      particles.forEach(function (p) {
+        p.tilt += p.tiltInc;
+        p.y += (Math.cos(angle + p.d) + 1.5) * 2;
+        p.x += Math.sin(angle) * 0.8;
+        ctx.beginPath();
+        ctx.lineWidth = p.r / 2;
+        ctx.strokeStyle = p.color;
+        ctx.moveTo(p.x + p.tilt + p.r / 4, p.y);
+        ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 4);
+        ctx.stroke();
+      });
+      particles = particles.filter(function (p) { return p.y < canvas.height + 20; });
+      if (particles.length > 0 && frame < 300) {
+        requestAnimationFrame(draw);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.display = 'none';
+      }
+    }
+    draw();
+  }
+
   function _renderTech() {
     var e       = MX.esc;
     var cu      = MX.state.currentUser;
@@ -253,6 +328,7 @@
     var JOURS   = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
     var MOIS    = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
     var dateStr = JOURS[today.getDay()] + ' ' + today.getDate() + ' ' + MOIS[today.getMonth()];
+    var todayISO = today.toISOString().slice(0, 10);
 
     _loadSeenIds();
     var checklistTasks = _getChecklistTasks();
@@ -277,7 +353,7 @@
     var intCount = myMissions.filter(function (t) { return t.missionType === 'intervention'; }).length;
     var pmpCount = myMissions.filter(function (t) { return t.missionType === 'pmp';          }).length;
 
-    // Unseen badges (missions from Firestore not yet viewed)
+    // Unseen badges
     var unseenInt = _allMissions.filter(function (m) {
       var mt = m.isPmp ? 'pmp' : (m.missionType || 'intervention');
       return mt === 'intervention' && !m.done && _isNew(m.id);
@@ -285,21 +361,6 @@
     var unseenPmp = _allMissions.filter(function (m) {
       return (m.isPmp || m.missionType === 'pmp') && !m.done && _isNew(m.id);
     }).length;
-
-    // Tab-filtered list
-    var tabFiltered;
-    if      (_activeTab === 'checklist')    tabFiltered = myMissions.filter(function (t) { return t.missionType === 'checklist'; });
-    else if (_activeTab === 'intervention') tabFiltered = myMissions.filter(function (t) { return t.missionType === 'intervention'; });
-    else if (_activeTab === 'pmp')          tabFiltered = myMissions.filter(function (t) { return t.missionType === 'pmp'; });
-    else                                    tabFiltered = myMissions;
-
-    // Sort: checklist by slot order, others by dueDate/dayId
-    tabFiltered = tabFiltered.slice().sort(function (a, b) {
-      var oa = a.sortOrder || 10, ob = b.sortOrder || 10;
-      if (oa !== ob) return oa - ob;
-      var da = a.dueDate || a.dayId || '', db2 = b.dueDate || b.dayId || '';
-      return da < db2 ? -1 : da > db2 ? 1 : 0;
-    });
 
     // Hero info
     var nc    = MX.userColors ? MX.userColors(cu.name) : { bg: 'var(--cyan)', fg: '#fff' };
@@ -311,120 +372,201 @@
     var greet = hour < 12 ? 'Bonjour' : hour < 18 ? 'Bon après-midi' : 'Bonsoir';
     var ru    = (MX.state.rewardsUsers || {})[cu.name] || {};
 
-    var h = '<div class="mm-wrap">';
+    var h = '<div class="mm-v3-wrap">';
+
+    // ── Confetti canvas ─────────────────────────
+    h += '<canvas id="mm-confetti-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none"></canvas>';
 
     // ── Hero ──────────────────────────────────────
-    h += '<div class="mm-hero">'
-      + '<div class="mm-hero-row">'
-      + '<div class="mm-hero-id">'
-      + '<div class="mm-hero-av" style="background:' + avBg + ';color:' + avFg + '">' + e(inits) + '</div>'
-      + '<div><div class="mm-hero-greet">' + e(greet) + ', <strong>' + e(fname) + '</strong> 👋</div>'
-      + '<div class="mm-hero-date">' + e(dateStr) + '</div></div>'
+    h += '<div class="mm-v3-hero">'
+      + '<div class="mm-v3-hero-av" style="background:' + avBg + ';color:' + avFg + '">' + e(inits) + '</div>'
+      + '<div class="mm-v3-hero-txt">'
+      + '<div class="mm-v3-hero-greet">' + e(greet) + ', <strong>' + e(fname) + '</strong> 👋</div>'
+      + '<div class="mm-v3-hero-date">' + e(dateStr) + '</div>'
       + '</div>';
-    if (ru.points || ru.streak) {
-      h += '<div class="mm-hero-chips">';
-      if (ru.points) h += '<div class="mm-chip">🏆 <strong>' + ru.points + '</strong><span>pts</span></div>';
-      if (ru.streak) h += '<div class="mm-chip">🔥 <strong>' + ru.streak + '</strong><span>j</span></div>';
+    if (ru.points !== undefined || ru.streak) {
+      h += '<div class="mm-v3-hero-xp">';
+      if (ru.rank)   h += '<div class="mm-v3-xp-rank">' + e(ru.rank) + '</div>';
+      if (ru.points !== undefined) h += '<div class="mm-v3-xp-pts"><span class="mm-v3-xp-val">' + (ru.points || 0) + '</span><span class="mm-v3-xp-lbl">XP</span></div>';
+      if (ru.streak) h += '<div class="mm-v3-xp-streak"><span>🔥</span><span class="mm-v3-xp-val">' + ru.streak + '</span><span class="mm-v3-xp-lbl">j</span></div>';
       h += '</div>';
     }
-    h += '</div></div>'; // mm-hero-row, mm-hero
+    h += '</div>';
 
-    // ── Summary stats bar ─────────────────────────
-    h += '<div class="mm-summary-bar">'
-      + '<div class="mm-sum-card"><span class="mm-sum-val">' + totalCount + '</span><span class="mm-sum-lbl">Missions</span></div>'
-      + '<div class="mm-sum-card"><span class="mm-sum-val" style="color:' + TC.checklist + '">' + doneCount + '</span><span class="mm-sum-lbl">Terminées</span></div>'
-      + '<div class="mm-sum-card"><span class="mm-sum-val">' + todoCount + '</span><span class="mm-sum-lbl">À faire</span></div>'
-      + '<div class="mm-sum-card"><span class="mm-sum-val" style="color:' + TC.urgence + '">' + urgentCount + '</span><span class="mm-sum-lbl">Urgentes</span></div>';
-    if (newCount) {
-      h += '<div class="mm-sum-card mm-sum-card--new"><span class="mm-sum-val" style="color:#f97316">' + newCount + '</span><span class="mm-sum-lbl">Nouvelles</span></div>';
-    }
-    // Donut progress
-    var dashLen = 100;
+    // ── Stats bar ─────────────────────────────────
     var dashFill = Math.round(pct);
-    h += '<div class="mm-sum-card mm-sum-card--prog">'
-      + '<div class="mm-sum-donut-wrap">'
-      + '<svg viewBox="0 0 36 36" class="mm-sum-donut">'
-      + '<circle class="mm-sum-donut-bg" cx="18" cy="18" r="15.9"/>'
-      + '<circle class="mm-sum-donut-fill" cx="18" cy="18" r="15.9" style="stroke:' + pctCol + ';stroke-dasharray:' + dashFill + ' ' + (100 - dashFill) + '"/>'
+    h += '<div class="mm-v3-stats">'
+      + '<div class="mm-v3-stat"><span class="mm-v3-stat-val">' + totalCount + '</span><span class="mm-v3-stat-lbl">Total</span></div>'
+      + '<div class="mm-v3-stat mm-v3-stat--done"><span class="mm-v3-stat-val" style="color:' + TC.checklist + '">' + doneCount + '</span><span class="mm-v3-stat-lbl">Terminées</span></div>'
+      + '<div class="mm-v3-stat"><span class="mm-v3-stat-val">' + todoCount + '</span><span class="mm-v3-stat-lbl">À faire</span></div>'
+      + '<div class="mm-v3-stat mm-v3-stat--urg"><span class="mm-v3-stat-val" style="color:' + TC.urgence + '">' + urgentCount + '</span><span class="mm-v3-stat-lbl">Urgentes</span></div>'
+      + '<div class="mm-v3-stat mm-v3-stat--prog">'
+      + '<div class="mm-v3-donut-wrap">'
+      + '<svg viewBox="0 0 36 36" class="mm-v3-donut">'
+      + '<circle class="mm-v3-donut-bg" cx="18" cy="18" r="15.9"/>'
+      + '<circle class="mm-v3-donut-fill" cx="18" cy="18" r="15.9" style="stroke:' + pctCol + ';stroke-dasharray:' + dashFill + ' ' + (100 - dashFill) + '"/>'
       + '</svg>'
-      + '<span class="mm-sum-donut-pct" style="color:' + pctCol + '">' + pct + '%</span>'
+      + '<span class="mm-v3-donut-pct" style="color:' + pctCol + '">' + pct + '%</span>'
       + '</div>'
-      + '<span class="mm-sum-lbl">Progression</span></div>'
+      + '<span class="mm-v3-stat-lbl">Progression</span>'
+      + '</div>'
       + '</div>';
 
-    // ── Tab navigation ────────────────────────────
+    // ── 3-Tab navigation ──────────────────────────
     var TABS = [
-      { id: 'all',          l: 'Toutes',       count: totalCount, badge: 0,          col: '' },
-      { id: 'checklist',    l: 'Checklists',   count: clCount,    badge: 0,          col: TC.checklist },
-      { id: 'intervention', l: 'Interventions',count: intCount,   badge: unseenInt,  col: TC.intervention },
-      { id: 'pmp',          l: 'Préventif',    count: pmpCount,   badge: unseenPmp,  col: TC.pmp },
+      { id: 'checklist',    icon: '✅', l: 'Missions',      count: clCount,  badge: 0,         col: TC.checklist    },
+      { id: 'intervention', icon: '🔧', l: 'Interventions', count: intCount, badge: unseenInt, col: TC.intervention },
+      { id: 'pmp',          icon: '🛠️', l: 'PMP',           count: pmpCount, badge: unseenPmp, col: TC.pmp          },
     ];
-    h += '<div class="mm-tab-bar">';
+    h += '<div class="mm-v3-tabs">';
     TABS.forEach(function (tab) {
       var active = _activeTab === tab.id;
-      h += '<button class="mm-tab' + (active ? ' mm-tab--active' : '') + '"'
-        + (active && tab.col ? ' style="border-bottom-color:' + tab.col + ';color:' + tab.col + '"' : '')
+      h += '<button class="mm-v3-tab' + (active ? ' mm-v3-tab--active' : '') + '"'
+        + (active ? ' style="border-bottom-color:' + tab.col + ';color:' + tab.col + '"' : '')
         + ' onclick="MX.MM.setTab(\'' + tab.id + '\')">'
-        + e(tab.l)
-        + '<span class="mm-tab-ct' + (active ? ' mm-tab-ct--active' : '') + '">' + tab.count + '</span>'
-        + (tab.badge > 0 ? '<span class="mm-tab-badge">' + tab.badge + '</span>' : '')
+        + tab.icon + ' ' + e(tab.l)
+        + '<span class="mm-v3-tab-ct">' + tab.count + '</span>'
+        + (tab.badge > 0 ? '<span class="mm-v3-tab-badge">' + tab.badge + '</span>' : '')
         + '</button>';
     });
     h += '</div>';
 
-    // ── Nouvelles missions zone ───────────────────
+    // ── Nouvelles missions ────────────────────────
     if (newCount) {
-      h += '<div class="mm-new-zone">'
-        + '<div class="mm-new-zone-hd"><i class="fas fa-bell"></i> '
+      h += '<div class="mm-v3-new-zone">'
+        + '<div class="mm-v3-new-hd"><i class="fas fa-bell"></i> '
         + newCount + ' nouvelle' + (newCount > 1 ? 's' : '') + ' mission' + (newCount > 1 ? 's' : '') + ' assignée' + (newCount > 1 ? 's' : '')
-        + '</div>'
-        + '<div class="mm-new-list">';
+        + '</div><div class="mm-v3-new-list">';
       newMissions.forEach(function (m) { h += _newMissionCard(m); });
       h += '</div></div>';
     }
 
-    // ── Mission list ──────────────────────────────
-    h += '<div class="mm-sections">';
+    // ── Toolbar: search + filter pills ────────────
+    h += '<div class="mm-v3-toolbar">'
+      + '<div class="mm-v3-search-wrap">'
+      + '<i class="fas fa-magnifying-glass mm-v3-search-ico"></i>'
+      + '<input class="mm-v3-search-inp" type="text" placeholder="Rechercher une mission…" value="' + e(_searchQuery) + '" oninput="MX.MM._doMmSearch(this.value)">'
+      + (_searchQuery ? '<button class="mm-v3-search-clr" onclick="MX.MM._doMmSearch(\'\')" title="Effacer"><i class="fas fa-times"></i></button>' : '')
+      + '</div>';
+    var FILTERS = [
+      { id: 'all',    l: 'Toutes'    },
+      { id: 'urgent', l: 'Urgent'    },
+      { id: 'retard', l: 'En retard' },
+      { id: 'todo',   l: 'À faire'   },
+      { id: 'done',   l: 'Terminées' },
+    ];
+    h += '<div class="mm-v3-filter-pills">';
+    FILTERS.forEach(function (f) {
+      var act = _activeFilter === f.id;
+      h += '<button class="mm-v3-fp' + (act ? ' mm-v3-fp--active' : '') + '" onclick="MX.MM.setMmFilter(\'' + f.id + '\')">' + e(f.l) + '</button>';
+    });
+    h += '</div></div>';
 
-    if (tabFiltered.length === 0 && availableTasks.length === 0) {
-      h += '<div class="mm-empty">'
-        + '<div class="mm-empty-ico">' + (totalCount === 0 ? '📋' : '🎯') + '</div>'
-        + '<div class="mm-empty-ttl">' + (totalCount === 0 ? 'Aucune mission assignée' : 'Aucune mission dans cet onglet') + '</div>'
-        + '<div class="mm-empty-sub">' + (totalCount === 0
-          ? 'Votre responsable n\'a pas encore assigné de missions pour aujourd\'hui.'
-          : 'Consultez un autre onglet.') + '</div></div>';
-    } else {
-      tabFiltered.forEach(function (task) { h += _missionCard(task); });
+    // ── Content ───────────────────────────────────
+    h += '<div class="mm-v3-content">';
 
-      if (totalCount > 0 && doneCount === totalCount && _activeTab === 'all') {
-        h += '<div class="mm-congrats">'
-          + '<div class="mm-congrats-ico">🏆</div>'
-          + '<div class="mm-congrats-ttl">Missions du jour terminées !</div>'
-          + '<div class="mm-congrats-sub">Félicitations ' + e(fname) + ', toutes vos missions sont validées !</div>'
+    if (_activeTab === 'checklist') {
+      // Slot-grouped display
+      var tabTasks = myMissions.filter(function (t) { return t.missionType === 'checklist'; });
+      var filtered = _applyFilters(tabTasks, todayISO);
+
+      var SLOTS = ['matin', 'journee', 'soir'];
+      var hasAny = false;
+
+      SLOTS.forEach(function (slotKey) {
+        var si = SLOT_INFO[slotKey];
+        var slotTasks     = tabTasks.filter(function (t) { return t.slot === slotKey; });
+        var slotFiltered  = filtered.filter(function (t) { return t.slot === slotKey; });
+        if (slotTasks.length === 0) return;
+        hasAny = true;
+        var slotDone  = slotTasks.filter(function (t) { return t.done; }).length;
+        var slotTotal = slotTasks.length;
+        var slotPct   = slotTotal ? Math.round(slotDone / slotTotal * 100) : 0;
+        var barCol    = slotPct === 100 ? TC.checklist : slotPct >= 50 ? '#f97316' : TC.intervention;
+
+        h += '<div class="mm-v3-slot-group">'
+          + '<div class="mm-v3-slot-hd">'
+          + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
+          + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
+          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>'
+          + '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + slotPct + '%;background:' + barCol + '"></div></div>'
+          + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + slotDone + '/' + slotTotal + '</span>'
           + '</div>';
+
+        if (slotFiltered.length === 0) {
+          h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
+        } else {
+          h += '<div class="mm-v3-cards">';
+          slotFiltered.forEach(function (task) { h += _checklistCard(task); });
+          h += '</div>';
+        }
+        h += '</div>';
+      });
+
+      // Available unassigned
+      if (availableTasks.length) {
+        hasAny = true;
+        h += '<div class="mm-v3-slot-group mm-v3-slot-group--avail">'
+          + '<div class="mm-v3-slot-hd">'
+          + '<span class="mm-v3-slot-icon">📋</span>'
+          + '<span class="mm-v3-slot-name">Disponibles</span>'
+          + '<span class="mm-v3-slot-sub">Non assignées</span>'
+          + '<span class="mm-v3-slot-ct" style="color:var(--text3)">' + availableTasks.length + '</span>'
+          + '</div><div class="mm-v3-cards">';
+        availableTasks.forEach(function (task) { h += _availableCard(task); });
+        h += '</div></div>';
+      }
+
+      if (!hasAny) {
+        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
+          + '<div class="mm-v3-empty-ttl">Aucune mission aujourd\'hui</div>'
+          + '<div class="mm-v3-empty-sub">Votre responsable n\'a pas encore assigné de tâches.</div></div>';
+      }
+
+      // Congrats + confetti when all done
+      if (clCount > 0 && myMissions.filter(function (t) { return t.missionType === 'checklist' && !t.done; }).length === 0) {
+        h += '<div class="mm-v3-congrats">'
+          + '<div class="mm-v3-congrats-ico">🏆</div>'
+          + '<div class="mm-v3-congrats-ttl">Toutes les missions terminées !</div>'
+          + '<div class="mm-v3-congrats-sub">Félicitations ' + e(fname) + ' !</div>'
+          + '</div>';
+        setTimeout(function () { if (typeof _confetti === 'function') _confetti(); }, 200);
+      }
+
+    } else if (_activeTab === 'intervention') {
+      var intTasks  = myMissions.filter(function (t) { return t.missionType === 'intervention'; });
+      var intFilt   = _applyFilters(intTasks, todayISO);
+      if (intFilt.length === 0) {
+        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">🔧</div>'
+          + '<div class="mm-v3-empty-ttl">' + (intTasks.length === 0 ? 'Aucune intervention assignée' : 'Aucune intervention ne correspond') + '</div>'
+          + '<div class="mm-v3-empty-sub">' + (intTasks.length === 0 ? 'Pas d\'intervention pour aujourd\'hui.' : 'Ajustez les filtres.') + '</div></div>';
+      } else {
+        h += '<div class="mm-v3-cards">';
+        intFilt.forEach(function (task) { h += _interventionCard(task); });
+        h += '</div>';
+      }
+
+    } else if (_activeTab === 'pmp') {
+      var pmpTasks = myMissions.filter(function (t) { return t.missionType === 'pmp'; });
+      var pmpFilt  = _applyFilters(pmpTasks, todayISO);
+      if (pmpFilt.length === 0) {
+        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">🛠️</div>'
+          + '<div class="mm-v3-empty-ttl">' + (pmpTasks.length === 0 ? 'Aucun PMP assigné' : 'Aucun PMP ne correspond') + '</div>'
+          + '<div class="mm-v3-empty-sub">' + (pmpTasks.length === 0 ? 'Pas de maintenance préventive prévue.' : 'Ajustez les filtres.') + '</div></div>';
+      } else {
+        h += '<div class="mm-v3-cards">';
+        pmpTasks.forEach(function (task) { h += _pmpCard(task); });
+        h += '</div>';
       }
     }
 
-    // Available unassigned tasks
-    if (availableTasks.length && (_activeTab === 'all' || _activeTab === 'checklist')) {
-      h += '<div class="mm-section" style="margin-top:8px">'
-        + '<div class="mm-sec-hd">'
-        + '<div class="mm-sec-hd-l"><span class="mm-sec-dot" style="background:var(--text3)"></span>'
-        + '<span class="mm-sec-ttl">Missions disponibles</span>'
-        + '<span class="mm-sec-sub">Non assignées</span></div>'
-        + '<span class="mm-sec-ct">' + availableTasks.length + '</span></div>'
-        + '<div class="mm-cards">';
-      availableTasks.forEach(function (task) { h += _availableCard(task); });
-      h += '</div></div>';
-    }
+    h += '</div>'; // mm-v3-content
 
-    h += '</div>'; // mm-sections
-
-    // Hidden inputs
+    // Hidden file inputs
     h += '<input type="file" id="mm-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPh(this)">';
     h += '<input type="file" id="pmp-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPmpPh(this)">';
 
-    h += '</div>'; // mm-wrap
+    h += '</div>'; // mm-v3-wrap
     return h;
   }
 
@@ -440,42 +582,37 @@
 
   function _checklistCard(t) {
     var e     = MX.esc;
-    var si    = SLOT_INFO[t.slot] || { l: t.slot, icon: '' };
     var isUrg = t.priority === 'haute' || t.priority === 'critique';
     var lc    = isUrg ? TC.urgence : TC.checklist;
     var dayE  = e(t.dayId), slotE = e(t.slot), idE = e(t.id);
 
-    var h = '<div class="mm-card mm-card-v2' + (t.done ? ' mm-card-v2--done' : '') + (isUrg ? ' mm-card-v2--urgent' : '') + '">'
-      + '<div class="mm-cv2-bar" style="background:' + lc + '"></div>'
-      + '<div class="mm-cv2-body">'
-      + '<div class="mm-cv2-top">'
-      + '<div class="mm-cv2-top-l">'
-      + '<span class="mm-type-bdg mm-type-bdg--cl">' + si.icon + ' ' + e(si.l) + '</span>';
-    if (t.priority === 'critique') h += '<span class="mm-pri-bdg mm-pri-bdg--crit">CRITIQUE</span>';
-    else if (t.priority === 'haute') h += '<span class="mm-pri-bdg mm-pri-bdg--urg">URGENT</span>';
-    if (t.fromUser) h += '<span class="mm-pri-bdg mm-pri-bdg--xfer">Transféré</span>';
-    h += '</div>'
-      + '<div class="mm-cv2-top-r">'
-      + (t.done ? '<span class="mm-status-bdg mm-status-bdg--done"><i class="fas fa-check"></i> Validé</span>' : '')
-      + '</div></div>';
-
-    h += '<div class="mm-cv2-title">' + e(t.text) + '</div>';
-    if (t.desc) h += '<div class="mm-cv2-desc">' + e(t.desc) + '</div>';
-
-    h += '<div class="mm-cv2-meta">';
-    if (t.zone) h += '<span class="mm-meta-it"><i class="fas fa-location-dot"></i>' + e(t.zone) + (t.subZone ? ' · ' + e(t.subZone) : '') + '</span>';
-    if (t.estimatedDuration) h += '<span class="mm-meta-it"><i class="fas fa-clock"></i>' + e(t.estimatedDuration) + '</span>';
-    if (t.note) h += '<span class="mm-meta-it"><i class="fas fa-note-sticky"></i>' + e(t.note) + '</span>';
+    var h = '<div class="mm-v3-card' + (t.done ? ' mm-v3-card--done' : '') + (isUrg ? ' mm-v3-card--urgent' : '') + '">'
+      + '<div class="mm-v3-card-bar" style="background:' + lc + '"></div>'
+      + '<div class="mm-v3-card-body">'
+      + '<div class="mm-v3-card-tags">';
+    if (t.priority === 'critique') h += '<span class="mm-v3-tag mm-v3-tag--crit">CRITIQUE</span>';
+    else if (t.priority === 'haute') h += '<span class="mm-v3-tag mm-v3-tag--urg">URGENT</span>';
+    if (t.fromUser) h += '<span class="mm-v3-tag mm-v3-tag--xfer">Transféré</span>';
+    if (t.done)     h += '<span class="mm-v3-tag mm-v3-tag--done"><i class="fas fa-check"></i> Validé</span>';
     h += '</div>';
 
-    h += '<div class="mm-cv2-actions">'
-      + '<button class="mm-act-v2 mm-act-v2--icon" onclick="MX.MM.photo(\'' + e(t.checkKey) + '\')" title="Photo"><i class="fas fa-camera"></i></button>'
-      + '<button class="mm-act-v2 mm-act-v2--icon" onclick="MX.MM.signal(\'' + e(t.checkKey) + '\')" title="Signaler"><i class="fas fa-triangle-exclamation"></i></button>';
+    h += '<div class="mm-v3-card-title">' + e(t.text) + '</div>';
+    if (t.desc) h += '<div class="mm-v3-card-desc">' + e(t.desc) + '</div>';
+
+    h += '<div class="mm-v3-card-meta">';
+    if (t.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(t.zone) + (t.subZone ? ' · ' + e(t.subZone) : '') + '</span>';
+    if (t.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(t.estimatedDuration) + '</span>';
+    if (t.note) h += '<span class="mm-v3-meta-it"><i class="fas fa-note-sticky"></i>' + e(t.note) + '</span>';
+    h += '</div>';
+
+    h += '<div class="mm-v3-card-actions">'
+      + '<button class="mm-v3-act-icon" onclick="MX.MM.photo(\'' + e(t.checkKey) + '\')" title="Photo"><i class="fas fa-camera"></i></button>'
+      + '<button class="mm-v3-act-icon" onclick="MX.MM.signal(\'' + e(t.checkKey) + '\')" title="Signaler"><i class="fas fa-triangle-exclamation"></i></button>';
     if (t.done) {
-      h += '<button class="mm-act-v2 mm-act-v2--done" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')">'
+      h += '<button class="mm-v3-act-main mm-v3-act-main--done" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')">'
         + '<i class="fas fa-circle-check"></i><span>Validée</span></button>';
     } else {
-      h += '<button class="mm-act-v2 mm-act-v2--validate" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')">'
+      h += '<button class="mm-v3-act-main mm-v3-act-main--validate" onclick="MX.MM.toggle(\'' + dayE + '\',\'' + slotE + '\',\'' + idE + '\')">'
         + '<i class="fas fa-circle-check"></i><span>Valider</span></button>';
     }
     h += '</div></div></div>';
@@ -485,34 +622,31 @@
   function _interventionCard(t) {
     var e     = MX.esc;
     var isUrg = t.priority === 'haute' || t.priority === 'critique';
-    var lc    = isUrg ? TC.urgence : TC.intervention;
     var today = new Date().toISOString().slice(0, 10);
-    var isLate = t.dueDate && t.dueDate < today;
+    var isLate = t.dueDate && t.dueDate < today && !t.done;
+    var lc    = isLate ? TC.urgence : isUrg ? TC.urgence : TC.intervention;
 
-    var h = '<div class="mm-card mm-card-v2' + (t.done ? ' mm-card-v2--done' : '') + (isLate || isUrg ? ' mm-card-v2--urgent' : '') + '">'
-      + '<div class="mm-cv2-bar" style="background:' + lc + '"></div>'
-      + '<div class="mm-cv2-body">'
-      + '<div class="mm-cv2-top">'
-      + '<div class="mm-cv2-top-l"><span class="mm-type-bdg mm-type-bdg--int">🔧 Intervention</span>';
-    if (isLate) h += '<span class="mm-pri-bdg mm-pri-bdg--crit">RETARD</span>';
-    else if (t.priority === 'critique') h += '<span class="mm-pri-bdg mm-pri-bdg--crit">CRITIQUE</span>';
-    else if (t.priority === 'haute') h += '<span class="mm-pri-bdg mm-pri-bdg--urg">URGENT</span>';
-    h += '</div>'
-      + '<div class="mm-cv2-top-r">';
-    if (t.dueDate) h += '<span class="mm-due-bdg' + (isLate ? ' mm-due-bdg--late' : '') + '"><i class="fas fa-calendar"></i>' + _fmtDate(t.dueDate) + '</span>';
-    if (t.done) h += '<span class="mm-status-bdg mm-status-bdg--done"><i class="fas fa-check"></i> Terminé</span>';
-    h += '</div></div>';
-
-    h += '<div class="mm-cv2-title">' + e(t.text) + '</div>';
-    if (t.desc) h += '<div class="mm-cv2-desc">' + e(t.desc) + '</div>';
-
-    h += '<div class="mm-cv2-meta">';
-    if (t.zone) h += '<span class="mm-meta-it"><i class="fas fa-location-dot"></i>' + e(t.zone) + (t.subZone ? ' · ' + e(t.subZone) : '') + '</span>';
-    if (t.estimatedDuration) h += '<span class="mm-meta-it"><i class="fas fa-clock"></i>' + e(t.estimatedDuration) + '</span>';
+    var h = '<div class="mm-v3-card' + (t.done ? ' mm-v3-card--done' : '') + (isLate || isUrg ? ' mm-v3-card--urgent' : '') + '">'
+      + '<div class="mm-v3-card-bar" style="background:' + lc + '"></div>'
+      + '<div class="mm-v3-card-body">'
+      + '<div class="mm-v3-card-tags">';
+    if (isLate) h += '<span class="mm-v3-tag mm-v3-tag--crit">RETARD</span>';
+    else if (t.priority === 'critique') h += '<span class="mm-v3-tag mm-v3-tag--crit">CRITIQUE</span>';
+    else if (t.priority === 'haute') h += '<span class="mm-v3-tag mm-v3-tag--urg">URGENT</span>';
+    if (t.dueDate) h += '<span class="mm-v3-tag mm-v3-tag--date' + (isLate ? ' mm-v3-tag--date-late' : '') + '"><i class="fas fa-calendar"></i>' + _fmtDate(t.dueDate) + '</span>';
+    if (t.done) h += '<span class="mm-v3-tag mm-v3-tag--done"><i class="fas fa-check"></i> Terminé</span>';
     h += '</div>';
 
-    h += '<div class="mm-cv2-actions">'
-      + '<button class="mm-act-v2 mm-act-v2--open-int" onclick="MX.MM._openInterventionDetail(\'' + e(t.firestoreId || t.id) + '\')">'
+    h += '<div class="mm-v3-card-title">' + e(t.text) + '</div>';
+    if (t.desc) h += '<div class="mm-v3-card-desc">' + e(t.desc) + '</div>';
+
+    h += '<div class="mm-v3-card-meta">';
+    if (t.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(t.zone) + (t.subZone ? ' · ' + e(t.subZone) : '') + '</span>';
+    if (t.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(t.estimatedDuration) + '</span>';
+    h += '</div>';
+
+    h += '<div class="mm-v3-card-actions">'
+      + '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openInterventionDetail(\'' + e(t.firestoreId || t.id) + '\')">'
       + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>'
       + '</div></div></div>';
     return h;
@@ -523,40 +657,37 @@
     var pd     = t.pmpData || {};
     var isUrg  = t.priority === 'haute' || t.priority === 'critique';
     var today  = new Date().toISOString().slice(0, 10);
-    var isLate = pd.dueDate && pd.dueDate < today;
-    var lc     = isLate ? TC.urgence : (isUrg ? TC.urgence : TC.pmp);
+    var isLate = pd.dueDate && pd.dueDate < today && !t.done;
+    var lc     = isLate ? TC.urgence : isUrg ? TC.urgence : TC.pmp;
     var items  = pd.checklistItems || [];
-    var done   = Object.keys(t.completedChecklist || {}).filter(function (k) { return t.completedChecklist[k]; }).length;
+    var doneC  = Object.keys(t.completedChecklist || {}).filter(function (k) { return t.completedChecklist[k]; }).length;
 
-    var h = '<div class="mm-card mm-card-v2' + (isLate ? ' mm-card-v2--urgent' : '') + '">'
-      + '<div class="mm-cv2-bar" style="background:' + lc + '"></div>'
-      + '<div class="mm-cv2-body">'
-      + '<div class="mm-cv2-top">'
-      + '<div class="mm-cv2-top-l"><span class="mm-type-bdg mm-type-bdg--pmp">🛠️ Préventif</span>';
-    if (isLate) h += '<span class="mm-pri-bdg mm-pri-bdg--crit">RETARD</span>';
-    else if (t.priority === 'critique') h += '<span class="mm-pri-bdg mm-pri-bdg--crit">CRITIQUE</span>';
-    else if (t.priority === 'haute') h += '<span class="mm-pri-bdg mm-pri-bdg--urg">URGENT</span>';
-    h += '</div>'
-      + '<div class="mm-cv2-top-r">';
-    if (pd.dueDate) h += '<span class="mm-due-bdg' + (isLate ? ' mm-due-bdg--late' : '') + '"><i class="fas fa-calendar"></i>' + _fmtDate(pd.dueDate) + '</span>';
-    h += '</div></div>';
+    var h = '<div class="mm-v3-card' + (isLate ? ' mm-v3-card--urgent' : '') + '">'
+      + '<div class="mm-v3-card-bar" style="background:' + lc + '"></div>'
+      + '<div class="mm-v3-card-body">'
+      + '<div class="mm-v3-card-tags">';
+    if (isLate) h += '<span class="mm-v3-tag mm-v3-tag--crit">RETARD</span>';
+    else if (t.priority === 'critique') h += '<span class="mm-v3-tag mm-v3-tag--crit">CRITIQUE</span>';
+    else if (t.priority === 'haute') h += '<span class="mm-v3-tag mm-v3-tag--urg">URGENT</span>';
+    if (pd.dueDate) h += '<span class="mm-v3-tag mm-v3-tag--date' + (isLate ? ' mm-v3-tag--date-late' : '') + '"><i class="fas fa-calendar"></i>' + _fmtDate(pd.dueDate) + '</span>';
+    h += '</div>';
 
-    h += '<div class="mm-cv2-title">' + e(pd.equipmentName || t.text) + '</div>';
+    h += '<div class="mm-v3-card-title">' + e(pd.equipmentName || t.text) + '</div>';
 
-    h += '<div class="mm-cv2-meta">';
-    if (pd.zone) h += '<span class="mm-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
-    if (pd.estimatedDuration) h += '<span class="mm-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
+    h += '<div class="mm-v3-card-meta">';
+    if (pd.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
+    if (pd.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
     h += '</div>';
 
     if (items.length) {
-      var pct = Math.round(done / items.length * 100);
-      h += '<div class="mm-cv2-prog">'
-        + '<div class="mm-cv2-prog-track"><div class="mm-cv2-prog-fill" style="width:' + pct + '%;background:' + TC.pmp + '"></div></div>'
-        + '<span class="mm-cv2-prog-lbl">' + done + '/' + items.length + ' tâches</span></div>';
+      var pmpPct = Math.round(doneC / items.length * 100);
+      h += '<div class="mm-v3-pmp-prog">'
+        + '<div class="mm-v3-pmp-prog-track"><div class="mm-v3-pmp-prog-fill" style="width:' + pmpPct + '%;background:' + TC.pmp + '"></div></div>'
+        + '<span class="mm-v3-pmp-prog-lbl">' + doneC + '/' + items.length + ' tâches</span></div>';
     }
 
-    h += '<div class="mm-cv2-actions">'
-      + '<button class="mm-act-v2 mm-act-v2--open-pmp" onclick="MX.MM._openPmpDetail(\'' + e(t.missionId || t.id) + '\')">'
+    h += '<div class="mm-v3-card-actions">'
+      + '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + e(t.missionId || t.id) + '\')">'
       + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>'
       + '</div></div></div>';
     return h;
@@ -567,27 +698,35 @@
     var tc  = m.missionType === 'pmp' ? TC.pmp : m.missionType === 'intervention' ? TC.intervention : TC.checklist;
     var lbl = m.missionType === 'pmp' ? '🛠️ Préventif' : m.missionType === 'intervention' ? '🔧 Intervention' : '✅ Checklist';
     var fid = e(m.firestoreId || m.id);
-    return '<div class="mm-new-card">'
-      + '<div class="mm-new-card-type" style="color:' + tc + ';border:1px solid ' + tc + '40;background:' + tc + '15">' + lbl + '</div>'
-      + '<div class="mm-new-card-title">' + e(m.text) + '</div>'
-      + (m.zone ? '<div class="mm-new-card-meta"><i class="fas fa-location-dot"></i>' + e(m.zone) + '</div>' : '')
-      + (m.estimatedDuration ? '<div class="mm-new-card-meta"><i class="fas fa-clock"></i>' + e(m.estimatedDuration) + '</div>' : '')
-      + '<button class="mm-new-accept-btn" onclick="MX.MM._acceptMission(\'' + fid + '\')">'
-      + '<i class="fas fa-circle-plus"></i> Accepter</button>'
-      + '</div>';
+    return '<div class="mm-v3-new-card">'
+      + '<div class="mm-v3-new-card-bar" style="background:' + tc + '"></div>'
+      + '<div class="mm-v3-new-card-body">'
+      + '<div class="mm-v3-tag" style="color:' + tc + ';border-color:' + tc + '40;background:' + tc + '18">' + lbl + '</div>'
+      + '<div class="mm-v3-card-title">' + e(m.text) + '</div>'
+      + '<div class="mm-v3-card-meta">'
+      + (m.zone ? '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(m.zone) + '</span>' : '')
+      + (m.estimatedDuration ? '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(m.estimatedDuration) + '</span>' : '')
+      + '</div>'
+      + '<button class="mm-v3-act-main mm-v3-act-main--accept" onclick="MX.MM._acceptMission(\'' + fid + '\')">'
+      + '<i class="fas fa-circle-plus"></i><span>Accepter</span></button>'
+      + '</div></div>';
   }
 
   function _availableCard(t) {
     var e  = MX.esc;
     var si = SLOT_INFO[t.slot] || { l: t.slot, icon: '' };
-    return '<div class="mm-card mm-card--avail">'
-      + '<div class="mm-card-top"><span class="mm-slot-tag mm-slot-tag--' + e(t.slot) + '">' + e(si.l) + '</span>'
-      + '<span style="font-size:10px;color:var(--text3);margin-left:auto">Non assigné</span></div>'
-      + '<div class="mm-card-title">' + e(t.text) + '</div>'
-      + '<div class="mm-card-actions">'
-      + '<button class="mm-act mm-act--take" onclick="MX.MM.prendre(\'' + e(t.dayId) + '\',\'' + e(t.slot) + '\',\'' + e(t.id) + '\')">'
+    return '<div class="mm-v3-card mm-v3-card--avail">'
+      + '<div class="mm-v3-card-bar" style="background:var(--text3)"></div>'
+      + '<div class="mm-v3-card-body">'
+      + '<div class="mm-v3-card-tags">'
+      + '<span class="mm-v3-tag">' + (si.icon || '') + ' ' + e(si.l) + '</span>'
+      + '<span class="mm-v3-tag mm-v3-tag--avail">Non assigné</span>'
+      + '</div>'
+      + '<div class="mm-v3-card-title">' + e(t.text) + '</div>'
+      + '<div class="mm-v3-card-actions">'
+      + '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM.prendre(\'' + e(t.dayId) + '\',\'' + e(t.slot) + '\',\'' + e(t.id) + '\')">'
       + '<i class="fas fa-hand-pointer"></i><span>Prendre</span></button>'
-      + '</div></div>';
+      + '</div></div></div>';
   }
 
   // ══════════════════════════════════════════════
@@ -1207,8 +1346,14 @@
 
   function setFilter(f) { _curFilter = f; render(); }
 
+  function setMmFilter(f) { _activeFilter = f; render(); }
+
+  function _doMmSearch(q) { _searchQuery = q || ''; render(); }
+
   function setTab(tab) {
     _activeTab = tab;
+    _activeFilter = 'all';
+    _searchQuery  = '';
     _markTabSeen(tab);
     render();
   }
@@ -1316,6 +1461,7 @@
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.MesMissions = {
     render: render, setFilter: setFilter, setTab: setTab,
+    setMmFilter: setMmFilter, _doMmSearch: _doMmSearch,
     toggle: toggle, prendre: prendre,
     photo: photo, _onPh: _onPh, signal: signal, _doSignal: _doSignal,
     _acceptMission: _acceptMission,
