@@ -39,6 +39,8 @@
   var _eqSearch        = '';
   var _eqTypeFilter    = 'all';
   var _intStatusFilter = 'all';
+  var _eqFormMode      = null;   // null | 'new' | '<docId>'
+  var _eqFormDraft     = {};
 
   var PMP_DB = {
     eq:  function () { return db.collection('pmp_equipments');   },
@@ -47,18 +49,59 @@
   };
 
   var EQ_TYPES = {
-    cta:          { l: 'CTA',               icon: '🌀' },
-    groupe_froid: { l: 'Groupe Froid',      icon: '❄️' },
-    ecs:          { l: 'ECS',               icon: '🔥' },
-    ssi:          { l: 'SSI',               icon: '🚨' },
-    ascenseur:    { l: 'Ascenseur',         icon: '🛗' },
-    tgbt:         { l: 'TGBT',             icon: '⚡' },
-    pompe:        { l: 'Pompe',             icon: '💧' },
-    adoucisseur:  { l: 'Adoucisseur',       icon: '💎' },
-    porte_auto:   { l: 'Porte automatique', icon: '🚪' },
-    vmc:          { l: 'VMC',              icon: '💨' },
-    eclairage:    { l: 'Éclairage',         icon: '💡' },
-    divers:       { l: 'Divers',            icon: '🔧' },
+    // ── Fluides & Eau
+    plomberie:         { l: 'Plomberie',             icon: '🔧', grp: 'Fluides & Eau' },
+    pompe:             { l: 'Pompe',                 icon: '💧', grp: 'Fluides & Eau' },
+    surpresseur:       { l: 'Surpresseur',           icon: '⬆️', grp: 'Fluides & Eau' },
+    adoucisseur:       { l: 'Adoucisseur',           icon: '💎', grp: 'Fluides & Eau' },
+    ballon_ecs:        { l: 'Ballon ECS',            icon: '🔥', grp: 'Fluides & Eau' },
+    ecs:               { l: 'Production ECS',        icon: '🔥', grp: 'Fluides & Eau' },
+    ballon_tampon:     { l: 'Ballon tampon',         icon: '🛢️', grp: 'Fluides & Eau' },
+    bac_graisse:       { l: 'Bac à graisse',         icon: '🫙', grp: 'Fluides & Eau' },
+    sanitaire:         { l: 'Sanitaire',             icon: '🚿', grp: 'Fluides & Eau' },
+    arrosage:          { l: 'Arrosage',              icon: '🌱', grp: 'Fluides & Eau' },
+    // ── CVC
+    chauffage:         { l: 'Chauffage',             icon: '🌡️', grp: 'CVC' },
+    climatisation:     { l: 'Climatisation',         icon: '❄️', grp: 'CVC' },
+    ventilation:       { l: 'Ventilation',           icon: '🌬️', grp: 'CVC' },
+    cta:               { l: 'CTA',                   icon: '🌀', grp: 'CVC' },
+    vmc:               { l: 'VMC',                   icon: '💨', grp: 'CVC' },
+    // ── Électricité
+    electricite:       { l: 'Électricité',           icon: '⚡', grp: 'Électricité' },
+    tgbt:              { l: 'TGBT',                  icon: '⚡', grp: 'Électricité' },
+    eclairage:         { l: 'Éclairage',             icon: '💡', grp: 'Électricité' },
+    groupe_elec:       { l: 'Groupe électrogène',    icon: '🏭', grp: 'Électricité' },
+    compresseur:       { l: 'Compresseur',           icon: '🔩', grp: 'Électricité' },
+    // ── Froid
+    groupe_froid:      { l: 'Groupes frigorifiques', icon: '🥶', grp: 'Froid' },
+    chambre_froide:    { l: 'Chambres froides',      icon: '🧊', grp: 'Froid' },
+    // ── Sécurité
+    securite_incendie: { l: 'Sécurité incendie',     icon: '🔴', grp: 'Sécurité' },
+    ssi:               { l: 'SSI',                   icon: '🚨', grp: 'Sécurité' },
+    desenfumage:       { l: 'Désenfumage',           icon: '🌫️', grp: 'Sécurité' },
+    controle_acces:    { l: "Contrôle d'accès",      icon: '🔐', grp: 'Sécurité' },
+    videosurveillance: { l: 'Vidéosurveillance',     icon: '📹', grp: 'Sécurité' },
+    // ── Transport & Automatismes
+    ascenseur:         { l: 'Ascenseur',             icon: '🛗', grp: 'Transport & Automatismes' },
+    monte_charge:      { l: 'Monte-charge',          icon: '📦', grp: 'Transport & Automatismes' },
+    porte_auto:        { l: 'Portes automatiques',   icon: '🚪', grp: 'Transport & Automatismes' },
+    portail:           { l: 'Portails',              icon: '🔒', grp: 'Transport & Automatismes' },
+    barriere:          { l: 'Barrières parking',     icon: '🚧', grp: 'Transport & Automatismes' },
+    // ── Équipements
+    cuisine:           { l: 'Cuisine',               icon: '🍳', grp: 'Équipements' },
+    buanderie:         { l: 'Buanderie',             icon: '🧺', grp: 'Équipements' },
+    piscine:           { l: 'Piscine',               icon: '🏊', grp: 'Loisirs' },
+    spa:               { l: 'Spa',                   icon: '🧖', grp: 'Loisirs' },
+    // ── Numérique & Communication
+    reseau_info:       { l: 'Réseau informatique',   icon: '🌐', grp: 'Numérique & Communication' },
+    telephonie:        { l: 'Téléphonie',            icon: '📞', grp: 'Numérique & Communication' },
+    television:        { l: 'Télévision',            icon: '📺', grp: 'Numérique & Communication' },
+    // ── Bâtiment & Extérieur
+    local_technique:   { l: 'Local technique',       icon: '🏭', grp: 'Bâtiment & Extérieur' },
+    espaces_verts:     { l: 'Espaces verts',         icon: '🌿', grp: 'Bâtiment & Extérieur' },
+    mobilier:          { l: 'Mobilier',              icon: '🪑', grp: 'Bâtiment & Extérieur' },
+    batiment:          { l: 'Bâtiment',              icon: '🏢', grp: 'Bâtiment & Extérieur' },
+    divers:            { l: 'Divers',                icon: '🔧', grp: 'Bâtiment & Extérieur' },
   };
 
   var FREQS = [
@@ -69,6 +112,14 @@
     { v: 90,  l: '90 jours – Trimestriel'  },
     { v: 180, l: '180 jours – Semestriel'  },
     { v: 365, l: '365 jours – Annuel'      },
+  ];
+
+  var DURATIONS = [
+    '15 min', '30 min', '45 min',
+    '1h', '1h30', '2h', '3h', '4h', '5h', '6h', '7h', '8h',
+    '1 journée', '2 journées', '3 journées',
+    '1 semaine', '2 semaines', '1 mois',
+    'Autre',
   ];
 
   var CRIT = {
@@ -130,6 +181,23 @@
   function _freqLbl(v) {
     var f = FREQS.find(function (x) { return x.v === v; });
     return f ? f.l : (v ? v + ' jours' : '—');
+  }
+
+  function _eqTypeOptgroups(sel) {
+    var groups = {};
+    var order  = [];
+    Object.entries(EQ_TYPES).forEach(function (kv) {
+      var g = kv[1].grp || 'Autres';
+      if (!groups[g]) { groups[g] = []; order.push(g); }
+      groups[g].push(kv);
+    });
+    return order.map(function (g) {
+      return '<optgroup label="' + esc(g) + '">' +
+        groups[g].map(function (kv) {
+          return '<option value="' + kv[0] + '"' + (sel === kv[0] ? ' selected' : '') + '>' + kv[1].icon + ' ' + kv[1].l + '</option>';
+        }).join('') +
+        '</optgroup>';
+    }).join('');
   }
 
   function _daysLate(dueDate) {
@@ -286,9 +354,10 @@
     if (tabs) tabs.innerHTML = _tabsHtml();
   }
 
-  function _tab(id) { _curTab = id; _rerender(); }
+  function _tab(id) { _eqFormMode = null; _curTab = id; _rerender(); }
 
   function _body() {
+    if (_eqFormMode !== null)        return _tEqFormPage();
     if (_curTab === 'dashboard')     return _tDashboard();
     if (_curTab === 'equipements')   return _tEquipements();
     if (_curTab === 'calendrier')    return _tCalendrier();
@@ -305,8 +374,16 @@
 
   function _parseDurMins(s) {
     if (!s) return 0;
-    if (s === '30 min') return 30;
-    if (s === 'Journée') return 480;
+    var low = s.toLowerCase().trim();
+    if (low === '15 min') return 15;
+    if (low === '30 min') return 30;
+    if (low === '45 min') return 45;
+    if (low === '1 journée' || low === 'journée') return 480;
+    if (low === '2 journées') return 960;
+    if (low === '3 journées') return 1440;
+    if (low === '1 semaine') return 2400;
+    if (low === '2 semaines') return 4800;
+    if (low === '1 mois') return 9600;
     var m = s.match(/^(\d+)h(\d+)?$/i);
     if (m) return parseInt(m[1]) * 60 + parseInt(m[2] || 0);
     m = s.match(/^(\d+)\s*min$/i);
@@ -836,7 +913,7 @@
       if (tpl && tpl.items) checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
     }
 
-    var DURS = ['30 min','1h','1h30','2h','3h','4h','Journée'];
+    var DURS = DURATIONS.filter(function (d) { return d !== 'Autre'; });
     var curDur = i.estimatedDuration || (eq && eq.duration) || '';
 
     var body =
@@ -935,15 +1012,24 @@
 
   // ── ÉQUIPEMENTS ───────────────────────────────────────────────────────────
 
-  function _tEquipements() {
-    var today    = _today();
+  function _eqListHtml(today) {
     var filtered = _pmpEq.slice();
     if (_eqSearch) {
       var s = _eqSearch.toLowerCase();
       filtered = filtered.filter(function (e) {
-        return (e.name || '').toLowerCase().includes(s) ||
-               (e.zone || '').toLowerCase().includes(s) ||
-               (e.ref  || '').toLowerCase().includes(s);
+        var ti = EQ_TYPES[e.type] || {};
+        var cr = CRIT[e.criticite] || {};
+        return (e.name         || '').toLowerCase().includes(s) ||
+               (e.ref          || '').toLowerCase().includes(s) ||
+               (e.zone         || '').toLowerCase().includes(s) ||
+               (e.subZone      || '').toLowerCase().includes(s) ||
+               (e.technician   || '').toLowerCase().includes(s) ||
+               (e.type         || '').toLowerCase().includes(s) ||
+               (ti.l           || '').toLowerCase().includes(s) ||
+               (cr.l           || '').toLowerCase().includes(s) ||
+               (e.status       || '').toLowerCase().includes(s) ||
+               (e.technicalNotes || '').toLowerCase().includes(s) ||
+               (e.comments     || '').toLowerCase().includes(s);
       });
     }
     if (_eqTypeFilter !== 'all') {
@@ -951,23 +1037,11 @@
     }
     filtered.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
 
-    var h = '<div class="pmp-eq-page">';
-    h += '<div class="pmp-toolbar">' +
-      '<input type="text" class="pmp-search" placeholder="Rechercher…" value="' + esc(_eqSearch) + '"' +
-      ' oninput="MX.Pages.PMP._setEqSearch(this.value)">' +
-      '<select class="pmp-select" onchange="MX.Pages.PMP._setEqType(this.value)">' +
-      '<option value="all">Tous types</option>' +
-      Object.entries(EQ_TYPES).map(function (kv) {
-        return '<option value="' + kv[0] + '"' + (_eqTypeFilter === kv[0] ? ' selected' : '') + '>' + kv[1].icon + ' ' + kv[1].l + '</option>';
-      }).join('') +
-      '</select>' +
-      '<button class="pmp-add-btn" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter</button>' +
-      '</div>';
-
+    var h = '';
     if (!filtered.length) {
       h += '<div class="pmp-empty pmp-empty--big">' +
         '<i class="fas fa-wrench" style="font-size:32px;opacity:0.3;margin-bottom:12px;display:block"></i>' +
-        '<div style="font-size:14px">' + (_pmpEq.length ? 'Aucun résultat' : 'Aucun équipement configuré') + '</div>' +
+        '<div style="font-size:14px">' + (_pmpEq.length ? 'Aucun résultat pour "' + esc(_eqSearch) + '"' : 'Aucun équipement configuré') + '</div>' +
         (!_pmpEq.length ? '<button class="pmp-add-btn" style="margin-top:12px" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter un équipement</button>' : '') +
         '</div>';
     } else {
@@ -981,11 +1055,11 @@
           '<div class="pmp-eq-card-head">' +
           '<div class="pmp-eq-ico">' + ti.icon + '</div>' +
           '<div class="pmp-eq-info"><div class="pmp-eq-name">' + esc(eq.name) + '</div>' +
-          '<div class="pmp-eq-type">' + ti.l + (eq.zone ? ' · ' + esc(eq.zone) : '') + '</div></div>' +
+          '<div class="pmp-eq-type">' + esc(ti.l) + (eq.zone ? ' · ' + esc(eq.zone) : '') + '</div></div>' +
           '<div class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</div>' +
           '</div>' +
           '<div class="pmp-eq-card-body">' +
-          (eq.ref       ? '<span class="pmp-eq-meta"><i class="fas fa-tag"></i> ' + esc(eq.ref) + '</span>' : '') +
+          (eq.ref        ? '<span class="pmp-eq-meta"><i class="fas fa-tag"></i> ' + esc(eq.ref) + '</span>' : '') +
           (eq.technician ? '<span class="pmp-eq-meta"><i class="fas fa-user"></i> ' + esc(eq.technician) + '</span>' : '') +
           '<span class="pmp-eq-meta"><i class="fas fa-rotate"></i> ' + _freqLbl(eq.frequency) + '</span>' +
           (eq.nextDue ? '<span class="pmp-eq-meta' +
@@ -1004,6 +1078,22 @@
       });
       h += '</div>';
     }
+    return h;
+  }
+
+  function _tEquipements() {
+    var today = _today();
+    var h = '<div class="pmp-eq-page">';
+    h += '<div class="pmp-toolbar">' +
+      '<input type="text" class="pmp-search" id="pmp-eq-search" placeholder="Rechercher nom, famille, zone, technicien…" value="' + esc(_eqSearch) + '"' +
+      ' oninput="MX.Pages.PMP._setEqSearch(this.value)">' +
+      '<select class="pmp-select" onchange="MX.Pages.PMP._setEqType(this.value)">' +
+      '<option value="all"' + (_eqTypeFilter === 'all' ? ' selected' : '') + '>Toutes les familles</option>' +
+      _eqTypeOptgroups(_eqTypeFilter) +
+      '</select>' +
+      '<button class="pmp-add-btn" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter</button>' +
+      '</div>';
+    h += '<div id="pmp-eq-list-wrap">' + _eqListHtml(today) + '</div>';
     h += '</div>';
     return h;
   }
@@ -1515,112 +1605,299 @@
     return h;
   }
 
-  // ── EQUIPMENT FORM & ACTIONS ──────────────────────────────────────────────
+  // ── EQUIPMENT FORM — FULL PAGE ────────────────────────────────────────────
 
   function _eqForm(id) {
-    var eq    = id ? _pmpEq.find(function (e) { return e.id === id; }) : null;
-    var users = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
-    var tpls  = _pmpTpl;
-
-    var body = '<div style="display:flex;flex-direction:column;gap:10px;max-height:68vh;overflow-y:auto;padding-right:4px">' +
-      '<div><label class="pmp-form-lbl">Nom *</label>' +
-      '<input class="fi" id="pmp-f-name" placeholder="Ex: CTA Toiture" value="' + esc(eq ? eq.name || '' : '') + '"></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-      '<div><label class="pmp-form-lbl">Type *</label>' +
-      '<select class="fi" id="pmp-f-type"><option value="">— Type —</option>' +
-      Object.entries(EQ_TYPES).map(function (kv) {
-        return '<option value="' + kv[0] + '"' + (eq && eq.type === kv[0] ? ' selected' : '') + '>' + kv[1].icon + ' ' + kv[1].l + '</option>';
-      }).join('') + '</select></div>' +
-      '<div><label class="pmp-form-lbl">Criticité</label>' +
-      '<select class="fi" id="pmp-f-crit">' +
-      Object.entries(CRIT).map(function (kv) {
-        var sel = eq ? eq.criticite === kv[0] : kv[0] === 'normale';
-        return '<option value="' + kv[0] + '"' + (sel ? ' selected' : '') + '>' + kv[1].l + '</option>';
-      }).join('') + '</select></div></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-      '<div><label class="pmp-form-lbl">Zone</label>' +
-      '<input class="fi" id="pmp-f-zone" placeholder="Ex: Toiture" value="' + esc(eq ? eq.zone || '' : '') + '"></div>' +
-      '<div><label class="pmp-form-lbl">Sous-zone</label>' +
-      '<input class="fi" id="pmp-f-subzone" placeholder="Ex: Local technique" value="' + esc(eq ? eq.subZone || '' : '') + '"></div></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-      '<div><label class="pmp-form-lbl">Référence interne</label>' +
-      '<input class="fi" id="pmp-f-ref" placeholder="Ex: CTA-01" value="' + esc(eq ? eq.ref || '' : '') + '"></div>' +
-      '<div><label class="pmp-form-lbl">Mise en service</label>' +
-      '<input class="fi" type="date" id="pmp-f-startDate" value="' + esc(eq ? eq.startDate || '' : '') + '"></div></div>' +
-      '<div><label class="pmp-form-lbl">Technicien référent</label>' +
-      '<select class="fi" id="pmp-f-tech"><option value="">— Non assigné —</option>' +
-      users.map(function (u) {
-        return '<option value="' + esc(u.name) + '"' + (eq && eq.technician === u.name ? ' selected' : '') + '>' + esc(u.name) + '</option>';
-      }).join('') + '</select></div>' +
-      '<div><label class="pmp-form-lbl">Fréquence *</label>' +
-      '<select class="fi" id="pmp-f-freq">' +
-      FREQS.map(function (f) {
-        var sel = eq ? eq.frequency === f.v : f.v === 30;
-        return '<option value="' + f.v + '"' + (sel ? ' selected' : '') + '>' + f.l + '</option>';
-      }).join('') + '</select></div>' +
-      (id ? '<div><label class="pmp-form-lbl">Prochaine échéance</label>' +
-        '<input class="fi" type="date" id="pmp-f-nextDue" value="' + esc(eq ? eq.nextDue || '' : '') + '"></div>' : '') +
-      '<div><label class="pmp-form-lbl">Modèle de checklist</label>' +
-      '<select class="fi" id="pmp-f-tpl"><option value="">— Aucun —</option>' +
-      tpls.map(function (t) {
-        return '<option value="' + esc(t.id) + '"' + (eq && eq.templateId === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
-      }).join('') + '</select></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-      '<div><label class="pmp-form-lbl">Durée estimée</label>' +
-      '<select class="fi" id="pmp-f-dur">' +
-      '<option value="">Non définie</option>' +
-      ['30 min','1h','1h30','2h','3h','4h','Journée'].map(function (d) {
-        return '<option value="' + d + '"' + (eq && eq.duration === d ? ' selected' : '') + '>' + d + '</option>';
-      }).join('') + '</select></div>' +
-      '<div><label class="pmp-form-lbl">Statut</label>' +
-      '<select class="fi" id="pmp-f-status">' +
-      '<option value="actif"' + (!eq || eq.status === 'actif' ? ' selected' : '') + '>Actif</option>' +
-      '<option value="inactif"' + (eq && eq.status === 'inactif' ? ' selected' : '') + '>Inactif</option>' +
-      '</select></div></div>' +
-      '<div><label class="pmp-form-lbl">Consignes techniques</label>' +
-      '<textarea class="fi" id="pmp-f-notes" rows="3" placeholder="Instructions, points d\'attention, consignes de sécurité…" style="resize:vertical">' + esc(eq ? eq.technicalNotes || '' : '') + '</textarea></div>' +
-      '</div>';
-
-    MX.showModal({ title: id ? "Modifier l'équipement" : 'Nouvel équipement', body: body, actions: [
-      { label: 'Enregistrer', cls: 'primary', fn: function () { _saveEq(id); } },
-      { label: 'Annuler',     cls: 'cancel' },
-    ]});
+    _eqFormMode = id || 'new';
+    _rerender();
   }
 
-  async function _saveEq(id) {
-    var name      = (document.getElementById('pmp-f-name')?.value      || '').trim();
-    var type      =  document.getElementById('pmp-f-type')?.value      || '';
-    var crit      =  document.getElementById('pmp-f-crit')?.value      || 'normale';
-    var zone      = (document.getElementById('pmp-f-zone')?.value      || '').trim();
-    var subZone   = (document.getElementById('pmp-f-subzone')?.value   || '').trim();
-    var ref       = (document.getElementById('pmp-f-ref')?.value       || '').trim();
-    var startDate =  document.getElementById('pmp-f-startDate')?.value || '';
-    var tech      =  document.getElementById('pmp-f-tech')?.value      || '';
-    var freq      = parseInt(document.getElementById('pmp-f-freq')?.value || '30') || 30;
-    var nextDueEl =  document.getElementById('pmp-f-nextDue');
-    var tplId          =  document.getElementById('pmp-f-tpl')?.value          || '';
-    var status         =  document.getElementById('pmp-f-status')?.value       || 'actif';
-    var duration       =  document.getElementById('pmp-f-dur')?.value          || '';
-    var technicalNotes = (document.getElementById('pmp-f-notes')?.value        || '').trim();
+  function _eqFormBack() {
+    _eqFormMode = null;
+    _curTab = 'equipements';
+    _rerender();
+  }
 
-    if (!name) { MX.toast('Nom requis', true); return; }
-    if (!type) { MX.toast('Type requis', true); return; }
+  function _onDurChange(v) {
+    var el = document.getElementById('pmp-f-dur-other');
+    if (el) el.style.display = v === 'Autre' ? 'block' : 'none';
+  }
 
-    var data = { name, type, criticite: crit, zone, subZone, ref, startDate, technician: tech, frequency: freq, templateId: tplId, status, duration, technicalNotes, updatedAt: FV.serverTimestamp() };
-    if (nextDueEl && nextDueEl.value) data.nextDue = nextDueEl.value;
+  function _tEqFormPage() {
+    var isEdit = _eqFormMode !== 'new';
+    var eq     = isEdit ? _pmpEq.find(function (e) { return e.id === _eqFormMode; }) : null;
+    var users  = (MX.state.users || []).filter(function (u) { return u.name && !u.hidden; });
+    var tpls   = _pmpTpl;
 
+    var eqDur      = eq ? (eq.duration || '') : '';
+    var durIsOther = eqDur !== '' && !DURATIONS.includes(eqDur);
+    var durSel     = durIsOther ? 'Autre' : eqDur;
+    var durOther   = durIsOther ? eqDur : '';
+
+    var h = '<div class="pmp-eqfm-page">';
+
+    // ── header bar
+    h += '<div class="pmp-eqfm-header">' +
+      '<button class="pmp-eqfm-back" onclick="MX.Pages.PMP._eqFormBack()">' +
+        '<i class="fas fa-arrow-left"></i> Équipements' +
+      '</button>' +
+      '<h2 class="pmp-eqfm-title">' + (isEdit ? "Modifier l'équipement" : 'Nouvel équipement') + '</h2>' +
+      '<button class="pmp-eqfm-save-btn" onclick="MX.Pages.PMP._saveEqForm()">' +
+        '<i class="fas fa-check"></i> ' + (isEdit ? 'Enregistrer' : 'Créer') +
+      '</button>' +
+    '</div>';
+
+    // ── section 1 : Informations générales
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-info-circle"></i> Informations générales</div>' +
+      '<div class="pmp-eqfm-grid">' +
+
+      '<div class="pmp-eqfm-field pmp-eqfm-field--full">' +
+        '<label class="pmp-eqfm-lbl">Nom <span class="pmp-eqfm-req">*</span></label>' +
+        '<input class="pmp-eqfm-input" id="pmp-f-name" placeholder="Ex: CTA Toiture, Pompe de relevage…" value="' + esc(eq ? eq.name || '' : '') + '">' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Famille <span class="pmp-eqfm-req">*</span></label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-type">' +
+          '<option value="">— Sélectionner —</option>' +
+          _eqTypeOptgroups(eq ? eq.type || '' : '') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Criticité</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-crit">' +
+          Object.entries(CRIT).map(function (kv) {
+            var sel = eq ? eq.criticite === kv[0] : kv[0] === 'normale';
+            return '<option value="' + kv[0] + '"' + (sel ? ' selected' : '') + '>' + kv[1].l + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Zone <span class="pmp-eqfm-req">*</span></label>' +
+        '<input class="pmp-eqfm-input" id="pmp-f-zone" placeholder="Ex: Toiture, Sous-sol, RDC…" value="' + esc(eq ? eq.zone || '' : '') + '">' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Sous-zone</label>' +
+        '<input class="pmp-eqfm-input" id="pmp-f-subzone" placeholder="Ex: Local technique" value="' + esc(eq ? eq.subZone || '' : '') + '">' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Référence</label>' +
+        '<input class="pmp-eqfm-input" id="pmp-f-ref" placeholder="Ex: CTA-01" value="' + esc(eq ? eq.ref || '' : '') + '">' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">État</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-status">' +
+          '<option value="actif"' + (!eq || eq.status === 'actif' ? ' selected' : '') + '>Actif</option>' +
+          '<option value="inactif"' + (eq && eq.status === 'inactif' ? ' selected' : '') + '>Inactif</option>' +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Technicien référent</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-tech">' +
+          '<option value="">— Non assigné —</option>' +
+          users.map(function (u) {
+            return '<option value="' + esc(u.name) + '"' + (eq && eq.technician === u.name ? ' selected' : '') + '>' + esc(u.name) + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '</div></div>';
+
+    // ── section 2 : Organisation maintenance
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-calendar-alt"></i> Organisation maintenance</div>' +
+      '<div class="pmp-eqfm-grid">' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Fréquence <span class="pmp-eqfm-req">*</span></label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-freq">' +
+          FREQS.map(function (f) {
+            var sel = eq ? eq.frequency === f.v : f.v === 30;
+            return '<option value="' + f.v + '"' + (sel ? ' selected' : '') + '>' + f.l + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Durée estimée</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-dur" onchange="MX.Pages.PMP._onDurChange(this.value)">' +
+          '<option value="">— Non définie —</option>' +
+          DURATIONS.map(function (d) {
+            return '<option value="' + d + '"' + (durSel === d ? ' selected' : '') + '>' + d + '</option>';
+          }).join('') +
+        '</select>' +
+        '<input class="pmp-eqfm-input" id="pmp-f-dur-other" placeholder="Préciser la durée…"' +
+          ' style="margin-top:6px;display:' + (durSel === 'Autre' ? 'block' : 'none') + '"' +
+          ' value="' + esc(durOther) + '">' +
+      '</div>' +
+
+      (isEdit ? '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Prochaine échéance <span class="pmp-eqfm-req">*</span></label>' +
+        '<input class="pmp-eqfm-input" type="date" id="pmp-f-nextDue" value="' + esc(eq ? eq.nextDue || '' : '') + '">' +
+      '</div>' : '') +
+
+      '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">Modèle de checklist</label>' +
+        '<select class="pmp-eqfm-select" id="pmp-f-tpl">' +
+          '<option value="">— Aucun —</option>' +
+          tpls.map(function (t) {
+            return '<option value="' + esc(t.id) + '"' + (eq && eq.templateId === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '</div></div>';
+
+    // ── section 3 : Documents (placeholder)
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title">' +
+        '<i class="fas fa-folder-open"></i> Documents' +
+        ' <span class="pmp-soon-tag">Bientôt disponible</span>' +
+      '</div>' +
+      '<div class="pmp-eqfm-docs-placeholder">' +
+        '<div class="pmp-eqfm-docs-grid">' +
+          ['PDF', 'Notice', 'Schéma', 'Photo', 'Vidéo', 'Manuel'].map(function (d) {
+            return '<div class="pmp-eqfm-doc-slot">' +
+              '<i class="fas fa-file-circle-plus"></i>' +
+              '<span>' + d + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
+        '<p class="pmp-eqfm-docs-note">La gestion documentaire sera activée dans une prochaine mise à jour.</p>' +
+      '</div>' +
+    '</div>';
+
+    // ── section 4 : Consignes techniques
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-clipboard-list"></i> Consignes techniques</div>' +
+      '<textarea class="pmp-eqfm-textarea" id="pmp-f-notes"' +
+        ' placeholder="Instructions de maintenance, points d\'attention, consignes de sécurité, procédures spécifiques…">' +
+        esc(eq ? eq.technicalNotes || '' : '') +
+      '</textarea>' +
+    '</div>';
+
+    // ── section 5 : Commentaires
+    h += '<div class="pmp-eqfm-section">' +
+      '<div class="pmp-eqfm-section-title"><i class="fas fa-comment-dots"></i> Commentaires</div>' +
+      '<textarea class="pmp-eqfm-textarea pmp-eqfm-textarea--sm" id="pmp-f-comments"' +
+        ' placeholder="Observations, historique, remarques…">' +
+        esc(eq ? eq.comments || '' : '') +
+      '</textarea>' +
+    '</div>';
+
+    // ── footer actions
+    h += '<div class="pmp-eqfm-footer">' +
+      '<button class="pmp-eqfm-cancel-btn" onclick="MX.Pages.PMP._eqFormBack()">' +
+        '<i class="fas fa-times"></i> Annuler' +
+      '</button>' +
+      '<button class="pmp-eqfm-save-btn pmp-eqfm-save-btn--lg" onclick="MX.Pages.PMP._saveEqForm()">' +
+        '<i class="fas fa-check"></i> ' + (isEdit ? 'Enregistrer les modifications' : "Créer l'équipement") +
+      '</button>' +
+    '</div>';
+
+    h += '</div>';
+    return h;
+  }
+
+  function _collectEqForm() {
+    var isEdit = _eqFormMode !== 'new';
+    var durSel = document.getElementById('pmp-f-dur')?.value || '';
+    var durOther = (document.getElementById('pmp-f-dur-other')?.value || '').trim();
+    return {
+      isEdit:         isEdit,
+      id:             isEdit ? _eqFormMode : null,
+      name:           (document.getElementById('pmp-f-name')?.value    || '').trim(),
+      type:            document.getElementById('pmp-f-type')?.value    || '',
+      criticite:       document.getElementById('pmp-f-crit')?.value    || 'normale',
+      zone:           (document.getElementById('pmp-f-zone')?.value    || '').trim(),
+      subZone:        (document.getElementById('pmp-f-subzone')?.value || '').trim(),
+      ref:            (document.getElementById('pmp-f-ref')?.value     || '').trim(),
+      status:          document.getElementById('pmp-f-status')?.value  || 'actif',
+      technician:      document.getElementById('pmp-f-tech')?.value    || '',
+      frequency:      parseInt(document.getElementById('pmp-f-freq')?.value || '30') || 30,
+      nextDue:         document.getElementById('pmp-f-nextDue')?.value || '',
+      templateId:      document.getElementById('pmp-f-tpl')?.value     || '',
+      duration:        durSel === 'Autre' ? durOther : durSel,
+      technicalNotes: (document.getElementById('pmp-f-notes')?.value    || '').trim(),
+      comments:       (document.getElementById('pmp-f-comments')?.value || '').trim(),
+    };
+  }
+
+  function _saveEqForm() {
+    var d = _collectEqForm();
+    if (!d.name)      { MX.toast('Nom requis', true);      return; }
+    if (!d.type)      { MX.toast('Famille requise', true);  return; }
+    if (!d.zone)      { MX.toast('Zone requise', true);     return; }
+    if (!d.frequency) { MX.toast('Fréquence requise', true); return; }
+    if (d.isEdit && !d.nextDue) { MX.toast('Prochaine échéance requise', true); return; }
+
+    var ti = EQ_TYPES[d.type] || { icon: '🔧', l: d.type };
+    var cr = CRIT[d.criticite] || CRIT.normale;
+    _eqFormDraft = d;
+
+    var preview = '<div class="pmp-eqfm-preview">' +
+      '<div class="pmp-eqfm-preview-head">' +
+        '<div class="pmp-eqfm-preview-ico">' + ti.icon + '</div>' +
+        '<div>' +
+          '<div class="pmp-eqfm-preview-name">' + esc(d.name) + '</div>' +
+          '<div class="pmp-eqfm-preview-type">' + esc(ti.l) + '</div>' +
+        '</div>' +
+        '<div class="pmp-eq-badge" style="color:' + cr.c + ';border-color:' + cr.c + '">' + cr.l + '</div>' +
+      '</div>' +
+      '<div class="pmp-eqfm-preview-rows">' +
+        '<div class="pmp-eqfm-preview-row"><i class="fas fa-map-marker-alt"></i><span>' + esc(d.zone) + (d.subZone ? ' · ' + esc(d.subZone) : '') + '</span></div>' +
+        '<div class="pmp-eqfm-preview-row"><i class="fas fa-rotate"></i><span>' + _freqLbl(d.frequency) + '</span></div>' +
+        (d.duration ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-clock"></i><span>' + esc(d.duration) + '</span></div>' : '') +
+        (d.technician ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-user"></i><span>' + esc(d.technician) + '</span></div>' : '') +
+        (d.nextDue ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-calendar-check"></i><span>' + _dateLbl(d.nextDue) + '</span></div>' : '') +
+      '</div>' +
+    '</div>';
+
+    MX.showModal({
+      title: d.isEdit ? "Confirmer la modification" : "Confirmer la création",
+      body: preview,
+      actions: [
+        { label: d.isEdit ? 'Enregistrer' : 'Créer', cls: 'primary', fn: function () { _doSaveEq(); } },
+        { label: 'Modifier', cls: 'cancel' },
+      ],
+    });
+  }
+
+  async function _doSaveEq() {
+    var d = _eqFormDraft;
+    if (!d || !d.name) return;
+    var data = {
+      name: d.name, type: d.type, criticite: d.criticite,
+      zone: d.zone, subZone: d.subZone, ref: d.ref,
+      status: d.status, technician: d.technician,
+      frequency: d.frequency, templateId: d.templateId,
+      duration: d.duration,
+      technicalNotes: d.technicalNotes, comments: d.comments,
+      updatedAt: FV.serverTimestamp(),
+    };
+    if (d.nextDue) data.nextDue = d.nextDue;
     try {
-      if (id) {
-        await PMP_DB.eq().doc(id).update(data);
+      if (d.isEdit) {
+        await PMP_DB.eq().doc(d.id).update(data);
         MX.toast('Équipement mis à jour ✓');
       } else {
         data.createdAt = FV.serverTimestamp();
         data.lastDone  = '';
-        data.nextDue   = startDate ? _addDays(startDate, freq) : _addDays(_today(), freq);
+        data.nextDue   = _addDays(_today(), d.frequency);
         data.createdBy = _author();
         await PMP_DB.eq().add(data);
-        MX.toast('Équipement ajouté ✓');
+        MX.toast('Équipement créé ✓');
       }
+      _eqFormMode  = null;
+      _eqFormDraft = {};
+      _curTab = 'equipements';
     } catch (e) { console.error(e); MX.toast('Erreur : ' + e.message, true); }
   }
 
@@ -2121,8 +2398,18 @@
 
   // ── FILTER SETTERS ────────────────────────────────────────────────────────
 
-  function _setEqSearch(v)  { _eqSearch        = v; _rerender(); }
-  function _setEqType(v)    { _eqTypeFilter    = v; _rerender(); }
+  function _setEqSearch(v) {
+    _eqSearch = v;
+    var wrap = document.getElementById('pmp-eq-list-wrap');
+    if (wrap) { wrap.innerHTML = _eqListHtml(_today()); return; }
+    _rerender();
+  }
+  function _setEqType(v) {
+    _eqTypeFilter = v;
+    var wrap = document.getElementById('pmp-eq-list-wrap');
+    if (wrap) { wrap.innerHTML = _eqListHtml(_today()); return; }
+    _rerender();
+  }
   function _setIntFilter(v) { _intStatusFilter = v; _rerender(); }
   function _setCalMonth(v)  { _calMonth        = v; _rerender(); }
 
@@ -2133,7 +2420,7 @@
   window.MX.Pages.PMP = {
     render,
     _tab, _setEqSearch, _setEqType, _setIntFilter, _setCalMonth,
-    _eqForm, _delEq, _createInt, _createIntManual, _markDone, _delInt,
+    _eqForm, _eqFormBack, _onDurChange, _saveEqForm, _delEq, _createInt, _createIntManual, _markDone, _delInt,
     _assignModal,
     _tplForm, _tplAddItem, _delTpl,
     _onImportFile, _onImportDrop, _runImport, _resetImport, _setImportUserMap, _downloadTemplate, _createDefaultTpls, _checkAndGenerate,

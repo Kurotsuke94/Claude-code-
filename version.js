@@ -2,6 +2,6 @@
 // Modifier UNIQUEMENT ce fichier lors d'une nouvelle release.
 // Chargé par : index.html (window), sw.js (importScripts → self)
 (function (ctx) {
-  ctx.MX_VERSION = "1.0.34";
-  ctx.MX_BUILD   = 134;
+  ctx.MX_VERSION = "1.0.35";
+  ctx.MX_BUILD   = 135;
 })(typeof self !== "undefined" ? self : window);

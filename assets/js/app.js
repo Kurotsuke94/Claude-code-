@@ -762,6 +762,22 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.35', date: '2026-07-04', emoji: '🛠️',
+      title: 'Refonte module Maintenance Préventive',
+      changes: [
+        '44 familles d\'équipements organisées en optgroups (Fluides & Eau, CVC, Électricité, Froid, Sécurité…)',
+        'Fiche équipement en page complète avec 5 sections structurées',
+        'Confirmation visuelle avant enregistrement (carte récapitulative)',
+        'Validation des champs obligatoires : nom, famille, zone, fréquence',
+        'Nouvelles durées : 15 min → 1 mois + champ libre "Autre"',
+        'Correctif critique : la recherche ne perd plus le focus à chaque frappe',
+        'Recherche étendue à tous les champs : famille, zone, technicien, criticité, notes…',
+        'Section Documents réservée (PDF, Notice, Schéma, Photo, Vidéo, Manuel)',
+        'Consignes techniques : zone de texte agrandie (min 180 px, redimensionnable)',
+        'Commentaires : champ dédié par équipement',
+      ]
+    },
+    {
       ver: '1.0.34', date: '2026-07-04', emoji: '🚀',
       title: 'Espace de travail Mission & Déploiement automatique',
       changes: [
@@ -842,11 +858,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.34";
+  window.MX.appVer = window.MX_VERSION || "1.0.35";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.34";
-  const _APP_BUILD = window.MX_BUILD   || 134;
+  const _APP_VER   = window.MX_VERSION || "1.0.35";
+  const _APP_BUILD = window.MX_BUILD   || 135;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
