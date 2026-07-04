@@ -14628,3 +14628,89 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .pmp-eqfm-footer  { padding: 12px; }
   .pmp-eqfm-docs-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PMP — Indice de santé du parc (.pmdb-ph-*)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pmdb-widget--ph { }
+
+.pmdb-ph-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0 4px;
+}
+.pmdb-ph-pct {
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  transition: color .3s;
+}
+.pmdb-ph-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1.5px solid;
+  border-radius: 20px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: color .3s, border-color .3s;
+}
+
+/* Segmented bar */
+.pmdb-ph-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 1px;
+  margin: 8px 0 4px;
+  background: var(--border);
+}
+.pmdb-ph-seg {
+  height: 100%;
+  min-width: 2px;
+  transition: width .4s;
+}
+
+.pmdb-ph-counts {
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 10px;
+}
+
+/* Breakdown rows */
+.pmdb-ph-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 8px;
+}
+.pmdb-ph-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text1);
+  transition: opacity .2s;
+}
+.pmdb-ph-row--zero {
+  opacity: .35;
+  color: var(--text3);
+}
+.pmdb-ph-dot  { font-size: 14px; line-height: 1; width: 18px; text-align: center; }
+.pmdb-ph-lbl  { flex: 1; }
+.pmdb-ph-mini {
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  transition: width .3s;
+}
+
+/* Equipment form — health select */
+.pmp-eqfm-select--health option { font-size: 14px; }

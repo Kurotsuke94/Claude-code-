@@ -129,6 +129,14 @@
     critique: { l: 'Critique', c: '#EF4444' },
   };
 
+  var HEALTH_STATES = {
+    excellent: { l: 'Excellent',  pts: 100, dot: '🟢', c: '#22C55E' },
+    bon:       { l: 'Bon',        pts: 80,  dot: '🟢', c: '#10B981' },
+    moyen:     { l: 'Moyen',      pts: 60,  dot: '🟡', c: '#F59E0B' },
+    degrade:   { l: 'Dégradé',   pts: 40,  dot: '🟠', c: '#F97316' },
+    critique:  { l: 'Critique',   pts: 20,  dot: '🔴', c: '#EF4444' },
+  };
+
   var INT_ST = {
     planifiee: { l: 'Planifiée',  c: '#F59E0B', bg: 'rgba(245,158,11,.12)'  },
     en_cours:  { l: 'En cours',   c: '#F97316', bg: 'rgba(249,115,22,.12)'  },
@@ -407,6 +415,20 @@
     return maxLate <= 3 ? 70 : maxLate <= 7 ? 55 : maxLate <= 14 ? 40 : 25;
   }
 
+  function _parkHealth() {
+    var active = _pmpEq.filter(function (e) { return e.status !== 'inactif'; });
+    var counts  = { excellent: 0, bon: 0, moyen: 0, degrade: 0, critique: 0 };
+    var total   = 0;
+    active.forEach(function (eq) {
+      var key = (eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon';
+      total  += HEALTH_STATES[key].pts;
+      counts[key]++;
+    });
+    var n     = active.length || 1;
+    var score = active.length ? Math.round(total / n) : 100;
+    return { score: score, counts: counts, total: active.length };
+  }
+
   function _pmdbKpiCard(icon, color, val, lbl, sub, tab, alert) {
     var isAlert = alert && Number(val) > 0;
     var onclick = tab ? ' onclick="MX.Pages.PMP._tab(\'' + tab + '\')" style="cursor:pointer"' : '';
@@ -582,38 +604,31 @@
         '<span class="pmdb-top5-dur">' + esc(item.dur) + '</span></div>';
     }).join('') : '<div class="pmdb-empty-sm">Aucune durée renseignée</div>';
 
-    // ── Score de fiabilité donut ──
-    var score      = kpi.conformite;
-    var scoreColor = score >= 90 ? '#22C55E' : score >= 70 ? '#3B82F6' : score >= 50 ? '#F59E0B' : '#EF4444';
-    var scoreLbl   = score >= 90 ? 'Excellent' : score >= 80 ? 'Très bon' : score >= 70 ? 'Bon' : score >= 50 ? 'Moyen' : 'Critique';
-    var SR = 60, SCX = 75, SCY = 75, SCIRC = 2 * Math.PI * SR;
-    var SdashD = (score / 100) * SCIRC;
-    var donutSVG = '<svg viewBox="0 0 150 150" width="120" height="120" style="flex-shrink:0">' +
-      '<circle cx="' + SCX + '" cy="' + SCY + '" r="' + SR + '" fill="none" stroke="var(--border)" stroke-width="13"/>' +
-      '<circle cx="' + SCX + '" cy="' + SCY + '" r="' + SR + '" fill="none" stroke="' + scoreColor + '" stroke-width="13"' +
-      ' stroke-dasharray="' + SdashD.toFixed(1) + ' ' + (SCIRC - SdashD).toFixed(1) + '"' +
-      ' stroke-linecap="round" transform="rotate(-90 ' + SCX + ' ' + SCY + ')"/>' +
-      '<text x="' + SCX + '" y="' + (SCY - 6) + '" text-anchor="middle" font-size="24" font-weight="700" fill="' + scoreColor + '" font-family="monospace">' + score + '%</text>' +
-      '<text x="' + SCX + '" y="' + (SCY + 13) + '" text-anchor="middle" font-size="11" fill="var(--text3)">' + scoreLbl + '</text>' +
-      '</svg>';
+    // ── Indice de santé du parc ──
+    var ph       = _parkHealth();
+    var phScore  = ph.score;
+    var phTotal  = ph.total || 1;
+    var phC      = phScore >= 90 ? '#22C55E' : phScore >= 75 ? '#10B981' : phScore >= 55 ? '#F59E0B' : phScore >= 35 ? '#F97316' : '#EF4444';
+    var phLbl    = phScore >= 90 ? 'Excellent' : phScore >= 75 ? 'Très bon' : phScore >= 55 ? 'Bon' : phScore >= 35 ? 'Dégradé' : 'Critique';
+    var phEmoji  = phScore >= 90 ? '🟢' : phScore >= 55 ? '🟡' : phScore >= 35 ? '🟠' : '🔴';
 
-    var excellent = 0, bonne = 0, moyenne = 0, faible = 0;
-    _pmpEq.forEach(function (eq) {
-      var s = _eqHealthScore(eq);
-      if (s >= 90) excellent++; else if (s >= 70) bonne++; else if (s >= 50) moyenne++; else faible++;
-    });
-    var totEq = _pmpEq.length || 1;
-    var scoreBreak = [
-      { lbl: 'Excellente', count: excellent, color: '#22C55E' },
-      { lbl: 'Bonne',      count: bonne,     color: '#3B82F6' },
-      { lbl: 'Moyenne',    count: moyenne,   color: '#F59E0B' },
-      { lbl: 'Faible',     count: faible,    color: '#EF4444' },
-    ].map(function (b) {
-      return '<div class="pmdb-score-brow">' +
-        '<span class="pmdb-score-bdot" style="background:' + b.color + '"></span>' +
-        '<span class="pmdb-score-blbl">' + b.lbl + '</span>' +
-        '<span class="pmdb-score-bcnt">' + b.count + ' (' + Math.round(b.count / totEq * 100) + '%)</span>' +
-        '</div>';
+    var PH_ORDER = ['excellent', 'bon', 'moyen', 'degrade', 'critique'];
+    var phBarHtml = PH_ORDER.map(function (k) {
+      var st  = HEALTH_STATES[k];
+      var cnt = ph.counts[k] || 0;
+      var pct = cnt / phTotal * 100;
+      if (!cnt) return '';
+      return '<div class="pmdb-ph-seg" style="width:' + pct.toFixed(1) + '%;background:' + st.c + '" title="' + st.l + ': ' + cnt + '"></div>';
+    }).join('');
+
+    var phRowsHtml = PH_ORDER.map(function (k) {
+      var st  = HEALTH_STATES[k];
+      var cnt = ph.counts[k] || 0;
+      return '<div class="pmdb-ph-row' + (!cnt ? ' pmdb-ph-row--zero' : '') + '">' +
+        '<span class="pmdb-ph-dot">' + st.dot + '</span>' +
+        '<span class="pmdb-ph-lbl">' + cnt + ' ' + st.l + (cnt > 1 && k !== 'moyen' ? 's' : '') + '</span>' +
+        (cnt ? '<div class="pmdb-ph-mini" style="width:' + (cnt / phTotal * 64).toFixed(0) + 'px;background:' + st.c + '"></div>' : '') +
+      '</div>';
     }).join('');
 
     // ── Equipment grid (filtered + paginated) ──
@@ -662,8 +677,9 @@
         var ti       = EQ_TYPES[eq.type] || { icon: '🔧', l: eq.type || 'Divers' };
         var isLate   = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
         var daysOff  = eq.nextDue ? Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
-        var health   = _eqHealthScore(eq);
-        var hColor   = health >= 80 ? '#22C55E' : health >= 60 ? '#F59E0B' : health >= 40 ? '#F97316' : '#EF4444';
+        var eqHs     = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
+        var health   = eqHs.pts;
+        var hColor   = eqHs.c;
         var badgeT   = eq.status === 'inactif' ? 'off' : isLate ? 'late' : (daysOff !== null && daysOff <= 7) ? 'soon' : 'ok';
         var badgeLbl = { off:'Inactif', late:'En retard', soon:'À venir', ok:'OK' }[badgeT];
         var nextStr  = !eq.nextDue ? '—' : isLate ? '<span style="color:#EF4444">' + _dateLbl(eq.nextDue) + ' (' + Math.abs(daysOff) + 'j)</span>' :
@@ -687,7 +703,7 @@
             (eq.zone ? '<div class="pmdb-eq-zone"><i class="fas fa-location-dot"></i> ' + esc(eq.zone) + (eq.subZone ? ' · ' + esc(eq.subZone) : '') + '</div>' : '') +
             '<div class="pmdb-eq-health-row" style="--hw:' + health + '%;--hc:' + hColor + '">' +
               '<div class="pmdb-eq-health-bar"><div class="pmdb-eq-health-fill"></div></div>' +
-              '<span class="pmdb-eq-health-pct" style="color:' + hColor + '">' + health + '%</span>' +
+              '<span class="pmdb-eq-health-pct" style="color:' + hColor + '">' + eqHs.dot + ' ' + eqHs.l + '</span>' +
             '</div>' +
             '<div class="pmdb-eq-meta">' +
               '<div class="pmdb-eq-meta-item"><i class="fas fa-calendar-check"></i> ' + nextStr + '</div>' +
@@ -809,13 +825,16 @@
             (top5.length >= 5 ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'interventions\')" class="pmdb-widget-link">Voir le classement complet →</a></div>' : '') +
           '</div>' +
 
-          '<div class="pmdb-widget">' +
-            '<div class="pmdb-widget-hdr"><i class="fas fa-star-half-stroke"></i> Score de fiabilité global</div>' +
-            '<div class="pmdb-score-body">' +
-              '<div class="pmdb-score-donut">' + donutSVG + '</div>' +
-              '<div class="pmdb-score-breakdown">' + scoreBreak + '</div>' +
+          '<div class="pmdb-widget pmdb-widget--ph">' +
+            '<div class="pmdb-widget-hdr"><i class="fas fa-battery-three-quarters"></i> Indice de santé du parc</div>' +
+            '<div class="pmdb-ph-score-row">' +
+              '<span class="pmdb-ph-pct" style="color:' + phC + '">' + phScore + ' %</span>' +
+              '<div class="pmdb-ph-badge" style="color:' + phC + ';border-color:' + phC + '">' + phEmoji + ' ' + phLbl + '</div>' +
             '</div>' +
-            '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'equipements\')" class="pmdb-widget-link">Voir le détail par équipement →</a></div>' +
+            '<div class="pmdb-ph-bar">' + (phBarHtml || '<div class="pmdb-ph-seg" style="width:100%;background:var(--border)"></div>') + '</div>' +
+            '<div class="pmdb-ph-counts">' + phTotal + ' équipement' + (phTotal > 1 ? 's' : '') + ' actif' + (phTotal > 1 ? 's' : '') + '</div>' +
+            '<div class="pmdb-ph-rows">' + phRowsHtml + '</div>' +
+            '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'equipements\')" class="pmdb-widget-link">Gérer les états de santé →</a></div>' +
           '</div>' +
 
         '</div>' +
@@ -1049,6 +1068,7 @@
       filtered.forEach(function (eq) {
         var ti      = EQ_TYPES[eq.type]  || { icon: '🔧', l: eq.type || 'Divers' };
         var cr      = CRIT[eq.criticite] || CRIT.normale;
+        var hs      = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
         var isLate  = eq.nextDue && eq.nextDue < today && eq.status !== 'inactif';
         var daysOff = eq.nextDue ? Math.round((new Date(eq.nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
         h += '<div class="pmp-eq-card' + (isLate ? ' pmp-eq-card--late' : '') + '">' +
@@ -1061,6 +1081,7 @@
           '<div class="pmp-eq-card-body">' +
           (eq.ref        ? '<span class="pmp-eq-meta"><i class="fas fa-tag"></i> ' + esc(eq.ref) + '</span>' : '') +
           (eq.technician ? '<span class="pmp-eq-meta"><i class="fas fa-user"></i> ' + esc(eq.technician) + '</span>' : '') +
+          '<span class="pmp-eq-meta" style="color:' + hs.c + '">' + hs.dot + ' ' + hs.l + '</span>' +
           '<span class="pmp-eq-meta"><i class="fas fa-rotate"></i> ' + _freqLbl(eq.frequency) + '</span>' +
           (eq.nextDue ? '<span class="pmp-eq-meta' +
             (isLate ? ' pmp-eq-meta--late' : daysOff !== null && daysOff <= 7 ? ' pmp-eq-meta--warn' : '') + '">' +
@@ -1699,6 +1720,16 @@
       '</div>' +
 
       '<div class="pmp-eqfm-field">' +
+        '<label class="pmp-eqfm-lbl">État de santé</label>' +
+        '<select class="pmp-eqfm-select pmp-eqfm-select--health" id="pmp-f-health">' +
+          Object.entries(HEALTH_STATES).map(function (kv) {
+            var sel = eq ? eq.healthState === kv[0] : kv[0] === 'bon';
+            return '<option value="' + kv[0] + '"' + (sel ? ' selected' : '') + '>' + kv[1].dot + ' ' + kv[1].l + '</option>';
+          }).join('') +
+        '</select>' +
+      '</div>' +
+
+      '<div class="pmp-eqfm-field">' +
         '<label class="pmp-eqfm-lbl">Technicien référent</label>' +
         '<select class="pmp-eqfm-select" id="pmp-f-tech">' +
           '<option value="">— Non assigné —</option>' +
@@ -1820,6 +1851,7 @@
       subZone:        (document.getElementById('pmp-f-subzone')?.value || '').trim(),
       ref:            (document.getElementById('pmp-f-ref')?.value     || '').trim(),
       status:          document.getElementById('pmp-f-status')?.value  || 'actif',
+      healthState:     document.getElementById('pmp-f-health')?.value  || 'bon',
       technician:      document.getElementById('pmp-f-tech')?.value    || '',
       frequency:      parseInt(document.getElementById('pmp-f-freq')?.value || '30') || 30,
       nextDue:         document.getElementById('pmp-f-nextDue')?.value || '',
@@ -1842,6 +1874,7 @@
     var cr = CRIT[d.criticite] || CRIT.normale;
     _eqFormDraft = d;
 
+    var hs = HEALTH_STATES[d.healthState] || HEALTH_STATES.bon;
     var preview = '<div class="pmp-eqfm-preview">' +
       '<div class="pmp-eqfm-preview-head">' +
         '<div class="pmp-eqfm-preview-ico">' + ti.icon + '</div>' +
@@ -1853,6 +1886,7 @@
       '</div>' +
       '<div class="pmp-eqfm-preview-rows">' +
         '<div class="pmp-eqfm-preview-row"><i class="fas fa-map-marker-alt"></i><span>' + esc(d.zone) + (d.subZone ? ' · ' + esc(d.subZone) : '') + '</span></div>' +
+        '<div class="pmp-eqfm-preview-row"><i class="fas fa-heart-pulse" style="color:' + hs.c + '"></i><span style="color:' + hs.c + '">' + hs.dot + ' ' + hs.l + '</span></div>' +
         '<div class="pmp-eqfm-preview-row"><i class="fas fa-rotate"></i><span>' + _freqLbl(d.frequency) + '</span></div>' +
         (d.duration ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-clock"></i><span>' + esc(d.duration) + '</span></div>' : '') +
         (d.technician ? '<div class="pmp-eqfm-preview-row"><i class="fas fa-user"></i><span>' + esc(d.technician) + '</span></div>' : '') +
@@ -1876,7 +1910,7 @@
     var data = {
       name: d.name, type: d.type, criticite: d.criticite,
       zone: d.zone, subZone: d.subZone, ref: d.ref,
-      status: d.status, technician: d.technician,
+      status: d.status, healthState: d.healthState, technician: d.technician,
       frequency: d.frequency, templateId: d.templateId,
       duration: d.duration,
       technicalNotes: d.technicalNotes, comments: d.comments,
