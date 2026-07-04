@@ -71,6 +71,7 @@
     document.querySelectorAll(".sx-item[data-page],.bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
     MX.closeSidebar();
     renderPage(id);
+    buildDxPanel();
   };
 
   function renderPage(id) {
@@ -544,6 +545,164 @@
     `;
   }
 
+  // ── DESKTOP RIGHT PANEL ──
+  function buildDxPanel() {
+    const el = document.getElementById('dx-panel');
+    if (!el || window.innerWidth < 1280) return;
+
+    const state   = MX.state;
+    const e       = MX.esc;
+    const todayId = MX.todayId ? MX.todayId() : '';
+    const slots   = ['matin', 'journee', 'soir'];
+    const SLOT_LABELS = { matin: {l:'Matin',icon:'☀️'}, journee: {l:'Après-midi',icon:'🌤️'}, soir: {l:'Soir',icon:'🌙'} };
+
+    // ── Today progress ──
+    let total = 0, done = 0;
+    slots.forEach(function(slot) {
+      var tasks = state.tasks[todayId + '_' + slot] || [];
+      total += tasks.length;
+      tasks.forEach(function(t) {
+        if (state.checks[todayId + '_' + slot + '_' + t.id]) done++;
+      });
+    });
+    const pct    = total ? Math.round(done / total * 100) : 0;
+    const pctCol = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f97316' : '#3b82f6';
+
+    // ── Planning / daily claims ──
+    const claims = state.dailyClaims || {};
+
+    // ── Missions (interventions + PMP from admin view) ──
+    const missions  = state.missions || [];
+    const ints      = missions.filter(m => !(m.isPmp || m.missionType === 'pmp') && !m.done);
+    const pmps      = missions.filter(m => m.isPmp || m.missionType === 'pmp');
+    const pmpsActive = pmps.filter(m => !m.done);
+    const pmpsDone  = pmps.length - pmpsActive.length;
+
+    // ── Alerts ──
+    const alerts = (state.triggeredAlerts || []).filter(a => !a.acknowledged);
+
+    // ── Stock critique ──
+    const critStock = (state.products || []).filter(p =>
+      p.quantity !== undefined && p.minStock !== undefined && Number(p.quantity) <= Number(p.minStock)
+    );
+
+    let h = '';
+
+    // ── Résumé journée ──
+    h += '<div class="dxp-section">'
+      + '<div class="dxp-hd"><i class="fas fa-sun dxp-ico"></i><span>Journée du jour</span></div>'
+      + '<div class="dxp-prog-wrap">'
+      + '<div class="dxp-prog-track"><div class="dxp-prog-fill" style="width:' + pct + '%;background:' + pctCol + '"></div></div>'
+      + '<span class="dxp-prog-pct" style="color:' + pctCol + '">' + pct + '%</span>'
+      + '</div>'
+      + '<div class="dxp-jour-stats">'
+      + '<div class="dxp-js"><strong>' + done + '</strong><span>Terminées</span></div>'
+      + '<div class="dxp-js"><strong>' + (total - done) + '</strong><span>Restantes</span></div>'
+      + '<div class="dxp-js"><strong>' + total + '</strong><span>Total</span></div>'
+      + '</div>'
+      + '</div>';
+
+    // ── Planning ──
+    h += '<div class="dxp-section">'
+      + '<div class="dxp-hd"><i class="fas fa-calendar-days dxp-ico"></i><span>Planning</span></div>';
+    slots.forEach(function(slot) {
+      var si = SLOT_LABELS[slot];
+      var assignee = (claims[slot] && claims[slot].name) || (state.assignments && state.assignments[todayId + '_' + slot]) || '';
+      h += '<div class="dxp-slot-row">'
+        + '<span class="dxp-slot-ico">' + si.icon + '</span>'
+        + '<span class="dxp-slot-lbl">' + e(si.l) + '</span>'
+        + '<span class="dxp-slot-user">' + (assignee ? e(assignee) : '<span style="color:var(--text3)">—</span>') + '</span>'
+        + '</div>';
+    });
+    h += '</div>';
+
+    // ── Interventions ──
+    h += '<div class="dxp-section">'
+      + '<div class="dxp-hd"><i class="fas fa-wrench dxp-ico" style="color:#3b82f6"></i>'
+      + '<span>Interventions</span>'
+      + (ints.length ? '<span class="dxp-badge dxp-badge--blue">' + ints.length + '</span>' : '<span class="dxp-badge">0</span>')
+      + '</div>';
+    if (ints.length === 0) {
+      h += '<div class="dxp-empty">Aucune intervention active</div>';
+    } else {
+      h += '<div class="dxp-list">';
+      ints.slice(0, 4).forEach(function(m) {
+        h += '<div class="dxp-item">'
+          + '<div class="dxp-item-dot" style="background:#3b82f6"></div>'
+          + '<div class="dxp-item-info">'
+          + '<div class="dxp-item-ttl">' + e(m.text || '—') + '</div>'
+          + (m.zone ? '<div class="dxp-item-sub">' + e(m.zone) + '</div>' : '')
+          + '</div></div>';
+      });
+      if (ints.length > 4) h += '<div class="dxp-more">+' + (ints.length - 4) + ' de plus</div>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    // ── PMP ──
+    h += '<div class="dxp-section">'
+      + '<div class="dxp-hd"><i class="fas fa-screwdriver-wrench dxp-ico" style="color:#a855f7"></i>'
+      + '<span>Maintenance PMP</span>'
+      + '<span class="dxp-badge' + (pmpsActive.length ? ' dxp-badge--purple' : '') + '">' + pmpsDone + '/' + pmps.length + '</span>'
+      + '</div>';
+    if (pmpsActive.length === 0) {
+      h += '<div class="dxp-empty">' + (pmps.length ? 'Tous les PMP terminés ✓' : 'Aucun PMP planifié') + '</div>';
+    } else {
+      h += '<div class="dxp-list">';
+      pmpsActive.slice(0, 3).forEach(function(m) {
+        var pd = m.pmpData || {};
+        h += '<div class="dxp-item">'
+          + '<div class="dxp-item-dot" style="background:#a855f7"></div>'
+          + '<div class="dxp-item-info">'
+          + '<div class="dxp-item-ttl">' + e(pd.equipmentName || m.text || '—') + '</div>'
+          + (pd.zone ? '<div class="dxp-item-sub">' + e(pd.zone) + '</div>' : '')
+          + '</div></div>';
+      });
+      if (pmpsActive.length > 3) h += '<div class="dxp-more">+' + (pmpsActive.length - 3) + ' de plus</div>';
+      h += '</div>';
+    }
+    h += '</div>';
+
+    // ── Alertes ──
+    if (alerts.length > 0) {
+      h += '<div class="dxp-section dxp-section--alert">'
+        + '<div class="dxp-hd"><i class="fas fa-triangle-exclamation dxp-ico" style="color:#ef4444"></i>'
+        + '<span>Alertes actives</span>'
+        + '<span class="dxp-badge dxp-badge--red">' + alerts.length + '</span>'
+        + '</div><div class="dxp-list">';
+      alerts.slice(0, 3).forEach(function(a) {
+        h += '<div class="dxp-item">'
+          + '<div class="dxp-item-dot" style="background:#ef4444"></div>'
+          + '<div class="dxp-item-info"><div class="dxp-item-ttl">' + e(a.label || a.type || 'Alerte') + '</div></div>'
+          + '</div>';
+      });
+      if (alerts.length > 3) h += '<div class="dxp-more">+' + (alerts.length - 3) + ' de plus</div>';
+      h += '</div></div>';
+    }
+
+    // ── Stock critique ──
+    if (critStock.length > 0) {
+      h += '<div class="dxp-section">'
+        + '<div class="dxp-hd"><i class="fas fa-box-open dxp-ico" style="color:#f97316"></i>'
+        + '<span>Stock critique</span>'
+        + '<span class="dxp-badge dxp-badge--orange">' + critStock.length + '</span>'
+        + '</div><div class="dxp-list">';
+      critStock.slice(0, 4).forEach(function(p) {
+        h += '<div class="dxp-item">'
+          + '<div class="dxp-item-dot" style="background:#f97316"></div>'
+          + '<div class="dxp-item-info">'
+          + '<div class="dxp-item-ttl">' + e(p.name || '—') + '</div>'
+          + '<div class="dxp-item-sub">Qté: ' + (p.quantity || 0) + ' · Min: ' + (p.minStock || 0) + '</div>'
+          + '</div></div>';
+      });
+      if (critStock.length > 4) h += '<div class="dxp-more">+' + (critStock.length - 4) + ' de plus</div>';
+      h += '</div></div>';
+    }
+
+    el.innerHTML = h;
+  }
+  window.MX._refreshDxPanel = buildDxPanel;
+
   function _updAlertBadge() {
     const alerts = MX.state.triggeredAlerts || [];
     const cnt    = alerts.filter(a => !a.acknowledged).length;
@@ -597,6 +756,7 @@
     });
 
     _updBadges();
+    buildDxPanel();
   }
 
   // ── CHANGELOG ──
@@ -702,13 +862,19 @@
   // On resize between mobile and desktop: close sidebar + clear overlay to avoid stuck state
   window.addEventListener('resize', (function() {
     var _lastMob = window.innerWidth <= 900;
+    var _lastDesk = window.innerWidth >= 1280;
     return function() {
       updateViewportHeight();
-      var mob = window.innerWidth <= 900;
+      var mob  = window.innerWidth <= 900;
+      var desk = window.innerWidth >= 1280;
       if (mob !== _lastMob) {
         _lastMob = mob;
         MX.closeSidebar();
         buildNav();
+      }
+      if (desk !== _lastDesk) {
+        _lastDesk = desk;
+        buildDxPanel();
       }
     };
   })());
