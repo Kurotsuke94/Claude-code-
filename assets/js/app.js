@@ -762,6 +762,20 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.34', date: '2026-07-04', emoji: '🚀',
+      title: 'Espace de travail Mission & Déploiement automatique',
+      changes: [
+        'Espace de travail quotidien : vue 25%/75% avec panneau latéral de tâches',
+        'Sélection de tâche avec consigne, note et boutons de validation',
+        'Mise à jour obligatoire et transparente : écran de déploiement automatique',
+        'Mode Maintenance : blocage des techniciens pendant les déploiements',
+        'Historique de déploiement enregistré dans Firestore',
+        'Section "Maintenance" dans Paramètres (admin uniquement)',
+        'Numéro de build affiché dans la barre de statut et À propos',
+        '"Bienvenue" affiché une seule fois au premier lancement de la nouvelle version',
+      ]
+    },
+    {
       ver: '1.0.33', date: '2026-06-26', emoji: '🔔',
       title: 'Centre de notifications unifié',
       changes: [
@@ -828,10 +842,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.33";
+  window.MX.appVer = window.MX_VERSION || "1.0.34";
 
   // ── STATUS BAR ──
-  const _APP_VER = window.MX_VERSION || "1.0.33";
+  const _APP_VER   = window.MX_VERSION || "1.0.34";
+  const _APP_BUILD = window.MX_BUILD   || 134;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -956,7 +971,9 @@
         `<span class="sb-sep">│</span>` +
         `<span class="sb-item" id="sb-users"><i class="fas fa-users"></i> ${usersLabel}</span>` +
         `<span class="sb-sep">│</span>` +
-        `<span class="sb-item sb-ver"><i class="fas fa-rocket"></i> Maintix v${_APP_VER}</span>`;
+        `<span class="sb-item sb-ver"><i class="fas fa-rocket"></i> Maintix v${_APP_VER}</span>` +
+        `<span class="sb-sep">│</span>` +
+        `<span class="sb-item sb-ver" style="color:var(--text3)">Build ${_APP_BUILD}</span>`;
     }
 
     // Mobile topbar sync dot
@@ -1394,23 +1411,25 @@
           _swReg.update().catch(() => {});
         }
       });
-      // Rechargement automatique silencieux à chaque nouveau SW
+      // Rechargement obligatoire à chaque nouveau SW — écran de déploiement
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (_swHadController) {
-          MX.toast('Mise à jour automatique en cours…', false);
-          setTimeout(() => window.location.reload(), 2500);
+          _showUpdateOverlay(window.MX_VERSION || _APP_VER);
         }
       });
       // Écoute du message SW_UPDATED (envoyé par activate → clients.claim)
       navigator.serviceWorker.addEventListener('message', e => {
         if (e.data && e.data.type === 'SW_UPDATED') {
-          console.log('[Maintix] SW mis à jour → v' + e.data.version);
+          console.log('[Maintix] SW mis à jour → v' + e.data.version + ' build ' + e.data.build);
+          _showUpdateOverlay(e.data.version || _APP_VER);
         }
       });
     }
 
     MX.Notifs.init();
     MX.Updates.init();
+    var _isAdmin = !!(MX.state.adminUser) || MX.Auth.canSeeAll();
+    MX.Maintenance.init(_isAdmin);
   }
 
   function hideLoading() {
@@ -2014,81 +2033,190 @@
     };
   })();
 
+  // ── MANDATORY UPDATE OVERLAY ──
+  var _updateOverlayShown = false;
+  function _showUpdateOverlay(version) {
+    if (_updateOverlayShown) return;
+    _updateOverlayShown = true;
+    var ver = version || _APP_VER;
+    var el = document.createElement('div');
+    el.id = 'mx-update-overlay';
+    el.className = 'mx-update-overlay';
+    el.innerHTML =
+      '<div class="mx-update-box">' +
+        '<img src="/assets/icons/maintix-logo.png" class="mx-update-logo" alt="Maintix">' +
+        '<div class="mx-update-brand">MAINTIX</div>' +
+        '<div class="mx-update-title">Mise à jour en cours</div>' +
+        '<div class="mx-update-ver">v' + ver + '</div>' +
+        '<div class="mx-update-steps" id="mx-upd-steps">' +
+          '<div class="mx-update-step mx-update-step--active" id="mx-upd-s1"><i class="fas fa-download"></i> Téléchargement…</div>' +
+          '<div class="mx-update-step" id="mx-upd-s2"><i class="fas fa-gears"></i> Optimisation du cache…</div>' +
+          '<div class="mx-update-step" id="mx-upd-s3"><i class="fas fa-rotate"></i> Redémarrage…</div>' +
+        '</div>' +
+        '<div class="mx-update-progress-wrap"><div class="mx-update-bar" id="mx-upd-bar"></div></div>' +
+        '<div class="mx-update-footer">Application mise à jour automatiquement</div>' +
+      '</div>';
+    document.body.appendChild(el);
+    // Animate steps then reload
+    function _step(n, pct) {
+      var steps = ['mx-upd-s1', 'mx-upd-s2', 'mx-upd-s3'];
+      steps.forEach(function(id, i) {
+        var s = document.getElementById(id);
+        if (!s) return;
+        s.classList.remove('mx-update-step--active', 'mx-update-step--done');
+        if (i < n) s.classList.add('mx-update-step--done');
+        else if (i === n) s.classList.add('mx-update-step--active');
+      });
+      var bar = document.getElementById('mx-upd-bar');
+      if (bar) bar.style.width = pct + '%';
+    }
+    setTimeout(function() { _step(0, 40); }, 100);
+    setTimeout(function() { _step(1, 70);
+      if ('caches' in window) caches.keys().then(function(keys) { return Promise.all(keys.map(function(k) { return caches.delete(k); })); }).catch(function(){});
+    }, 1200);
+    setTimeout(function() { _step(2, 95); }, 2200);
+    setTimeout(function() {
+      var bar = document.getElementById('mx-upd-bar');
+      if (bar) bar.style.width = '100%';
+    }, 2800);
+    setTimeout(function() { window.location.reload(true); }, 3200);
+  }
+  window.MX._showUpdateOverlay = _showUpdateOverlay;
+
   // ── VERSION UPDATES MODULE ──
   window.MX.Updates = (function() {
     function init() {
       if (localStorage.getItem('mx_last_ver') !== _APP_VER) {
         buildDeskHeader();
-        setTimeout(showModal, 2500);
-        // Create Firestore notification for new version
+        setTimeout(showWelcome, 2500);
         MX.Notifs.createVersionNotif(_APP_VER);
       }
     }
 
-    function showModal() {
+    function showWelcome() {
       if (document.getElementById('ver-modal-overlay')) return;
-      const cl = window.MX.CHANGELOG || [];
-      const latest = cl[0] || {};
-      const changesList = (latest.changes || []).map(c =>
-        `<li class="vcl-change-item"><i class="fas fa-check" style="color:var(--cyan);font-size:10px;margin-right:8px"></i>${MX.esc(c)}</li>`
-      ).join('');
+      var cl = window.MX.CHANGELOG || [];
+      var latest = cl[0] || {};
+      var changesList = (latest.changes || []).map(function(c) {
+        return '<li class="vcl-change-item"><i class="fas fa-check" style="color:var(--cyan);font-size:10px;margin-right:8px"></i>' + MX.esc(c) + '</li>';
+      }).join('');
 
-      const overlay = document.createElement('div');
+      var overlay = document.createElement('div');
       overlay.id = 'ver-modal-overlay';
       overlay.className = 'ver-modal-overlay';
-      overlay.innerHTML = `<div class="ver-modal">
-        <div style="text-align:center;margin-bottom:22px">
-          <div style="font-size:32px;margin-bottom:10px">🚀</div>
-          <div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1.2">Nouvelle version disponible</div>
-          <div style="font-size:13px;color:var(--cyan);margin-top:6px;font-weight:700;letter-spacing:0.5px">Maintix v${_APP_VER}</div>
-        </div>
-        ${latest.title ? `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text2)">${MX.esc(latest.title)}</div>` : ''}
-        ${changesList ? `<ul class="vcl-changes-list">${changesList}</ul>` : ''}
-        <div class="ver-modal-actions">
-          <button class="primary-btn" style="width:100%" onclick="MX.Updates._goNouveautes()">
-            <i class="fas fa-scroll"></i> Voir les nouveautés
-          </button>
-          <button class="sec-btn" style="width:100%;margin-top:8px" onclick="MX.Updates._doUpdate()">
-            <i class="fas fa-rotate"></i> Mettre à jour maintenant
-          </button>
-          <button class="ver-modal-later" onclick="MX.Updates.dismiss()">Plus tard</button>
-        </div>
-      </div>`;
-      overlay.addEventListener('click', e => { if (e.target === overlay) MX.Updates.dismiss(); });
+      overlay.innerHTML =
+        '<div class="ver-modal">' +
+          '<div style="text-align:center;margin-bottom:22px">' +
+            '<div style="font-size:32px;margin-bottom:10px">🎉</div>' +
+            '<div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1.2">Bienvenue sur Maintix ' + _APP_VER + '</div>' +
+            '<div style="font-size:12px;color:var(--text3);margin-top:6px">Application mise à jour avec succès</div>' +
+          '</div>' +
+          (latest.title ? '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text2)">' + MX.esc(latest.title) + '</div>' : '') +
+          (changesList ? '<ul class="vcl-changes-list">' + changesList + '</ul>' : '') +
+          '<div class="ver-modal-actions">' +
+            '<button class="primary-btn" style="width:100%" onclick="MX.Updates._goNouveautes()">' +
+              '<i class="fas fa-scroll"></i> Voir toutes les nouveautés' +
+            '</button>' +
+            '<button class="ver-modal-later" onclick="MX.Updates.dismiss()">Continuer</button>' +
+          '</div>' +
+        '</div>';
       document.body.appendChild(overlay);
     }
 
     function markSeen() {
       localStorage.setItem('mx_last_ver', _APP_VER);
-      const badge = document.getElementById('dh-ver-badge');
+      var badge = document.getElementById('dh-ver-badge');
       if (badge) badge.remove();
     }
 
     function dismiss() {
-      const el = document.getElementById('ver-modal-overlay');
-      if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 200); }
+      markSeen();
+      var el = document.getElementById('ver-modal-overlay');
+      if (el) { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 200); }
     }
 
     function _goNouveautes() {
       dismiss();
-      markSeen();
       window._settingsTab = 'nouveautes';
       MX.showPage('settings');
     }
 
-    function _doUpdate() {
-      dismiss();
-      markSeen();
-      if ('caches' in window) {
-        caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
-          window.location.reload(true);
-        });
-      } else {
-        window.location.reload(true);
-      }
+    return { init, showModal: showWelcome, markSeen, dismiss, _goNouveautes };
+  })();
+
+  // ── MAINTENANCE MODULE ──
+  window.MX.Maintenance = (function() {
+    var _isAdmin = false;
+    var _unsub = null;
+    var _overlayEl = null;
+    var _recheckTimer = null;
+
+    function init(isAdmin) {
+      _isAdmin = !!isAdmin;
+      _unsub = MX.DB.listenMaintenance(function(data) {
+        _onData(data);
+      });
     }
 
-    return { init, showModal, markSeen, dismiss, _goNouveautes, _doUpdate };
+    function _onData(data) {
+      if (!data || !data.active) {
+        _hide();
+        return;
+      }
+      // Recompute admin each time (auth may settle after init)
+      if (_isAdmin || MX.Auth.canSeeAll()) return;
+      _show(data);
+    }
+
+    function _show(data) {
+      if (_overlayEl) {
+        // update content
+        var msg = _overlayEl.querySelector('.mx-maint-sub');
+        if (msg) msg.textContent = data.message || 'Maintenance en cours. Merci de patienter.';
+        var mins = _overlayEl.querySelector('.mx-maint-timer');
+        if (mins && data.estimatedMinutes) mins.textContent = 'Durée estimée : ' + data.estimatedMinutes + ' min';
+        var nv = _overlayEl.querySelector('.mx-maint-badge');
+        if (nv && data.nextVersion) nv.textContent = 'Prochaine version : v' + data.nextVersion;
+        return;
+      }
+      var el = document.createElement('div');
+      el.id = 'mx-maint-overlay';
+      el.className = 'mx-maint-overlay';
+      el.innerHTML =
+        '<div class="mx-maint-body">' +
+          '<div class="mx-maint-icon"><i class="fas fa-wrench"></i></div>' +
+          '<div class="mx-maint-title">Maintenance en cours</div>' +
+          '<div class="mx-maint-sub">' + MX.esc(data.message || 'Maintenance en cours. Merci de patienter.') + '</div>' +
+          (data.estimatedMinutes ? '<div class="mx-maint-timer">Durée estimée : ' + data.estimatedMinutes + ' min</div>' : '') +
+          (data.nextVersion ? '<div class="mx-maint-badge">Prochaine version : v' + MX.esc(data.nextVersion) + '</div>' : '') +
+          '<div class="mx-maint-hint">L\'application redémarrera automatiquement.</div>' +
+        '</div>';
+      document.body.appendChild(el);
+      _overlayEl = el;
+      // Auto-reload once maintenance lifts — recheckTimer polls every 15s
+      _recheckTimer = setInterval(function() {
+        // listener handles it — this is just a safety net
+      }, 15000);
+    }
+
+    function _hide() {
+      if (_recheckTimer) { clearInterval(_recheckTimer); _recheckTimer = null; }
+      if (!_overlayEl) return;
+      _overlayEl.classList.add('mx-maint-fade');
+      var el = _overlayEl;
+      _overlayEl = null;
+      setTimeout(function() {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+        window.location.reload(true);
+      }, 800);
+    }
+
+    function destroy() {
+      if (_unsub) { _unsub(); _unsub = null; }
+      _hide();
+    }
+
+    return { init, destroy };
   })();
 
   window.MX.badgeBorder = function(userName) {

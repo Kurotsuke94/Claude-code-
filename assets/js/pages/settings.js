@@ -26,6 +26,7 @@
     { id: 'journal',       icon: 'fa-clock-rotate-left', l: 'Journal' },
     { id: 'nouveautes',    icon: 'fa-rocket',           l: 'Nouveautés' },
     { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
+    { id: 'maintenance',   icon: 'fa-wrench',           l: 'Maintenance', adminOnly: true },
   ];
 
   // ── AVATAR CANVAS CROP ──
@@ -891,10 +892,17 @@
   }
 
   function _renderApropos() {
-    const ver = (window.MX && MX.appVer) ? MX.appVer : (window.MX_VERSION || '1.0.33');
-    const isOnline = navigator.onLine;
-    const users = MX.state.users || [];
-    const lastSync = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';
+    const ver   = (window.MX && MX.appVer) ? MX.appVer : (window.MX_VERSION || '1.0.34');
+    const build = window.MX_BUILD || 134;
+    const isOnline  = navigator.onLine;
+    const users     = MX.state.users || [];
+    const lastSync  = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';
+    const lastVer   = localStorage.getItem('mx_last_ver');
+    const isUpToDate = lastVer === ver;
+
+    const statusBadge = isOnline
+      ? '<span style="color:var(--green);font-size:11px;font-weight:700"><i class="fas fa-circle" style="font-size:7px"></i> Application à jour</span>'
+      : '<span style="color:var(--orange);font-size:11px;font-weight:700"><i class="fas fa-circle" style="font-size:7px"></i> Hors ligne</span>';
 
     return `
       <div class="stt-section-head"><i class="fas fa-circle-info"></i> À propos</div>
@@ -904,7 +912,11 @@
           <div>
             <div style="font-size:18px;font-weight:800;letter-spacing:-0.5px">Maintix</div>
             <div style="font-size:12px;color:var(--text3)">Gestion de maintenance industrielle</div>
-            <div style="margin-top:4px"><span class="stt-badge stt-badge-green" style="cursor:pointer;user-select:none" onclick="MX.Pages.Settings._diagVersionTap()" title="Appuyez 5× pour ouvrir le diagnostic">v${ver}</span></div>
+            <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="stt-badge stt-badge-green" style="cursor:pointer;user-select:none" onclick="MX.Pages.Settings._diagVersionTap()" title="Appuyez 5× pour ouvrir le diagnostic">v${ver}</span>
+              <span class="stt-badge" style="background:var(--bg3);color:var(--text3);border-color:var(--border1)">Build ${build}</span>
+            </div>
+            <div style="margin-top:6px">${statusBadge}</div>
           </div>
         </div>
         <div class="stt-info-list">
@@ -1098,6 +1110,91 @@
       </div>`;
   }
 
+  // ── MAINTENANCE ADMIN ──
+  var _maintData = null;
+  var _maintUnsub = null;
+  var _deployLog = [];
+
+  function _renderMaintenance() {
+    const d = _maintData || {};
+    const active = !!d.active;
+    const logHtml = _deployLog.length === 0
+      ? '<div style="color:var(--text3);font-size:12px;padding:8px 0">Aucun déploiement enregistré.</div>'
+      : _deployLog.map(function(e) {
+          const tsVal = e.ts && e.ts.toDate ? e.ts.toDate().toLocaleString('fr-FR') : (e.ts || '—');
+          const action = e.action === 'on' ? '<span style="color:var(--orange);font-weight:700">Activé</span>' :
+                         e.action === 'off' ? '<span style="color:var(--green);font-weight:700">Désactivé</span>' : MX.esc(e.action || '—');
+          return '<div class="stt-info-row"><span class="stt-info-label">' + tsVal + '</span><span class="stt-info-val">' + action + (e.by ? ' — ' + MX.esc(e.by) : '') + '</span></div>';
+        }).join('');
+
+    return '<div class="stt-section-head"><i class="fas fa-wrench"></i> Mode Maintenance</div>' +
+      '<div class="stt-card">' +
+        '<div class="stt-card-title">Activation</div>' +
+        '<div class="stt-info-row" style="margin-bottom:10px">' +
+          '<span class="stt-info-label"><i class="fas fa-toggle-' + (active ? 'on' : 'off') + '" style="color:' + (active ? 'var(--orange)' : 'var(--text3)') + '"></i> Mode maintenance</span>' +
+          '<label class="stt-toggle">' +
+            '<input type="checkbox" id="maint-toggle" ' + (active ? 'checked' : '') + ' onchange="MX.Pages.Settings._maintToggle(this.checked)">' +
+            '<span class="stt-toggle-track"></span>' +
+          '</label>' +
+        '</div>' +
+        '<div class="stt-info-row" style="margin-bottom:10px">' +
+          '<span class="stt-info-label"><i class="fas fa-comment"></i> Message</span>' +
+          '<input class="fi" id="maint-msg" style="max-width:240px;font-size:12px" value="' + MX.esc(d.message || 'Maintenance en cours. Merci de patienter.') + '" placeholder="Message affiché aux techniciens">' +
+        '</div>' +
+        '<div class="stt-info-row" style="margin-bottom:10px">' +
+          '<span class="stt-info-label"><i class="fas fa-clock"></i> Durée estimée (min)</span>' +
+          '<input class="fi" id="maint-mins" type="number" min="1" max="120" style="max-width:80px;font-size:12px" value="' + (d.estimatedMinutes || '') + '" placeholder="—">' +
+        '</div>' +
+        '<div class="stt-info-row" style="margin-bottom:14px">' +
+          '<span class="stt-info-label"><i class="fas fa-rocket"></i> Prochaine version</span>' +
+          '<input class="fi" id="maint-ver" style="max-width:100px;font-size:12px" value="' + MX.esc(d.nextVersion || '') + '" placeholder="ex: 1.0.35">' +
+        '</div>' +
+        '<button class="stt-btn" onclick="MX.Pages.Settings._maintSave()">' +
+          '<i class="fas fa-floppy-disk"></i> Enregistrer les paramètres' +
+        '</button>' +
+      '</div>' +
+      '<div class="stt-card" style="margin-top:12px">' +
+        '<div class="stt-card-title">Historique de déploiement</div>' +
+        '<div class="stt-info-list">' + logHtml + '</div>' +
+      '</div>';
+  }
+
+  function _maintInit() {
+    if (_maintUnsub) return;
+    _maintUnsub = MX.DB.listenMaintenance(function(data) {
+      _maintData = data;
+      const sec = document.getElementById('stt-content');
+      if (sec && document.querySelector('.stt-nav-item[data-sec="maintenance"]') &&
+          document.querySelector('.stt-nav-item[data-sec="maintenance"]').classList.contains('active')) {
+        sec.innerHTML = _renderMaintenance();
+      }
+    });
+    MX.DB.listenDeployLog(function(log) {
+      _deployLog = log;
+    });
+  }
+
+  function _maintToggle(checked) {
+    const admin = MX.state.adminUser;
+    const by = admin ? (admin.email || 'admin') : 'admin';
+    MX.DB.saveMaintenance({ active: checked }).then(function() {
+      MX.DB.logDeploy({ action: checked ? 'on' : 'off', by: by });
+      MX.toast(checked ? '🔴 Maintenance activée' : '🟢 Maintenance désactivée');
+    }).catch(function() { MX.toast('Erreur lors de la mise à jour', true); });
+  }
+
+  function _maintSave() {
+    const msg  = (document.getElementById('maint-msg')  || {}).value || '';
+    const mins = parseInt((document.getElementById('maint-mins') || {}).value, 10) || null;
+    const ver  = (document.getElementById('maint-ver')  || {}).value || '';
+    const data = { message: msg };
+    if (mins) data.estimatedMinutes = mins;
+    if (ver) data.nextVersion = ver;
+    MX.DB.saveMaintenance(data).then(function() {
+      MX.toast('Paramètres enregistrés');
+    }).catch(function() { MX.toast('Erreur lors de la sauvegarde', true); });
+  }
+
   // ── SECTION SWITCHER ──
   function _showSection(id) {
     _section = id;
@@ -1119,7 +1216,9 @@
       nouveautes:    _renderNouveautes,
       apropos:       _renderApropos,
       diagnostic:    _renderDiagnostic,
+      maintenance:   _renderMaintenance,
     };
+    if (id === 'maintenance') _maintInit();
     content.innerHTML = (renderers[id] || (() => ''))();
   }
 
@@ -1224,5 +1323,7 @@
     _refreshDiag: () => _showSection('diagnostic'),
     _toggleSound,
     _previewSound,
+    _maintToggle,
+    _maintSave,
   };
 })();

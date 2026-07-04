@@ -94,6 +94,7 @@ const SHELL = [
   "/assets/js/pages/interventions.js"        + V,
   "/assets/js/pages/notifications.js"        + V,
   "/assets/js/pages/equipe.js"               + V,
+  "/assets/js/pages/pmp.js"                  + V,
   "/assets/js/alerts-engine.js"              + V,
   "/assets/js/app.js"                        + V,
 ];
@@ -129,7 +130,7 @@ self.addEventListener("activate", e => {
       ))
       .then(() => self.clients.claim())
       .then(() => self.clients.matchAll({ type: "window" }).then(list => {
-        list.forEach(client => client.postMessage({ type: "SW_UPDATED", version: MX_VERSION }));
+        list.forEach(client => client.postMessage({ type: "SW_UPDATED", version: MX_VERSION, build: MX_BUILD }));
       }))
   );
 });

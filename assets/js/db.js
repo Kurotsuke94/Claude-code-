@@ -862,6 +862,25 @@
     await db.collection('config').doc('versions').set(data);
   }
 
+  // ── MAINTENANCE ──
+  function listenMaintenance(cb) {
+    return db.collection('config').doc('maintenance')
+      .onSnapshot(snap => cb(snap.exists ? snap.data() : null));
+  }
+  async function saveMaintenance(data) {
+    await db.collection('config').doc('maintenance').set(data, { merge: true });
+  }
+  async function logDeploy(data) {
+    await db.collection('config').doc('maintenance')
+      .collection('deploy_log').add(Object.assign({ ts: FV.serverTimestamp() }, data));
+  }
+  function listenDeployLog(cb) {
+    return db.collection('config').doc('maintenance')
+      .collection('deploy_log')
+      .orderBy('ts', 'desc').limit(30)
+      .onSnapshot(snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+  }
+
   // ── NOTIFICATIONS ──
   const R_NOTIFS = () => db.collection('notifications');
 
@@ -1145,6 +1164,7 @@
     getBiblePermissions, setBiblePermissions,
     getHotelConfig, saveHotelConfig,
     getVersions, saveVersions,
+    listenMaintenance, saveMaintenance, logDeploy, listenDeployLog,
     getRecentBibleArticles,
     listenBadges, listenUserBadges,
     addBadge, updateBadge, deleteBadge,
