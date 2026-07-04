@@ -762,6 +762,22 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.40', date: '2026-07-04', emoji: '🔧',
+      title: 'Correction critique — Validation des missions PMP toujours accessible',
+      changes: [
+        'Fix comparaison de noms normalisée (trim + lowercase) — plus de blocage si casse ou espaces différents',
+        'Rétrocompatibilité : missions assignées sans takenBy peuvent désormais être validées directement',
+        'Bouton "Terminer directement" si la mission est assignée au technicien mais pas encore prise',
+        'Responsable peut toujours valider n\'importe quelle mission PMP (canSeeAll)',
+        'Diagnostics console détaillés à chaque ouverture de panneau PMP (_diagPmpValidation)',
+        'Mise à jour dynamique du footer sans fermer/rouvrir le panneau (prise, rendu)',
+        'Checklist activée/désactivée en temps réel après prise ou rendu de mission',
+        'Dialogue de confirmation : champs optionnels affichés en ⚠ orange (jamais ✗ rouge)',
+        'Seule condition obligatoire pour valider : Mission prise ✔',
+        'Checklist, journal, photos, pièces : indicateurs informatifs uniquement, jamais bloquants',
+      ]
+    },
+    {
       ver: '1.0.39', date: '2026-07-04', emoji: '🔄',
       title: 'Refonte du panneau mission PMP — workflow simplifié sans chrono',
       changes: [
@@ -925,11 +941,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.39";
+  window.MX.appVer = window.MX_VERSION || "1.0.40";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.39";
-  const _APP_BUILD = window.MX_BUILD   || 139;
+  const _APP_VER   = window.MX_VERSION || "1.0.40";
+  const _APP_BUILD = window.MX_BUILD   || 140;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

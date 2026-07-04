@@ -15141,3 +15141,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmp-confirm-row.ko { color: var(--red); }
 .pmp-confirm-row.warn { color: var(--orange); }
 .pmp-confirm-row.info { color: var(--text3); }
+
+/* v1.0.40 — pmp-take-btn */
+.pmp-take-btn { width: 100%; padding: 12px 16px; border-radius: 10px; border: none; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); color: #fff; font-weight: 600; font-size: 13px; font-family: var(--ffs); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity .15s; }
+.pmp-take-btn:hover { opacity: .88; }

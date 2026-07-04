@@ -983,13 +983,15 @@
     var cu          = MX.state.currentUser;
     var curName     = cu ? cu.name : null;
 
+    _diagPmpValidation(m, curName);
+
     // Lifecycle state
     var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
     var lcLabel   = lifecycle === 'terminee' ? 'Terminée 🟢' : (lifecycle === 'en_cours' ? 'En cours 🟠' : 'Disponible 🟣');
     var lcColor   = lifecycle === 'terminee' ? '#22c55e' : (lifecycle === 'en_cours' ? '#f97316' : '#a855f7');
 
-    // Checklist (editable only when en cours by current user)
-    var canEdit = lifecycle === 'en_cours' && m.takenBy === curName;
+    // Checklist (editable only when mission is mine)
+    var canEdit = lifecycle === 'en_cours' && _canTerminate(m, curName);
     var checklist = items.map(function (it, idx) {
       var ck = completed[String(idx)] || completed[idx];
       return '<label class="pmp-ck-item' + (ck ? ' pmp-ck-item--done' : '') + '">'
@@ -1143,24 +1145,9 @@
     h += '</div>';
 
     // ── Footer lifecycle ──
-    h += '<div class="pmp-detail-footer" id="pmp-detail-footer-' + missionId + '">';
-    if (lifecycle === 'disponible') {
-      h += '<button class="pmp-validate-btn" style="background:#a855f7;border-color:#a855f7" onclick="MX.MM._takePmpMission(\'' + missionId + '\')">'
-        + '<i class="fas fa-hand-pointer"></i> Prendre la mission</button>';
-    } else if (lifecycle === 'en_cours') {
-      if (m.takenBy === curName) {
-        h += '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
-          + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
-          + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
-          + '<i class="fas fa-check"></i> Terminer</button>';
-      } else {
-        h += '<div class="pmp-taken-info"><i class="fas fa-user-clock"></i> Prise par <strong>' + e(m.takenBy || '') + '</strong></div>';
-      }
-    } else {
-      h += '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
-        + '<i class="fas fa-circle-check"></i> Mission validée</button>';
-    }
-    h += '</div>';
+    h += '<div class="pmp-detail-footer" id="pmp-detail-footer-' + missionId + '">'
+      + _buildPmpFooter(m, missionId, curName)
+      + '</div>';
 
     h += '</div></div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
@@ -1284,6 +1271,93 @@
   }
 
   // ══════════════════════════════════════════════
+  // LIFECYCLE HELPERS v1.0.40
+  // ══════════════════════════════════════════════
+
+  function _normName(n) {
+    return (n || '').trim().toLowerCase();
+  }
+
+  function _canTerminate(m, curName) {
+    if (!curName || m.done) return false;
+    if (MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll()) return true;
+    if (_normName(m.takenBy) === _normName(curName)) return true;
+    if (!m.takenBy && _normName(m.assignedTo) === _normName(curName)) return true;
+    return false;
+  }
+
+  function _diagPmpValidation(m, curName) {
+    var pd = m.pmpData || {};
+    console.group('[MX PMP] Diagnostic validation — ' + (pd.equipmentName || m.id || '?'));
+    console.log('curName:', curName, '| takenBy:', m.takenBy, '| assignedTo:', m.assignedTo, '| done:', m.done);
+    var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
+    console.log('lifecycle:', lifecycle, '| _canTerminate:', _canTerminate(m, curName));
+    var completed = m.completedChecklist || {};
+    var items = pd.checklistItems || [];
+    var doneCnt = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
+    var pmpPhotos = m.pmpPhotos || {};
+    var photoCount = Object.keys(pmpPhotos).reduce(function (s, k) {
+      return s + (Array.isArray(pmpPhotos[k]) ? pmpPhotos[k].length : 0);
+    }, 0) + (m.photoAvant ? 1 : 0) + (m.photoPendant ? 1 : 0) + (m.photoApres ? 1 : 0);
+    console.log('Checklist:', doneCnt + '/' + items.length, '| Journal:', (m.pmpComments || []).length + ' entrée(s)', '| Photos:', photoCount, '| Pièces:', (m.usedParts || []).length);
+    console.log('OBLIGATOIRE — Mission prise :', _canTerminate(m, curName) ? 'OK ✔' : 'BLOQUÉ ✗ (prendre la mission d\'abord)');
+    console.log('OPTIONNEL — Checklist, Journal, Photos, Pièces : jamais bloquants');
+    console.groupEnd();
+  }
+
+  function _buildPmpFooter(m, missionId, curName) {
+    var e = MX.esc;
+    var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
+    var canAll = !!(MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll());
+    var isMine = _canTerminate(m, curName);
+    var h = '';
+    if (lifecycle === 'terminee') {
+      h += '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
+        + '<i class="fas fa-circle-check"></i> Mission validée</button>';
+    } else if (lifecycle === 'en_cours') {
+      if (isMine || canAll) {
+        h += '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
+          + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
+          + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
+          + '<i class="fas fa-check"></i> Terminer</button>';
+      } else {
+        h += '<div class="pmp-taken-info"><i class="fas fa-user-clock"></i> Prise par <strong>' + e(m.takenBy || '') + '</strong></div>';
+      }
+    } else {
+      // disponible
+      h += '<button class="pmp-take-btn" onclick="MX.MM._takePmpMission(\'' + missionId + '\')">'
+        + '<i class="fas fa-hand-pointer"></i> Prendre la mission</button>';
+      if (isMine || canAll) {
+        h += '<button class="pmp-validate-btn" style="margin-top:8px" onclick="MX.MM._terminerAssigned(\'' + missionId + '\')">'
+          + '<i class="fas fa-check"></i> Terminer directement</button>';
+      }
+    }
+    return h;
+  }
+
+  function _updatePmpFooter(missionId) {
+    var footerEl = document.getElementById('pmp-detail-footer-' + missionId);
+    if (!footerEl) return;
+    var m = _allMissions.find(function (x) { return x.id === missionId; });
+    if (!m) return;
+    var cu = MX.state.currentUser;
+    footerEl.innerHTML = _buildPmpFooter(m, missionId, cu ? cu.name : null);
+  }
+
+  function _terminerAssigned(missionId) {
+    var cu = MX.state.currentUser;
+    if (!cu) { MX.toast('Connectez-vous pour valider une mission', true); return; }
+    var now = Date.now();
+    db.collection('missions').doc(missionId).update({ takenBy: cu.name, takenAt: now })
+      .then(function () {
+        var m = _allMissions.find(function (x) { return x.id === missionId; });
+        if (m) { m.takenBy = cu.name; m.takenAt = now; }
+        _updatePmpFooter(missionId);
+        _confirmTerminePmp(missionId);
+      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  // ══════════════════════════════════════════════
   // CHECKLIST TOGGLE (PMP)
   // ══════════════════════════════════════════════
 
@@ -1316,8 +1390,9 @@
         var m = _allMissions.find(function (x) { return x.id === missionId; });
         if (m) { m.takenBy = cu.name; m.takenAt = now; }
         MX.toast('Mission prise ✓');
-        _closePmpDetail();
-        _openPmpDetail(missionId);
+        _updatePmpFooter(missionId);
+        var ov = document.getElementById('pmp-detail-ov');
+        if (ov) ov.querySelectorAll('.pmp-ck-item input[type=checkbox]').forEach(function (cb) { cb.disabled = false; });
       }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 
@@ -1338,8 +1413,9 @@
         var m = _allMissions.find(function (x) { return x.id === missionId; });
         if (m) { m.takenBy = null; m.takenAt = null; }
         MX.toast('Mission rendue ✓');
-        _closePmpDetail();
-        _openPmpDetail(missionId);
+        _updatePmpFooter(missionId);
+        var ov = document.getElementById('pmp-detail-ov');
+        if (ov) ov.querySelectorAll('.pmp-ck-item input[type=checkbox]').forEach(function (cb) { cb.disabled = true; });
       }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 
@@ -1354,15 +1430,18 @@
     var doneCnt     = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
     var photoCount  = Object.keys(pmpPhotos).reduce(function (s, k) { return s + (Array.isArray(pmpPhotos[k]) ? pmpPhotos[k].length : 0); }, 0)
       + (m.photoAvant ? 1 : 0) + (m.photoPendant ? 1 : 0) + (m.photoApres ? 1 : 0);
+    var cu2 = MX.state.currentUser;
+    var curName2 = cu2 ? cu2.name : null;
     var checkHtml = '<div class="pmp-confirm-checks">'
-      + '<div class="pmp-confirm-row ' + (pmpComments.length ? 'ok' : 'ko') + '">'
-      + (pmpComments.length ? '✓' : '✗') + ' Journal : ' + (pmpComments.length ? pmpComments.length + ' entrée(s)' : 'aucun commentaire') + '</div>'
-      + '<div class="pmp-confirm-row ' + (photoCount ? 'ok' : 'ko') + '">'
-      + (photoCount ? '✓' : '✗') + ' Photos : ' + (photoCount ? photoCount + ' photo(s)' : 'aucune photo') + '</div>'
+      + '<div class="pmp-confirm-row ok">✓ Mission prise' + (m.takenBy ? ' par ' + MX.esc(m.takenBy) : '') + '</div>'
+      + '<div class="pmp-confirm-row ' + (pmpComments.length ? 'ok' : 'warn') + '">'
+      + (pmpComments.length ? '✓' : '⚠') + ' Journal : ' + (pmpComments.length ? pmpComments.length + ' entrée(s)' : 'aucun commentaire (facultatif)') + '</div>'
+      + '<div class="pmp-confirm-row ' + (photoCount ? 'ok' : 'warn') + '">'
+      + (photoCount ? '✓' : '⚠') + ' Photos : ' + (photoCount ? photoCount + ' photo(s)' : 'aucune photo (facultatif)') + '</div>'
       + (items.length ? '<div class="pmp-confirm-row ' + (doneCnt === items.length ? 'ok' : 'warn') + '">'
-      + (doneCnt === items.length ? '✓' : '⚠') + ' Checklist : ' + doneCnt + '/' + items.length + '</div>' : '')
+      + (doneCnt === items.length ? '✓' : '⚠') + ' Checklist : ' + doneCnt + '/' + items.length + ' (facultatif)</div>' : '')
       + '<div class="pmp-confirm-row ' + (parts.length ? 'ok' : 'info') + '">'
-      + (parts.length ? '✓' : '—') + ' Pièces : ' + (parts.length ? parts.map(function (p) { return p.name + ' ×' + (p.qty || 1); }).join(', ') : 'aucune') + '</div>'
+      + (parts.length ? '✓' : '—') + ' Pièces : ' + (parts.length ? parts.map(function (p) { return p.name + ' ×' + (p.qty || 1); }).join(', ') : 'aucune (facultatif)') + '</div>'
       + '</div>';
     document.getElementById('m-title').textContent = 'Valider la mission';
     document.getElementById('m-sub').innerHTML = checkHtml
@@ -1378,6 +1457,12 @@
     var m = _allMissions.find(function (x) { return x.id === missionId; });
     if (!m || m.done) return;
     var cu    = MX.state.currentUser;
+    var curName = cu ? cu.name : null;
+    _diagPmpValidation(m, curName);
+    if (!_canTerminate(m, curName)) {
+      MX.toast('Prenez d\'abord la mission pour pouvoir la valider', true);
+      return;
+    }
     var today = new Date().toISOString().slice(0, 10);
     var lastObs = (m.pmpComments && m.pmpComments.length)
       ? m.pmpComments[m.pmpComments.length - 1].text
@@ -1567,6 +1652,7 @@
     _toggleCheck: _toggleCheck,
     _takePmpMission: _takePmpMission, _releasePmpMission: _releasePmpMission,
     _doReleasePmp: _doReleasePmp, _confirmTerminePmp: _confirmTerminePmp,
+    _terminerAssigned: _terminerAssigned,
     _addPmpComment: _addPmpComment, _addIntComment: _addIntComment,
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,
