@@ -1,7 +1,7 @@
 (function () {
   const NAV = [
     { id: "home",          icon: "fa-house",          l: "Accueil" },
-    { id: "msgs",          icon: "fa-comments",       l: "Messages",        badge: true },
+    { id: "msgs",          icon: "fa-book-open",      l: "Journal",         badge: true },
     null,
     { id: "today-cl",      icon: "fa-list-check",     l: "Aujourd'hui",     todayShortcut: true },
     { id: "lundi",         icon: "fa-1",              l: "Lundi",           day: true },
@@ -178,7 +178,7 @@
   // ── FAVORITES (Accès Rapide) ──
   const NAV_INFO = {
     'home':          { icon: 'fa-house',           l: 'Accueil' },
-    'msgs':          { icon: 'fa-comments',        l: 'Messages' },
+    'msgs':          { icon: 'fa-book-open',        l: 'Journal' },
     'planning':      { icon: 'fa-calendar-days',   l: 'Planning' },
     'today-cl':      { icon: 'fa-list-check',      l: 'Checklists' },
     'mes-missions':  { icon: 'fa-list-check',      l: 'Mes missions' },
@@ -364,7 +364,7 @@
     let gestItems = "";
     if (_see('stock'))     gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true });
     if (_see('resources')) gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true });
-    if (_see('messages'))  gestItems += _item("msgs",      "fa-comments", "Messages",    { sub: true, badge: true, favable: true });
+    if (_see('messages'))  gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true });
     if (gestItems)
       h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
 
@@ -537,8 +537,8 @@
         <i class="fas fa-bell"></i>
         <span class="nav-badge" id="notif-bell-badge"></span>
       </button>
-      <button class="dh-btn" onclick="MX.showPage('msgs')" title="Messages">
-        <i class="fas fa-comments"></i>
+      <button class="dh-btn" onclick="MX.showPage('msgs')" title="Journal">
+        <i class="fas fa-book-open"></i>
         <span class="nav-badge${unread ? ' show' : ''}" id="dh-bell-badge">${unread > 9 ? '9+' : unread || ''}</span>
       </button>
       ${userHtml}
@@ -2250,7 +2250,7 @@
 
     const navItems = [
       { id: 'planning',     icon: 'fa-calendar-days',  label: 'Planning',      fn: "MX.closeMobileDrawer();MX.showPage('planning')" },
-      { id: 'msgs',         icon: 'fa-comments',       label: 'Messages',      fn: "MX.closeMobileDrawer();MX.showPage('msgs')" },
+      { id: 'msgs',         icon: 'fa-book-open',      label: 'Journal',       fn: "MX.closeMobileDrawer();MX.showPage('msgs')" },
       { id: 'orders',       icon: 'fa-box',            label: 'Stock',         fn: "MX.closeMobileDrawer();MX.showPage('orders')" },
       { id: 'documents',    icon: 'fa-book',           label: 'Ressources',    fn: "MX.closeMobileDrawer();MX.showPage('documents')" },
       { id: 'parametres',   icon: 'fa-gear',           label: 'Paramètres',    fn: "MX.closeMobileDrawer();MX.showPage('parametres')" },
@@ -2397,7 +2397,7 @@
       { id: 'interventions', label: 'Interventions',    icon: 'fa-bolt' },
       { id: 'resources',     label: 'Ressources',       icon: 'fa-book' },
       { id: 'documents',     label: 'Documents',        icon: 'fa-book' },
-      { id: 'msgs',          label: 'Messages',         icon: 'fa-comments' },
+      { id: 'msgs',          label: 'Journal',          icon: 'fa-book-open' },
       { id: 'badges',        label: 'Badges',           icon: 'fa-trophy' },
       { id: 'admin',         label: 'Administration',   icon: 'fa-shield' },
       { id: 'utilisateurs',  label: 'Utilisateurs',     icon: 'fa-users' },

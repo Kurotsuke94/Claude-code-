@@ -345,15 +345,19 @@
         cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
   }
-  async function sendAnnouncement({ type, content, authorName, authorRole, imageUrl, imageMime }) {
+  async function sendAnnouncement({ type, content, title, tags, authorName, authorRole, imageUrl, imageMime, useNewReactions }) {
     const data = {
-      type, content, authorName, authorRole,
+      type, content: content || '', authorName, authorRole,
       createdAt: FV.serverTimestamp(),
       pinned: false,
-      reactions: { '👍': [], '✅': [], '⚠️': [] },
+      reactions: useNewReactions
+        ? { ok: [], warning: [], wrench: [], attach: [], seen: [] }
+        : { '👍': [], '✅': [], '⚠️': [] },
       readBy: [authorName],
       replyCount: 0
     };
+    if (title)    data.title = title;
+    if (tags && tags.length) data.tags = tags;
     if (imageUrl) { data.imageUrl = imageUrl; if (imageMime) data.imageMime = imageMime; }
     await R_ANN().add(data);
   }
