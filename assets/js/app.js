@@ -762,6 +762,22 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.38', date: '2026-07-04', emoji: '🤖',
+      title: 'Assistant IA Maintix — analyse intelligente du parc',
+      changes: [
+        'Panneau Assistant IA affiché en permanence sur chaque fiche équipement',
+        'Analyse automatique : retard, taux de complétion checklist, anomalies',
+        'Détection des composants récurrents dans les observations techniciens',
+        'Estimation intelligente de la durée d\'intervention (basée sur l\'historique)',
+        'Suggestions de pièces adaptées à la famille d\'équipement',
+        'Statistiques temps réel : interventions réalisées, taux de retard, checklist',
+        'Chaque recommandation explique pourquoi elle est faite (transparence IA)',
+        'Layout deux colonnes sur desktop : fiche + IA côte à côte',
+        'Adaptation mobile : panneau IA sous la fiche équipement',
+        'Données 100 % locales — analyse des données Maintix, pas d\'IA externe',
+      ]
+    },
+    {
       ver: '1.0.37', date: '2026-07-04', emoji: '🏭',
       title: 'PMP : plusieurs plans de maintenance par équipement',
       changes: [
@@ -888,11 +904,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.37";
+  window.MX.appVer = window.MX_VERSION || "1.0.38";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.37";
-  const _APP_BUILD = window.MX_BUILD   || 137;
+  const _APP_VER   = window.MX_VERSION || "1.0.38";
+  const _APP_BUILD = window.MX_BUILD   || 138;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

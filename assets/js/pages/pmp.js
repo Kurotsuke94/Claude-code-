@@ -1971,6 +1971,9 @@
       '</button>' +
     '</div>';
 
+    // ── two-column layout : main content + AI panel
+    h += '<div class="pmp-detail-layout"><div class="pmp-detail-main">';
+
     // ── equipment identity card
     h += '<div class="pmp-eq-id-card">' +
       '<div class="pmp-eq-id-row">' +
@@ -2044,7 +2047,10 @@
       });
       h += '</div>';
     }
-    h += '</div>';
+    h += '</div>'; // pmp-detail-main
+    h += _tAIPanel(eqId, null);
+    h += '</div>'; // pmp-detail-layout
+    h += '</div>'; // pmp-eq-detail-page
     return h;
   }
 
@@ -2809,6 +2815,289 @@
   }
   function _setIntFilter(v) { _intStatusFilter = v; _rerender(); }
   function _setCalMonth(v)  { _calMonth        = v; _rerender(); }
+
+  // ── AI MAINTIX ────────────────────────────────────────────────────────────
+
+  var _AI_PARTS_MAP = {
+    'cta':               ['Courroie de transmission', 'Filtre G4/F7', 'Graisse lubrification', 'Roulement', 'Joint d\'étanchéité'],
+    'vmc':               ['Filtre à air', 'Courroie ventilateur', 'Graisse palier'],
+    'ventilation':       ['Courroie', 'Roulement', 'Graisse', 'Filtre à air'],
+    'climatisation':     ['Filtre déshydrateur', 'Huile réfrigérante', 'Joint d\'étanchéité', 'Filtre à air'],
+    'chauffage':         ['Joint de porte foyer', 'Électrode allumage', 'Filtre fioul', 'Gicleur brûleur'],
+    'pompe':             ['Joint mécanique', 'Roulement', 'Garniture mécanique', 'Huile'],
+    'surpresseur':       ['Membrane', 'Joint', 'Clapet anti-retour', 'Manostat'],
+    'adoucisseur':       ['Résine échangeuse d\'ions', 'Sel régénérant', 'Joint', 'Filtre sédiments'],
+    'ballon_ecs':        ['Anode magnésium', 'Joint de trappe', 'Sonde température', 'Thermostat'],
+    'ecs':               ['Anode magnésium', 'Joint', 'Sonde température'],
+    'groupe_froid':      ['Filtre déshydrateur', 'Huile compresseur', 'Joint d\'étanchéité', 'Sonde température'],
+    'chambre_froide':    ['Joint de porte chambre froide', 'Résistance dégivrage', 'Filtre déshydrateur'],
+    'groupe_elec':       ['Filtre à huile', 'Filtre gasoil', 'Batterie 12V', 'Courroie alternateur'],
+    'compresseur':       ['Filtre à air', 'Huile compresseur', 'Courroie', 'Filtre à huile'],
+    'tgbt':              ['Disjoncteur', 'Fusible', 'Contact auxiliaire', 'Câble'],
+    'ascenseur':         ['Huile vérins', 'Câble traction', 'Courroie', 'Graisse guidage'],
+    'securite_incendie': ['Détecteur fumée', 'Pile de secours', 'Câblage'],
+  };
+
+  function _aiPartsForEq(eq) {
+    if (!eq || !eq.type) return ['Graisse lubrification', 'Filtre', 'Joint d\'étanchéité'];
+    var parts = _AI_PARTS_MAP[eq.type];
+    if (parts) return parts;
+    var ti = EQ_TYPES[eq.type];
+    if (ti) {
+      var grp = (ti.grp || '').toLowerCase();
+      if (grp.indexOf('froid') !== -1)     return ['Filtre déshydrateur', 'Huile réfrigérante', 'Joint'];
+      if (grp.indexOf('cvc') !== -1)       return ['Filtre à air', 'Courroie', 'Graisse lubrification'];
+      if (grp.indexOf('fluides') !== -1)   return ['Joint', 'Filtre', 'Produit traitement eau'];
+      if (grp.indexOf('lectric') !== -1)   return ['Fusible', 'Contact', 'Câblage'];
+    }
+    return ['Graisse lubrification', 'Filtre', 'Joint d\'étanchéité'];
+  }
+
+  var _AI_KW_PARTS  = ['courroie', 'filtre', 'roulement', 'joint', 'moteur', 'condensateur', 'sonde', 'vanne', 'fusible', 'contacteur', 'garniture', 'palier', 'huile', 'graisse', 'membrane', 'clapet', 'électrode', 'brûleur', 'anode', 'pompe'];
+  var _AI_KW_ISSUES = ['défectueux', 'défaillance', 'panne', 'cassé', 'usé', 'fuité', 'bruit', 'vibration', 'surchauffe', 'bloqué', 'corrosion', 'rouillé', 'fuite', 'claquement', 'grippé', 'déformé', 'oxydé'];
+  var _AI_KW_OK     = ['conforme', 'bon état', 'rien à signaler', 'sans anomalie', 'ras', 'parfait', 'impeccable', 'nickel', 'ok'];
+
+  function _aiParseObs(obs) {
+    var text = (obs || '').toLowerCase();
+    var parts   = _AI_KW_PARTS.filter(function (k)  { return text.indexOf(k) !== -1; });
+    var issues  = _AI_KW_ISSUES.filter(function (k) { return text.indexOf(k) !== -1; });
+    var isNormal = _AI_KW_OK.some(function (k) { return text.indexOf(k) !== -1; });
+    return { parts: parts, issues: issues, isNormal: isNormal };
+  }
+
+  function _aiFormatMins(mins) {
+    if (!mins) return '—';
+    if (mins < 60) return mins + ' min';
+    var h = Math.floor(mins / 60);
+    var m = mins % 60;
+    return h + ' h' + (m ? ' ' + m : '');
+  }
+
+  function _aiAnalyzeEq(eqId) {
+    var eq = _pmpEq.find(function (e) { return e.id === eqId; });
+    if (!eq) return { insights: [], stats: {}, doneInts: [], plans: [] };
+
+    var allInts     = _pmpInt.filter(function (i) { return i.equipmentId === eqId; });
+    var doneInts    = allInts.filter(function (i) { return i.status === 'terminee'; })
+                             .sort(function (a, b) { return (b.doneDate || b.dueDate || '').localeCompare(a.doneDate || a.dueDate || ''); });
+    var pendingInts = allInts.filter(function (i) { return i.status === 'planifiee' || i.status === 'en_retard'; });
+    var plans       = _pmpPlans.filter(function (p) { return p.equipmentId === eqId; });
+    var activePlans = plans.filter(function (p) { return p.status !== 'inactif'; });
+    var insights    = [];
+    var stats       = { totalDone: doneInts.length, totalPlans: activePlans.length, lateRate: null, checklistRate: null };
+
+    // 1. Plans en retard
+    var overdueNow = pendingInts.filter(function (i) { return i.status === 'en_retard'; });
+    if (overdueNow.length > 0) {
+      var oNames = overdueNow.slice(0, 2).map(function (i) { return '"' + (i.planName || 'plan') + '"'; });
+      insights.push({
+        type: 'overdue', icon: '⚠️', severity: 'high',
+        text: overdueNow.length + ' plan' + (overdueNow.length > 1 ? 's' : '') + ' en retard',
+        why: 'car ' + oNames.join(', ') + (overdueNow.length > 2 ? ' et ' + (overdueNow.length - 2) + ' autre(s)' : '') + ' dépasse' + (overdueNow.length > 1 ? 'nt' : '') + ' l\'échéance prévue. Intervention prioritaire recommandée.',
+      });
+    }
+
+    // 2. Taux de retard sur interventions passées
+    if (doneInts.length >= 3) {
+      var lateInts = doneInts.filter(function (i) { return i.doneDate && i.dueDate && i.doneDate > i.dueDate; });
+      stats.lateRate = Math.round(lateInts.length / doneInts.length * 100);
+      if (stats.lateRate > 35) {
+        insights.push({
+          type: 'late_pattern', icon: '📅', severity: 'medium',
+          text: stats.lateRate + ' % des maintenances réalisées en retard',
+          why: 'car ' + lateInts.length + ' intervention' + (lateInts.length > 1 ? 's' : '') + ' sur ' + doneInts.length + ' ont dépassé leur date prévue. Envisager de réviser la fréquence ou d\'affecter un technicien dédié.',
+        });
+      }
+    }
+
+    // 3. Taux de complétion checklist (sur les 10 dernières)
+    var chkTotal = 0, chkDone = 0;
+    doneInts.slice(0, 10).forEach(function (i) {
+      if (i.checklistItems && i.checklistItems.length) {
+        chkTotal += i.checklistItems.length;
+        chkDone  += i.checklistItems.filter(function (c) { return c.done; }).length;
+      }
+    });
+    if (chkTotal > 0) {
+      stats.checklistRate = Math.round(chkDone / chkTotal * 100);
+      if (stats.checklistRate < 75) {
+        var skipCounts = {};
+        doneInts.slice(0, 10).forEach(function (i) {
+          if (i.checklistItems) {
+            i.checklistItems.filter(function (c) { return !c.done; }).forEach(function (c) {
+              skipCounts[c.text] = (skipCounts[c.text] || 0) + 1;
+            });
+          }
+        });
+        var topSkipped = Object.keys(skipCounts)
+                               .filter(function (k) { return skipCounts[k] >= 2; })
+                               .sort(function (a, b) { return skipCounts[b] - skipCounts[a]; })
+                               .slice(0, 2);
+        insights.push({
+          type: 'checklist_low', icon: '📋', severity: 'medium',
+          text: 'Complétion checklist : ' + stats.checklistRate + ' %',
+          why: 'car ' + (chkTotal - chkDone) + ' points sur ' + chkTotal + ' n\'ont pas été cochés lors des interventions précédentes.' + (topSkipped.length ? ' Points souvent ignorés : "' + topSkipped.join('", "') + '".' : ''),
+        });
+      }
+    }
+
+    // 4. Composants récurrents dans les observations
+    var partMentions = {};
+    doneInts.forEach(function (i) {
+      if (i.observations) {
+        _aiParseObs(i.observations).parts.forEach(function (p) {
+          partMentions[p] = (partMentions[p] || 0) + 1;
+        });
+      }
+    });
+    var recParts = Object.keys(partMentions).filter(function (k) { return partMentions[k] >= 3; })
+                         .sort(function (a, b) { return partMentions[b] - partMentions[a]; }).slice(0, 3);
+    if (recParts.length > 0) {
+      insights.push({
+        type: 'recurring', icon: '🔁', severity: 'medium',
+        text: 'Composant récurrent : ' + recParts.map(function (p) { return p + ' (' + partMentions[p] + '\xd7)'; }).join(', '),
+        why: 'car ces termes apparaissent fréquemment dans les observations des techniciens. Envisager une maintenance préventive dédiée ou une inspection approfondie.',
+      });
+    }
+
+    // 5. État de santé dégradé
+    if (eq.healthState && eq.healthState !== 'bon' && eq.healthState !== 'excellent') {
+      var hs = HEALTH_STATES[eq.healthState];
+      if (hs) {
+        insights.push({
+          type: 'health_alert', icon: '🔧',
+          severity: eq.healthState === 'critique' ? 'high' : 'medium',
+          text: 'État technique : ' + hs.l,
+          why: 'car l\'état de santé a été évalué "' + hs.l + '". Une attention particulière est recommandée lors de la prochaine intervention.',
+        });
+      }
+    }
+
+    // 6. Tout va bien (pas de dérive détectée)
+    if (insights.length === 0 && doneInts.length >= 3) {
+      insights.push({
+        type: 'good_track', icon: '✅', severity: 'ok',
+        text: 'Maintenance régulière — aucune anomalie détectée',
+        why: 'car les ' + doneInts.length + ' interventions terminées sur cet équipement ne présentent pas de dérive notable. L\'équipement est bien entretenu.',
+      });
+    }
+
+    // 7. Absence d'historique
+    if (doneInts.length === 0) {
+      insights.push({
+        type: 'no_history', icon: '📊', severity: 'info',
+        text: activePlans.length > 0 ? 'Premier cycle — aucun historique disponible' : 'Aucun plan — commencez par en créer un',
+        why: 'Les recommandations de l\'IA s\'affineront après les premières interventions réalisées.',
+      });
+    }
+
+    return { insights: insights, stats: stats, eq: eq, plans: activePlans, doneInts: doneInts };
+  }
+
+  function _aiEstimate(planId) {
+    var plan = _pmpPlans.find(function (p) { return p.id === planId; });
+    if (!plan) return null;
+    var doneForPlan = _pmpInt.filter(function (i) { return i.planId === planId && i.status === 'terminee'; });
+    var actuals = doneForPlan.filter(function (i) { return i.actualDuration; })
+                             .map(function (i) { return parseFloat(i.actualDuration); })
+                             .filter(function (v) { return !isNaN(v) && v > 0; });
+    if (actuals.length >= 2) {
+      var avg = actuals.reduce(function (s, v) { return s + v; }, 0) / actuals.length;
+      return { minutes: Math.round(avg), confidence: Math.min(95, 70 + actuals.length * 5), basedOn: actuals.length };
+    }
+    if (plan.duration) {
+      var mins = _parseDurMins(plan.duration);
+      if (mins > 0) return { minutes: mins, confidence: null, basedOn: 0, fromPlan: true };
+    }
+    return null;
+  }
+
+  function _tAIPanel(eqId, planId) {
+    var analysis   = _aiAnalyzeEq(eqId);
+    var eq         = analysis.eq;
+    var urgentPlan = planId ? _pmpPlans.find(function (p) { return p.id === planId; }) : null;
+    if (!urgentPlan && analysis.plans.length) {
+      urgentPlan = analysis.plans.filter(function (p) { return p.nextDue; })
+                                 .sort(function (a, b) { return (a.nextDue || '').localeCompare(b.nextDue || ''); })[0];
+    }
+
+    var h = '<div class="ai-panel">';
+
+    // Header
+    h += '<div class="ai-panel-header">' +
+      '<span class="ai-panel-title"><span class="ai-icon-pulse"></span> Assistant IA Maintix</span>' +
+    '</div>';
+
+    // Analyse
+    h += '<div class="ai-section">';
+    h += '<div class="ai-section-lbl">Analyse de l\'équipement</div>';
+    analysis.insights.forEach(function (ins) {
+      h += '<div class="ai-insight ai-insight--' + ins.severity + '">' +
+        '<div class="ai-insight-head">' + ins.icon + ' ' + esc(ins.text) + '</div>' +
+        '<div class="ai-insight-why"><i class="fas fa-circle-info"></i> ' + esc(ins.why) + '</div>' +
+      '</div>';
+    });
+    h += '</div>';
+
+    // Statistiques
+    if (analysis.stats.totalDone > 0) {
+      h += '<div class="ai-section">';
+      h += '<div class="ai-section-lbl">Statistiques</div>';
+      h += '<div class="ai-stats-grid">';
+      h += '<div class="ai-stat"><div class="ai-stat-val">' + analysis.stats.totalDone + '</div><div class="ai-stat-lbl">réalisées</div></div>';
+      h += '<div class="ai-stat"><div class="ai-stat-val">' + analysis.stats.totalPlans + '</div><div class="ai-stat-lbl">plans actifs</div></div>';
+      if (analysis.stats.lateRate !== null) {
+        h += '<div class="ai-stat"><div class="ai-stat-val' + (analysis.stats.lateRate > 30 ? ' ai-stat-val--warn' : '') + '">' + analysis.stats.lateRate + '%</div><div class="ai-stat-lbl">retard</div></div>';
+      }
+      if (analysis.stats.checklistRate !== null) {
+        h += '<div class="ai-stat"><div class="ai-stat-val' + (analysis.stats.checklistRate < 80 ? ' ai-stat-val--warn' : '') + '">' + analysis.stats.checklistRate + '%</div><div class="ai-stat-lbl">checklist</div></div>';
+      }
+      h += '</div>';
+      h += '</div>';
+    }
+
+    // Estimation (plan le plus urgent)
+    if (urgentPlan) {
+      var est = _aiEstimate(urgentPlan.id);
+      if (est) {
+        h += '<div class="ai-section">';
+        h += '<div class="ai-section-lbl">Estimation \xb7 ' + esc(urgentPlan.name) + '</div>';
+        h += '<div class="ai-estimate-row">';
+        h += '<div class="ai-estimate-time">' + _aiFormatMins(est.minutes) + '</div>';
+        h += '<div class="ai-estimate-conf">';
+        if (est.confidence) {
+          h += 'Précision ' + est.confidence + '%<div class="ai-conf-bar"><div class="ai-conf-fill" style="width:' + est.confidence + '%"></div></div>';
+        } else {
+          h += '<span style="font-style:italic;font-size:11px">Basé sur le plan</span>';
+        }
+        h += '</div>';
+        h += '</div>';
+        if (est.basedOn >= 2) {
+          h += '<div class="ai-insight-why" style="margin-top:6px"><i class="fas fa-circle-info"></i> Calculé à partir de ' + est.basedOn + ' intervention' + (est.basedOn > 1 ? 's' : '') + ' réalisées sur ce plan.</div>';
+        }
+        h += '</div>';
+      }
+    }
+
+    // Pièces généralement nécessaires
+    if (eq) {
+      var parts = _aiPartsForEq(eq);
+      if (parts.length) {
+        var typeLbl = (EQ_TYPES[eq.type] && EQ_TYPES[eq.type].l) || eq.type || '';
+        h += '<div class="ai-section">';
+        h += '<div class="ai-section-lbl">Pièces généralement nécessaires</div>';
+        parts.forEach(function (p) {
+          h += '<div class="ai-part-row"><i class="fas fa-wrench"></i> ' + esc(p) + '</div>';
+        });
+        h += '<div class="ai-insight-why" style="margin-top:6px"><i class="fas fa-circle-info"></i> Suggestions basées sur la famille "' + esc(typeLbl) + '".</div>';
+        h += '</div>';
+      }
+    }
+
+    h += '<div class="ai-panel-footer"><i class="fas fa-database"></i> Analyse en temps réel \xb7 Données Maintix</div>';
+    h += '</div>';
+    return h;
+  }
 
   // ── EXPORT ────────────────────────────────────────────────────────────────
 
