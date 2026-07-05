@@ -762,6 +762,18 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.0.41', date: '2026-07-05', emoji: '⚙️',
+      title: 'Correctif workflow PMP — bouton Prendre sur la carte + suppression en cascade',
+      changes: [
+        'Bouton "Prendre" visible sur la carte PMP tant que la mission n\'est pas attribuée',
+        '"Ouvrir" n\'apparaît que lorsque la mission est prise par le technicien connecté',
+        'Si une mission est déjà prise par quelqu\'un d\'autre : affichage du nom, aucun bouton',
+        'Prise de mission enregistre un log automatique dans le journal : "X a pris cette maintenance\nJJ/MM/AAAA - HH:MM"',
+        'Suppression d\'un équipement PMP supprime désormais aussi les missions Firestore associées (cascade complète)',
+        'Correction : deux techniciens ne peuvent plus ouvrir la même maintenance simultanément',
+      ]
+    },
+    {
       ver: '1.0.40', date: '2026-07-04', emoji: '🔧',
       title: 'Correction critique — Validation des missions PMP toujours accessible',
       changes: [
@@ -941,11 +953,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.40";
+  window.MX.appVer = window.MX_VERSION || "1.0.41";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.40";
-  const _APP_BUILD = window.MX_BUILD   || 140;
+  const _APP_VER   = window.MX_VERSION || "1.0.41";
+  const _APP_BUILD = window.MX_BUILD   || 141;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

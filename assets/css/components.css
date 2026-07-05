@@ -12769,6 +12769,19 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   color: var(--text2);
 }
 .mm-v3-act-main--take:hover { background: var(--bg5); }
+.mm-v3-card-taken-info {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--rs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text3);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
 
 /* ── PMP progress ── */
 .mm-v3-pmp-prog {

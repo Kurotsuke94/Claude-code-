@@ -683,10 +683,23 @@
         + '<span class="mm-v3-pmp-prog-lbl">' + doneC + '/' + items.length + ' tâches</span></div>';
     }
 
-    h += '<div class="mm-v3-card-actions">'
-      + '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + e(t.missionId || t.id) + '\')">'
-      + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>'
-      + '</div></div></div>';
+    var cu      = MX.state.currentUser;
+    var curName = cu ? cu.name : '';
+    var mid     = e(t.missionId || t.id);
+    h += '<div class="mm-v3-card-actions">';
+    if (t.done) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--done" disabled>'
+        + '<i class="fas fa-circle-check"></i><span>Terminée</span></button>';
+    } else if (!t.takenBy) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM._takePmpMission(\'' + mid + '\')">'
+        + '<i class="fas fa-right-to-bracket"></i><span>Prendre</span></button>';
+    } else if (t.takenBy === curName) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
+        + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>';
+    } else {
+      h += '<span class="mm-v3-card-taken-info"><i class="fas fa-user-gear"></i> ' + e(t.takenBy) + '</span>';
+    }
+    h += '</div></div></div>';
     return h;
   }
 
@@ -1312,6 +1325,30 @@
   // LIFECYCLE — RELEASE / CONFIRM / VALIDATE
   // ══════════════════════════════════════════════
 
+  function _takePmpMission(missionId) {
+    var cu = MX.state.currentUser;
+    if (!cu) { MX.toast('Non connecté', true); return; }
+    var m = _allMissions.find(function (x) { return x.id === missionId; });
+    if (!m) { MX.toast('Mission introuvable', true); return; }
+    if (m.takenBy) { MX.toast('Mission déjà prise par ' + m.takenBy, true); return; }
+    var now  = new Date();
+    var dd   = String(now.getDate()).padStart(2, '0');
+    var mo   = String(now.getMonth() + 1).padStart(2, '0');
+    var yyyy = now.getFullYear();
+    var hh   = String(now.getHours()).padStart(2, '0');
+    var min  = String(now.getMinutes()).padStart(2, '0');
+    var logText = cu.name + ' a pris cette maintenance\n'
+      + dd + '/' + mo + '/' + yyyy + ' - ' + hh + ':' + min;
+    var logEntry = { text: logText, by: cu.name, ts: FV.serverTimestamp(), isSystemLog: true };
+    db.collection('missions').doc(missionId).update({
+      takenBy: cu.name,
+      takenAt: FV.serverTimestamp(),
+      pmpComments: FV.arrayUnion(logEntry),
+    }).then(function () {
+      MX.toast('Maintenance prise ✓');
+    }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
   function _releasePmpMission(missionId) {
     document.getElementById('m-title').textContent = 'Rendre la maintenance';
     document.getElementById('m-sub').innerHTML = '<p style="margin:0;color:var(--text2)">La maintenance sera remise disponible pour un autre technicien.<br>Vos commentaires, photos et pièces sont conservés.</p>';
@@ -1545,6 +1582,7 @@
     _openInterventionDetail: _openInterventionDetail, _closeInterventionDetail: _closeInterventionDetail,
     _triggerPmpPhoto: _triggerPmpPhoto, _onPmpPh: _onPmpPh, _viewPhoto: _viewPhoto,
     _toggleCheck: _toggleCheck,
+    _takePmpMission: _takePmpMission,
     _releasePmpMission: _releasePmpMission,
     _doReleasePmp: _doReleasePmp, _confirmTerminePmp: _confirmTerminePmp,
     _addPmpComment: _addPmpComment, _addIntComment: _addIntComment,

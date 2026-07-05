@@ -1930,10 +1930,20 @@
       [
         { label: 'Supprimer', cls: 'danger', fn: async function () {
           try {
+            var intList = _pmpInt.filter(function (i) { return i.equipmentId === id; });
+            var intIds  = intList.map(function (i) { return i.id; });
+            for (var j = 0; j < intIds.length; j += 30) {
+              var chunk = intIds.slice(j, j + 30);
+              var mSnap = await db.collection('missions').where('pmpIntId', 'in', chunk).get();
+              if (!mSnap.empty) {
+                var mBatch = db.batch();
+                mSnap.docs.forEach(function (d) { mBatch.delete(d.ref); });
+                await mBatch.commit();
+              }
+            }
             var batch = db.batch();
             batch.delete(PMP_DB.eq().doc(id));
-            _pmpInt.filter(function (i) { return i.equipmentId === id; })
-                   .forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
+            intList.forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
             _pmpPlans.filter(function (p) { return p.equipmentId === id; })
                      .forEach(function (p) { batch.delete(PMP_DB.plans().doc(p.id)); });
             await batch.commit();
