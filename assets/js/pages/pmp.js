@@ -1058,12 +1058,13 @@
             updatedAt:         FV.serverTimestamp(),
           });
           var missionData = {
-            text:       '🛠️ PMP — ' + (i.equipmentName || ''),
-            dayId:      i.dueDate,
-            assignedTo: tech,
-            priority:   pri === 'critique' ? 'critique' : pri === 'haute' ? 'haute' : 'normale',
-            category:   'pmp',
-            isPmp:      true,
+            text:         '🛠️ PMP — ' + (i.equipmentName || ''),
+            dayId:        i.dueDate,
+            assignedTo:   tech,
+            priority:     pri === 'critique' ? 'critique' : pri === 'haute' ? 'haute' : 'normale',
+            category:     'pmp',
+            isPmp:        true,
+            missionType:  'pmp',
             pmpIntId:   intId,
             done:       false,
             pmpData: {
@@ -2071,40 +2072,97 @@
     var plan = _pmpPlans.find(function (p) { return p.id === planId; });
     if (!plan) { MX.toast('Plan introuvable', true); return; }
     var eq = _pmpEq.find(function (e) { return e.id === plan.equipmentId; });
-    MX.showModal('Activer maintenant ?',
-      '<p style="margin:0;color:var(--text2);font-size:13px">Crée une intervention immédiatement pour <strong>' + esc(eq ? eq.name : 'cet équipement') + '</strong>, avant la date prévue.</p>',
-      [
-        { label: 'Activer', cls: 'confirm', fn: function () {
+    var eqName = eq ? eq.name : (plan.equipmentName || '');
+
+    // BUG 4 — Protection doublons : vérifier si une intervention active existe déjà
+    var alreadyActive = _pmpInt.filter(function (i) {
+      return i.planId === planId && i.status !== 'terminee' && i.status !== 'done';
+    });
+    if (alreadyActive.length) {
+      MX.showModal({
+        title: 'Mission déjà en cours',
+        sub: '<p style="margin:0;color:var(--text2);font-size:13px">Une mission est déjà active pour <strong>' + esc(eqName) + '</strong>. Elle doit être terminée avant d\'en créer une nouvelle.</p>',
+        actions: [{ label: 'OK', cls: 'cancel' }],
+      });
+      return;
+    }
+
+    // BUG 1 — Utiliser object-style showModal pour que le HTML soit rendu correctement
+    MX.showModal({
+      title: 'Activer maintenant ?',
+      sub: '<p style="margin:0;color:var(--text2);font-size:13px">'
+        + 'Une mission PMP sera créée immédiatement pour <strong>' + esc(eqName) + '</strong>, '
+        + 'disponible pour tous les techniciens. Le premier à cliquer "Prendre" en deviendra responsable.'
+        + '</p>',
+      actions: [
+        { label: '<i class="fas fa-bolt"></i> Activer', cls: 'confirm', fn: async function () {
           var today = new Date().toISOString().slice(0, 10);
+          var checklistItems = plan.checklistItems || [];
+          if (!checklistItems.length && eq && eq.templateId) {
+            var tpl = _pmpTpl.find(function (t) { return t.id === eq.templateId; });
+            if (tpl && tpl.items) checklistItems = tpl.items.map(function (it) { return { text: it.text || it, done: false }; });
+          }
+          var prio = plan.criticite || (eq && eq.criticite) || 'normale';
           var intData = {
-            planId:        planId,
-            equipmentId:   plan.equipmentId,
-            equipmentName: eq ? eq.name : '',
-            type:          plan.type || eq && eq.type || '',
-            frequency:     plan.frequency || eq && eq.frequency || 30,
-            duration:      plan.duration || '',
-            technician:    plan.technician || '',
-            zone:          plan.zone || eq && eq.zone || '',
-            subZone:       plan.subZone || eq && eq.subZone || '',
-            checklistItems:    plan.checklistItems || [],
-            technicalNotes:    plan.technicalNotes || '',
+            planId:            planId,
+            equipmentId:       plan.equipmentId,
+            equipmentName:     eqName,
+            type:              plan.type || (eq && eq.type) || '',
+            frequency:         plan.frequency || (eq && eq.frequency) || 30,
+            duration:          plan.duration || '',
+            zone:              plan.zone || (eq && eq.zone) || '',
+            subZone:           plan.subZone || (eq && eq.subZone) || '',
+            checklistItems:    checklistItems,
+            technicalNotes:    plan.technicalNotes || (eq && eq.technicalNotes) || '',
             requiredParts:     plan.requiredParts || [],
             estimatedDuration: plan.duration || '',
-            dueDate:    today,
-            status:     'planifiee',
-            source:     'activation_anticipee',
-            createdAt:  FV.serverTimestamp(),
-            updatedAt:  FV.serverTimestamp(),
+            criticite:         prio,
+            dueDate:           today,
+            status:            'planifiee',
+            source:            'activation_anticipee',
+            createdAt:         FV.serverTimestamp(),
+            updatedAt:         FV.serverTimestamp(),
           };
-          PMP_DB.int().add(intData).then(function (ref) {
-            MX.toast('Intervention créée ✓');
-            _pmpInt.push(Object.assign({ id: ref.id }, intData));
+          try {
+            // Créer l'intervention PMP
+            var intRef = await PMP_DB.int().add(intData);
+            // BUG 2/3 — Créer la mission avec assignedTo=null pour visibilité universelle
+            var missionData = {
+              text:         '🛠️ PMP — ' + eqName,
+              dayId:        today,
+              assignedTo:   null,
+              priority:     prio === 'critique' ? 'critique' : prio === 'haute' ? 'haute' : 'normale',
+              category:     'pmp',
+              isPmp:        true,
+              missionType:  'pmp',
+              planId:       planId,
+              pmpIntId:     intRef.id,
+              done:         false,
+              pmpData: {
+                equipmentId:       plan.equipmentId,
+                equipmentName:     eqName,
+                type:              plan.type || (eq && eq.type) || '',
+                zone:              plan.zone || (eq && eq.zone) || '',
+                subZone:           plan.subZone || (eq && eq.subZone) || '',
+                dueDate:           today,
+                criticite:         prio,
+                estimatedDuration: plan.duration || '',
+                technicalNotes:    plan.technicalNotes || (eq && eq.technicalNotes) || '',
+                checklistItems:    checklistItems,
+              },
+              createdAt: FV.serverTimestamp(),
+              createdBy:  _author(),
+            };
+            var mRef = await db.collection('missions').add(missionData);
+            await PMP_DB.int().doc(intRef.id).update({ missionId: mRef.id });
+            _pmpInt.push(Object.assign({ id: intRef.id, missionId: mRef.id }, intData));
+            MX.toast('Mission créée — disponible pour tous les techniciens ✓');
             _rerender();
-          }).catch(function (err) { MX.toast('Erreur : ' + err.message, true); });
+          } catch (err) { MX.toast('Erreur : ' + err.message, true); }
         }},
         { label: 'Annuler', cls: 'cancel' },
-      ]
-    );
+      ],
+    });
   }
 
   function _planForm(planId, eqId) {

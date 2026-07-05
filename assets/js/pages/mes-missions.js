@@ -14,10 +14,13 @@
   var _upcomingRange  = 7;        // 7 | 15 | 30
   var _lastConfettiAt = 0;
 
-  // ── Mission state (single Firestore listener) ──
-  var _allMissions    = [];
-  var _missionsLoaded = false;
-  var _missionsUnsub  = null;
+  // ── Mission state (dual Firestore listener) ──
+  var _allMissions         = []; // merged result
+  var _assignedMissions    = []; // where assignedTo == cu.name
+  var _unassignedPmpMissions = []; // where assignedTo == null AND isPmp
+  var _missionsLoaded      = false;
+  var _missionsUnsub       = null;
+  var _pmpMissionsUnsub    = null;
 
   // ── Photo state ──
   var _pendingPmpPh = null;
@@ -79,24 +82,50 @@
   // FIRESTORE LISTENER (single, unified)
   // ══════════════════════════════════════════════
 
+  function _mergeAllMissions() {
+    var seen = {};
+    var result = [];
+    _assignedMissions.forEach(function (m) { seen[m.id] = true; result.push(m); });
+    _unassignedPmpMissions.forEach(function (m) { if (!seen[m.id]) { seen[m.id] = true; result.push(m); } });
+    _allMissions = result;
+  }
+
+  function _rerenderIfActive() {
+    if (!MX.Auth.canSeeAll() && MX.state.currentUser) {
+      var el = document.getElementById('main-content');
+      if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
+        el.innerHTML = _renderTech();
+      }
+    }
+  }
+
   function _loadMissions() {
     if (_missionsLoaded) return;
     var cu = MX.state.currentUser;
     if (!cu || !cu.name) return;
     _missionsLoaded = true;
+
+    // Listener 1: missions explicitly assigned to this tech
     _missionsUnsub = db.collection('missions')
       .where('assignedTo', '==', cu.name)
       .onSnapshot(function (snap) {
-        _allMissions = snap.docs.map(function (d) {
-          return Object.assign({ id: d.id }, d.data());
-        });
-        if (!MX.Auth.canSeeAll() && MX.state.currentUser) {
-          var el = document.getElementById('main-content');
-          if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
-            el.innerHTML = _renderTech();
-          }
-        }
+        _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        _mergeAllMissions();
+        _rerenderIfActive();
       }, function (err) { console.warn('[MM] missions listener:', err.message); });
+
+    // Listener 2: unassigned PMP missions visible to all techs
+    _pmpMissionsUnsub = db.collection('missions')
+      .where('assignedTo', '==', null)
+      .onSnapshot(function (snap) {
+        _unassignedPmpMissions = snap.docs.map(function (d) {
+          return Object.assign({ id: d.id }, d.data());
+        }).filter(function (m) {
+          return !m.done && (m.isPmp || m.missionType === 'pmp' || m.category === 'pmp');
+        });
+        _mergeAllMissions();
+        _rerenderIfActive();
+      }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); });
   }
 
   // ══════════════════════════════════════════════
@@ -557,7 +586,7 @@
         });
       }
       var upcomingDue2 = _addDaysMM(todayISO, _upcomingRange);
-      var todayPmp     = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return !pd.dueDate || pd.dueDate === todayISO; });
+      var todayPmp     = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (!pd.dueDate || pd.dueDate === todayISO) && t.takenBy !== curName2; });
       var upcomingPmp  = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return pd.dueDate && pd.dueDate > todayISO && pd.dueDate <= upcomingDue2; });
       var inProgPmp    = pmpAllTasks.filter(function (t) { return t.takenBy === curName2; });
       var urgentPmp    = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (t.priority === 'haute' || t.priority === 'critique') || (pd.dueDate && pd.dueDate < todayISO); });

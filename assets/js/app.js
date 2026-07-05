@@ -776,6 +776,18 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.01', date: '2026-07-05', emoji: '🔧',
+      title: 'Correctifs workflow PMP — popup, visibilité, doublons',
+      changes: [
+        'BUG 1 — Popup "Créer maintenant" : HTML rendu correctement via object-style showModal',
+        'BUG 2/3 — Mission créée avec assignedTo=null → visible par TOUS les techniciens',
+        'BUG 3 — Double listener Firestore : missions assignées + PMP disponibles sans affectation',
+        'BUG 4 — Protection doublons : bloque la création si une mission active existe déjà pour ce plan',
+        "Onglet Aujourd'hui : n'affiche plus les missions déjà prises par le tech connecté",
+        'missionType="pmp" ajouté systématiquement sur tous les docs missions PMP créés',
+      ]
+    },
+    {
       ver: '1.1.00', date: '2026-07-05', emoji: '🛠️',
       title: 'Refonte module PMP — vue technicien par sous-onglets + activation anticipée',
       changes: [
@@ -981,11 +993,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.00";
+  window.MX.appVer = window.MX_VERSION || "1.1.01";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.00";
-  const _APP_BUILD = window.MX_BUILD   || 200;
+  const _APP_VER   = window.MX_VERSION || "1.1.01";
+  const _APP_BUILD = window.MX_BUILD   || 201;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
