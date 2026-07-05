@@ -12769,6 +12769,27 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   color: var(--text2);
 }
 .mm-v3-act-main--take:hover { background: var(--bg5); }
+.mm-v3-act-main--release {
+  background: rgba(249,115,22,.1);
+  border-color: rgba(249,115,22,.3);
+  color: #f97316;
+}
+.mm-v3-act-main--release:hover { background: rgba(249,115,22,.18); }
+.mm-v3-act-sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: var(--rs);
+  border: 1px solid var(--border1);
+  background: var(--bg3);
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+}
+.mm-v3-act-sec:hover { background: var(--bg4); color: var(--text2); }
 .mm-v3-card-taken-info {
   margin-left: auto;
   display: inline-flex;

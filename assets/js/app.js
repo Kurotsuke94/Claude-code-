@@ -776,6 +776,16 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.03', date: '2026-07-05', emoji: '🔧',
+      title: 'Bouton "Prendre" PMP — diagnostic et correction complète',
+      changes: [
+        'FIX — _takePmpMission met à jour assignedTo=cu.name (+ takenBy) : la mission quitte Listener 2 et entre dans Listener 1 proprement',
+        'Logs console complets sur toute la chaîne : clic → Firestore → listeners → re-render',
+        'Carte "En cours" : boutons [Rendre] + [Valider] directement sur la carte (plus besoin d\'ouvrir le détail)',
+        'CSS : .mm-v3-act-main--release (orange) + .mm-v3-act-sec (secondaire gris)',
+      ]
+    },
+    {
       ver: '1.1.02', date: '2026-07-05', emoji: '🔍',
       title: 'Audit PMP — cause racine du filtre dayId identifiée et corrigée',
       changes: [
@@ -1003,11 +1013,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.02";
+  window.MX.appVer = window.MX_VERSION || "1.1.03";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.02";
-  const _APP_BUILD = window.MX_BUILD   || 202;
+  const _APP_VER   = window.MX_VERSION || "1.1.03";
+  const _APP_BUILD = window.MX_BUILD   || 203;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

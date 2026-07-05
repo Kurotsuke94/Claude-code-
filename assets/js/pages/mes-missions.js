@@ -112,8 +112,8 @@
       .where('assignedTo', '==', cu.name)
       .onSnapshot(function (snap) {
         _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        console.log('[MM] Listener 1 snap →', _assignedMissions.length, 'missions pour', cu.name,
-          _assignedMissions.map(function(m){ return {id:m.id, type:m.missionType||m.category, dayId:m.dayId, done:m.done}; }));
+        console.log('[PMP] Listener 1 reçu →', _assignedMissions.length, 'missions assignedTo =', cu.name,
+          _assignedMissions.map(function(m){ return {id:m.id, type:m.missionType||m.category, assignedTo:m.assignedTo, takenBy:m.takenBy, done:m.done}; }));
         _mergeAllMissions();
         _rerenderIfActive();
       }, function (err) { console.warn('[MM] missions listener:', err.message); });
@@ -127,7 +127,8 @@
         _unassignedPmpMissions = raw.filter(function (m) {
           return !m.done && (m.isPmp || m.missionType === 'pmp' || m.category === 'pmp');
         });
-        console.log('[MM] Listener 2 snap → raw:', raw.length, '| PMP filtrés:', _unassignedPmpMissions.length);
+        console.log('[PMP] Listener 2 reçu → status:', snap.docChanges().map(function(c){ return {type:c.type, id:c.doc.id, assignedTo:c.doc.data().assignedTo, takenBy:c.doc.data().takenBy}; }),
+          '| raw total:', raw.length, '| PMP non-assignés:', _unassignedPmpMissions.length);
         _mergeAllMissions();
         _rerenderIfActive();
       }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); });
@@ -845,8 +846,12 @@
         + '<span class="mm-v3-pmp-prog-lbl">' + doneC + '/' + items.length + ' tâches — ' + pmpPct + '%</span></div>';
     }
     h += '<div class="mm-v3-card-actions">'
-      + '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
-      + '<i class="fas fa-folder-open"></i><span>📂 Ouvrir</span></button>'
+      + '<button class="mm-v3-act-sec" onclick="MX.MM._openPmpDetail(\'' + mid + '\')" title="Détail">'
+      + '<i class="fas fa-folder-open"></i><span>Détail</span></button>'
+      + '<button class="mm-v3-act-main mm-v3-act-main--release" onclick="MX.MM._releasePmpMission(\'' + mid + '\')">'
+      + '<i class="fas fa-arrow-rotate-left"></i><span>Rendre</span></button>'
+      + '<button class="mm-v3-act-main mm-v3-act-main--validate" onclick="MX.MM._confirmTerminePmp(\'' + mid + '\')">'
+      + '<i class="fas fa-circle-check"></i><span>Valider</span></button>'
       + '</div></div></div>';
     return h;
   }
@@ -1649,9 +1654,14 @@
   // ══════════════════════════════════════════════
 
   function _takePmpMission(missionId) {
+    console.log('[PMP] Bouton Prendre cliqué', missionId);
     var cu = MX.state.currentUser;
-    if (!cu) { MX.toast('Non connecté', true); return; }
+    if (!cu) { console.error('[PMP] Erreur: currentUser null'); MX.toast('Non connecté', true); return; }
     var m = _allMissions.find(function (x) { return x.id === missionId; });
+    console.log('[PMP] Mission trouvée:', m ? {
+      id: m.id, assignedTo: m.assignedTo, takenBy: m.takenBy, done: m.done, missionType: m.missionType
+    } : 'INTROUVABLE dans _allMissions (total: ' + _allMissions.length + ')');
+    console.log('[PMP] Technicien connecté:', cu.name, '| uid:', cu.uid || cu.id || '?');
     if (!m) { MX.toast('Mission introuvable', true); return; }
     if (m.takenBy) { MX.toast('Mission déjà prise par ' + m.takenBy, true); return; }
     var now  = new Date();
@@ -1663,13 +1673,21 @@
     var logText = cu.name + ' a pris cette maintenance\n'
       + dd + '/' + mo + '/' + yyyy + ' - ' + hh + ':' + min;
     var logEntry = { text: logText, by: cu.name, ts: FV.serverTimestamp(), isSystemLog: true };
+    // Mettre assignedTo = cu.name en plus de takenBy :
+    // → la mission quitte Listener 2 (assignedTo==null) et entre dans Listener 1 (assignedTo==cu.name)
+    // → les deux listeners se déclenchent proprement, re-render automatique via Firestore temps réel
     db.collection('missions').doc(missionId).update({
-      takenBy: cu.name,
-      takenAt: FV.serverTimestamp(),
+      assignedTo:  cu.name,
+      takenBy:     cu.name,
+      takenAt:     FV.serverTimestamp(),
       pmpComments: FV.arrayUnion(logEntry),
     }).then(function () {
+      console.log('[PMP] Update Firestore OK — assignedTo + takenBy =', cu.name);
       MX.toast('Maintenance prise ✓');
-    }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    }).catch(function (err) {
+      console.error('[PMP] Erreur Firestore update:', err.message, err);
+      MX.toast('Erreur: ' + err.message, true);
+    });
   }
 
   function _releasePmpMission(missionId) {
