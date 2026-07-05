@@ -15210,6 +15210,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmp-tech-card-badge--crit { background: rgba(239,68,68,.12); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
 .pmp-tech-card-badge--urg  { background: rgba(249,115,22,.12); color: #f97316; border: 1px solid rgba(249,115,22,.3); }
 .pmp-tech-card-badge--inprog { background: rgba(249,115,22,.12); color: #f97316; border: 1px solid rgba(249,115,22,.3); }
+.pmp-beyond-label { padding: 6px 12px; font-size: 12px; color: var(--text3); font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.pmp-beyond-label::before { content: ''; flex: 1; height: 1px; background: var(--border1); }
+.pmp-beyond-label::after  { content: ''; flex: 1; height: 1px; background: var(--border1); }
 
 /* AI assistance block */
 .pmp-ai-block { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }

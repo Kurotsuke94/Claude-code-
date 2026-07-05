@@ -776,6 +776,21 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.05', date: '2026-07-05', emoji: '🗂️',
+      title: 'Refonte classement PMP — aucune mission invisible',
+      changes: [
+        '_normalizeMissionDate() : convertit Timestamp Firestore, YYYYMMDD, ISO, datetime → YYYY-MM-DD uniforme',
+        '_isPmpRunning / _isPmpLate / _isPmpToday / _isPmpFuture : 4 fonctions, 1 responsabilité chacune',
+        '_getPmpCategory() : classement déterministe avec fallback "Aujourd\'hui" + console.warn si aucune règle',
+        'Classification : priorité En cours > Urgent > Aujourd\'hui > À venir — chaque mission dans exactement 1 catégorie',
+        'À venir : toutes les missions futures incluses (plus de filtre range qui excluait les PMP au-delà de 7j)',
+        'Filtre range 7/15/30 j devient filtre d\'affichage uniquement — bouton "Tout" ajouté',
+        'Missions hors range affichées sous un séparateur "X PMP au-delà de N jours"',
+        'Debug bloc : tableau par mission (id, dueDate normalisé, raw, today/future/running/late, catégorie finale)',
+        'Badge "Diagnostic" sur les missions fallback pour identification immédiate',
+      ]
+    },
+    {
       ver: '1.1.04', date: '2026-07-05', emoji: '🐛',
       title: 'Bouton "Prendre" — cause racine : serverTimestamp interdit dans arrayUnion',
       changes: [
@@ -1025,11 +1040,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.04";
+  window.MX.appVer = window.MX_VERSION || "1.1.05";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.04";
-  const _APP_BUILD = window.MX_BUILD   || 204;
+  const _APP_VER   = window.MX_VERSION || "1.1.05";
+  const _APP_BUILD = window.MX_BUILD   || 205;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

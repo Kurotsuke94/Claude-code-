@@ -283,6 +283,69 @@
   }
 
   // ══════════════════════════════════════════════
+  // PMP CLASSIFICATION HELPERS (v1.1.05)
+  // ══════════════════════════════════════════════
+
+  // Converts any date representation to YYYY-MM-DD string.
+  // Handles: Firestore Timestamp, ISO string, dayId (YYYYMMDD), ISO datetime.
+  function _normalizeMissionDate(t) {
+    var raw = '';
+    var pd = t.pmpData || {};
+    if (pd.dueDate) raw = pd.dueDate;
+    else if (t.dueDate) raw = t.dueDate;
+    else if (t.dayId)   raw = t.dayId;
+    if (!raw) return '';
+    // Firestore Timestamp object ({seconds, nanoseconds} or .toDate())
+    if (typeof raw === 'object') {
+      if (typeof raw.toDate === 'function') return raw.toDate().toISOString().slice(0, 10);
+      if (raw.seconds !== undefined) return new Date(raw.seconds * 1000).toISOString().slice(0, 10);
+      return '';
+    }
+    var s = String(raw);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;              // YYYY-MM-DD
+    if (/^\d{8}$/.test(s)) return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8); // YYYYMMDD
+    if (s.length > 10 && s[10] === 'T') return s.slice(0, 10); // ISO datetime
+    return s;
+  }
+
+  // En cours — takenBy == me, indépendant de la date
+  function _isPmpRunning(t, curName) {
+    if (t.done) return false;
+    return t.takenBy === curName;
+  }
+  // Urgent — dueDate < today, pas terminée, pas prise par moi
+  function _isPmpLate(t, todayISO, curName) {
+    if (t.done || _isPmpRunning(t, curName)) return false;
+    var d = _normalizeMissionDate(t);
+    return d !== '' && d < todayISO;
+  }
+  // Aujourd'hui — dueDate == today OU pas de date, pas terminée, pas prise par moi
+  function _isPmpToday(t, todayISO, curName) {
+    if (t.done || _isPmpRunning(t, curName)) return false;
+    var d = _normalizeMissionDate(t);
+    return d === todayISO || d === '';
+  }
+  // À venir — dueDate > today, pas terminée, pas prise par moi
+  function _isPmpFuture(t, todayISO, curName) {
+    if (t.done || _isPmpRunning(t, curName)) return false;
+    var d = _normalizeMissionDate(t);
+    return d !== '' && d > todayISO;
+  }
+  // Renvoie la catégorie finale ; fallback 'today' si aucune règle ne correspond
+  function _getPmpCategory(t, todayISO, curName) {
+    if (_isPmpRunning(t, curName)) return 'inprogress';
+    if (_isPmpLate(t, todayISO, curName))   return 'urgent';
+    if (_isPmpToday(t, todayISO, curName))  return 'today';
+    if (_isPmpFuture(t, todayISO, curName)) return 'upcoming';
+    // Fallback : une mission ne doit jamais être invisible
+    console.warn('[PMP] Mission non classée — fallback vers "Aujourd\'hui"', {
+      id: t.id, text: t.text, dueDate: _normalizeMissionDate(t),
+      takenBy: t.takenBy, done: t.done
+    });
+    return 'today';
+  }
+
+  // ══════════════════════════════════════════════
   // RENDER — TECHNICIAN VIEW
   // ══════════════════════════════════════════════
 
@@ -584,15 +647,9 @@
       }
 
     } else if (_activeTab === 'pmp') {
-      // ── Debug counters ─────────────────────────────
-      var _dbgFirestore = _allMissions.filter(function (m) { return m.isPmp || m.missionType === 'pmp' || m.category === 'pmp'; }).length;
-      var _dbgAllTasks  = allTasks.filter(function (t) { return t.missionType === 'pmp'; }).length;
-      var _dbgMyMissions = myMissions.filter(function (t) { return t.missionType === 'pmp'; }).length;
-      console.log('[MM][PMP-DEBUG] Firestore PMP:', _dbgFirestore, '| allTasks PMP:', _dbgAllTasks, '| myMissions PMP:', _dbgMyMissions);
-      // ─────────────────────────────────────────────
-
-      var pmpAllTasks = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; });
+      // ── Classification PMP (v1.1.05) ───────────────
       var curName2    = cu ? cu.name : '';
+      var pmpAllTasks = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; });
       var q2 = _searchQuery ? _searchQuery.toLowerCase() : '';
       if (q2) {
         pmpAllTasks = pmpAllTasks.filter(function (t) {
@@ -601,15 +658,46 @@
             || (pd.zone || t.zone || '').toLowerCase().indexOf(q2) !== -1;
         });
       }
-      var upcomingDue2 = _addDaysMM(todayISO, _upcomingRange);
-      var todayPmp     = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (!pd.dueDate || pd.dueDate === todayISO) && t.takenBy !== curName2; });
-      var upcomingPmp  = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return pd.dueDate && pd.dueDate > todayISO && pd.dueDate <= upcomingDue2; });
-      var inProgPmp    = pmpAllTasks.filter(function (t) { return t.takenBy === curName2; });
-      var urgentPmp    = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (t.priority === 'haute' || t.priority === 'critique') || (pd.dueDate && pd.dueDate < todayISO); });
 
-      console.log('[MM][PMP-DEBUG] pmpAllTasks (non-done):', pmpAllTasks.length, '| today:', todayPmp.length, '| upcoming:', upcomingPmp.length, '| inprog:', inProgPmp.length, '| urgent:', urgentPmp.length);
+      // Counters for debug block (before classification)
+      var _dbgFirestore  = _allMissions.filter(function (m) { return m.isPmp || m.missionType === 'pmp' || m.category === 'pmp'; }).length;
+      var _dbgAllTasks   = allTasks.filter(function (t) { return t.missionType === 'pmp'; }).length;
+      var _dbgMyMissions = myMissions.filter(function (t) { return t.missionType === 'pmp'; }).length;
 
-      // Visual debug block (collapsible)
+      // Classify each mission into exactly one category
+      var todayPmp    = [];
+      var upcomingPmp = [];
+      var inProgPmp   = [];
+      var urgentPmp   = [];
+      var fallbackPmp = []; // should always stay empty
+
+      pmpAllTasks.forEach(function (t) {
+        var d       = _normalizeMissionDate(t);
+        var running = _isPmpRunning(t, curName2);
+        var late    = _isPmpLate(t, todayISO, curName2);
+        var todayM  = _isPmpToday(t, todayISO, curName2);
+        var future  = _isPmpFuture(t, todayISO, curName2);
+        var cat     = _getPmpCategory(t, todayISO, curName2);
+        var isFallback = (!running && !late && !todayM && !future);
+
+        console.log('[PMP] classement —', (t.text || t.id), {
+          id: t.id, dueDate: d, rawPmpDueDate: (t.pmpData||{}).dueDate,
+          today: todayM, future: future, running: running, late: late,
+          done: t.done, assignedTo: (t.assignedTo||null), takenBy: (t.takenBy||null),
+          categorie: cat + (isFallback ? ' (FALLBACK)' : '')
+        });
+
+        if (!running && !late && !todayM && !future) {
+          console.warn('[PMP] Mission non classée', t);
+        }
+
+        if (cat === 'inprogress') inProgPmp.push(t);
+        else if (cat === 'urgent')    urgentPmp.push(t);
+        else if (cat === 'upcoming')  upcomingPmp.push(t);
+        else { todayPmp.push(t); if (isFallback) fallbackPmp.push(t.id); }
+      });
+
+      // Visual debug block
       h += '<details class="pmp-debug-block" style="margin:8px 12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border1);border-radius:8px;font-size:11px;color:var(--text3);font-family:monospace;">'
         + '<summary style="cursor:pointer;color:var(--text2);font-weight:600;font-size:12px;">🔍 Debug flux PMP</summary>'
         + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;">'
@@ -621,7 +709,33 @@
         + '<span>À venir :</span><strong>' + upcomingPmp.length + '</strong>'
         + '<span>En cours :</span><strong>' + inProgPmp.length + '</strong>'
         + '<span>Urgent :</span><strong>' + urgentPmp.length + '</strong>'
-        + '</div></details>';
+        + '</div>';
+      // Per-mission diagnostic table
+      if (pmpAllTasks.length > 0) {
+        h += '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">';
+        pmpAllTasks.forEach(function (t) {
+          var d       = _normalizeMissionDate(t);
+          var running = _isPmpRunning(t, curName2);
+          var late    = _isPmpLate(t, todayISO, curName2);
+          var todayM  = _isPmpToday(t, todayISO, curName2);
+          var future  = _isPmpFuture(t, todayISO, curName2);
+          var cat     = _getPmpCategory(t, todayISO, curName2);
+          var isFb    = (!running && !late && !todayM && !future);
+          var catLabel = cat === 'today' ? 'Aujourd\'hui' + (isFb ? ' ⚠️ FALLBACK' : '')
+            : cat === 'upcoming' ? 'À venir' : cat === 'inprogress' ? 'En cours' : 'Urgent';
+          h += '<div style="margin-bottom:6px;padding:4px 0;border-bottom:1px solid var(--border)">'
+            + '<strong>' + MX.esc(t.text || t.id) + '</strong><br>'
+            + 'id : ' + MX.esc(t.id) + '<br>'
+            + 'dueDate normalisé : ' + (d || '<em>vide</em>') + '<br>'
+            + 'rawPmpData.dueDate : ' + MX.esc(String((t.pmpData||{}).dueDate||'')) + '<br>'
+            + 'today:' + todayM + ' future:' + future + ' running:' + running + ' late:' + late + '<br>'
+            + 'done:' + t.done + ' assignedTo:' + (t.assignedTo||'null') + ' takenBy:' + (t.takenBy||'null') + '<br>'
+            + '<strong style="color:var(--cyan)">→ catégorie : ' + catLabel + '</strong>'
+            + '</div>';
+        });
+        h += '</div>';
+      }
+      h += '</details>';
 
       h += _pmpSubTabBar({ today: todayPmp.length, upcoming: upcomingPmp.length, inprogress: inProgPmp.length, urgent: urgentPmp.length });
 
@@ -632,24 +746,42 @@
             + '<div class="mm-v3-empty-sub">Pas de PMP prévu pour aujourd\'hui.</div></div>';
         } else {
           h += '<div class="mm-v3-cards">';
-          todayPmp.forEach(function (t) { h += _pmpCardToday(t); });
+          todayPmp.forEach(function (t) { h += _pmpCardToday(t, fallbackPmp); });
           h += '</div>';
         }
       } else if (_pmpSubTab === 'upcoming') {
+        // Range = filtre d'affichage uniquement — toutes les missions futures sont classées ici
+        var upcomingDueDisplay = _addDaysMM(todayISO, _upcomingRange);
+        var upcomingInRange    = upcomingPmp.filter(function (t) { return _normalizeMissionDate(t) <= upcomingDueDisplay; });
+        var upcomingBeyond     = upcomingPmp.filter(function (t) { return _normalizeMissionDate(t) > upcomingDueDisplay; });
         h += '<div class="pmp-upcoming-range">';
         [7, 15, 30].forEach(function (n) {
           h += '<button class="pmp-upcoming-range-btn' + (_upcomingRange === n ? ' pmp-upcoming-range-btn--active' : '') + '"'
-            + ' onclick="MX.MM.setUpcomingRange(' + n + ')">' + n + ' jours</button>';
+            + ' onclick="MX.MM.setUpcomingRange(' + n + ')">' + n + ' j</button>';
         });
+        h += '<button class="pmp-upcoming-range-btn' + (_upcomingRange === 365 ? ' pmp-upcoming-range-btn--active' : '') + '"'
+          + ' onclick="MX.MM.setUpcomingRange(365)">Tout</button>';
         h += '</div>';
         if (upcomingPmp.length === 0) {
           h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📅</div>'
             + '<div class="mm-v3-empty-ttl">Aucune maintenance à venir</div>'
-            + '<div class="mm-v3-empty-sub">Pas de PMP dans les ' + _upcomingRange + ' prochains jours.</div></div>';
+            + '<div class="mm-v3-empty-sub">Aucun PMP planifié dans le futur.</div></div>';
         } else {
-          h += '<div class="mm-v3-cards">';
-          upcomingPmp.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
-          h += '</div>';
+          if (upcomingInRange.length > 0) {
+            h += '<div class="mm-v3-cards">';
+            upcomingInRange.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
+            h += '</div>';
+          }
+          if (upcomingBeyond.length > 0) {
+            h += '<div class="pmp-beyond-label">+ ' + upcomingBeyond.length + ' PMP au-delà de ' + _upcomingRange + ' jours</div>'
+              + '<div class="mm-v3-cards">';
+            upcomingBeyond.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
+            h += '</div>';
+          }
+          if (upcomingInRange.length === 0 && upcomingBeyond.length > 0) {
+            // All missions beyond range with current filter — show them anyway
+            h = h; // already rendered above
+          }
         }
       } else if (_pmpSubTab === 'inprogress') {
         if (inProgPmp.length === 0) {
@@ -744,14 +876,15 @@
     return h;
   }
 
-  function _pmpCardToday(t) {
-    var e       = MX.esc;
-    var pd      = t.pmpData || {};
-    var today   = new Date().toISOString().slice(0, 10);
-    var isLate  = pd.dueDate && pd.dueDate < today;
-    var cu      = MX.state.currentUser;
-    var curName = cu ? cu.name : '';
-    var mid     = e(t.missionId || t.id);
+  function _pmpCardToday(t, fallbackIds) {
+    var e         = MX.esc;
+    var pd        = t.pmpData || {};
+    var today     = new Date().toISOString().slice(0, 10);
+    var isLate    = pd.dueDate && pd.dueDate < today;
+    var isFallback = fallbackIds && fallbackIds.indexOf(t.id) !== -1;
+    var cu        = MX.state.currentUser;
+    var curName   = cu ? cu.name : '';
+    var mid       = e(t.missionId || t.id);
     var h = '<div class="pmp-tech-card' + (isLate ? ' pmp-tech-card--late' : '') + '">'
       + '<div class="pmp-tech-card-bar"></div>'
       + '<div class="pmp-tech-card-inner">'
@@ -759,7 +892,8 @@
       + '<div><div class="pmp-tech-card-title">' + e(pd.equipmentName || t.text) + '</div>'
       + (pd.family || pd.eqType ? '<div class="pmp-tech-card-family">' + e(pd.family || pd.eqType) + '</div>' : '')
       + '</div>';
-    if (t.priority === 'critique') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--crit">CRITIQUE</span>';
+    if (isFallback) h += '<span class="pmp-tech-card-badge" style="background:rgba(234,179,8,.15);color:#ca8a04;border:1px solid rgba(234,179,8,.3)">Diagnostic</span>';
+    else if (t.priority === 'critique') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--crit">CRITIQUE</span>';
     else if (t.priority === 'haute') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--urg">URGENT</span>';
     h += '</div>';
     h += '<div class="mm-v3-card-meta">';
