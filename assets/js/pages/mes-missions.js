@@ -88,6 +88,7 @@
     _assignedMissions.forEach(function (m) { seen[m.id] = true; result.push(m); });
     _unassignedPmpMissions.forEach(function (m) { if (!seen[m.id]) { seen[m.id] = true; result.push(m); } });
     _allMissions = result;
+    console.log('[MM] _mergeAllMissions → assigned:', _assignedMissions.length, '| unassigned PMP:', _unassignedPmpMissions.length, '| total:', _allMissions.length);
   }
 
   function _rerenderIfActive() {
@@ -106,23 +107,27 @@
     _missionsLoaded = true;
 
     // Listener 1: missions explicitly assigned to this tech
+    console.log('[MM] Listener 1: missions where assignedTo ==', cu.name);
     _missionsUnsub = db.collection('missions')
       .where('assignedTo', '==', cu.name)
       .onSnapshot(function (snap) {
         _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        console.log('[MM] Listener 1 snap →', _assignedMissions.length, 'missions pour', cu.name,
+          _assignedMissions.map(function(m){ return {id:m.id, type:m.missionType||m.category, dayId:m.dayId, done:m.done}; }));
         _mergeAllMissions();
         _rerenderIfActive();
       }, function (err) { console.warn('[MM] missions listener:', err.message); });
 
     // Listener 2: unassigned PMP missions visible to all techs
+    console.log('[MM] Listener 2: missions where assignedTo == null (PMP disponibles)');
     _pmpMissionsUnsub = db.collection('missions')
       .where('assignedTo', '==', null)
       .onSnapshot(function (snap) {
-        _unassignedPmpMissions = snap.docs.map(function (d) {
-          return Object.assign({ id: d.id }, d.data());
-        }).filter(function (m) {
+        var raw = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        _unassignedPmpMissions = raw.filter(function (m) {
           return !m.done && (m.isPmp || m.missionType === 'pmp' || m.category === 'pmp');
         });
+        console.log('[MM] Listener 2 snap → raw:', raw.length, '| PMP filtrés:', _unassignedPmpMissions.length);
         _mergeAllMissions();
         _rerenderIfActive();
       }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); });
@@ -199,7 +204,10 @@
     var firestoreTasks = _allMissions
       .filter(function (m) {
         var dayId = m.dayId || '';
-        if (dayId > todayId) return false; // skip future
+        var isPmp = m.isPmp || m.missionType === 'pmp' || m.category === 'pmp';
+        // PMP missions have future dueDate by design — don't filter them out
+        // Only skip future-dated checklist and intervention missions
+        if (!isPmp && dayId > todayId) return false;
         return true;
       })
       .map(function (m) {
@@ -575,6 +583,13 @@
       }
 
     } else if (_activeTab === 'pmp') {
+      // ── Debug counters ─────────────────────────────
+      var _dbgFirestore = _allMissions.filter(function (m) { return m.isPmp || m.missionType === 'pmp' || m.category === 'pmp'; }).length;
+      var _dbgAllTasks  = allTasks.filter(function (t) { return t.missionType === 'pmp'; }).length;
+      var _dbgMyMissions = myMissions.filter(function (t) { return t.missionType === 'pmp'; }).length;
+      console.log('[MM][PMP-DEBUG] Firestore PMP:', _dbgFirestore, '| allTasks PMP:', _dbgAllTasks, '| myMissions PMP:', _dbgMyMissions);
+      // ─────────────────────────────────────────────
+
       var pmpAllTasks = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; });
       var curName2    = cu ? cu.name : '';
       var q2 = _searchQuery ? _searchQuery.toLowerCase() : '';
@@ -590,6 +605,22 @@
       var upcomingPmp  = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return pd.dueDate && pd.dueDate > todayISO && pd.dueDate <= upcomingDue2; });
       var inProgPmp    = pmpAllTasks.filter(function (t) { return t.takenBy === curName2; });
       var urgentPmp    = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (t.priority === 'haute' || t.priority === 'critique') || (pd.dueDate && pd.dueDate < todayISO); });
+
+      console.log('[MM][PMP-DEBUG] pmpAllTasks (non-done):', pmpAllTasks.length, '| today:', todayPmp.length, '| upcoming:', upcomingPmp.length, '| inprog:', inProgPmp.length, '| urgent:', urgentPmp.length);
+
+      // Visual debug block (collapsible)
+      h += '<details class="pmp-debug-block" style="margin:8px 12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border1);border-radius:8px;font-size:11px;color:var(--text3);font-family:monospace;">'
+        + '<summary style="cursor:pointer;color:var(--text2);font-weight:600;font-size:12px;">🔍 Debug flux PMP</summary>'
+        + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;">'
+        + '<span>Firestore PMP :</span><strong style="color:var(--cyan)">' + _dbgFirestore + '</strong>'
+        + '<span>allTasks PMP :</span><strong style="color:var(--cyan)">' + _dbgAllTasks + '</strong>'
+        + '<span>myMissions PMP :</span><strong style="color:var(--cyan)">' + _dbgMyMissions + '</strong>'
+        + '<span>Non-terminées :</span><strong style="color:var(--cyan)">' + pmpAllTasks.length + '</strong>'
+        + '<span>Aujourd\'hui :</span><strong>' + todayPmp.length + '</strong>'
+        + '<span>À venir :</span><strong>' + upcomingPmp.length + '</strong>'
+        + '<span>En cours :</span><strong>' + inProgPmp.length + '</strong>'
+        + '<span>Urgent :</span><strong>' + urgentPmp.length + '</strong>'
+        + '</div></details>';
 
       h += _pmpSubTabBar({ today: todayPmp.length, upcoming: upcomingPmp.length, inprogress: inProgPmp.length, urgent: urgentPmp.length });
 

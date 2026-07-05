@@ -776,6 +776,16 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.02', date: '2026-07-05', emoji: '🔍',
+      title: 'Audit PMP — cause racine du filtre dayId identifiée et corrigée',
+      changes: [
+        'ROOT CAUSE — _getAllTasks() filtre if(dayId > todayId) supprimait toutes les missions PMP à échéance future',
+        'FIX — Les missions PMP contournent le filtre date : seules les missions checklist/intervention futures sont filtrées',
+        'Logs console ajoutés sur les 2 listeners Firestore, _mergeAllMissions et le flux PMP tab',
+        'Bloc debug visuel "🔍 Debug flux PMP" dans l\'onglet PMP (collapsible) : compte les missions à chaque étape du filtre',
+      ]
+    },
+    {
       ver: '1.1.01', date: '2026-07-05', emoji: '🔧',
       title: 'Correctifs workflow PMP — popup, visibilité, doublons',
       changes: [
@@ -993,11 +1003,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.01";
+  window.MX.appVer = window.MX_VERSION || "1.1.02";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.01";
-  const _APP_BUILD = window.MX_BUILD   || 201;
+  const _APP_VER   = window.MX_VERSION || "1.1.02";
+  const _APP_BUILD = window.MX_BUILD   || 202;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
