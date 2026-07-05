@@ -456,7 +456,7 @@
     const isMob = window.innerWidth <= 900;
     if (sidebar) sidebar.classList.toggle("sx-compact", _compact && !isMob);
 
-    // ── Bottom nav (mobile) — floating bar: Accueil | Missions | Compteurs | ➕ | Planning | Pilotage ──
+    // ── Bottom nav (mobile) — native bar: Accueil | Missions | ➕ | Compteurs | Planning ──
     const dayIds = DAYS.map(d => d.id);
     const allCl  = ["today-cl", "mes-missions", ...dayIds];
     let bot = `<div class="mbn-bar">`;
@@ -776,6 +776,23 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.06', date: '2026-07-05', emoji: '📱',
+      title: 'Bottom Navigation — reconstruction native iOS/Android',
+      changes: [
+        'SUPPRESSION — ancienne barre flottante (pill glassmorphism, left/right:12px, bottom:max(12px,...)) remplacée par barre pleine largeur',
+        'Conteneur #bottom-nav : position:fixed bottom:0 left:0 right:0 — collé au bord physique, background étend la safe area',
+        'Hauteur : calc(62px + env(safe-area-inset-bottom)) — 62px de contenu visible + safe area sous (iPhone encoche/Dynamic Island/Android)',
+        '.mbn-bar : display:flex pleine largeur, hauteur var(--bottomnav-h) — plus de position:absolute ni de marges latérales',
+        'FAB : translateY(-10px) — élévation réduite et cohérente, sans décaler les boutons adjacents',
+        'Zone tactile : min-height:48px sur chaque .mbn-btn (standard iOS/Android)',
+        'Indicateur actif : top:0 (trait en haut du bouton) — visible sur fond opaque',
+        '.mbn-fmenu-panel : repositionné via var(--bottomnav-h) + safe-area — plus de valeur hardcodée 100px',
+        'Nettoyage — supprimés : .bn, .bn-bar, .bottom-nav-inner (code mort), hacks !important, max(12px,...)',
+        'Thème clair : #bottom-nav fond et bordure propres, .mbn-btn inactifs en gris neutre #6B7280',
+        'Variable --bottomnav-h : 62px (mobile) — valeur unique dans la media query, eliminée la double déclaration',
+      ]
+    },
+    {
       ver: '1.1.05', date: '2026-07-05', emoji: '🗂️',
       title: 'Refonte classement PMP — aucune mission invisible',
       changes: [
@@ -1040,11 +1057,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.05";
+  window.MX.appVer = window.MX_VERSION || "1.1.06";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.05";
-  const _APP_BUILD = window.MX_BUILD   || 205;
+  const _APP_VER   = window.MX_VERSION || "1.1.06";
+  const _APP_BUILD = window.MX_BUILD   || 206;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

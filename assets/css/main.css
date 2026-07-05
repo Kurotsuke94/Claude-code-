@@ -519,49 +519,13 @@ html, body {
 /* ── BOTTOM NAV (MOBILE) ── */
 .bottom-nav {
   display: none;
-  position: fixed; bottom: 0; left: 0; right: 0;
-  height: var(--bottomnav-h);
-  background: rgba(13,13,17,0.96);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
-  border-top: 1px solid var(--border);
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
-  padding-bottom: env(safe-area-inset-bottom);
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  overflow: visible;
 }
-.bottom-nav::-webkit-scrollbar { display: none; }
-.bottom-nav-inner {
-  display: flex;
-  min-width: max-content;
-  height: 100%;
-}
-.bn {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 6px 14px;
-  gap: 3px;
-  border: none; background: transparent;
-  color: var(--text2);
-  font-size: 8px; font-family: var(--ffs);
-  cursor: pointer;
-  min-height: 56px;
-  position: relative;
-  transition: color var(--t);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.bn i { font-size: 15px; transition: transform var(--t); }
-.bn.active { color: var(--cyan); }
-.bn.active i { transform: translateY(-1px); }
-.bn-bar {
-  position: absolute; top: 0; left: 15%; right: 15%;
-  height: 2px; background: var(--cyan);
-  border-radius: 0 0 2px 2px;
-  opacity: 0; transition: opacity var(--t);
-}
-.bn.active .bn-bar { opacity: 1; }
 
 /* ── TOAST ── */
 .toast {
@@ -754,9 +718,9 @@ html, body {
     min-height: calc(var(--topbar-h) + env(safe-area-inset-top));
     max-height: calc(var(--topbar-h) + env(safe-area-inset-top));
   }
-  /* Contenu — compense la barre de gestes iOS en bas + encoches latérales (mode paysage) */
+  /* Contenu — décalage exact = hauteur nav + safe area */
   .main-content {
-    padding-bottom: calc(var(--bottomnav-h) + max(12px, env(safe-area-inset-bottom, 0px)));
+    padding-bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px));
     padding-left:  env(safe-area-inset-left,  0px);
     padding-right: env(safe-area-inset-right, 0px);
   }
@@ -765,13 +729,13 @@ html, body {
     padding-left:  max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
   }
-  .bottom-nav { display: flex; }
+  .bottom-nav { display: block; }
   .ph { padding: 16px 16px 14px; }
   .ph-title { font-size: 22px; }
   .page-body { padding: 14px 16px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .page-cols { grid-template-columns: 1fr; }
-  .toast { bottom: calc(var(--bottomnav-h) + max(12px, env(safe-area-inset-bottom, 0px)) + 10px); }
+  .toast { bottom: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px) + 12px); }
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar { padding-top: env(safe-area-inset-top); }
@@ -842,17 +806,6 @@ html, body {
   background: rgba(255,255,255,0.92);
   border-bottom-color: var(--border);
   box-shadow: 0 1px 0 var(--border);
-}
-[data-theme="light"] .bottom-nav {
-  background: rgba(255,255,255,0.95);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -1px 0 var(--border);
-}
-[data-theme="light"] .bn {
-  color: var(--text3);
-}
-[data-theme="light"] .bn.active {
-  color: var(--cyan);
 }
 [data-theme="light"] .main-content {
   background: var(--bg);

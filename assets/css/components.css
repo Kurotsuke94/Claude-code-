@@ -6111,9 +6111,6 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .int-xfr-btn--ok,
   .int-xfr-btn--no { min-height: 36px; padding: 6px 14px; font-size: 12px; }
 
-  /* Bottom nav items — zone de toucher élargie */
-  .bn { min-width: 52px; padding: 6px 10px; }
-
   /* Encoches latérales (paysage iPhone) */
   .int-body,
   .cso-body { padding-left:  max(10px, env(safe-area-inset-left,  0px));
@@ -6278,17 +6275,6 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   width: 100%; max-height: 200px; object-fit: cover;
   border-radius: 10px; border: 1px solid var(--border);
   margin-top: 8px; display: block;
-}
-
-/* ══════════════════════════════════════════════════════
-   BOTTOM NAV — OPTIMISATION TAILLE ET LISIBILITÉ
-══════════════════════════════════════════════════════ */
-@media (max-width: 400px) {
-  /* Très petits écrans (iPhone SE, Galaxy A) */
-  .bn { padding: 5px 6px; min-width: 40px; }
-  .bn i { font-size: 14px; }
-  .bn span:not(.bn-bar):not(.nav-badge) { font-size: 7px; }
-  .bottom-nav-inner { gap: 0; }
 }
 
 /* ══════════════════════════════════════════════════════
@@ -8842,54 +8828,41 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 
 /* ══════════════════════════════════════════════════════
-   MOBILE BOTTOM NAV — FLOATING GLASSMORPHISM BAR
+   MOBILE BOTTOM NAV — NATIVE FULL-WIDTH BAR
    Mobile uniquement (≤900px). Desktop inchangé.
 ══════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
-  /* Padding bas pour que le contenu ne passe pas sous la barre */
-  :root { --bottomnav-h: 72px; }
+  /* Hauteur visible de la barre (hors safe area) */
+  :root { --bottomnav-h: 62px; }
 
-  /* Conteneur transparent — la barre visuelle est .mbn-bar */
+  /* Conteneur fixe — colle au bord physique bas, couvre la safe area */
   #bottom-nav {
-    background: transparent !important;
-    border-top: none !important;
-    box-shadow: none !important;
-    /* Hauteur = barre (72px) + espace sous la barre (safe-area ou 12px min) */
-    height: calc(72px + max(12px, env(safe-area-inset-bottom, 0px))) !important;
-    padding-bottom: 0 !important;
-    overflow: visible !important;
-  }
-
-  /* ── Barre flottante — ancrée bas de l'écran ── */
-  .mbn-bar {
-    position: absolute;
-    /* Zéro valeur fixe : la barre flotte exactement au-dessus du home indicator */
-    bottom: max(12px, env(safe-area-inset-bottom, 12px));
-    left: 12px;
-    right: 12px;
-    height: 72px;
-    background: rgba(10,15,35,0.85);
+    height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px));
+    background: rgba(10,15,35,0.92);
     -webkit-backdrop-filter: blur(20px);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 28px;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
-    display: flex;
-    align-items: center;
-    justify-content: space-around;
-    padding: 0 8px;
-    z-index: 100;
+    border-top: 1px solid rgba(255,255,255,0.07);
     overflow: visible;
   }
 
-  /* ── Boutons d'onglet ── */
+  /* Barre pleine largeur — row de boutons sur la hauteur visible uniquement */
+  .mbn-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    height: var(--bottomnav-h);
+    padding: 0 4px;
+    overflow: visible;
+  }
+
+  /* Boutons d'onglet — zone tactile 48×48 px minimum */
   .mbn-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 8px 6px;
+    gap: 3px;
+    padding: 8px 10px;
     border: none;
     background: transparent;
     color: #A1A1AA;
@@ -8899,36 +8872,34 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
     letter-spacing: 0.01em;
     cursor: pointer;
     flex: 1;
-    min-height: 60px;
+    min-height: 48px;
     position: relative;
-    transition: color 220ms ease;
-    border-radius: 16px;
+    transition: color 150ms ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .mbn-btn i { font-size: 22px; transition: transform 220ms ease; }
+  .mbn-btn i { font-size: 20px; transition: transform 150ms ease; }
   .mbn-btn span { line-height: 1; }
 
   /* État actif */
   .mbn-btn.mbn-act { color: var(--cyan); }
   .mbn-btn.mbn-act i { transform: translateY(-1px); }
 
-  /* Indicateur actif — trait arrondi sous l'icône */
+  /* Indicateur actif — trait en haut du bouton */
   .mbn-btn.mbn-act::after {
     content: '';
     position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 24px;
-    height: 3px;
+    top: 0;
+    left: 25%;
+    right: 25%;
+    height: 2px;
     background: var(--cyan);
-    border-radius: 999px;
+    border-radius: 0 0 3px 3px;
   }
 
-  /* ── FAB central — dépasse de la barre de 18px vers le haut ── */
+  /* FAB central — légèrement élevé, sans décaler les autres boutons */
   .mbn-fab {
-    width: 64px;
-    height: 64px;
+    width: 54px;
+    height: 54px;
     border-radius: 50%;
     border: none;
     background: linear-gradient(135deg, #8B5CF6 0%, #FF8A00 100%);
@@ -8938,22 +8909,22 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 0 30px rgba(124,58,237,0.35), 0 4px 16px rgba(0,0,0,0.3);
-    transform: translateY(-18px);
-    transition: transform 200ms var(--ease-spring), box-shadow 200ms ease;
+    box-shadow: 0 0 24px rgba(124,58,237,0.4), 0 4px 12px rgba(0,0,0,0.3);
+    transform: translateY(-10px);
+    transition: transform 180ms ease, box-shadow 180ms ease;
     -webkit-tap-highlight-color: transparent;
     z-index: 2;
   }
   .mbn-fab i {
     font-size: 22px;
     color: #fff;
-    transition: transform 280ms var(--ease-spring);
+    transition: transform 230ms ease;
   }
   .mbn-fab.open i { transform: rotate(45deg); }
-  .mbn-fab:active { transform: translateY(-18px) scale(0.92); }
+  .mbn-fab:active { transform: translateY(-10px) scale(0.93); }
 }
 
-/* ── Menu actions rapides du FAB (global, pas dans la media query) ── */
+/* ── Menu actions rapides du FAB (global — overlay fixed) ── */
 .mbn-fmenu {
   position: fixed;
   inset: 0;
@@ -8973,7 +8944,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .mbn-fmenu-panel {
   position: absolute;
-  bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--bottomnav-h, 62px) + env(safe-area-inset-bottom, 0px) + 16px);
   left: 50%;
   transform: translateX(-50%) translateY(14px) scale(0.94);
   display: flex;
@@ -9106,12 +9077,11 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 
 /* ── Thème clair ── */
-[data-theme="light"] .mbn-bar {
-  background: rgba(255,255,255,0.90);
-  border-color: rgba(0,0,0,0.06);
-  box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+[data-theme="light"] #bottom-nav {
+  background: rgba(250,250,252,0.95);
+  border-top-color: rgba(0,0,0,0.09);
 }
-[data-theme="light"] .mbn-btn { color: #A1A1AA; }
+[data-theme="light"] .mbn-btn { color: #6B7280; }
 [data-theme="light"] .mbn-btn.mbn-act { color: var(--cyan); }
 [data-theme="light"] .mbn-fitem {
   background: rgba(255,255,255,0.96);
