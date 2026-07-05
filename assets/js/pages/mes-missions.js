@@ -1654,40 +1654,73 @@
   // ══════════════════════════════════════════════
 
   function _takePmpMission(missionId) {
-    console.log('[PMP] Bouton Prendre cliqué', missionId);
-    var cu = MX.state.currentUser;
-    if (!cu) { console.error('[PMP] Erreur: currentUser null'); MX.toast('Non connecté', true); return; }
-    var m = _allMissions.find(function (x) { return x.id === missionId; });
-    console.log('[PMP] Mission trouvée:', m ? {
-      id: m.id, assignedTo: m.assignedTo, takenBy: m.takenBy, done: m.done, missionType: m.missionType
-    } : 'INTROUVABLE dans _allMissions (total: ' + _allMissions.length + ')');
-    console.log('[PMP] Technicien connecté:', cu.name, '| uid:', cu.uid || cu.id || '?');
-    if (!m) { MX.toast('Mission introuvable', true); return; }
-    if (m.takenBy) { MX.toast('Mission déjà prise par ' + m.takenBy, true); return; }
-    var now  = new Date();
-    var dd   = String(now.getDate()).padStart(2, '0');
-    var mo   = String(now.getMonth() + 1).padStart(2, '0');
-    var yyyy = now.getFullYear();
-    var hh   = String(now.getHours()).padStart(2, '0');
-    var min  = String(now.getMinutes()).padStart(2, '0');
-    var logText = cu.name + ' a pris cette maintenance\n'
-      + dd + '/' + mo + '/' + yyyy + ' - ' + hh + ':' + min;
-    var logEntry = { text: logText, by: cu.name, ts: FV.serverTimestamp(), isSystemLog: true };
-    // Mettre assignedTo = cu.name en plus de takenBy :
-    // → la mission quitte Listener 2 (assignedTo==null) et entre dans Listener 1 (assignedTo==cu.name)
-    // → les deux listeners se déclenchent proprement, re-render automatique via Firestore temps réel
-    db.collection('missions').doc(missionId).update({
-      assignedTo:  cu.name,
-      takenBy:     cu.name,
-      takenAt:     FV.serverTimestamp(),
-      pmpComments: FV.arrayUnion(logEntry),
-    }).then(function () {
-      console.log('[PMP] Update Firestore OK — assignedTo + takenBy =', cu.name);
-      MX.toast('Maintenance prise ✓');
-    }).catch(function (err) {
-      console.error('[PMP] Erreur Firestore update:', err.message, err);
-      MX.toast('Erreur: ' + err.message, true);
-    });
+    console.log('[PMP] CLICK'); // point 1 : confirmer que le clic atteint la fonction
+    try {
+      var cu = MX.state.currentUser;
+      console.log('[PMP] missionId reçu:', JSON.stringify(missionId));
+      console.log('[PMP] currentUser:', cu ? { name: cu.name, uid: cu.uid || cu.id || '?' } : 'NULL');
+      console.log('[PMP] _allMissions count:', _allMissions.length,
+        '| PMP ids:', _allMissions.filter(function(x){ return x.isPmp || x.missionType==='pmp'; }).map(function(x){ return x.id; }));
+
+      if (!cu) { console.error('[PMP] Erreur: currentUser null'); MX.toast('Non connecté', true); return; }
+
+      var m = _allMissions.find(function (x) { return x.id === missionId; });
+      console.log('[PMP] Mission dans _allMissions:', m
+        ? { id: m.id, assignedTo: m.assignedTo, takenBy: m.takenBy, done: m.done, missionType: m.missionType, isPmp: m.isPmp }
+        : 'INTROUVABLE — vérifier que missionId (' + missionId + ') est bien un id présent dans _allMissions');
+
+      if (!m) { MX.toast('Mission introuvable', true); return; }
+      if (m.takenBy) {
+        console.warn('[PMP] Bloqué : mission déjà prise par', m.takenBy);
+        MX.toast('Mission déjà prise par ' + m.takenBy, true);
+        return;
+      }
+
+      var now  = new Date();
+      var dd   = String(now.getDate()).padStart(2, '0');
+      var mo   = String(now.getMonth() + 1).padStart(2, '0');
+      var yyyy = now.getFullYear();
+      var hh   = String(now.getHours()).padStart(2, '0');
+      var min  = String(now.getMinutes()).padStart(2, '0');
+      var tsStr = dd + '/' + mo + '/' + yyyy + ' - ' + hh + ':' + min;
+      var logText = cu.name + ' a pris cette maintenance\n' + tsStr;
+      // FV.serverTimestamp() NE PEUT PAS être utilisé à l'intérieur d'un arrayUnion :
+      // → lève une exception synchrone → aucun effet, aucun toast, aucun log
+      // → FIX : timestamp ISO plain string dans logEntry
+      var logEntry = { text: logText, by: cu.name, ts: tsStr, isSystemLog: true };
+
+      var collection = 'missions';
+      var docRef = db.collection(collection).doc(missionId);
+      console.log('[PMP] Firestore — collection:', collection, '| docId:', missionId, '| path:', docRef.path);
+
+      docRef.update({
+        assignedTo:  cu.name,
+        takenBy:     cu.name,
+        takenAt:     FV.serverTimestamp(),
+        pmpComments: FV.arrayUnion(logEntry),
+      }).then(function () {
+        console.log('[PMP] Update Firestore OK — assignedTo + takenBy =', cu.name);
+        // Relecture immédiate pour vérifier ce que Firestore contient réellement
+        return docRef.get();
+      }).then(function (snap) {
+        if (snap && snap.exists) {
+          var d = snap.data();
+          console.log('[PMP] Vérification getDoc → assignedTo:', d.assignedTo,
+            '| takenBy:', d.takenBy, '| done:', d.done, '| status:', d.status || '(non défini)');
+        } else {
+          console.error('[PMP] getDoc : document inexistant après update !');
+        }
+        MX.toast('Maintenance prise ✓');
+      }).catch(function (err) {
+        console.error('[PMP] Erreur Firestore update/getDoc:', err.code, err.message, err);
+        MX.toast('Erreur: ' + (err.message || err.code || 'inconnue'), true);
+      });
+
+    } catch (syncErr) {
+      // Capture les exceptions synchrones (ex: serverTimestamp dans arrayUnion)
+      console.error('[PMP] Exception synchrone dans _takePmpMission:', syncErr.message, syncErr);
+      MX.toast('Erreur interne: ' + syncErr.message, true);
+    }
   }
 
   function _releasePmpMission(missionId) {

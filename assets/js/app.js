@@ -776,6 +776,18 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.04', date: '2026-07-05', emoji: '🐛',
+      title: 'Bouton "Prendre" — cause racine : serverTimestamp interdit dans arrayUnion',
+      changes: [
+        'BUG ROOT CAUSE — FV.serverTimestamp() à l\'intérieur de FV.arrayUnion() est interdit par Firestore : lève une exception synchrone non catchée → bouton inopérant sans aucun message',
+        'FIX — logEntry.ts remplacé par un timestamp plain string ISO (jamais de sentinel dans arrayUnion)',
+        'FIX — try/catch synchrone autour de toute la fonction pour capturer les exceptions SDK',
+        'Diagnostic — console.log("[PMP] CLICK") en première ligne, log missionId + _allMissions + docRef.path',
+        'Diagnostic — getDoc() immédiat après update pour vérifier les valeurs réelles dans Firestore',
+        'Diagnostic — log Listener 1 + Listener 2 avec docChanges() complets',
+      ]
+    },
+    {
       ver: '1.1.03', date: '2026-07-05', emoji: '🔧',
       title: 'Bouton "Prendre" PMP — diagnostic et correction complète',
       changes: [
@@ -1013,11 +1025,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.03";
+  window.MX.appVer = window.MX_VERSION || "1.1.04";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.03";
-  const _APP_BUILD = window.MX_BUILD   || 203;
+  const _APP_VER   = window.MX_VERSION || "1.1.04";
+  const _APP_BUILD = window.MX_BUILD   || 204;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
