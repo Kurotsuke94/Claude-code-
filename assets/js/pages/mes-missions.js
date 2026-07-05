@@ -552,7 +552,7 @@
           + '<div class="mm-v3-empty-sub">' + (pmpTasks.length === 0 ? 'Pas de maintenance préventive prévue.' : 'Ajustez les filtres.') + '</div></div>';
       } else {
         h += '<div class="mm-v3-cards">';
-        pmpTasks.forEach(function (task) { h += _pmpCard(task); });
+        pmpFilt.forEach(function (task) { h += _pmpCard(task); });
         h += '</div>';
       }
     }
@@ -1283,14 +1283,11 @@
   // ══════════════════════════════════════════════
 
   function _buildPmpFooter(m, missionId) {
-    if (m.done) {
-      return '<button class="pmp-validate-btn pmp-validate-btn--done" disabled>'
-        + '<i class="fas fa-circle-check"></i> Maintenance terminée</button>';
-    }
-    return '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
-      + '<i class="fas fa-arrow-rotate-left"></i> Rendre la maintenance</button>'
-      + '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
-      + '<i class="fas fa-check-circle"></i> Valider la maintenance</button>';
+    if (m.done) return '';
+    return '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmp(\'' + missionId + '\')">'
+      + '<i class="fas fa-circle-check"></i> Valider la maintenance</button>'
+      + '<button class="pmp-release-btn" onclick="MX.MM._releasePmpMission(\'' + missionId + '\')">'
+      + '<i class="fas fa-arrow-rotate-left"></i> Rendre la maintenance</button>';
   }
 
   function _updatePmpFooter(missionId) {
@@ -1366,7 +1363,7 @@
         var m = _allMissions.find(function (x) { return x.id === missionId; });
         if (m) { m.takenBy = null; m.takenAt = null; }
         MX.toast('Maintenance rendue ✓');
-        _updatePmpFooter(missionId);
+        _closePmpDetail();
       }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
   }
 

@@ -15143,7 +15143,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmp-ai-mini-why { font-size: 10px; color: rgba(255,255,255,.38); margin-top: 3px; font-style: italic; }
 
 /* Lifecycle footer buttons */
-.pmp-release-btn { background: transparent; border: 1px solid var(--border2); color: var(--text2); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: background .15s, color .15s; }
+.pmp-release-btn { display: block; width: 100%; margin-top: 8px; background: transparent; border: 1px solid var(--border2); color: var(--text2); padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--ffs); transition: background .15s, color .15s; }
 .pmp-release-btn:hover { background: var(--bg3); color: var(--text1); }
 .pmp-taken-info { padding: 10px 14px; border-radius: 8px; background: rgba(249,115,22,.08); border: 1px solid rgba(249,115,22,.3); color: rgba(249,115,22,.9); font-size: 13px; text-align: center; width: 100%; box-sizing: border-box; }
 
