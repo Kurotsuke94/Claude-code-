@@ -2050,6 +2050,7 @@
           '</div>' +
           '<div class="pmp-plan-actions">' +
             '<button class="pmp-act-btn" onclick="MX.Pages.PMP._createInt(\'' + esc(plan.id) + '\')"><i class="fas fa-plus-circle"></i> Intervention</button>' +
+            '<button class="pmp-act-btn pmp-act-btn--activate" onclick="MX.Pages.PMP._activateNow(\'' + esc(plan.id) + '\')"><i class="fas fa-bolt"></i> Créer maintenant</button>' +
             '<button class="pmp-act-btn" onclick="MX.Pages.PMP._planForm(\'' + esc(plan.id) + '\', \'' + esc(eq.id) + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
             '<button class="pmp-act-btn pmp-act-btn--del" onclick="MX.Pages.PMP._delPlan(\'' + esc(plan.id) + '\')"><i class="fas fa-trash"></i></button>' +
           '</div>' +
@@ -2065,6 +2066,46 @@
   }
 
   function _backToEq() { _viewEqId = null; _curTab = 'equipements'; _rerender(); }
+
+  function _activateNow(planId) {
+    var plan = _pmpPlans.find(function (p) { return p.id === planId; });
+    if (!plan) { MX.toast('Plan introuvable', true); return; }
+    var eq = _pmpEq.find(function (e) { return e.id === plan.equipmentId; });
+    MX.showModal('Activer maintenant ?',
+      '<p style="margin:0;color:var(--text2);font-size:13px">Crée une intervention immédiatement pour <strong>' + esc(eq ? eq.name : 'cet équipement') + '</strong>, avant la date prévue.</p>',
+      [
+        { label: 'Activer', cls: 'confirm', fn: function () {
+          var today = new Date().toISOString().slice(0, 10);
+          var intData = {
+            planId:        planId,
+            equipmentId:   plan.equipmentId,
+            equipmentName: eq ? eq.name : '',
+            type:          plan.type || eq && eq.type || '',
+            frequency:     plan.frequency || eq && eq.frequency || 30,
+            duration:      plan.duration || '',
+            technician:    plan.technician || '',
+            zone:          plan.zone || eq && eq.zone || '',
+            subZone:       plan.subZone || eq && eq.subZone || '',
+            checklistItems:    plan.checklistItems || [],
+            technicalNotes:    plan.technicalNotes || '',
+            requiredParts:     plan.requiredParts || [],
+            estimatedDuration: plan.duration || '',
+            dueDate:    today,
+            status:     'planifiee',
+            source:     'activation_anticipee',
+            createdAt:  FV.serverTimestamp(),
+            updatedAt:  FV.serverTimestamp(),
+          };
+          PMP_DB.int().add(intData).then(function (ref) {
+            MX.toast('Intervention créée ✓');
+            _pmpInt.push(Object.assign({ id: ref.id }, intData));
+            _rerender();
+          }).catch(function (err) { MX.toast('Erreur : ' + err.message, true); });
+        }},
+        { label: 'Annuler', cls: 'cancel' },
+      ]
+    );
+  }
 
   function _planForm(planId, eqId) {
     _planFormMode  = planId || 'new';
@@ -3120,6 +3161,7 @@
     _viewEq, _backToEq,
     _planForm, _planFormBack, _onDurChange2, _savePlanForm, _delPlan,
     _createInt, _createIntManual, _markDone, _delInt,
+    _activateNow,
     _assignModal,
     _tplForm, _tplAddItem, _delTpl,
     _onImportFile, _onImportDrop, _runImport, _resetImport, _setImportUserMap, _downloadTemplate, _createDefaultTpls, _checkAndGenerate,

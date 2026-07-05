@@ -640,13 +640,27 @@
     h += '</div>';
 
     // ── PMP ──
+    var pmpStats = (MX.Pages.PMP && typeof MX.Pages.PMP.getStats === 'function') ? MX.Pages.PMP.getStats() : null;
+    var totalPmpPlanned = pmpStats ? (pmpStats.thisMonthCount || 0) : 0;
+    var pmpEnRetard     = pmpStats ? (pmpStats.enRetard || 0) : 0;
+    var pmpTotal        = pmps.length || totalPmpPlanned;
     h += '<div class="dxp-section">'
       + '<div class="dxp-hd"><i class="fas fa-screwdriver-wrench dxp-ico" style="color:#a855f7"></i>'
       + '<span>Maintenance PMP</span>'
-      + '<span class="dxp-badge' + (pmpsActive.length ? ' dxp-badge--purple' : '') + '">' + pmpsDone + '/' + pmps.length + '</span>'
+      + '<span class="dxp-badge' + (pmpsActive.length || pmpEnRetard ? ' dxp-badge--purple' : '') + '">'
+      + (pmps.length ? pmpsDone + '/' + pmps.length : (totalPmpPlanned ? totalPmpPlanned + ' ce mois' : '0'))
+      + '</span>'
       + '</div>';
     if (pmpsActive.length === 0) {
-      h += '<div class="dxp-empty">' + (pmps.length ? 'Tous les PMP terminés ✓' : 'Aucun PMP planifié') + '</div>';
+      if (pmps.length > 0) {
+        h += '<div class="dxp-empty" style="color:var(--green)"><i class="fas fa-circle-check"></i> Tous les PMP terminés ✓</div>';
+      } else if (pmpEnRetard > 0) {
+        h += '<div class="dxp-empty" style="color:#ef4444"><i class="fas fa-triangle-exclamation"></i> ' + pmpEnRetard + ' PMP en retard</div>';
+      } else if (totalPmpPlanned > 0) {
+        h += '<div class="dxp-empty" style="color:#a855f7"><i class="fas fa-calendar-check"></i> ' + totalPmpPlanned + ' maintenances planifiées ce mois</div>';
+      } else {
+        h += '<div class="dxp-empty">Aucun PMP planifié ce mois</div>';
+      }
     } else {
       h += '<div class="dxp-list">';
       pmpsActive.slice(0, 3).forEach(function(m) {
@@ -761,6 +775,20 @@
 
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
+    {
+      ver: '1.1.00', date: '2026-07-05', emoji: '🛠️',
+      title: 'Refonte module PMP — vue technicien par sous-onglets + activation anticipée',
+      changes: [
+        'Vue technicien PMP : 4 sous-onglets Aujourd\'hui / À venir / En cours / Urgent',
+        'Onglet À venir : sélecteur de plage 7/15/30 jours avec liste de préparation',
+        'Onglet En cours : uniquement les missions prises par le technicien connecté, avec progression',
+        'Onglet Urgent : retards + haute/critique avec badge coloré',
+        'Bloc "Aide à l\'intervention" par carte : durée, criticité, tâches, notes techniques',
+        'Responsable PMP : bouton "Créer maintenant" pour activation anticipée d\'un plan',
+        'Volet de droite : affiche les stats réelles du module PMP (getStats) même sans mission assignée',
+        'Correction : "Aucun PMP planifié" ne s\'affiche plus si des maintenances existent',
+      ]
+    },
     {
       ver: '1.0.41', date: '2026-07-05', emoji: '⚙️',
       title: 'Correctif workflow PMP — bouton Prendre sur la carte + suppression en cascade',
@@ -953,11 +981,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.0.41";
+  window.MX.appVer = window.MX_VERSION || "1.1.00";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.0.41";
-  const _APP_BUILD = window.MX_BUILD   || 141;
+  const _APP_VER   = window.MX_VERSION || "1.1.00";
+  const _APP_BUILD = window.MX_BUILD   || 200;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;

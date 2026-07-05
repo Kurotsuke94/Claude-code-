@@ -10,6 +10,8 @@
   var _pendingSignal  = null;
   var _activeFilter   = 'all';    // 'all' | 'urgent' | 'retard' | 'done' | 'todo'
   var _searchQuery    = '';
+  var _pmpSubTab      = 'today';  // 'today' | 'upcoming' | 'inprogress' | 'urgent'
+  var _upcomingRange  = 7;        // 7 | 15 | 30
   var _lastConfettiAt = 0;
 
   // ── Mission state (single Firestore listener) ──
@@ -544,16 +546,70 @@
       }
 
     } else if (_activeTab === 'pmp') {
-      var pmpTasks = myMissions.filter(function (t) { return t.missionType === 'pmp'; });
-      var pmpFilt  = _applyFilters(pmpTasks, todayISO);
-      if (pmpFilt.length === 0) {
-        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">🛠️</div>'
-          + '<div class="mm-v3-empty-ttl">' + (pmpTasks.length === 0 ? 'Aucun PMP assigné' : 'Aucun PMP ne correspond') + '</div>'
-          + '<div class="mm-v3-empty-sub">' + (pmpTasks.length === 0 ? 'Pas de maintenance préventive prévue.' : 'Ajustez les filtres.') + '</div></div>';
-      } else {
-        h += '<div class="mm-v3-cards">';
-        pmpFilt.forEach(function (task) { h += _pmpCard(task); });
+      var pmpAllTasks = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; });
+      var curName2    = cu ? cu.name : '';
+      var q2 = _searchQuery ? _searchQuery.toLowerCase() : '';
+      if (q2) {
+        pmpAllTasks = pmpAllTasks.filter(function (t) {
+          var pd = t.pmpData || {};
+          return (pd.equipmentName || t.text || '').toLowerCase().indexOf(q2) !== -1
+            || (pd.zone || t.zone || '').toLowerCase().indexOf(q2) !== -1;
+        });
+      }
+      var upcomingDue2 = _addDaysMM(todayISO, _upcomingRange);
+      var todayPmp     = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return !pd.dueDate || pd.dueDate === todayISO; });
+      var upcomingPmp  = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return pd.dueDate && pd.dueDate > todayISO && pd.dueDate <= upcomingDue2; });
+      var inProgPmp    = pmpAllTasks.filter(function (t) { return t.takenBy === curName2; });
+      var urgentPmp    = pmpAllTasks.filter(function (t) { var pd = t.pmpData || {}; return (t.priority === 'haute' || t.priority === 'critique') || (pd.dueDate && pd.dueDate < todayISO); });
+
+      h += _pmpSubTabBar({ today: todayPmp.length, upcoming: upcomingPmp.length, inprogress: inProgPmp.length, urgent: urgentPmp.length });
+
+      if (_pmpSubTab === 'today') {
+        if (todayPmp.length === 0) {
+          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">☀️</div>'
+            + '<div class="mm-v3-empty-ttl">Aucune maintenance aujourd\'hui</div>'
+            + '<div class="mm-v3-empty-sub">Pas de PMP prévu pour aujourd\'hui.</div></div>';
+        } else {
+          h += '<div class="mm-v3-cards">';
+          todayPmp.forEach(function (t) { h += _pmpCardToday(t); });
+          h += '</div>';
+        }
+      } else if (_pmpSubTab === 'upcoming') {
+        h += '<div class="pmp-upcoming-range">';
+        [7, 15, 30].forEach(function (n) {
+          h += '<button class="pmp-upcoming-range-btn' + (_upcomingRange === n ? ' pmp-upcoming-range-btn--active' : '') + '"'
+            + ' onclick="MX.MM.setUpcomingRange(' + n + ')">' + n + ' jours</button>';
+        });
         h += '</div>';
+        if (upcomingPmp.length === 0) {
+          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📅</div>'
+            + '<div class="mm-v3-empty-ttl">Aucune maintenance à venir</div>'
+            + '<div class="mm-v3-empty-sub">Pas de PMP dans les ' + _upcomingRange + ' prochains jours.</div></div>';
+        } else {
+          h += '<div class="mm-v3-cards">';
+          upcomingPmp.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
+          h += '</div>';
+        }
+      } else if (_pmpSubTab === 'inprogress') {
+        if (inProgPmp.length === 0) {
+          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">⚙️</div>'
+            + '<div class="mm-v3-empty-ttl">Aucune maintenance en cours</div>'
+            + '<div class="mm-v3-empty-sub">Prenez une maintenance pour la démarrer.</div></div>';
+        } else {
+          h += '<div class="mm-v3-cards">';
+          inProgPmp.forEach(function (t) { h += _pmpCardInProgress(t); });
+          h += '</div>';
+        }
+      } else if (_pmpSubTab === 'urgent') {
+        if (urgentPmp.length === 0) {
+          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">✅</div>'
+            + '<div class="mm-v3-empty-ttl">Aucune urgence</div>'
+            + '<div class="mm-v3-empty-sub">Bravo ! Tous les PMP sont dans les délais.</div></div>';
+        } else {
+          h += '<div class="mm-v3-cards">';
+          urgentPmp.forEach(function (t) { h += _pmpCardUrgent(t, todayISO); });
+          h += '</div>';
+        }
       }
     }
 
@@ -564,6 +620,216 @@
     h += '<input type="file" id="pmp-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPmpPh(this)">';
 
     h += '</div>'; // mm-v3-wrap
+    return h;
+  }
+
+  // ══════════════════════════════════════════════
+  // PMP TECH SUB-TABS (v1.1.00)
+  // ══════════════════════════════════════════════
+
+  function _pmpSubTabBar(counts) {
+    var tabs = [
+      { id: 'today',      l: "Aujourd'hui",  icon: 'fas fa-sun',                   ct: counts.today,      red: false },
+      { id: 'upcoming',   l: 'À venir',      icon: 'fas fa-calendar-days',         ct: counts.upcoming,   red: false },
+      { id: 'inprogress', l: 'En cours',     icon: 'fas fa-spinner',               ct: counts.inprogress, red: false },
+      { id: 'urgent',     l: 'Urgent',       icon: 'fas fa-triangle-exclamation',  ct: counts.urgent,     red: true  },
+    ];
+    var h = '<div class="pmp-tech-subtabs">';
+    tabs.forEach(function (tab) {
+      var active = _pmpSubTab === tab.id;
+      h += '<button class="pmp-tech-subtab' + (active ? ' pmp-tech-subtab--active' : '') + (tab.red ? ' pmp-tech-subtab--urgent' : '') + '"'
+        + ' onclick="MX.MM.setPmpSubTab(\'' + tab.id + '\')">'
+        + '<i class="' + tab.icon + '"></i><span>' + tab.l + '</span>'
+        + (tab.ct > 0 ? '<span class="pmp-tech-subtab-ct' + (tab.red && tab.ct > 0 ? ' pmp-tech-subtab-ct--red' : '') + '">' + tab.ct + '</span>' : '')
+        + '</button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function _pmpAiBlock(t) {
+    var pd    = t.pmpData || {};
+    var notes = pd.technicalNotes || pd.observations || '';
+    var items = pd.checklistItems || [];
+    var dur   = pd.estimatedDuration || '';
+    var prio  = t.priority || pd.criticite || '';
+    if (!notes && !items.length && !dur && !prio) return '';
+    var e = MX.esc;
+    var h = '<div class="pmp-ai-block">'
+      + '<div class="pmp-ai-block-hdr"><i class="fas fa-robot"></i> Aide à l\'intervention</div>';
+    if (dur) {
+      h += '<div class="pmp-ai-block-section"><span class="pmp-ai-block-lbl"><i class="fas fa-clock"></i> Durée estimée</span>'
+        + '<span class="pmp-ai-block-item">' + e(dur) + '</span></div>';
+    }
+    if (prio === 'haute' || prio === 'critique') {
+      var prioCol = prio === 'critique' ? '#ef4444' : '#f97316';
+      h += '<div class="pmp-ai-block-section"><span class="pmp-ai-block-lbl"><i class="fas fa-gauge-high" style="color:' + prioCol + '"></i> Criticité</span>'
+        + '<span class="pmp-ai-block-item" style="color:' + prioCol + '">' + e(prio.charAt(0).toUpperCase() + prio.slice(1)) + '</span></div>';
+    }
+    if (items.length) {
+      h += '<div class="pmp-ai-block-section"><span class="pmp-ai-block-lbl"><i class="fas fa-list-check"></i> Tâches (' + items.length + ')</span>';
+      items.slice(0, 3).forEach(function (it) {
+        h += '<div class="pmp-ai-block-item">' + e(typeof it === 'string' ? it : (it.label || it.text || '')) + '</div>';
+      });
+      if (items.length > 3) h += '<div class="pmp-ai-block-more">+' + (items.length - 3) + ' de plus</div>';
+      h += '</div>';
+    }
+    if (notes) {
+      var shortNotes = notes.length > 120 ? notes.substring(0, 120) + '…' : notes;
+      h += '<div class="pmp-ai-block-section"><span class="pmp-ai-block-lbl"><i class="fas fa-note-sticky"></i> Notes techniques</span>'
+        + '<div class="pmp-ai-block-notes">' + e(shortNotes) + '</div></div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _pmpCardToday(t) {
+    var e       = MX.esc;
+    var pd      = t.pmpData || {};
+    var today   = new Date().toISOString().slice(0, 10);
+    var isLate  = pd.dueDate && pd.dueDate < today;
+    var cu      = MX.state.currentUser;
+    var curName = cu ? cu.name : '';
+    var mid     = e(t.missionId || t.id);
+    var h = '<div class="pmp-tech-card' + (isLate ? ' pmp-tech-card--late' : '') + '">'
+      + '<div class="pmp-tech-card-bar"></div>'
+      + '<div class="pmp-tech-card-inner">'
+      + '<div class="pmp-tech-card-head">'
+      + '<div><div class="pmp-tech-card-title">' + e(pd.equipmentName || t.text) + '</div>'
+      + (pd.family || pd.eqType ? '<div class="pmp-tech-card-family">' + e(pd.family || pd.eqType) + '</div>' : '')
+      + '</div>';
+    if (t.priority === 'critique') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--crit">CRITIQUE</span>';
+    else if (t.priority === 'haute') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--urg">URGENT</span>';
+    h += '</div>';
+    h += '<div class="mm-v3-card-meta">';
+    if (pd.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
+    if (pd.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
+    h += '</div>';
+    h += _pmpAiBlock(t);
+    h += '<div class="mm-v3-card-actions">';
+    if (!t.takenBy) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM._takePmpMission(\'' + mid + '\')">'
+        + '<i class="fas fa-right-to-bracket"></i><span>📥 Prendre</span></button>';
+    } else if (t.takenBy === curName) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
+        + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>';
+    } else {
+      h += '<span class="mm-v3-card-taken-info"><i class="fas fa-user-gear"></i> ' + e(t.takenBy) + '</span>';
+    }
+    h += '</div></div></div>';
+    return h;
+  }
+
+  function _pmpCardUpcoming(t, todayISO) {
+    var e   = MX.esc;
+    var pd  = t.pmpData || {};
+    var due = pd.dueDate || '';
+    var daysUntil = 0;
+    if (due && due > todayISO) {
+      daysUntil = Math.round((new Date(due + 'T00:00:00') - new Date(todayISO + 'T00:00:00')) / 86400000);
+    }
+    var items = pd.checklistItems || [];
+    var h = '<div class="pmp-tech-card pmp-tech-card--upcoming">'
+      + '<div class="pmp-tech-card-bar"></div>'
+      + '<div class="pmp-tech-card-inner">'
+      + '<div class="pmp-tech-card-head">'
+      + '<div><div class="pmp-tech-card-title">' + e(pd.equipmentName || t.text) + '</div>'
+      + (pd.family || pd.eqType ? '<div class="pmp-tech-card-family">' + e(pd.family || pd.eqType) + '</div>' : '')
+      + '</div>'
+      + (daysUntil > 0 ? '<div class="pmp-tech-card-days">J-' + daysUntil + '</div>' : '')
+      + '</div>';
+    h += '<div class="mm-v3-card-meta">';
+    if (pd.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
+    if (due) h += '<span class="mm-v3-meta-it"><i class="fas fa-calendar"></i>' + _fmtDate(due) + '</span>';
+    if (pd.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
+    h += '</div>';
+    if (items.length) {
+      h += '<div class="pmp-tech-upcoming-prep"><div class="pmp-tech-prep-lbl"><i class="fas fa-clipboard-list"></i> Préparer</div>';
+      items.slice(0, 3).forEach(function (it) {
+        h += '<div class="pmp-tech-prep-item"><i class="fas fa-circle-dot"></i> ' + e(typeof it === 'string' ? it : (it.label || it.text || '')) + '</div>';
+      });
+      if (items.length > 3) h += '<div class="pmp-tech-prep-more">+' + (items.length - 3) + ' tâches supplémentaires</div>';
+      h += '</div>';
+    }
+    if (pd.technicalNotes) {
+      var sn = pd.technicalNotes.length > 80 ? pd.technicalNotes.substring(0, 80) + '…' : pd.technicalNotes;
+      h += '<div class="pmp-tech-upcoming-notes"><i class="fas fa-note-sticky"></i> ' + e(sn) + '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  function _pmpCardInProgress(t) {
+    var e      = MX.esc;
+    var pd     = t.pmpData || {};
+    var items  = pd.checklistItems || [];
+    var doneC  = Object.keys(t.completedChecklist || {}).filter(function (k) { return t.completedChecklist[k]; }).length;
+    var mid    = e(t.missionId || t.id);
+    var h = '<div class="pmp-tech-card pmp-tech-card--inprogress">'
+      + '<div class="pmp-tech-card-bar"></div>'
+      + '<div class="pmp-tech-card-inner">'
+      + '<div class="pmp-tech-card-head">'
+      + '<div><div class="pmp-tech-card-title">' + e(pd.equipmentName || t.text) + '</div>'
+      + (pd.family || pd.eqType ? '<div class="pmp-tech-card-family">' + e(pd.family || pd.eqType) + '</div>' : '')
+      + '</div>'
+      + '<span class="pmp-tech-card-badge pmp-tech-card-badge--inprog">En cours</span>'
+      + '</div>';
+    h += '<div class="mm-v3-card-meta">';
+    if (pd.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
+    if (pd.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
+    h += '</div>';
+    if (items.length) {
+      var pmpPct = Math.round(doneC / items.length * 100);
+      h += '<div class="mm-v3-pmp-prog">'
+        + '<div class="mm-v3-pmp-prog-track"><div class="mm-v3-pmp-prog-fill" style="width:' + pmpPct + '%;background:' + TC.pmp + '"></div></div>'
+        + '<span class="mm-v3-pmp-prog-lbl">' + doneC + '/' + items.length + ' tâches — ' + pmpPct + '%</span></div>';
+    }
+    h += '<div class="mm-v3-card-actions">'
+      + '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
+      + '<i class="fas fa-folder-open"></i><span>📂 Ouvrir</span></button>'
+      + '</div></div></div>';
+    return h;
+  }
+
+  function _pmpCardUrgent(t, todayISO) {
+    var e       = MX.esc;
+    var pd      = t.pmpData || {};
+    var isLate  = pd.dueDate && pd.dueDate < todayISO;
+    var cu      = MX.state.currentUser;
+    var curName = cu ? cu.name : '';
+    var mid     = e(t.missionId || t.id);
+    var h = '<div class="pmp-tech-card pmp-tech-card--urgent">'
+      + '<div class="pmp-tech-card-bar"></div>'
+      + '<div class="pmp-tech-card-inner">'
+      + '<div class="pmp-tech-card-head">'
+      + '<div><div class="pmp-tech-card-title">' + e(pd.equipmentName || t.text) + '</div>'
+      + (pd.family || pd.eqType ? '<div class="pmp-tech-card-family">' + e(pd.family || pd.eqType) + '</div>' : '')
+      + '</div>';
+    if (isLate) h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--crit">RETARD</span>';
+    else if (t.priority === 'critique') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--crit">CRITIQUE</span>';
+    else if (t.priority === 'haute') h += '<span class="pmp-tech-card-badge pmp-tech-card-badge--urg">URGENT</span>';
+    h += '</div>';
+    h += '<div class="mm-v3-card-meta">';
+    if (pd.zone) h += '<span class="mm-v3-meta-it"><i class="fas fa-location-dot"></i>' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>';
+    if (pd.dueDate) {
+      h += '<span class="mm-v3-meta-it"><i class="fas fa-calendar' + (isLate ? '' : '-days') + '"></i>' + _fmtDate(pd.dueDate);
+      if (isLate) h += ' <span style="color:#ef4444;font-weight:600">(RETARD)</span>';
+      h += '</span>';
+    }
+    if (pd.estimatedDuration) h += '<span class="mm-v3-meta-it"><i class="fas fa-clock"></i>' + e(pd.estimatedDuration) + '</span>';
+    h += '</div>';
+    h += _pmpAiBlock(t);
+    h += '<div class="mm-v3-card-actions">';
+    if (!t.takenBy) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM._takePmpMission(\'' + mid + '\')">'
+        + '<i class="fas fa-right-to-bracket"></i><span>📥 Prendre</span></button>';
+    } else if (t.takenBy === curName) {
+      h += '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
+        + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>';
+    } else {
+      h += '<span class="mm-v3-card-taken-info"><i class="fas fa-user-gear"></i> ' + e(t.takenBy) + '</span>';
+    }
+    h += '</div></div></div>';
     return h;
   }
 
@@ -1468,6 +1734,16 @@
     render();
   }
 
+  function setPmpSubTab(tab) {
+    _pmpSubTab = tab;
+    render();
+  }
+
+  function setUpcomingRange(n) {
+    _upcomingRange = n;
+    render();
+  }
+
   function toggle(dayId, slot, taskId) {
     MX.Pages.Checklist.toggle(dayId, slot, taskId);
   }
@@ -1571,6 +1847,7 @@
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.MesMissions = {
     render: render, setFilter: setFilter, setTab: setTab,
+    setPmpSubTab: setPmpSubTab, setUpcomingRange: setUpcomingRange,
     setMmFilter: setMmFilter, _doMmSearch: _doMmSearch,
     toggle: toggle, prendre: prendre,
     photo: photo, _onPh: _onPh, signal: signal, _doSignal: _doSignal,
