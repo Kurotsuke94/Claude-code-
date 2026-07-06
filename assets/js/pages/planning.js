@@ -47,6 +47,10 @@
   let _clipboard   = null;
   let _loading     = false;
 
+  // ── AI WIZARD STATE ──
+  let _aiWiz = null;
+  const _AI_STEPS = ['Mois & Source', 'Options IA', 'Prévisualisation', 'Confirmation'];
+
   // ── ORDER DRAG STATE ──
   const _drag = {
     active: false, pending: false,
@@ -356,6 +360,7 @@
   function _teardownPlanningListener() {
     if (_plnUnsubEntries) { _plnUnsubEntries(); _plnUnsubEntries = null; }
     _plnMergedMaps = {};
+    _aiWizClose(true);
   }
 
   // ── SELECTION SYSTEM ──
@@ -898,6 +903,13 @@
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RTT')"><i class="fas fa-calendar-xmark"></i> RTT</button>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('JFL')"><i class="fas fa-star"></i> Jour férié</button>
         <button class="plng-qa-btn" onclick="MX.Pages.Planning._openAutoGenModal()"><i class="fas fa-wand-magic-sparkles"></i> Horaire récurrent</button>
+        <button class="plng-qa-btn plng-qa-ai" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Générer avec l'IA</button>
+        ${(function() {
+          const bk = _aiHasBackup();
+          if (!bk) return '';
+          const [bkY, bkMRaw] = bk.ym.split('-');
+          return `<button class="plng-qa-btn plng-qa-restore" onclick="MX.Pages.Planning._aiRestoreBackup()"><i class="fas fa-rotate-left"></i> Restaurer ${(MONTH_NAMES[+bkMRaw - 1] || bk.ym).slice(0, 3)} ${bkY}</button>`;
+        })()}
         <div class="plng-legend-sep"></div>
         <button class="plng-qa-btn plng-qa-export" onclick="MX.Pages.Planning._exportCsv()"><i class="fas fa-file-excel"></i> Export Excel</button>
         <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-file-pdf"></i> Exporter PDF</button>
@@ -1020,6 +1032,25 @@
           </div>
         </div>`;
       });
+    }
+
+    // ── 💡 Suggestions IA ──
+    if (_view === 'week' && canEdit) {
+      const weekDays   = _weekDays(_day);
+      const WORK_C     = ['1', '2', '3', '4'];
+      const noPost     = users.filter(u => !weekDays.some(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_C.includes(e.shiftCode); }));
+      const nextM      = _month === 11 ? 0 : _month + 1;
+      const nextY      = _month === 11 ? _year + 1 : _year;
+      const suggestions = [];
+      if (noPost.length > 0) suggestions.push({ ico: 'fa-user-clock', col: '#F97316', txt: noPost.length + ' agent' + (noPost.length > 1 ? 's' : '') + ' sans poste cette semaine' });
+      suggestions.push({ ico: 'fa-robot', col: 'var(--cyan)', txt: 'Générer ' + MONTH_NAMES[nextM].slice(0, 3) + ' ' + nextY + ' avec l\'IA' });
+
+      h += `<div class="plng-legend-sep"></div>
+        <div class="plng-legend-title"><i class="fas fa-lightbulb" style="color:#FDE047;margin-right:4px"></i>Suggestions IA</div>`;
+      suggestions.forEach(sg => {
+        h += `<div class="plng-ai-suggest"><i class="fas ${sg.ico}" style="color:${sg.col}"></i><span>${sg.txt}</span></div>`;
+      });
+      h += `<button class="plng-qa-btn plng-qa-ai" style="margin-top:4px" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Ouvrir l'assistant IA</button>`;
     }
 
     h += `</div>`;
@@ -1269,6 +1300,550 @@
       });
       MX.toast(shiftCode + ' appliqué (' + ops.length + ' entrée(s))'); render();
     } catch (e) { MX.toast('Erreur', true); }
+  }
+
+  // ── AI PLANNING WIZARD ──
+
+  function _openAIWizard() {
+    _aiWizClose(true);
+    const now = new Date();
+    const nm = now.getMonth() + 1;
+    const tgtY = nm > 11 ? now.getFullYear() + 1 : now.getFullYear();
+    const tgtM = nm > 11 ? 0 : nm;
+    _aiWiz = {
+      step: 1,
+      targetYear: tgtY, targetMonth: tgtM,
+      source: 'ai',
+      srcYear: now.getMonth() > 0 ? now.getFullYear() : now.getFullYear() - 1,
+      srcMonth: now.getMonth() > 0 ? now.getMonth() - 1 : 11,
+      opts: {
+        keepCP: true, keepRTT: true, keepRH: false, keepEXT: false, keepJFL: true,
+        noSat: true, noSun: true, respectCycles: true,
+        minMatin: 1, minJournee: 1, minSoir: 1, histMonths: 3,
+      },
+      generated: null, diff: null, score: null, loading: false,
+    };
+    const ov = document.createElement('div');
+    ov.id = 'plng-ai-ov';
+    ov.className = 'plng-ai-ov';
+    document.body.appendChild(ov);
+    requestAnimationFrame(() => ov.classList.add('visible'));
+    _aiWizRender();
+  }
+
+  function _aiWizClose(instant) {
+    const ov = document.getElementById('plng-ai-ov');
+    if (ov) {
+      if (instant) { ov.remove(); }
+      else { ov.classList.remove('visible'); setTimeout(() => ov.remove(), 280); }
+    }
+    _aiWiz = null;
+  }
+
+  function _aiWizRender() {
+    const ov = document.getElementById('plng-ai-ov');
+    if (!ov || !_aiWiz) return;
+    const s = _aiWiz.step;
+    ov.innerHTML = `<div class="plng-ai-panel">
+      <div class="plng-ai-hdr">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="plng-ai-icon"><i class="fas fa-robot"></i></div>
+          <div>
+            <div class="plng-ai-title">Assistant IA — Planification</div>
+            <div class="plng-ai-sub">Étape ${s}/${_AI_STEPS.length} : ${_AI_STEPS[s - 1]}</div>
+          </div>
+        </div>
+        <button class="plng-ai-x" onclick="MX.Pages.Planning._aiWizClose()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="plng-ai-steps">
+        ${_AI_STEPS.map((lbl, i) => `
+          <div class="plng-ai-step-w">
+            <div class="plng-ai-dot ${i + 1 < s ? 'done' : i + 1 === s ? 'cur' : ''}">${i + 1 < s ? '<i class="fas fa-check"></i>' : (i + 1)}</div>
+            <div class="plng-ai-step-lbl ${i + 1 === s ? 'cur' : ''}">${lbl}</div>
+          </div>
+          ${i < _AI_STEPS.length - 1 ? '<div class="plng-ai-step-seg ' + (i + 1 < s ? 'done' : '') + '"></div>' : ''}
+        `).join('')}
+      </div>
+      <div class="plng-ai-body" id="plng-ai-body">${_aiWizBody()}</div>
+      <div class="plng-ai-foot">
+        ${s > 1
+          ? `<button class="plng-ai-btn sec" onclick="MX.Pages.Planning._aiWizBack()"><i class="fas fa-chevron-left"></i> Retour</button>`
+          : `<button class="plng-ai-btn sec" onclick="MX.Pages.Planning._aiWizClose()">Annuler</button>`
+        }
+        <span style="flex:1"></span>
+        ${_aiWizNextBtn()}
+      </div>
+    </div>`;
+  }
+
+  function _aiWizNextBtn() {
+    const s = _aiWiz.step;
+    if (s === 2) return `<button class="plng-ai-btn pri" onclick="MX.Pages.Planning._aiWizGenerate()" ${_aiWiz.loading ? 'disabled' : ''}>
+      ${_aiWiz.loading ? '<i class="fas fa-spinner fa-spin"></i> Analyse…' : '<i class="fas fa-wand-magic-sparkles"></i> Générer le planning'}
+    </button>`;
+    if (s === 3) return `<button class="plng-ai-btn pri" onclick="MX.Pages.Planning._aiWizNext()"><i class="fas fa-eye"></i> Voir le résumé</button>`;
+    if (s === 4) return `<button class="plng-ai-btn pri confirm" onclick="MX.Pages.Planning._aiWizApply()"><i class="fas fa-check"></i> Appliquer le planning</button>`;
+    return `<button class="plng-ai-btn pri" onclick="MX.Pages.Planning._aiWizNext()">Suivant <i class="fas fa-chevron-right"></i></button>`;
+  }
+
+  function _aiWizBody() {
+    if (_aiWiz.step === 1) return _aiWizStep1();
+    if (_aiWiz.step === 2) return _aiWizStep2();
+    if (_aiWiz.step === 3) return _aiWizStep3();
+    return _aiWizStep4();
+  }
+
+  function _aiWizStep1() {
+    const w = _aiWiz;
+    const curY = new Date().getFullYear();
+    return `<div class="plng-ai-s1">
+      <div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-calendar-days"></i> Mois cible à générer</div>
+        <div class="plng-ai-row">
+          <select class="fi plng-ai-sel" onchange="MX.Pages.Planning._aiWizSet('targetMonth',+this.value)">
+            ${MONTH_NAMES.map((m, i) => `<option value="${i}"${w.targetMonth === i ? ' selected' : ''}>${m}</option>`).join('')}
+          </select>
+          <select class="fi plng-ai-sel" onchange="MX.Pages.Planning._aiWizSet('targetYear',+this.value)">
+            ${[-1, 0, 1].map(d => { const y = curY + d; return `<option value="${y}"${w.targetYear === y ? ' selected' : ''}>${y}</option>`; }).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-database"></i> Source des données</div>
+        <div class="plng-ai-radio-grp">
+          ${[
+            { v: 'ai',    ico: 'fa-robot',          lbl: 'IA Intelligente',          desc: 'Analyse 3 mois d\'historique pour générer un planning optimal adapté à chaque technicien' },
+            { v: 'prev',  ico: 'fa-copy',            lbl: 'Copier le mois précédent', desc: 'Reproduit le planning du mois précédent avec filtrage configurable des codes' },
+            { v: 'other', ico: 'fa-calendar-plus',   lbl: 'Copier un autre mois',     desc: 'Choisissez librement le mois source à transposer sur le mois cible' },
+            { v: 'empty', ico: 'fa-eraser',          lbl: 'Planning vide',            desc: 'Efface toutes les entrées existantes du mois cible' },
+          ].map(o => `<label class="plng-ai-ropt${w.source === o.v ? ' sel' : ''}">
+            <input type="radio" name="ai-src" value="${o.v}"${w.source === o.v ? ' checked' : ''} onchange="MX.Pages.Planning._aiWizSetSrc(this.value)">
+            <div class="plng-ai-rico"><i class="fas ${o.ico}"></i></div>
+            <div class="plng-ai-rbody">
+              <div class="plng-ai-rlbl">${o.lbl}</div>
+              <div class="plng-ai-rdesc">${o.desc}</div>
+            </div>
+            ${w.source === o.v ? '<div class="plng-ai-rcheck"><i class="fas fa-check"></i></div>' : ''}
+          </label>`).join('')}
+        </div>
+        ${w.source === 'other' ? `<div class="plng-ai-row" style="margin-top:10px;align-items:center">
+          <span style="font-size:12px;color:var(--text3);white-space:nowrap">Mois source :</span>
+          <select class="fi plng-ai-sel" onchange="MX.Pages.Planning._aiWizSet('srcMonth',+this.value)">
+            ${MONTH_NAMES.map((m, i) => `<option value="${i}"${w.srcMonth === i ? ' selected' : ''}>${m}</option>`).join('')}
+          </select>
+          <select class="fi plng-ai-sel" onchange="MX.Pages.Planning._aiWizSet('srcYear',+this.value)">
+            ${[-2, -1, 0].map(d => { const y = curY + d; return `<option value="${y}"${w.srcYear === y ? ' selected' : ''}>${y}</option>`; }).join('')}
+          </select>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function _aiWizStep2() {
+    const w = _aiWiz;
+    const o = w.opts;
+    const isAI    = w.source === 'ai';
+    const isCopy  = w.source === 'prev' || w.source === 'other';
+    const isEmpty = w.source === 'empty';
+    return `<div class="plng-ai-s2">
+      ${isAI ? `<div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-robot"></i> Paramètres IA</div>
+        <div class="plng-ai-hint"><i class="fas fa-circle-info"></i> L'IA analysera les ${o.histMonths} derniers mois pour détecter les cycles et habitudes de chaque technicien.</div>
+        <div class="plng-ai-chkgrid">
+          <label class="plng-ai-chk"><input type="checkbox" ${o.respectCycles ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('respectCycles',this.checked)"> Respecter les cycles habituels</label>
+          <label class="plng-ai-chk"><input type="checkbox" ${o.keepCP ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('keepCP',this.checked)"> Conserver CP existants</label>
+          <label class="plng-ai-chk"><input type="checkbox" ${o.keepJFL ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('keepJFL',this.checked)"> Conserver jours fériés</label>
+        </div>
+        <div class="plng-ai-constraints">
+          <div class="plng-ai-stitle" style="margin-bottom:8px"><i class="fas fa-sliders"></i> Minimum par créneau (jours ouvrés)</div>
+          ${[
+            { k: 'minMatin',   lbl: 'Min. Matin',   col: '#FDE047' },
+            { k: 'minJournee', lbl: 'Min. Journée',  col: '#9CA3AF' },
+            { k: 'minSoir',    lbl: 'Min. Soir',     col: '#EF4444' },
+          ].map(c => `<div class="plng-ai-cstr-row">
+            <span class="plng-ai-cstr-dot" style="background:${c.col}"></span>
+            <span class="plng-ai-cstr-lbl">${c.lbl}</span>
+            <div class="plng-ai-stepper">
+              <button type="button" onclick="MX.Pages.Planning._aiWizStep('${c.k}',-1)">−</button>
+              <span>${o[c.k]}</span>
+              <button type="button" onclick="MX.Pages.Planning._aiWizStep('${c.k}',1)">+</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+      ${isCopy ? `<div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-shield-halved"></i> Codes à conserver lors de la copie</div>
+        <div class="plng-ai-chkgrid">
+          ${[
+            { k: 'keepCP',  lbl: 'Congés (CP)'        },
+            { k: 'keepRTT', lbl: 'RTT'                 },
+            { k: 'keepRH',  lbl: 'Repos (RH)'          },
+            { k: 'keepEXT', lbl: 'Extérieur (EXT)'     },
+            { k: 'keepJFL', lbl: 'Jours fériés (JFL)'  },
+          ].map(c => `<label class="plng-ai-chk">
+            <input type="checkbox" ${o[c.k] ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('${c.k}',this.checked)">
+            ${c.lbl}
+          </label>`).join('')}
+        </div>
+      </div>` : ''}
+      ${isEmpty ? `<div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-eraser"></i> Planning vide</div>
+        <div class="plng-ai-hint"><i class="fas fa-triangle-exclamation" style="color:#F97316"></i> Toutes les entrées existantes du mois cible seront supprimées. La sauvegarde vous permettra de restaurer l'état actuel.</div>
+      </div>` : ''}
+      <div class="plng-ai-section">
+        <div class="plng-ai-stitle"><i class="fas fa-calendar-week"></i> Jours à exclure</div>
+        <div class="plng-ai-chkgrid">
+          <label class="plng-ai-chk"><input type="checkbox" ${o.noSat ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('noSat',this.checked)"> Exclure les samedis</label>
+          <label class="plng-ai-chk"><input type="checkbox" ${o.noSun ? 'checked' : ''} onchange="MX.Pages.Planning._aiWizOpt('noSun',this.checked)"> Exclure les dimanches</label>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function _aiWizStep3() {
+    const w = _aiWiz;
+    if (w.loading) return `<div class="plng-ai-loading"><i class="fas fa-spinner fa-spin"></i><div>Génération du planning en cours…</div><div style="font-size:11px;color:var(--text3)">Analyse de l'historique et calcul des contraintes</div></div>`;
+    if (!w.diff)   return `<div class="plng-ai-loading"><i class="fas fa-exclamation-circle" style="color:#EF4444"></i><div style="color:var(--text2)">Erreur lors de la génération</div></div>`;
+    const { added, changed, removed, unchanged } = w.diff;
+    const na = Object.keys(added).length, nc = Object.keys(changed).length;
+    const nr = Object.keys(removed).length, nu = Object.keys(unchanged).length;
+    const users = _users();
+    const days = _daysInMonth(w.targetYear, w.targetMonth);
+    const esc = MX.esc;
+    return `<div class="plng-ai-s3">
+      <div class="plng-ai-diff-stats">
+        <div class="plng-ai-dstat add"><i class="fas fa-plus-circle"></i><span>${na}</span><small>Ajouté${na > 1 ? 's' : ''}</small></div>
+        <div class="plng-ai-dstat chg"><i class="fas fa-pen-circle"></i><span>${nc}</span><small>Modifié${nc > 1 ? 's' : ''}</small></div>
+        <div class="plng-ai-dstat rem"><i class="fas fa-minus-circle"></i><span>${nr}</span><small>Supprimé${nr > 1 ? 's' : ''}</small></div>
+        <div class="plng-ai-dstat unc"><i class="fas fa-circle-check"></i><span>${nu}</span><small>Inchangé${nu > 1 ? 's' : ''}</small></div>
+      </div>
+      <div class="plng-ai-diff-legend">
+        <span class="plng-ai-dl add">Ajouté</span><span class="plng-ai-dl chg">Modifié</span>
+        <span class="plng-ai-dl rem">Supprimé</span><span class="plng-ai-dl unc">Inchangé</span>
+        <span class="plng-ai-dl mpt">Vide</span>
+      </div>
+      <div style="overflow-x:auto;margin-top:6px">
+        <table class="plng-ai-diff-tbl">
+          <thead><tr>
+            <th class="plng-ai-diff-th-u">Agent</th>
+            ${Array.from({ length: days }, (_, i) => {
+              const ds = _dateStr(w.targetYear, w.targetMonth, i + 1);
+              const dow = new Date(ds + 'T00:00:00').getDay();
+              return `<th class="plng-ai-diff-th${dow === 0 || dow === 6 ? ' wknd' : ''}">${i + 1}</th>`;
+            }).join('')}
+          </tr></thead>
+          <tbody>${users.map(u => `<tr>
+            <td class="plng-ai-diff-u">${esc(u.name.split(' ')[0])}</td>
+            ${Array.from({ length: days }, (_, i) => {
+              const ds = _dateStr(w.targetYear, w.targetMonth, i + 1);
+              const key = u.id + '_' + ds;
+              const dow = new Date(ds + 'T00:00:00').getDay();
+              if (dow === 0 || dow === 6) return `<td class="plng-ai-dc wknd"></td>`;
+              if (added[key])     return `<td class="plng-ai-dc add" title="+${added[key].shiftCode}">${added[key].shiftCode}</td>`;
+              if (changed[key])   return `<td class="plng-ai-dc chg" title="${changed[key].from}→${changed[key].to}">${changed[key].to}</td>`;
+              if (removed[key])   return `<td class="plng-ai-dc rem" title="-${removed[key].shiftCode}">${removed[key].shiftCode}</td>`;
+              if (unchanged[key]) return `<td class="plng-ai-dc unc">${unchanged[key].shiftCode}</td>`;
+              return `<td class="plng-ai-dc mpt"></td>`;
+            }).join('')}
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div class="plng-ai-backup-row">
+        <label class="plng-ai-chk" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="ai-bk-chk" checked>
+          <span>Sauvegarder le planning actuel avant d'appliquer <small style="color:var(--text3)">(restauration depuis la sidebar)</small></span>
+        </label>
+      </div>
+    </div>`;
+  }
+
+  function _aiWizStep4() {
+    const w = _aiWiz;
+    const sc = w.score || { score: 0, coveragePct: 0, minViolations: 0 };
+    const { added, changed, removed, unchanged } = w.diff || { added: {}, changed: {}, removed: {}, unchanged: {} };
+    const na = Object.keys(added).length, nc = Object.keys(changed).length;
+    const nr = Object.keys(removed).length, nu = Object.keys(unchanged).length;
+    const total = na + nc + nu;
+    const scoreCol = sc.score >= 80 ? '#22C55E' : sc.score >= 60 ? '#F97316' : '#EF4444';
+    const scoreLbl = sc.score >= 80 ? 'Excellent — Planning optimal' : sc.score >= 60 ? 'Satisfaisant — Vérifiez les contraintes' : 'Insuffisant — Ajustez les minimums';
+    const circ = 263.9;
+    return `<div class="plng-ai-s4">
+      <div class="plng-ai-score-box">
+        <div class="plng-ai-score-ring">
+          <svg viewBox="0 0 100 100" class="plng-ai-score-svg">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--bg3)" stroke-width="8"/>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="${scoreCol}" stroke-width="8"
+              stroke-dasharray="${Math.round(sc.score * circ / 100)} ${circ}"
+              stroke-linecap="round" transform="rotate(-90 50 50)"/>
+          </svg>
+          <div class="plng-ai-score-n">${sc.score}</div>
+        </div>
+        <div class="plng-ai-score-info">
+          <div class="plng-ai-score-title" style="color:${scoreCol}">${scoreLbl}</div>
+          <div class="plng-ai-score-sub">Couverture : ${sc.coveragePct}% des postes renseignés</div>
+          ${sc.minViolations > 0
+            ? `<div class="plng-ai-score-warn"><i class="fas fa-triangle-exclamation"></i> ${sc.minViolations} violation${sc.minViolations > 1 ? 's' : ''} des minimums</div>`
+            : `<div class="plng-ai-score-ok"><i class="fas fa-circle-check"></i> Minimums respectés</div>`
+          }
+        </div>
+      </div>
+      <div class="plng-ai-sum-grid">
+        <div class="plng-ai-sum-card"><div class="plng-ai-sum-n">${total}</div><div class="plng-ai-sum-lbl">Entrées totales</div></div>
+        <div class="plng-ai-sum-card add"><div class="plng-ai-sum-n">${na}</div><div class="plng-ai-sum-lbl">Nouvelles</div></div>
+        <div class="plng-ai-sum-card chg"><div class="plng-ai-sum-n">${nc}</div><div class="plng-ai-sum-lbl">Modifiées</div></div>
+        <div class="plng-ai-sum-card rem"><div class="plng-ai-sum-n">${nr}</div><div class="plng-ai-sum-lbl">Supprimées</div></div>
+      </div>
+      <div class="plng-ai-confirm-info">
+        <i class="fas fa-circle-info" style="color:var(--cyan)"></i>
+        <span>Le planning sera appliqué pour <strong>${MONTH_NAMES[w.targetMonth]} ${w.targetYear}</strong>.${nr > 0 ? ` <strong style="color:#EF4444">${nr} entrée${nr > 1 ? 's' : ''} existante${nr > 1 ? 's' : ''} sera${nr > 1 ? 'nt' : ''} supprimée${nr > 1 ? 's' : ''}.</strong>` : ''}</span>
+      </div>
+      <div class="plng-ai-backup-row">
+        <label class="plng-ai-chk" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="ai-bk-chk" checked>
+          <span>Sauvegarder le planning actuel avant d'appliquer</span>
+        </label>
+      </div>
+    </div>`;
+  }
+
+  function _aiWizNext() {
+    if (!_aiWiz) return;
+    if (_aiWiz.step === 1) { _aiWiz.step = 2; _aiWizRender(); }
+    else if (_aiWiz.step === 3) { _aiWiz.step = 4; _aiWizRender(); }
+  }
+
+  function _aiWizBack() {
+    if (!_aiWiz || _aiWiz.step <= 1) return;
+    if (_aiWiz.step === 4)      { _aiWiz.step = 3; }
+    else if (_aiWiz.step === 3) { _aiWiz.step = _aiWiz.source === 'empty' ? 1 : 2; }
+    else                        { _aiWiz.step--; }
+    _aiWizRender();
+  }
+
+  function _aiWizSet(key, val) { if (!_aiWiz) return; _aiWiz[key] = val; _aiWizRender(); }
+  function _aiWizSetSrc(val)   { if (!_aiWiz) return; _aiWiz.source = val; _aiWizRender(); }
+  function _aiWizOpt(key, val) { if (!_aiWiz) return; _aiWiz.opts[key] = val; }
+  function _aiWizStep(key, d)  { if (!_aiWiz) return; _aiWiz.opts[key] = Math.max(0, (_aiWiz.opts[key] || 0) + d); _aiWizRender(); }
+
+  async function _aiWizGenerate() {
+    if (!_aiWiz || _aiWiz.loading) return;
+    _aiWiz.loading = true;
+    _aiWiz.step = 3;
+    _aiWizRender();
+    try {
+      const { targetYear: ty, targetMonth: tm, source, opts, srcYear, srcMonth } = _aiWiz;
+      let generated;
+      if (source === 'empty') {
+        generated = {};
+      } else if (source === 'prev') {
+        const pM = tm === 0 ? 11 : tm - 1;
+        const pY = tm === 0 ? ty - 1 : ty;
+        generated = await _aiTransposeMonth(pY, pM, ty, tm, opts);
+      } else if (source === 'other') {
+        generated = await _aiTransposeMonth(srcYear, srcMonth, ty, tm, opts);
+      } else {
+        generated = await _aiSmartGenerate(ty, tm, opts);
+      }
+      const current = await MX.DB.loadPlanningMonth(ty, tm);
+      _aiWiz.diff = _aiComputeDiff(current, generated);
+      _aiWiz.generated = generated;
+      _aiWiz.score = _aiComputeScore(generated, ty, tm, opts);
+      _aiWiz.loading = false;
+      _aiWizRender();
+    } catch (e) {
+      console.error('[AI Wiz]', e);
+      _aiWiz.loading = false;
+      _aiWiz.step = _aiWiz.source === 'empty' ? 1 : 2;
+      _aiWizRender();
+      MX.toast('Erreur lors de la génération', true);
+    }
+  }
+
+  async function _aiTransposeMonth(srcY, srcM, tgtY, tgtM, opts) {
+    const srcMap = await MX.DB.loadPlanningMonth(srcY, srcM);
+    const result = {};
+    const users  = _users();
+    const days   = _daysInMonth(tgtY, tgtM);
+    const KEEP   = { CP: opts.keepCP, RTT: opts.keepRTT, RH: opts.keepRH, EXT: opts.keepEXT, JFL: opts.keepJFL };
+    const SPECIAL = new Set(['CP', 'RTT', 'RH', 'EXT', 'JFL']);
+
+    for (let d = 1; d <= days; d++) {
+      const tgtDate = _dateStr(tgtY, tgtM, d);
+      const dow = new Date(tgtDate + 'T00:00:00').getDay();
+      if (opts.noSat && dow === 6) continue;
+      if (opts.noSun && dow === 0) continue;
+      users.forEach(u => {
+        const srcKeys = Object.keys(srcMap).filter(k => k.startsWith(u.id + '_') && new Date(k.slice(u.id.length + 1) + 'T00:00:00').getDay() === dow);
+        const freq = {};
+        srcKeys.forEach(k => {
+          const code = srcMap[k].shiftCode;
+          if (SPECIAL.has(code) && KEEP[code] === false) return;
+          freq[code] = (freq[code] || 0) + 1;
+        });
+        const best = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+        if (best) result[u.id + '_' + tgtDate] = { userId: u.id, userName: u.name, date: tgtDate, shiftCode: best[0] };
+      });
+    }
+    return result;
+  }
+
+  async function _aiSmartGenerate(tgtY, tgtM, opts) {
+    const users = _users();
+    const result = {};
+    const WORK   = ['1', '2', '3', '4'];
+
+    // Load history (up to 3 months)
+    const histMaps = [];
+    for (let i = 1; i <= (opts.histMonths || 3); i++) {
+      let hm = tgtM - i, hy = tgtY;
+      while (hm < 0) { hm += 12; hy--; }
+      try { histMaps.push(await MX.DB.loadPlanningMonth(hy, hm)); } catch (_) { /* ignore empty months */ }
+    }
+
+    // Build frequency: userId → dow → shiftCode → count
+    const freq = {};
+    users.forEach(u => { freq[u.id] = { 0: {}, 1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {} }; });
+    histMaps.forEach(m => Object.values(m).forEach(e => {
+      if (!e || !e.userId || !e.shiftCode || !e.date || !freq[e.userId]) return;
+      const dow = new Date(e.date + 'T00:00:00').getDay();
+      freq[e.userId][dow][e.shiftCode] = (freq[e.userId][dow][e.shiftCode] || 0) + 1;
+    }));
+
+    const days = _daysInMonth(tgtY, tgtM);
+    for (let d = 1; d <= days; d++) {
+      const ds = _dateStr(tgtY, tgtM, d);
+      const dow = new Date(ds + 'T00:00:00').getDay();
+      if (opts.noSat && dow === 6) continue;
+      if (opts.noSun && dow === 0) continue;
+
+      const dc = { '1': 0, '2': 0, '3': 0, '4': 0 };
+      // Sort users by preference confidence (strongest preference first)
+      const prefs = users.map(u => {
+        const dF = freq[u.id] ? freq[u.id][dow] : {};
+        const tot = Object.values(dF).reduce((s, v) => s + v, 0);
+        const top = Object.entries(dF).filter(([c]) => WORK.includes(c)).sort((a, b) => b[1] - a[1])[0];
+        return { u, code: top ? top[0] : null, conf: tot > 0 && top ? top[1] / tot : 0 };
+      }).sort((a, b) => b.conf - a.conf);
+
+      prefs.forEach(({ u, code }) => {
+        let assignCode = code;
+        // Fallback when no preference: fill minimums first
+        if (!assignCode) {
+          if (dc['1'] < opts.minMatin) assignCode = '1';
+          else if (dc['4'] < opts.minSoir) assignCode = '4';
+          else assignCode = '2';
+        }
+        if (WORK.includes(assignCode)) dc[assignCode]++;
+        if (assignCode) result[u.id + '_' + ds] = { userId: u.id, userName: u.name, date: ds, shiftCode: assignCode };
+      });
+    }
+    return result;
+  }
+
+  function _aiComputeDiff(current, generated) {
+    const added = {}, changed = {}, removed = {}, unchanged = {};
+    Object.entries(generated).forEach(([k, e]) => {
+      const cur = current[k];
+      if (!cur)                         added[k]     = e;
+      else if (cur.shiftCode !== e.shiftCode) changed[k] = { ...e, from: cur.shiftCode, to: e.shiftCode };
+      else                              unchanged[k] = e;
+    });
+    Object.entries(current).forEach(([k, e]) => { if (!generated[k]) removed[k] = e; });
+    return { added, changed, removed, unchanged };
+  }
+
+  function _aiComputeScore(generated, ty, tm, opts) {
+    const users = _users();
+    const WORK  = ['1', '2', '3', '4'];
+    let workDays = 0, covered = 0, minViolations = 0;
+    const days = _daysInMonth(ty, tm);
+    for (let d = 1; d <= days; d++) {
+      const ds = _dateStr(ty, tm, d);
+      const dow = new Date(ds + 'T00:00:00').getDay();
+      if ((opts.noSat && dow === 6) || (opts.noSun && dow === 0)) continue;
+      workDays++;
+      const dc = { '1': 0, '2': 0, '3': 0, '4': 0 };
+      users.forEach(u => { const e = generated[u.id + '_' + ds]; if (e && WORK.includes(e.shiftCode)) { dc[e.shiftCode]++; covered++; } });
+      if (dc['1'] < opts.minMatin) minViolations++;
+      if (dc['4'] < opts.minSoir)  minViolations++;
+    }
+    const maxCov = workDays * users.length;
+    const coveragePct = maxCov > 0 ? Math.round(covered / maxCov * 100) : 0;
+    const minScore    = Math.max(0, 100 - minViolations * 8);
+    return { score: Math.min(100, Math.round(coveragePct * 0.65 + minScore * 0.35)), coveragePct, minViolations };
+  }
+
+  async function _aiWizApply() {
+    if (!_aiWiz || !_aiWiz.generated || !_aiWiz.diff) return;
+    const bkChk = document.getElementById('ai-bk-chk');
+    if (bkChk && bkChk.checked) _aiBackupCurrentMonth(_aiWiz.targetYear, _aiWiz.targetMonth);
+
+    const { added, changed, removed } = _aiWiz.diff;
+    const ty = _aiWiz.targetYear, tm = _aiWiz.targetMonth;
+    try {
+      const opsSet = Object.values(added).concat(Object.values(changed)).map(e => MX.DB.setPlanningEntry(e.userId, e.date, e.shiftCode));
+      const opsDel = Object.values(removed).map(e => MX.DB.deletePlanningEntry(e.userId, e.date));
+      await Promise.all(opsSet.concat(opsDel));
+
+      // Update local state if viewing same month
+      if (_year === ty && _month === tm) {
+        if (!MX.state.planningEntries) MX.state.planningEntries = {};
+        Object.values(added).concat(Object.values(changed)).forEach(e => {
+          const ym = e.date.slice(0, 7);
+          MX.state.planningEntries[e.userId + '_' + e.date] = { userId: e.userId, userName: e.userName, date: e.date, shiftCode: e.shiftCode, ym };
+        });
+        Object.values(removed).forEach(e => { delete MX.state.planningEntries[e.userId + '_' + e.date]; });
+      }
+
+      const total = opsSet.length + opsDel.length;
+      _aiWizClose();
+      MX.toast('Planning appliqué — ' + total + ' modification' + (total > 1 ? 's' : ''));
+      if (_year !== ty || _month !== tm) { _year = ty; _month = tm; _view = 'month'; }
+      render();
+    } catch (e) {
+      console.error('[AI Apply]', e);
+      MX.toast('Erreur lors de l\'application', true);
+    }
+  }
+
+  function _aiBackupCurrentMonth(ty, tm) {
+    try {
+      const ym  = ty + '-' + _pad(tm + 1);
+      const key = 'mxtx_plng_bk_' + ym;
+      const entries = {};
+      Object.entries(MX.state.planningEntries || {}).forEach(([k, e]) => { if (e && e.ym === ym) entries[k] = e; });
+      localStorage.setItem(key, JSON.stringify({ ym, ts: Date.now(), entries }));
+      localStorage.setItem('mxtx_plng_bk_last', ym);
+    } catch (_) { /* storage unavailable */ }
+  }
+
+  function _aiHasBackup() {
+    try {
+      const lastYm = localStorage.getItem('mxtx_plng_bk_last');
+      if (!lastYm) return null;
+      const raw = localStorage.getItem('mxtx_plng_bk_' + lastYm);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) { return null; }
+  }
+
+  async function _aiRestoreBackup() {
+    const bk = _aiHasBackup();
+    if (!bk) return MX.toast('Aucune sauvegarde disponible', true);
+    const [bkYStr, bkMRaw] = bk.ym.split('-');
+    const bkMIdx = +bkMRaw - 1;
+    MX.showModal('Restaurer la sauvegarde', MONTH_NAMES[bkMIdx] + ' ' + bkYStr + ' — ' + Object.keys(bk.entries).length + ' entrées sauvegardées', [
+      { label: 'Annuler', cls: 'cancel' },
+      { label: '<i class="fas fa-rotate-left"></i> Restaurer', cls: 'confirm', fn: async () => {
+        try {
+          await Promise.all(Object.values(bk.entries).map(e => MX.DB.setPlanningEntry(e.userId, e.date, e.shiftCode)));
+          if (!MX.state.planningEntries) MX.state.planningEntries = {};
+          Object.entries(bk.entries).forEach(([k, e]) => { MX.state.planningEntries[k] = e; });
+          MX.toast('Sauvegarde restaurée (' + Object.keys(bk.entries).length + ' entrées)');
+          render();
+        } catch (e) { MX.toast('Erreur restauration', true); }
+      }},
+    ]);
   }
 
   // ── AUTO GENERATE MODAL ──
@@ -1777,6 +2352,7 @@
         ${shifts.map(s => `<option value="${MX.esc(s.code)}"${_filterShift===s.code?' selected':''}>${MX.esc(s.code)} — ${MX.esc(s.name)}</option>`).join('')}
       </select>
     </div>
+    ${canEdit ? `<button class="plng-ai-open-btn" onclick="MX.Pages.Planning._openAIWizard()" title="Assistant IA de Planification"><i class="fas fa-robot"></i> <span>Générer avec l'IA</span></button>` : ''}
   </div>
   ${canEdit && _view !== 'day' ? _renderQuickBar(shifts) : ''}
   <div class="plng-body">
@@ -1834,5 +2410,8 @@
     _openMissionPanel,
     _showOrderMenu, _moveUser,
     _onUsersUpdate: render,
+    _openAIWizard, _aiWizClose, _aiWizNext, _aiWizBack,
+    _aiWizSet, _aiWizSetSrc, _aiWizOpt, _aiWizStep, _aiWizGenerate, _aiWizApply,
+    _aiRestoreBackup,
   };
 })();
