@@ -657,7 +657,7 @@
     return h;
   }
 
-  // ── WEEK CARDS V2 ──
+  // ── WEEK CARDS (Premium plnx) ──
 
   function _renderWeekCards(users, today, canEdit) {
     const days       = _weekDays(_day);
@@ -665,97 +665,56 @@
     const entries    = _entries();
     const visible    = _filterUser ? users.filter(u => u.id === _filterUser) : users;
     const canReorder = _canReorder();
-    const panelW     = _density === 'compact'
-      ? (canReorder ? 176 : 148)
-      : _density === 'comfort'
-        ? (canReorder ? 252 : 220)
-        : (canReorder ? 220 : 188);
-    const hdrPad     = panelW + 8;
+    const WORK_CODES = new Set(['1', '2', '3', '4']);
+    const ABS_CODES  = new Set(['CP', 'RTT', 'RH', 'JFL']);
 
     _ensureWeekDoc(_weekKeyOf(days[0]));
 
-    // ── Weekly stats ──
-    const WORK_CODES = new Set(['1', '3', '4']);
-    const activeTechs = new Set();
-    const wStats = { '1': 0, '3': 0, '4': 0, RH: 0, CP: 0, RTT: 0 };
-    users.forEach(u => {
-      days.forEach(ds => {
-        const e = entries[u.id + '_' + ds];
-        if (!e) return;
-        if (WORK_CODES.has(e.shiftCode)) activeTechs.add(u.id);
-        if (Object.prototype.hasOwnProperty.call(wStats, e.shiftCode)) wStats[e.shiftCode]++;
-      });
-    });
+    // Per-user weekly task counts (computed once)
+    const weekTaskCounts = {};
+    users.forEach(u => { weekTaskCounts[u.id] = _userWeekTaskCount(u, days, entries); });
+    const maxTaskCount = Math.max(1, ...Object.values(weekTaskCounts).concat([0]));
 
-    // ── Coverage per day ──
-    const dayCov    = {};
-    const dayAbsent = {};
+    // Per-day coverage stats
+    const dayStats = {};
     days.forEach(ds => {
-      dayCov[ds]    = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
-      dayAbsent[ds] = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && (e.shiftCode === 'CP' || e.shiftCode === 'RTT' || e.shiftCode === 'RH'); }).length;
+      dayStats[ds] = {
+        present: users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length,
+        absent:  users.filter(u => { const e = entries[u.id + '_' + ds]; return e && ABS_CODES.has(e.shiftCode); }).length,
+      };
     });
 
-    const totalSlots = users.length * days.length;
+    let h = `<div class="plnx-board plnx-density-${esc(_density)}">`;
 
-    // ── Stat cards ──
-    const STAT_DEFS = [
-      { label: 'Techniciens actifs', val: activeTechs.size,        max: users.length || 1, icon: 'fa-users',          color: 'var(--cyan)', key: null },
-      { label: 'Matins',             val: wStats['1'],             max: totalSlots || 1,    icon: 'fa-sun',            color: '#FDE047',     key: '1'  },
-      { label: 'Journées',          val: wStats['3'],             max: totalSlots || 1,    icon: 'fa-cloud-sun',      color: '#3B82F6',     key: '3'  },
-      { label: 'Soirs',              val: wStats['4'],             max: totalSlots || 1,    icon: 'fa-moon',           color: '#EF4444',     key: '4'  },
-      { label: 'RH / Repos',         val: wStats.RH,                max: totalSlots || 1,    icon: 'fa-couch',          color: '#22C55E',     key: 'RH' },
-      { label: 'Congés / RTT',       val: wStats.CP + wStats.RTT,  max: totalSlots || 1,    icon: 'fa-plane-departure',color: '#F97316',     key: null },
-    ];
+    // ── Sticky day-column header row ──
+    h += `<div class="plnx-hdr-row"><div class="plnx-hdr-spacer"></div><div class="plnx-day-hdrs">`;
+    days.forEach(ds => {
+      const dow    = new Date(ds + 'T00:00:00').getDay();
+      const isWE   = dow === 0 || dow === 6;
+      const isTd   = ds === today;
+      const st     = dayStats[ds];
+      const total  = users.length || 1;
+      const covPct = Math.round((st.present / total) * 100);
+      const alert  = !isWE ? (st.present === 0 && users.length > 0 ? 'critical' : covPct < 50 ? 'warn' : 'ok') : 'we';
+      const covClr = alert === 'critical' ? '#EF4444' : alert === 'warn' ? '#F97316' : isTd ? 'var(--cyan)' : '#22C55E';
 
-    let h = `<div class="plng-week-root plng-density-${esc(_density)}">`;
-
-    // ── Stat row ──
-    h += `<div class="plng-wk-stats">`;
-    STAT_DEFS.forEach(sd => {
-      const isActive = sd.key && _filterShift === sd.key;
-      const pct = Math.round((sd.val / sd.max) * 100);
-      h += `<div class="plng-wk-stat${isActive ? ' plng-wk-stat-active' : ''}" style="--sc:${sd.color}"
-        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}"` : ''}>
-        <div class="plng-wk-stat-top">
-          <i class="fas ${sd.icon} plng-wk-stat-ico"></i>
-          <span class="plng-wk-stat-val">${sd.val}</span>
-          <span class="plng-wk-stat-pct">${pct}%</span>
-        </div>
-        <div class="plng-wk-stat-lbl">${esc(sd.label)}</div>
-        <div class="plng-wk-stat-bar"><div class="plng-wk-stat-fill" style="width:${pct}%"></div></div>
+      h += `<div class="plnx-day-hdr plnx-day-${alert}${isTd ? ' plnx-day-today' : ''}">
+        <div class="plnx-day-dname">${DAY_LABELS[dow]}</div>
+        <div class="plnx-day-dnum">${new Date(ds + 'T00:00:00').getDate()}</div>
+        ${isWE
+          ? `<div class="plnx-day-we-badge">WE</div>`
+          : `<div class="plnx-day-dstats">
+              <span class="plnx-dstat plnx-dstat-pres" style="color:${covClr}"><i class="fas fa-user-check"></i> ${st.present}</span>
+              ${st.absent > 0 ? `<span class="plnx-dstat plnx-dstat-abs"><i class="fas fa-plane-departure"></i> ${st.absent}</span>` : ''}
+            </div>
+            <div class="plnx-day-covbar"><div class="plnx-day-covfill" style="width:${covPct}%;background:${covClr}"></div></div>`
+        }
       </div>`;
     });
-    h += `</div>`;
+    h += `</div></div>`;
 
-    // ── Day column headers ──
-    h += `<div class="plng-wk-hdrs" style="padding-left:${hdrPad}px">`;
-    days.forEach(ds => {
-      const dow      = new Date(ds + 'T00:00:00').getDay();
-      const isWE     = dow === 0 || dow === 6;
-      const isTd     = ds === today;
-      const cov      = dayCov[ds];
-      const abs      = dayAbsent[ds];
-      const total    = users.length || 1;
-      const covPct   = Math.round((cov / total) * 100);
-      const dayAlert = !isWE ? (cov === 0 && users.length > 0 ? 'critical' : covPct < 50 ? 'warn' : 'ok') : 'we';
-      const covColor = dayAlert === 'critical' ? '#EF4444' : dayAlert === 'warn' ? '#F97316' : isTd ? 'var(--cyan)' : '#22C55E';
-
-      h += `<div class="plng-wk-day-hdr plng-wk-day-${dayAlert}${isTd ? ' plng-wk-day-today' : ''}">
-        <div class="plng-wk-day-dow">${DAY_LABELS[dow]}</div>
-        <div class="plng-wk-day-num">${new Date(ds + 'T00:00:00').getDate()}</div>
-        ${!isWE ? `<div class="plng-wk-day-footer">
-          <div class="plng-wk-day-bar" style="--covw:${covPct}%;--covc:${covColor}"></div>
-          <div class="plng-wk-day-cov-row">
-            <span class="plng-wk-day-cov" style="color:${covColor}">${cov}<i class="fas fa-user plng-wk-day-cov-ico"></i></span>
-            ${abs > 0 ? `<span class="plng-wk-day-abs"><i class="fas fa-plane-departure"></i>${abs}</span>` : ''}
-          </div>
-        </div>` : `<div class="plng-wk-day-we-lbl">WE</div>`}
-      </div>`;
-    });
-    h += `</div>`;
-
-    // ── Tech card rows ──
-    h += `<div class="plng-month-wrap plng-wk-cards">`;
+    // ── Tech rows — plng-month-wrap MUST be preserved for drag & select ──
+    h += `<div class="plng-month-wrap plnx-rows">`;
 
     if (!visible.length) {
       h += `<div class="plng-empty"><i class="fas fa-users" style="font-size:28px"></i><span>Aucun agent</span></div>`;
@@ -767,35 +726,39 @@
         if (!has) return;
       }
 
-      const taskCount    = _userWeekTaskCount(user, days, entries);
-      const maxTaskCount = users.reduce((mx, u) => Math.max(mx, _userWeekTaskCount(u, days, entries)), 1);
-      const loadPct      = maxTaskCount > 0 ? Math.round((taskCount / maxTaskCount) * 100) : 0;
-      const loadColor    = taskCount === 0 ? 'var(--text3)' : loadPct > 70 ? '#22C55E' : loadPct > 35 ? '#F97316' : '#EF4444';
-      const avatarSz     = _density === 'compact' ? 28 : _density === 'comfort' ? 40 : 34;
+      const taskCount = weekTaskCounts[user.id] || 0;
+      const loadPct   = Math.round((taskCount / maxTaskCount) * 100);
+      const loadColor = taskCount === 0 ? 'var(--text3)' : loadPct > 70 ? '#22C55E' : loadPct > 35 ? '#F97316' : '#EF4444';
+      const avSz      = _density === 'compact' ? 30 : _density === 'dashboard' ? 46 : 38;
+      const roleLbl   = esc(user.service || user.department || 'Technicien');
 
-      h += `<div class="plng-wk-row" data-order-uid="${esc(user.id)}">`;
+      h += `<div class="plnx-row" data-order-uid="${esc(user.id)}">`;
 
-      // ─ Left user panel ─
-      h += `<div class="plng-wk-user${canReorder ? ' plng-drag-panel' : ''}" data-drag-uid="${esc(user.id)}" style="width:${panelW}px;min-width:${panelW}px">
-        ${canReorder ? `<i class="fas fa-grip-vertical plng-wk-grip" title="Glisser pour réorganiser"></i>` : ''}
-        <div class="plng-wk-avatar-wrap">${_avatar(user, avatarSz)}</div>
-        <div class="plng-wk-uinfo">
-          <div class="plng-wk-uname">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
-          ${_density !== 'compact' ? `<div class="plng-wk-load" style="--lc:${loadColor};--lw:${loadPct}%">
-            <div class="plng-wk-load-bar"></div>
-            <span class="plng-wk-load-n">${taskCount ? taskCount + ' miss.' : '—'}</span>
+      // ─ User card — plng-drag-panel + data-drag-uid required by drag system ─
+      h += `<div class="plnx-user-card${canReorder ? ' plng-drag-panel' : ''}" data-drag-uid="${esc(user.id)}">
+        ${canReorder ? `<i class="fas fa-grip-vertical plnx-grip" title="Glisser pour réorganiser"></i>` : ''}
+        <div class="plnx-user-av">${_avatar(user, avSz)}</div>
+        <div class="plnx-user-info">
+          <div class="plnx-user-name">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
+          <div class="plnx-user-role">${roleLbl}</div>
+          ${_density !== 'compact' ? `<div class="plnx-user-meta">
+            <span class="plnx-meta-pill">${taskCount ? taskCount + ' miss.' : '—'}</span>
+            <span class="plnx-meta-charge" style="color:${loadColor}">${loadPct}%</span>
+          </div>
+          <div class="plnx-user-loadbar-wrap">
+            <div class="plnx-user-loadbar" style="width:${loadPct}%;background:${loadColor}"></div>
           </div>` : ''}
         </div>
-        ${canEdit ? `<div class="plng-wk-uacts">
-          ${canReorder ? `<button class="plng-user-btn" title="Réorganiser" onclick="event.stopPropagation();MX.Pages.Planning._showOrderMenu('${esc(user.id)}',this)"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
-          <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
-          <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
+        ${canEdit ? `<div class="plnx-user-acts">
+          ${canReorder ? `<button class="plnx-act-btn" title="Réorganiser" onclick="event.stopPropagation();MX.Pages.Planning._showOrderMenu('${esc(user.id)}',this)"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
+          <button class="plnx-act-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
+          <button class="plnx-act-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
         </div>` : ''}
       </div>`;
 
-      // ─ Day cells ─
-      h += `<div class="plng-wk-cells">`;
-      days.forEach((ds, di) => {
+      // ─ Day cells — plng-cell + data-uid + data-date required by selection system ─
+      h += `<div class="plnx-cells">`;
+      days.forEach(ds => {
         const dow      = new Date(ds + 'T00:00:00').getDay();
         const isWE     = dow === 0 || dow === 6;
         const isTd     = ds === today;
@@ -805,28 +768,44 @@
         const dayTasks = entry ? _userTasksForDay(user, ds, entry.shiftCode) : [];
         const selKey   = user.id + '_' + ds;
         const isSel    = _selected.has(selKey);
-        const isDim    = _filterShift && entry && entry.shiftCode !== _filterShift;
-        const isLast   = di === 6;
+        const isDim    = !!(_filterShift && entry && entry.shiftCode !== _filterShift);
 
-        const cellClass = 'plng-cell plng-wk-cell'
-          + (isWE  ? ' plng-we'     : '')
-          + (isTd  ? ' plng-today'  : '')
-          + (isSel ? ' plng-sel'    : '')
-          + (isDim ? ' plng-dimmed' : '');
+        const cellCls = 'plng-cell plnx-cell'
+          + (isWE  ? ' plnx-we'    : '')
+          + (isTd  ? ' plnx-today' : '')
+          + (isSel ? ' plnx-sel'   : '')
+          + (isDim ? ' plnx-dimmed': '');
 
-        h += `<div class="${cellClass}" data-uid="${esc(user.id)}" data-date="${ds}"
-          style="${isLast ? '' : 'border-right:1px solid var(--border);'}"
+        h += `<div class="${cellCls}" data-uid="${esc(user.id)}" data-date="${ds}"
           ${canEdit ? `onmousedown="MX.Pages.Planning._cellMouseDown(event,'${esc(user.id)}','${ds}')"` : ''}>`;
 
         if (shift) {
-          const nb = shift.color === '#FFFFFF';
-          h += `<div class="plng-wk-badge" style="background:${shift.color};color:${shift.textColor}${nb ? ';outline:1px solid rgba(0,0,0,0.15)' : ''}">
-            <span class="plng-wk-bc">${badge.emoji} ${esc(badge.abbr)}</span>
-            ${shift.start && _density !== 'compact' ? `<span class="plng-wk-bt">${shift.start}–${shift.end}</span>` : ''}
-            ${dayTasks.length ? `<span class="plng-wk-bm" onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${ds}')">${dayTasks.length}<i class="fas fa-chevron-right" style="font-size:5px;margin-left:1px"></i></span>` : ''}
+          const nb      = shift.color === '#FFFFFF';
+          const hasTime = !!(shift.start && shift.end);
+          const mCount  = dayTasks.length;
+          h += `<div class="plnx-shift-card${isDim ? ' plnx-dim' : ''}"
+              style="background:${shift.color};color:${shift.textColor}${nb ? ';outline:1px solid rgba(0,0,0,.12)' : ''}">
+            <div class="plnx-sc-body">
+              <div class="plnx-sc-emoji">${badge.emoji}</div>
+              <div class="plnx-sc-info">
+                <div class="plnx-sc-name">${esc(badge.abbr)}</div>
+                ${hasTime && _density !== 'compact' ? `<div class="plnx-sc-time">${shift.start}→${shift.end}</div>` : ''}
+              </div>
+              ${mCount > 0 ? `<div class="plnx-sc-miss" onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${ds}')">${mCount}<i class="fas fa-tasks"></i></div>` : ''}
+            </div>
+            <div class="plnx-sc-glass"></div>
+            <div class="plnx-tip">
+              <div class="plnx-tip-inner">
+                <div class="plnx-tip-name">${esc(user.name)}</div>
+                <div class="plnx-tip-shift">${esc(badge.label)}${hasTime ? ' · ' + shift.start + '→' + shift.end : ''}</div>
+                <div class="plnx-tip-stat">${mCount > 0 ? mCount + ' mission' + (mCount > 1 ? 's' : '') : 'Aucune mission assignée'}</div>
+              </div>
+            </div>
           </div>`;
         } else {
-          h += `<div class="plng-wk-badge-empty"></div>`;
+          h += `<div class="plnx-empty-slot">
+            ${canEdit ? `<i class="fas fa-plus plnx-empty-ico"></i>` : ''}
+          </div>`;
         }
 
         h += `</div>`;
@@ -885,128 +864,165 @@
     return h;
   }
 
-  // ── SIDEBAR ──
+  // ── SIDEBAR (Command Center) ──
 
   function _renderSidebar(canEdit, isAdmin) {
-    const shifts  = _shifts();
-    const esc     = MX.esc;
-    const users   = _users();
-    const entries = _entries();
+    const shifts    = _shifts();
+    const esc       = MX.esc;
+    const users     = _users();
+    const entries   = _entries();
+    const todayStr  = _todayStr();
+    const todayDate = new Date(todayStr + 'T00:00:00');
+    const todayLbl  = DAY_LABELS[todayDate.getDay()] + ' ' + todayDate.getDate() + ' ' + MONTH_NAMES[todayDate.getMonth()];
+    const WORK_CODES = new Set(['1', '2', '3', '4']);
+    const ABS_CODES  = new Set(['CP', 'RTT', 'RH', 'JFL']);
 
-    let h = `<div class="plng-legend">
-      <div class="plng-legend-title">Légende des codes</div>`;
+    const todayPresent    = users.filter(u => { const e = entries[u.id + '_' + todayStr]; return e && WORK_CODES.has(e.shiftCode); }).length;
+    const todayAbsent     = users.filter(u => { const e = entries[u.id + '_' + todayStr]; return e && ABS_CODES.has(e.shiftCode); }).length;
+    const todayAbsentList = users.filter(u => { const e = entries[u.id + '_' + todayStr]; return e && ABS_CODES.has(e.shiftCode); });
 
-    shifts.forEach(s => {
-      const nb = s.color === '#FFFFFF';
-      h += `<div class="plng-legend-row">
-        <span class="plng-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';border:1px solid var(--border2)' : ''}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(s.code))}</span>
-        <div class="plng-legend-info">
-          <span class="plng-legend-name">${esc(s.name)}</span>
-          ${s.start ? `<span class="plng-legend-time">${s.start} – ${s.end}</span>` : ''}
+    let h = `<div class="plng-legend plnx-sidebar">`;
+
+    // ── Today status banner ──
+    h += `<div class="plnx-sb-section">
+      <div class="plnx-today-banner">
+        <div class="plnx-today-date">${esc(todayLbl)}</div>
+        <div class="plnx-status-row">
+          <span class="plnx-status-chip plnx-status-chip-ok"><i class="fas fa-users"></i> ${todayPresent} présent${todayPresent !== 1 ? 's' : ''}</span>
+          ${todayAbsent > 0 ? `<span class="plnx-status-chip plnx-status-chip-warn"><i class="fas fa-plane-departure"></i> ${todayAbsent} absent${todayAbsent !== 1 ? 's' : ''}</span>` : ''}
+          <span class="plnx-status-chip plnx-status-chip-info"><i class="fas fa-user-group"></i> ${users.length} tech.</span>
         </div>
-      </div>`;
-    });
+      </div>
+    </div>`;
 
-    if (isAdmin) {
-      h += `<button class="plng-legend-btn" onclick="MX.Pages.Planning._openShiftMgmt()">
-        <i class="fas fa-pen"></i> Gérer les codes
-      </button>`;
+    // ── Absents aujourd'hui ──
+    if (todayAbsentList.length > 0) {
+      h += `<div class="plnx-sb-section">
+        <div class="plnx-sb-title"><i class="fas fa-plane-departure" style="color:#F97316"></i> Absents aujourd'hui</div>`;
+      todayAbsentList.slice(0, 6).forEach(u => {
+        const e     = entries[u.id + '_' + todayStr];
+        const shift = _shiftByCode(e.shiftCode);
+        const badge = _badgeFor(e.shiftCode);
+        h += `<div class="plnx-absent-row">
+          <div class="plnx-absent-av">${_avatar(u, 24)}</div>
+          <div class="plnx-absent-info">
+            <span class="plnx-absent-name">${esc(u.name)}</span>
+            <span class="plnx-absent-code" style="background:${shift ? shift.color : '#9CA3AF'};color:${shift ? shift.textColor : '#fff'}">${badge.emoji} ${badge.abbr}</span>
+          </div>
+        </div>`;
+      });
+      h += `</div>`;
     }
 
+    // ── Actions rapides ──
     if (canEdit) {
-      h += `<div class="plng-legend-sep"></div>
-        <div class="plng-legend-title">Actions rapides</div>
-        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RH')"><i class="fas fa-moon"></i> Absence / Repos</button>
-        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('CP')"><i class="fas fa-plane-departure"></i> Congé payé</button>
-        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RTT')"><i class="fas fa-calendar-xmark"></i> RTT</button>
-        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openRangeApply('JFL')"><i class="fas fa-star"></i> Jour férié</button>
-        <button class="plng-qa-btn" onclick="MX.Pages.Planning._openAutoGenModal()"><i class="fas fa-wand-magic-sparkles"></i> Horaire récurrent</button>
-        <button class="plng-qa-btn plng-qa-ai" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Générer avec l'IA</button>
+      h += `<div class="plnx-sb-section">
+        <div class="plnx-sb-title"><i class="fas fa-bolt" style="color:var(--cyan)"></i> Actions rapides</div>
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RH')"><i class="fas fa-moon"></i> Absence / Repos</button>
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._openRangeApply('CP')"><i class="fas fa-plane-departure"></i> Congé payé</button>
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._openRangeApply('RTT')"><i class="fas fa-calendar-xmark"></i> RTT</button>
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._openRangeApply('JFL')"><i class="fas fa-star"></i> Jour férié</button>
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._openAutoGenModal()"><i class="fas fa-wand-magic-sparkles"></i> Horaire récurrent</button>
+        <button class="plnx-qa-btn plnx-qa-btn-ai" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Générer avec l'IA</button>
         ${(function() {
           const bk = _aiHasBackup();
           if (!bk) return '';
           const [bkY, bkMRaw] = bk.ym.split('-');
-          return `<button class="plng-qa-btn plng-qa-restore" onclick="MX.Pages.Planning._aiRestoreBackup()"><i class="fas fa-rotate-left"></i> Restaurer ${(MONTH_NAMES[+bkMRaw - 1] || bk.ym).slice(0, 3)} ${bkY}</button>`;
+          return `<button class="plnx-qa-btn plnx-qa-btn-restore" onclick="MX.Pages.Planning._aiRestoreBackup()"><i class="fas fa-rotate-left"></i> Restaurer ${(MONTH_NAMES[+bkMRaw - 1] || bk.ym).slice(0, 3)} ${bkY}</button>`;
         })()}
-        <div class="plng-legend-sep"></div>
-        <button class="plng-qa-btn plng-qa-export" onclick="MX.Pages.Planning._exportCsv()"><i class="fas fa-file-excel"></i> Export Excel</button>
-        <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-file-pdf"></i> Exporter PDF</button>
-        <button class="plng-qa-btn plng-qa-export" onclick="window.print()"><i class="fas fa-print"></i> Imprimer</button>`;
+        <button class="plnx-qa-btn" onclick="MX.Pages.Planning._exportCsv()"><i class="fas fa-file-excel"></i> Export Excel</button>
+        <button class="plnx-qa-btn" onclick="window.print()"><i class="fas fa-print"></i> Imprimer</button>
+        ${isAdmin ? `<button class="plnx-qa-btn" onclick="MX.Pages.Planning._openShiftMgmt()"><i class="fas fa-pen"></i> Gérer les codes</button>` : ''}
+      </div>`;
     }
 
-    // ── Alertes & conflits (week view) ──
+    // ── Suggestions IA ──
+    if (_view === 'week' && canEdit) {
+      const weekDays = _weekDays(_day);
+      const WORK_C   = ['1', '2', '3', '4'];
+      const noPost   = users.filter(u => !weekDays.some(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_C.includes(e.shiftCode); }));
+      const nextM    = _month === 11 ? 0 : _month + 1;
+      const nextY    = _month === 11 ? _year + 1 : _year;
+
+      h += `<div class="plnx-sb-section">
+        <div class="plnx-sb-title"><i class="fas fa-lightbulb" style="color:#FDE047"></i> Suggestions IA</div>`;
+      if (noPost.length > 0) {
+        h += `<div class="plnx-ai-suggest"><i class="fas fa-user-clock" style="color:#F97316"></i><span>${noPost.length} agent${noPost.length > 1 ? 's' : ''} sans poste cette semaine</span></div>`;
+      }
+      h += `<div class="plnx-ai-suggest"><i class="fas fa-robot" style="color:var(--cyan)"></i><span>Générer ${MONTH_NAMES[nextM].slice(0, 3)} ${nextY} avec l'IA</span></div>`;
+      h += `<button class="plnx-qa-btn plnx-qa-btn-ai" style="margin-top:4px" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Ouvrir l'assistant IA</button>`;
+      h += `</div>`;
+    }
+
+    // ── Alertes (week view) ──
     if (_view === 'week') {
-      const WORK_CODES = ['1', '2', '3', '4'];
-      const weekDays   = _weekDays(_day);
-      const gaps       = weekDays.filter(ds => {
+      const weekDays = _weekDays(_day);
+      const gaps = weekDays.filter(ds => {
         const dow = new Date(ds + 'T00:00:00').getDay();
         if (dow === 0 || dow === 6) return false;
-        return !users.some(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.includes(e.shiftCode); });
+        return !users.some(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); });
       });
-      const unassigned     = _weekUnassignedCount(weekDays);
+      const unassigned      = _weekUnassignedCount(weekDays);
       const overloadedUsers = users.filter(u => _userWeekTaskCount(u, weekDays, entries) > 12);
+      const totalAlerts     = gaps.length + (unassigned > 0 ? 1 : 0) + overloadedUsers.length;
 
-      const totalAlerts = gaps.length + (unassigned > 0 ? 1 : 0) + overloadedUsers.length;
-
-      h += `<div class="plng-legend-sep"></div>`;
+      h += `<div class="plnx-sb-section">`;
       if (totalAlerts === 0) {
-        h += `<div class="plng-legend-title" style="color:#22C55E"><i class="fas fa-circle-check" style="margin-right:4px"></i>Tout est en ordre</div>
-          <div class="plng-events-empty" style="color:#22C55E;font-size:11px"><i class="fas fa-check"></i> Couverture et missions OK</div>`;
+        h += `<div class="plnx-sb-title" style="color:#22C55E"><i class="fas fa-circle-check"></i> Tout est en ordre</div>
+          <div class="plnx-all-ok"><i class="fas fa-check-circle"></i> Couverture et missions OK</div>`;
       } else {
-        h += `<div class="plng-legend-title" style="color:#EF4444"><i class="fas fa-triangle-exclamation" style="margin-right:4px"></i>Alertes (${totalAlerts})</div>`;
+        h += `<div class="plnx-sb-title" style="color:#EF4444"><i class="fas fa-triangle-exclamation"></i> Alertes (${totalAlerts})</div>`;
         gaps.forEach(ds => {
           const d2  = new Date(ds + 'T00:00:00');
-          const lbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()].slice(0, 3) + '.';
-          h += `<div class="plng-event-row" style="border-color:rgba(239,68,68,0.2)">
-            <span class="plng-event-chip" style="background:#EF4444;color:#fff;min-width:22px"><i class="fas fa-xmark" style="font-size:10px"></i></span>
-            <div class="plng-event-info">
-              <span class="plng-event-name" style="color:#EF4444">Absence non couverte</span>
-              <span class="plng-event-date">${esc(lbl)}</span>
+          const lbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate();
+          h += `<div class="plnx-alert-row">
+            <div class="plnx-alert-ico" style="background:rgba(239,68,68,.15);color:#EF4444"><i class="fas fa-xmark"></i></div>
+            <div class="plnx-alert-body">
+              <div class="plnx-alert-title" style="color:#EF4444">Non couvert</div>
+              <div class="plnx-alert-sub">${esc(lbl)} — aucun présent</div>
             </div>
           </div>`;
         });
         overloadedUsers.forEach(u => {
           const cnt = _userWeekTaskCount(u, weekDays, entries);
-          h += `<div class="plng-event-row" style="border-color:rgba(249,115,22,0.2)">
-            <span class="plng-event-chip" style="background:#F97316;color:#fff;min-width:22px"><i class="fas fa-fire" style="font-size:10px"></i></span>
-            <div class="plng-event-info">
-              <span class="plng-event-name" style="color:#F97316">${esc(u.name)} surchargé</span>
-              <span class="plng-event-date">${cnt} missions cette semaine</span>
+          h += `<div class="plnx-alert-row">
+            <div class="plnx-alert-ico" style="background:rgba(249,115,22,.15);color:#F97316"><i class="fas fa-fire"></i></div>
+            <div class="plnx-alert-body">
+              <div class="plnx-alert-title" style="color:#F97316">${esc(u.name)} surchargé</div>
+              <div class="plnx-alert-sub">${cnt} missions cette semaine</div>
             </div>
           </div>`;
         });
         if (unassigned > 0) {
-          h += `<div class="plng-event-row" style="border-color:rgba(59,130,246,0.2)">
-            <span class="plng-event-chip" style="background:#3B82F6;color:#fff;min-width:22px"><i class="fas fa-user-slash" style="font-size:10px"></i></span>
-            <div class="plng-event-info">
-              <span class="plng-event-name" style="color:#60A5FA">Missions non assignées</span>
-              <span class="plng-event-date">${unassigned} mission${unassigned > 1 ? 's' : ''} sans technicien</span>
+          h += `<div class="plnx-alert-row">
+            <div class="plnx-alert-ico" style="background:rgba(59,130,246,.15);color:#3B82F6"><i class="fas fa-user-slash"></i></div>
+            <div class="plnx-alert-body">
+              <div class="plnx-alert-title" style="color:#60A5FA">Missions non assignées</div>
+              <div class="plnx-alert-sub">${unassigned} mission${unassigned > 1 ? 's' : ''} sans technicien</div>
             </div>
           </div>`;
         }
       }
+      h += `</div>`;
 
-      // ── Charge équipe (bar chart) ──
+      // ── Charge équipe ──
       const workloads = users.map(u => ({
         name: u.name,
         count: _userWeekTaskCount(u, weekDays, entries),
-        workDays: weekDays.filter(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.includes(e.shiftCode); }).length,
+        workDays: weekDays.filter(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length,
       })).filter(w => w.workDays > 0).sort((a, b) => b.count - a.count).slice(0, 8);
 
       if (workloads.length > 0) {
         const maxCount = Math.max(...workloads.map(w => w.count), 1);
-        h += `<div class="plng-legend-sep"></div>
-          <div class="plng-legend-title"><i class="fas fa-chart-bar" style="margin-right:4px;color:var(--cyan)"></i>Charge équipe</div>
-          <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">`;
+        h += `<div class="plnx-sb-section">
+          <div class="plnx-sb-title"><i class="fas fa-chart-bar" style="color:var(--cyan)"></i> Charge équipe</div>`;
         workloads.forEach(w => {
           const pct = Math.round((w.count / maxCount) * 100);
           const col = w.count > 12 ? '#EF4444' : w.count > 7 ? '#F97316' : '#22C55E';
-          h += `<div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:10px;color:var(--text2);width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0" title="${esc(w.name)}">${esc(w.name.split(' ')[0])}</span>
-            <div style="flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
-              <div style="height:100%;width:${pct}%;background:${col};border-radius:4px;transition:width 0.3s"></div>
-            </div>
-            <span style="font-size:10px;font-weight:700;color:${col};min-width:20px;text-align:right">${w.count}</span>
+          h += `<div class="plnx-wl-row">
+            <span class="plnx-wl-name" title="${esc(w.name)}">${esc(w.name.split(' ')[0])}</span>
+            <div class="plnx-wl-bar-wrap"><div class="plnx-wl-bar" style="width:${pct}%;background:${col}"></div></div>
+            <span class="plnx-wl-val" style="color:${col}">${w.count}</span>
           </div>`;
         });
         h += `</div>`;
@@ -1014,62 +1030,55 @@
     }
 
     // ── Prochains événements ──
-    const todayStr   = _todayStr();
-    const upcoming   = [];
-    const ABSENCE_CODES = new Set(['CP','RTT','RH','JFL']);
+    const upcoming = [];
     for (let i = 0; i <= 14; i++) {
       const d = new Date(todayStr + 'T00:00:00');
       d.setDate(d.getDate() + i);
       const dateStr = d.toISOString().slice(0, 10);
       users.forEach(u => {
         const e = entries[u.id + '_' + dateStr];
-        if (e && ABSENCE_CODES.has(e.shiftCode)) {
-          upcoming.push({ dateStr, userName: u.name, code: e.shiftCode });
-        }
+        if (e && ABS_CODES.has(e.shiftCode)) upcoming.push({ dateStr, userName: u.name, code: e.shiftCode });
       });
     }
     upcoming.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
-    const upSlice = upcoming.slice(0, 8);
+    const upSlice = upcoming.slice(0, 6);
 
-    h += `<div class="plng-legend-sep"></div>
-      <div class="plng-legend-title">Prochains événements</div>`;
-    if (upSlice.length === 0) {
-      h += `<div class="plng-events-empty"><i class="fas fa-calendar-check"></i> Aucun événement à venir</div>`;
+    h += `<div class="plnx-sb-section">
+      <div class="plnx-sb-title"><i class="fas fa-calendar-alt" style="color:var(--cyan)"></i> Prochains événements</div>`;
+    if (!upSlice.length) {
+      h += `<div style="font-size:11px;color:var(--text3);padding:4px 0"><i class="fas fa-calendar-check" style="margin-right:4px"></i>Aucun événement à venir</div>`;
     } else {
       upSlice.forEach(ev => {
-        const d2   = new Date(ev.dateStr + 'T00:00:00');
-        const dLbl = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()];
+        const d2    = new Date(ev.dateStr + 'T00:00:00');
+        const dLbl  = DAY_LABELS[d2.getDay()] + ' ' + d2.getDate() + ' ' + MONTH_NAMES[d2.getMonth()].slice(0, 3) + '.';
         const shift = _shiftByCode(ev.code);
-        const chipColor = shift ? shift.color : '#9CA3AF';
-        const chipText  = shift ? shift.textColor : '#1a1a1a';
-        h += `<div class="plng-event-row">
-          <span class="plng-event-chip" style="background:${chipColor};color:${chipText}">${(b => b.emoji + ' ' + b.abbr)(_badgeFor(ev.code))}</span>
-          <div class="plng-event-info">
-            <span class="plng-event-name">${esc(ev.userName)}</span>
-            <span class="plng-event-date">${esc(dLbl)}</span>
+        const badge = _badgeFor(ev.code);
+        h += `<div class="plnx-event-row">
+          <span class="plnx-event-chip" style="background:${shift ? shift.color : '#9CA3AF'};color:${shift ? shift.textColor : '#fff'}">${badge.emoji} ${badge.abbr}</span>
+          <div class="plnx-event-info">
+            <span class="plnx-event-name">${esc(ev.userName)}</span>
+            <span class="plnx-event-date">${esc(dLbl)}</span>
           </div>
         </div>`;
       });
     }
+    h += `</div>`;
 
-    // ── 💡 Suggestions IA ──
-    if (_view === 'week' && canEdit) {
-      const weekDays   = _weekDays(_day);
-      const WORK_C     = ['1', '2', '3', '4'];
-      const noPost     = users.filter(u => !weekDays.some(ds => { const e = entries[u.id + '_' + ds]; return e && WORK_C.includes(e.shiftCode); }));
-      const nextM      = _month === 11 ? 0 : _month + 1;
-      const nextY      = _month === 11 ? _year + 1 : _year;
-      const suggestions = [];
-      if (noPost.length > 0) suggestions.push({ ico: 'fa-user-clock', col: '#F97316', txt: noPost.length + ' agent' + (noPost.length > 1 ? 's' : '') + ' sans poste cette semaine' });
-      suggestions.push({ ico: 'fa-robot', col: 'var(--cyan)', txt: 'Générer ' + MONTH_NAMES[nextM].slice(0, 3) + ' ' + nextY + ' avec l\'IA' });
-
-      h += `<div class="plng-legend-sep"></div>
-        <div class="plng-legend-title"><i class="fas fa-lightbulb" style="color:#FDE047;margin-right:4px"></i>Suggestions IA</div>`;
-      suggestions.forEach(sg => {
-        h += `<div class="plng-ai-suggest"><i class="fas ${sg.ico}" style="color:${sg.col}"></i><span>${sg.txt}</span></div>`;
-      });
-      h += `<button class="plng-qa-btn plng-qa-ai" style="margin-top:4px" onclick="MX.Pages.Planning._openAIWizard()"><i class="fas fa-robot"></i> Ouvrir l'assistant IA</button>`;
-    }
+    // ── Légende (condensée) ──
+    h += `<div class="plnx-sb-section">
+      <div class="plnx-sb-title"><i class="fas fa-palette" style="color:var(--text3)"></i> Légende</div>`;
+    shifts.forEach(s => {
+      const nb    = s.color === '#FFFFFF';
+      const badge = _badgeFor(s.code);
+      h += `<div class="plnx-legend-row">
+        <span class="plnx-legend-chip" style="background:${s.color};color:${s.textColor};font-weight:${s.bold ? 700 : 600}${nb ? ';outline:1px solid var(--border2)' : ''}">${badge.emoji} ${badge.abbr}</span>
+        <div>
+          <div class="plnx-legend-name">${esc(s.name)}</div>
+          ${s.start ? `<div class="plnx-legend-time">${s.start}–${s.end}</div>` : ''}
+        </div>
+      </div>`;
+    });
+    h += `</div>`;
 
     h += `</div>`;
     return h;
@@ -2391,10 +2400,11 @@
         ${shifts.map(s => `<option value="${MX.esc(s.code)}"${_filterShift===s.code?' selected':''}>${MX.esc(s.code)} — ${MX.esc(s.name)}</option>`).join('')}
       </select>
     </div>
-    ${_view === 'week' ? `<div class="plng-density-toggle" title="Densité d'affichage">
+    ${_view === 'week' ? `<div class="plng-density-toggle" title="Mode d'affichage">
       <button class="plng-den-btn${_density==='compact'?' active':''}" onclick="MX.Pages.Planning._setDensity('compact')" title="Compact"><i class="fas fa-grip-lines"></i></button>
       <button class="plng-den-btn${_density==='normal'?' active':''}"  onclick="MX.Pages.Planning._setDensity('normal')"  title="Normal"><i class="fas fa-grip"></i></button>
       <button class="plng-den-btn${_density==='comfort'?' active':''}" onclick="MX.Pages.Planning._setDensity('comfort')" title="Confort"><i class="fas fa-align-justify"></i></button>
+      <button class="plng-den-btn${_density==='dashboard'?' active':''}" onclick="MX.Pages.Planning._setDensity('dashboard')" title="Dashboard"><i class="fas fa-table-columns"></i></button>
     </div>` : ''}
     ${canEdit ? `<button class="plng-ai-open-btn" onclick="MX.Pages.Planning._openAIWizard()" title="Assistant IA de Planification"><i class="fas fa-robot"></i> <span>Générer avec l'IA</span></button>` : ''}
   </div>
