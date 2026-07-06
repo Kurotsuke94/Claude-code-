@@ -10185,16 +10185,43 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
    PMP GMAO — DETAIL MODAL (Mes Missions)
    ═══════════════════════════════════════════════════════════ */
 
-.pmp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999; display:flex; align-items:stretch; justify-content:flex-end; }
+.pmp-detail-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999; display:flex; align-items:stretch; justify-content:flex-end; transition:background .22s ease; }
 .pmp-detail-modal { width:100%; max-width:520px; background:var(--bg); display:flex; flex-direction:column; overflow:hidden; animation:pmpSlideIn .22s cubic-bezier(.22,1,.36,1); }
-@keyframes pmpSlideIn { from { transform:translateX(100%); } to { transform:translateX(0); } }
+@keyframes pmpSlideIn  { from { transform:translateX(100%); } to { transform:translateX(0); } }
+@keyframes pmpSlideOut { from { transform:translateX(0);    } to { transform:translateX(100%); } }
+.pmp-detail--closing { background:rgba(0,0,0,0) !important; }
+.pmp-detail--closing .pmp-detail-modal { animation:pmpSlideOut .21s cubic-bezier(.4,0,1,1) forwards !important; }
+
+/* ── Header styles (both old close-X and new ← Retour) ── */
 .pmp-detail-header { display:flex; align-items:flex-start; gap:10px; padding:16px 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.pmp-detail-header--nav { flex-direction:column; gap:6px; padding:10px 16px 12px; }
 .pmp-detail-header-l { flex:1; min-width:0; }
+.pmp-detail-header-info { display:flex; flex-direction:column; gap:3px; }
 .pmp-detail-badge { display:inline-flex; align-items:center; gap:4px; background:rgba(249,115,22,.15); color:var(--orange); font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; margin-bottom:4px; letter-spacing:.04em; }
 .pmp-detail-ttl   { font-size:16px; font-weight:700; color:var(--text); line-height:1.2; }
 .pmp-detail-sub   { font-size:11px; color:var(--text3); margin-top:2px; }
 .pmp-detail-close { border:none; background:none; color:var(--text3); font-size:18px; cursor:pointer; padding:4px 8px; border-radius:6px; flex-shrink:0; transition:color .15s; }
 .pmp-detail-close:hover { color:var(--text); }
+.pmp-detail-back {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:4px 8px 4px 2px; border:none; background:transparent;
+  color:var(--cyan); font-size:13px; font-weight:600;
+  cursor:pointer; font-family:var(--ffs); border-radius:7px;
+  align-self:flex-start; transition:background .12s;
+  -webkit-tap-highlight-color:transparent;
+}
+.pmp-detail-back i { font-size:11px; }
+.pmp-detail-back:hover  { background:var(--bg3); }
+.pmp-detail-back:active { opacity:.75; }
+.pmp-detail-header-meta {
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:2px;
+}
+.pmp-detail-header-meta > span {
+  font-size:11px; color:var(--text2);
+  display:inline-flex; align-items:center; gap:3px;
+}
+.pmp-detail-header-meta i { font-size:9px; opacity:.7; }
+.pmp-hm-badge { padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; letter-spacing:.2px; }
 .pmp-detail-body { flex:1; overflow-y:auto; padding:14px 18px 24px; display:flex; flex-direction:column; gap:12px; }
 .pmp-detail-section { background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
 .pmp-detail-section-ttl { font-size:10.5px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:.07em; margin-bottom:8px; display:flex; align-items:center; gap:6px; }

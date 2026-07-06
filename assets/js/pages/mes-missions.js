@@ -25,6 +25,10 @@
   // ── Photo state ──
   var _pendingPmpPh = null;
 
+  // ── PMP panel state ──
+  var _pmpScrollSaved = 0;
+  var _pmpHistPushed  = false;
+
   // ── Notification tracking ──
   var _seenIds = null;
 
@@ -95,7 +99,9 @@
     if (!MX.Auth.canSeeAll() && MX.state.currentUser) {
       var el = document.getElementById('main-content');
       if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
+        var prevSt = el.scrollTop;
         el.innerHTML = _renderTech();
+        if (prevSt > 0) el.scrollTop = prevSt;
       }
     }
   }
@@ -1489,10 +1495,25 @@
     var pmpComments = m.pmpComments || [];
     var parts       = m.usedParts || [];
     var history     = m.interventionHistory || [];
-    // Lifecycle state (for header badge only)
+    // Lifecycle state
     var lifecycle = m.done ? 'terminee' : (m.takenBy ? 'en_cours' : 'disponible');
     var lcLabel   = lifecycle === 'terminee' ? 'Terminée 🟢' : (lifecycle === 'en_cours' ? 'En cours 🟠' : 'Disponible 🟣');
     var lcColor   = lifecycle === 'terminee' ? '#22c55e' : (lifecycle === 'en_cours' ? '#f97316' : '#a855f7');
+
+    // ── Panel state: open or replace ──
+    var replacing = !!document.getElementById('pmp-detail-ov');
+    if (replacing) {
+      document.getElementById('pmp-detail-ov').remove();
+    } else {
+      var mc = document.getElementById('main-content');
+      _pmpScrollSaved = mc ? mc.scrollTop : 0;
+      try {
+        window.history.pushState({ pmpDetail: missionId }, '', location.pathname + location.search);
+        _pmpHistPushed = true;
+      } catch (err) { _pmpHistPushed = false; }
+    }
+    window.MX.currentPmpMission = missionId;
+    window.MX.isPmpPanelOpen    = true;
 
     // Checklist (toujours éditable sauf si mission terminée)
     var canEdit = !m.done;
@@ -1504,16 +1525,24 @@
         + '<span>' + e(it.text || it) + '</span></label>';
     }).join('');
 
-    // Header
+    // Header — navigation native (← Retour)
+    var techName = m.takenBy || m.assignedTo || '';
+    var dueStr   = pd.dueDate ? _fmtDate(pd.dueDate) : '';
     var h = '<div class="pmp-detail-overlay" id="pmp-detail-ov">'
       + '<div class="pmp-detail-modal">'
-      + '<div class="pmp-detail-header">'
-      + '<div class="pmp-detail-header-l">'
-      + '<div class="pmp-detail-badge" style="background:' + lcColor + '22;color:' + lcColor + ';border:1px solid ' + lcColor + '55">' + lcLabel + '</div>'
+      + '<div class="pmp-detail-header pmp-detail-header--nav">'
+      + '<button class="pmp-detail-back" onclick="MX.MM._closePmpDetail()">'
+      + '<i class="fas fa-chevron-left"></i> Retour'
+      + '</button>'
+      + '<div class="pmp-detail-header-info">'
       + '<div class="pmp-detail-ttl">' + e(pd.equipmentName || '—') + '</div>'
-      + (pd.zone ? '<div class="pmp-detail-sub"><i class="fas fa-location-dot" style="font-size:9px"></i> ' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</div>' : '')
+      + '<div class="pmp-detail-header-meta">'
+      + '<span class="pmp-hm-badge" style="background:' + lcColor + '22;color:' + lcColor + ';border:1px solid ' + lcColor + '55">' + lcLabel + '</span>'
+      + (pd.zone ? '<span><i class="fas fa-location-dot"></i> ' + e(pd.zone) + (pd.subZone ? ' · ' + e(pd.subZone) : '') + '</span>' : '')
+      + (techName ? '<span><i class="fas fa-user-wrench"></i> ' + e(techName) + '</span>' : '')
+      + (dueStr   ? '<span><i class="fas fa-calendar-days"></i> ' + e(dueStr) + '</span>' : '')
       + '</div>'
-      + '<button class="pmp-detail-close" onclick="MX.MM._closePmpDetail()"><i class="fas fa-times"></i></button>'
+      + '</div>'
       + '</div>'
       + '<div class="pmp-detail-body">';
 
@@ -1658,8 +1687,29 @@
   }
 
   function _closePmpDetail() {
+    if (_pmpHistPushed) {
+      window.history.back();
+      // popstate handler calls _doClosePmpDetail()
+    } else {
+      _doClosePmpDetail();
+    }
+  }
+
+  function _doClosePmpDetail() {
+    _pmpHistPushed = false;
+    window.MX.isPmpPanelOpen    = false;
+    window.MX.currentPmpMission = null;
     var ov = document.getElementById('pmp-detail-ov');
-    if (ov) ov.remove();
+    if (!ov) return;
+    ov.classList.add('pmp-detail--closing');
+    var mc      = document.getElementById('main-content');
+    var savedSt = _pmpScrollSaved;
+    setTimeout(function () {
+      if (ov.parentNode) ov.remove();
+      if (mc && savedSt > 0) {
+        requestAnimationFrame(function () { mc.scrollTop = savedSt; });
+      }
+    }, 215);
   }
 
   function _addPmpComment(missionId) {
@@ -2119,7 +2169,17 @@
     });
   }
 
+  // ── iOS swipe-back + Android back button ──
+  window.addEventListener('popstate', function () {
+    if (window.MX && window.MX.isPmpPanelOpen) {
+      _pmpHistPushed = false;
+      _doClosePmpDetail();
+    }
+  });
+
   window.MX = window.MX || {};
+  window.MX.isPmpPanelOpen    = false;
+  window.MX.currentPmpMission = null;
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.MesMissions = {
     render: render, setFilter: setFilter, setTab: setTab,
