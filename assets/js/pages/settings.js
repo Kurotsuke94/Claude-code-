@@ -1002,57 +1002,39 @@
 
   // ── INFORMATIONS PWA ──
   function _renderInformations() {
-    const ver   = (window.MX && MX.appVer)  || (window.MX_VERSION || '—');
-    const build = window.MX_BUILD || '—';
-    const lastUpdateRaw = localStorage.getItem('mx_pwa_last_update');
+    const st = (window.MX && MX.UpdateManager) ? MX.UpdateManager.getStatus() : {};
+    const ver   = st.localVersion || (window.MX_VERSION || '—');
+    const build = st.localBuild   || (window.MX_BUILD   || '—');
+    const swCtrl = navigator.serviceWorker && navigator.serviceWorker.controller;
+    const swStateLabel = swCtrl ? 'Actif' : 'Inactif';
+    const swStateColor = swCtrl ? 'var(--green)' : 'var(--text3)';
+    const lastUpdateRaw = st.lastUpdate;
     const lastUpdate = lastUpdateRaw
       ? new Date(parseInt(lastUpdateRaw, 10)).toLocaleString('fr-FR')
       : '—';
-    const swState = (navigator.serviceWorker && navigator.serviceWorker.controller) ? 'Actif' : 'Inactif';
-    const swStateColor = swState === 'Actif' ? 'var(--green)' : 'var(--text3)';
-    const swUrl = (navigator.serviceWorker && navigator.serviceWorker.controller)
-      ? navigator.serviceWorker.controller.scriptURL.replace(location.origin, '')
+    const lastCheckRaw = st.lastCheck;
+    const lastCheck = lastCheckRaw
+      ? new Date(parseInt(lastCheckRaw, 10)).toLocaleTimeString('fr-FR')
       : '—';
-
-    // Remplissage async après rendu
-    setTimeout(function() {
-      if ('caches' in window) {
-        caches.keys().then(function(keys) {
-          var found = keys.find(function(k) { return k.startsWith('maintix-'); }) || '—';
-          var el = document.getElementById('pwa-cache-name');
-          if (el) el.textContent = found;
-        }).catch(function() {});
-      }
-      if (navigator.onLine) {
-        fetch('/version.js?_=' + Date.now(), { cache: 'no-store' })
-          .then(function(r) { return r.text(); })
-          .then(function(text) {
-            var m = text.match(/MX_VERSION\s*=\s*"([^"]+)"/);
-            var mb = text.match(/MX_BUILD\s*=\s*(\d+)/);
-            var el = document.getElementById('pwa-server-ver');
-            if (el) {
-              var sv = m ? m[1] : '?';
-              var sb = mb ? mb[1] : '?';
-              var localBuild = parseInt(window.MX_BUILD, 10) || 0;
-              var serverBuild = mb ? parseInt(mb[1], 10) : 0;
-              var badge = serverBuild > localBuild
-                ? '<span style="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan-border)">Nouvelle version</span>'
-                : '';
-              el.innerHTML = 'v' + MX.esc(sv) + ' (build ' + MX.esc(String(sb)) + ')' + badge;
-            }
-          })
-          .catch(function() {
-            var el = document.getElementById('pwa-server-ver');
-            if (el) el.textContent = 'Inaccessible';
-          });
-      } else {
-        var el = document.getElementById('pwa-server-ver');
-        if (el) el.textContent = 'Hors ligne';
-      }
-    }, 100);
+    const serverVerDisplay = st.serverVersion
+      ? 'v' + MX.esc(String(st.serverVersion)) + ' (build ' + st.serverBuild + ')'
+      : (navigator.onLine ? 'Vérification…' : 'Hors ligne');
+    const serverBadge = (st.serverBuild > 0 && st.serverBuild > st.localBuild)
+      ? ' <span class="pwa-new-badge">Nouvelle version</span>' : '';
+    const statusHtml = st.serverBuild > 0
+      ? (st.upToDate
+          ? '<i class="fas fa-check-circle" style="color:var(--green)"></i> <span style="color:var(--green);font-weight:600">À jour</span>'
+          : '<i class="fas fa-triangle-exclamation" style="color:var(--orange)"></i> <span style="color:var(--orange);font-weight:600">Mise à jour disponible</span>')
+      : '—';
+    const cacheName = 'maintix-' + (window.MX_VERSION || '?');
+    const waitingRow = st.hasWaiting
+      ? `<div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-hourglass-half"></i> En attente</span>
+            <span class="stt-info-val" style="color:var(--orange)">SW en attente d'activation</span>
+          </div>` : '';
 
     return `
-      <div class="stt-section-head"><i class="fas fa-shield-halved"></i> Informations</div>
+      <div class="stt-section-head"><i class="fas fa-shield-halved"></i> Informations système</div>
       <div class="stt-card">
         <div class="stt-card-title">Version application</div>
         <div class="stt-info-list">
@@ -1062,7 +1044,15 @@
           </div>
           <div class="stt-info-row">
             <span class="stt-info-label"><i class="fas fa-cloud"></i> Version serveur</span>
-            <span class="stt-info-val" id="pwa-server-ver" style="font-size:12px">Vérification…</span>
+            <span class="stt-info-val" id="pwa-server-ver" style="font-size:12px">${serverVerDisplay}${serverBadge}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-circle-check"></i> État</span>
+            <span class="stt-info-val" id="pwa-upd-status">${statusHtml}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-rotate"></i> Dernière vérification</span>
+            <span class="stt-info-val" id="pwa-last-check">${lastCheck}</span>
           </div>
           <div class="stt-info-row">
             <span class="stt-info-label"><i class="fas fa-clock-rotate-left"></i> Dernière mise à jour</span>
@@ -1075,18 +1065,19 @@
         <div class="stt-info-list">
           <div class="stt-info-row">
             <span class="stt-info-label"><i class="fas fa-circle-dot"></i> État</span>
-            <span class="stt-info-val" style="color:${swStateColor}">${swState}</span>
+            <span class="stt-info-val" style="color:${swStateColor}">${swStateLabel}</span>
           </div>
           <div class="stt-info-row">
-            <span class="stt-info-label"><i class="fas fa-hard-drive"></i> Cache actif</span>
-            <span class="stt-info-val" id="pwa-cache-name">…</span>
+            <span class="stt-info-label"><i class="fas fa-code-branch"></i> Version SW</span>
+            <span class="stt-info-val">v${MX.esc(String(ver))}</span>
           </div>
           <div class="stt-info-row">
-            <span class="stt-info-label"><i class="fas fa-file-code"></i> Script</span>
-            <span class="stt-info-val" style="font-size:11px">${MX.esc(swUrl)}</span>
+            <span class="stt-info-label"><i class="fas fa-hard-drive"></i> Nom du cache</span>
+            <span class="stt-info-val">${MX.esc(cacheName)}</span>
           </div>
+          ${waitingRow}
         </div>
-        <button class="stt-btn" style="margin-top:12px" onclick="MX.Pages.Settings._refreshInfos()">
+        <button class="stt-btn" style="margin-top:12px" onclick="if(window.MX&&MX.UpdateManager)MX.UpdateManager.checkVersion();MX.Pages.Settings._refreshInfos()">
           <i class="fas fa-rotate"></i> Actualiser
         </button>
         <button class="stt-btn" style="margin-top:8px;background:var(--red-dim);color:var(--red);border-color:var(--red)" onclick="MX.Pages.Settings._confirmForceUpdate()">
@@ -1100,7 +1091,7 @@
       'Forcer la mise à jour',
       'Ceci va vider tous les caches, désinscrire le service worker et recharger l\'application. L\'opération peut prendre quelques secondes.',
       [
-        { label: 'Forcer', cls: 'danger', cb: function() { if (window.MX && MX._forceUpdate) MX._forceUpdate(); else window.location.reload(true); } },
+        { label: 'Forcer', cls: 'danger', cb: function() { if (window.MX && MX.UpdateManager) MX.UpdateManager.forceUpdate(); else window.location.reload(true); } },
         { label: 'Annuler', cls: 'cancel' }
       ]
     );

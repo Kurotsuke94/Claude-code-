@@ -120,10 +120,18 @@ self.addEventListener("install", e => {
         return c.addAll(SHELL);
       })
       .then(() => {
-        console.log("[PWA] install — SHELL cached — skipWaiting()");
-        return self.skipWaiting();
+        console.log("[PWA] install complete — new SW installed and waiting for activation signal");
+        // skipWaiting() not called here — app sends SKIP_WAITING when user approves the update
       })
   );
+});
+
+// ── MESSAGE — SKIP_WAITING déclenché par l'app au clic 'Mettre à jour' ──
+self.addEventListener("message", e => {
+  if (e.data && e.data.type === "SKIP_WAITING") {
+    console.log("[PWA] SKIP_WAITING received — activating new SW immediately");
+    self.skipWaiting();
+  }
 });
 
 // ── ACTIVATE — nettoyage des anciens caches + rechargement automatique ──
