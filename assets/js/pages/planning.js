@@ -47,6 +47,14 @@
   let _clipboard   = null;
   let _loading     = false;
 
+  // ── ORDER DRAG STATE ──
+  const _drag = {
+    active: false, pending: false,
+    srcId: null, srcRow: null, srcIdx: -1, overIdx: -1,
+    ghost: null, rows: [], offY: 0, startX: 0, startY: 0,
+    container: null, handle: null,
+  };
+
   // Selection state
   let _selected             = new Set();  // 'userId_YYYY-MM-DD'
   let _shiftAnchor          = null;
@@ -76,7 +84,13 @@
   }
 
   function _users() {
-    return (MX.state.users || []).filter(u => u.name && u.role !== 'admin' && !u.hidden);
+    return (MX.state.users || [])
+      .filter(u => u.name && u.role !== 'admin' && !u.hidden)
+      .sort((a, b) => {
+        const oa = typeof a.planningOrder === 'number' ? a.planningOrder : 99999;
+        const ob = typeof b.planningOrder === 'number' ? b.planningOrder : 99999;
+        return oa !== ob ? oa - ob : (a.name || '').localeCompare(b.name || '', 'fr');
+      });
   }
 
   function _visibleUsers() {
@@ -84,7 +98,8 @@
     return _filterUser ? all.filter(u => u.id === _filterUser) : all;
   }
 
-  function _canEdit() { return MX.Auth.canSeeAll(); }
+  function _canEdit()    { return MX.Auth.canSeeAll(); }
+  function _canReorder() { return _canEdit() && !_filterUser; }
 
   // ── MISSION DATA (real task counts, linked from Planning → Missions) ──
 
@@ -637,10 +652,13 @@
   // ── WEEK CARDS V2 ──
 
   function _renderWeekCards(users, today, canEdit) {
-    const days    = _weekDays(_day);
-    const esc     = MX.esc;
-    const entries = _entries();
-    const visible = _filterUser ? users.filter(u => u.id === _filterUser) : users;
+    const days       = _weekDays(_day);
+    const esc        = MX.esc;
+    const entries    = _entries();
+    const visible    = _filterUser ? users.filter(u => u.id === _filterUser) : users;
+    const canReorder = _canReorder();
+    const panelW     = canReorder ? 220 : 188;
+    const hdrPad     = canReorder ? 224 : 192;
 
     _ensureWeekDoc(_weekKeyOf(days[0]));
 
@@ -700,7 +718,7 @@
     h += `</div>`;
 
     // Day column headers (aligned with tech cell columns)
-    h += `<div style="display:flex;gap:4px;padding-left:192px">`;
+    h += `<div style="display:flex;gap:4px;padding-left:${hdrPad}px">`;
     days.forEach(ds => {
       const dow  = new Date(ds + 'T00:00:00').getDay();
       const isWE = dow === 0 || dow === 6;
@@ -734,16 +752,18 @@
         : taskCount <= 10 ? `<span style="color:#F97316">${taskCount} miss. · Moyen</span>`
         : `<span style="color:#22C55E">${taskCount} miss. · Chargé</span>`;
 
-      h += `<div style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;min-width:560px;transition:box-shadow 0.18s" onmouseover="this.style.boxShadow='0 0 0 1px var(--cyan-border, rgba(0,245,212,0.3))'" onmouseout="this.style.boxShadow='none'">`;
+      h += `<div data-order-uid="${esc(user.id)}" style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;min-width:560px;transition:box-shadow 0.18s,opacity 0.15s" onmouseover="this.style.boxShadow='0 0 0 1px var(--cyan-border, rgba(0,245,212,0.3))'" onmouseout="this.style.boxShadow='none'">`;
 
-      // Left: user info (fixed 188px)
-      h += `<div style="width:188px;min-width:188px;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 12px;border-right:1px solid var(--border)">
+      // Left: user info panel (width adapts when reorder is enabled)
+      h += `<div ${canReorder ? `class="plng-drag-panel" data-drag-uid="${esc(user.id)}"` : ''} style="width:${panelW}px;min-width:${panelW}px;display:flex;align-items:center;gap:8px;padding:10px 8px 10px 12px;border-right:1px solid var(--border)">
+        ${canReorder ? '<i class="fas fa-grip-vertical" style="font-size:9px;color:var(--text3);opacity:0.45;flex-shrink:0;cursor:grab" title="Glisser pour réorganiser"></i>' : ''}
         ${_avatar(user, 32)}
         <div style="flex:1;min-width:0">
           <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text1)">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
           <div style="font-size:10px;margin-top:3px">${loadLabel}</div>
         </div>
         ${canEdit ? `<div style="display:flex;gap:2px;flex-shrink:0">
+          ${canReorder ? `<button class="plng-user-btn" title="Réorganiser" onclick="event.stopPropagation();MX.Pages.Planning._showOrderMenu('${esc(user.id)}',this)"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
           <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
           <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
         </div>` : ''}
@@ -1466,6 +1486,247 @@
   function _setFilterUser(v)  { _filterUser  = v; render(); }
   function _setFilterShift(v) { _filterShift = v; render(); }
 
+  // ── ORDER MANAGEMENT ──
+
+  function _showOrderMenu(userId, anchorBtn) {
+    _closeOrderMenu();
+    const users = _users();
+    const idx   = users.findIndex(u => u.id === userId);
+    if (idx < 0) return;
+
+    const rect = anchorBtn.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.id = 'plng-order-menu';
+    menu.className = 'plng-order-menu';
+
+    const items = [
+      { label: '⬆ Monter',            dir: 'up',    disabled: idx === 0 },
+      { label: '⬇ Descendre',          dir: 'down',  disabled: idx === users.length - 1 },
+      { label: '📌 Mettre en premier',  dir: 'first', disabled: idx === 0 },
+      { label: '📍 Mettre en dernier',  dir: 'last',  disabled: idx === users.length - 1 },
+    ];
+
+    items.forEach(item => {
+      const el = document.createElement('button');
+      el.className = 'plng-order-menu-item' + (item.disabled ? ' plng-order-menu-item--off' : '');
+      el.textContent = item.label;
+      if (!item.disabled) el.onclick = function() { _closeOrderMenu(); _moveUser(userId, item.dir); };
+      menu.appendChild(el);
+    });
+
+    const menuH   = items.length * 36 + 8;
+    const openTop = rect.bottom + 4 + menuH > window.innerHeight
+      ? rect.top - 4 - menuH
+      : rect.bottom + 4;
+    menu.style.cssText = `position:fixed;z-index:9998;top:${openTop}px;left:${rect.left}px`;
+    document.body.appendChild(menu);
+
+    setTimeout(() => {
+      document.addEventListener('pointerdown', _closeOrderMenu, { once: true, capture: true });
+    }, 50);
+  }
+
+  function _closeOrderMenu() {
+    const m = document.getElementById('plng-order-menu');
+    if (m) m.remove();
+  }
+
+  function _moveUser(userId, direction) {
+    const ids  = _users().map(u => u.id);
+    const idx  = ids.indexOf(userId);
+    if (idx < 0) return;
+
+    let dest;
+    if      (direction === 'up')    dest = Math.max(0, idx - 1);
+    else if (direction === 'down')  dest = Math.min(ids.length - 1, idx + 1);
+    else if (direction === 'first') dest = 0;
+    else if (direction === 'last')  dest = ids.length - 1;
+    else return;
+    if (dest === idx) return;
+
+    ids.splice(idx, 1);
+    ids.splice(dest, 0, userId);
+    _saveOrder(ids);
+  }
+
+  async function _saveOrder(orderedIds) {
+    // Optimistic: apply new planningOrder in-memory immediately
+    const map = {};
+    (MX.state.users || []).forEach(u => { map[u.id] = u; });
+    orderedIds.forEach((id, i) => {
+      if (map[id]) map[id] = Object.assign({}, map[id], { planningOrder: i });
+    });
+    MX.state.users = (MX.state.users || []).map(u => map[u.id] || u);
+    render();
+
+    try {
+      await Promise.all(orderedIds.map((id, i) => MX.DB.updateUserPlanningOrder(id, i)));
+    } catch (err) {
+      console.error('[Planning] Order save failed:', err);
+      MX.toast('Erreur lors de la sauvegarde de l\'ordre', true);
+    }
+  }
+
+  // ── DRAG & DROP ──
+
+  function _attachOrderDrag() {
+    if (!_canReorder()) return;
+    const container = document.querySelector('.plng-month-wrap');
+    if (!container) return;
+    container.querySelectorAll('.plng-drag-panel').forEach(panel => {
+      panel.addEventListener('pointerdown', _onDragPointerDown, { passive: false });
+    });
+  }
+
+  function _onDragPointerDown(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+
+    const container = document.querySelector('.plng-month-wrap');
+    if (!container) return;
+
+    const uid    = e.currentTarget.dataset.dragUid;
+    const rows   = Array.from(container.querySelectorAll('[data-order-uid]'));
+    const srcRow = rows.find(r => r.dataset.orderUid === uid);
+    if (!srcRow) return;
+
+    _drag.pending   = true;
+    _drag.active    = false;
+    _drag.srcId     = uid;
+    _drag.srcRow    = srcRow;
+    _drag.srcIdx    = rows.indexOf(srcRow);
+    _drag.overIdx   = _drag.srcIdx;
+    _drag.rows      = rows;
+    _drag.container = container;
+    _drag.startX    = e.clientX;
+    _drag.startY    = e.clientY;
+    _drag.offY      = e.clientY - srcRow.getBoundingClientRect().top;
+    _drag.handle    = e.currentTarget;
+
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.addEventListener('pointermove',   _onDragPointerMove, { passive: false });
+    e.currentTarget.addEventListener('pointerup',     _onDragPointerUp);
+    e.currentTarget.addEventListener('pointercancel', _onDragCancel);
+  }
+
+  function _onDragPointerMove(e) {
+    if (!_drag.pending && !_drag.active) return;
+    e.preventDefault();
+
+    // Activate drag once pointer moves > 6px
+    if (!_drag.active) {
+      const dx = e.clientX - _drag.startX;
+      const dy = e.clientY - _drag.startY;
+      if (dx * dx + dy * dy < 36) return;
+
+      _drag.active  = true;
+      _drag.pending = false;
+
+      const srcRow = _drag.srcRow;
+      const rect   = srcRow.getBoundingClientRect();
+
+      const ghost = document.createElement('div');
+      ghost.className = 'plng-drag-ghost';
+      ghost.setAttribute('style', srcRow.getAttribute('style') || '');
+      ghost.style.position     = 'fixed';
+      ghost.style.left         = rect.left   + 'px';
+      ghost.style.top          = rect.top    + 'px';
+      ghost.style.width        = rect.width  + 'px';
+      ghost.style.height       = rect.height + 'px';
+      ghost.style.zIndex       = '9999';
+      ghost.style.pointerEvents = 'none';
+      ghost.style.opacity      = '0.92';
+      ghost.style.boxShadow    = '0 16px 48px rgba(0,0,0,0.5)';
+      ghost.style.borderRadius = '16px';
+      ghost.style.overflow     = 'hidden';
+      ghost.style.transition   = 'none';
+      ghost.innerHTML          = srcRow.innerHTML;
+      document.body.appendChild(ghost);
+      _drag.ghost = ghost;
+
+      srcRow.classList.add('plng-dragging');
+    }
+
+    // Move ghost
+    if (_drag.ghost) _drag.ghost.style.top = (e.clientY - _drag.offY) + 'px';
+
+    // Find drop position: index of row whose midpoint is below pointer
+    const rows = _drag.rows;
+    let newIdx = rows.length;
+    for (let i = 0; i < rows.length; i++) {
+      const r    = rows[i];
+      const rect = r.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) { newIdx = i; break; }
+    }
+
+    if (newIdx !== _drag.overIdx) {
+      _drag.overIdx = newIdx;
+      _updateDropIndicator(newIdx);
+    }
+
+    // Autoscroll near viewport edges
+    if (e.clientY < 80)                          window.scrollBy(0, -8);
+    else if (e.clientY > window.innerHeight - 80) window.scrollBy(0,  8);
+  }
+
+  function _updateDropIndicator(targetIdx) {
+    document.querySelectorAll('.plng-drop-indicator').forEach(el => el.remove());
+    if (!_drag.active) return;
+
+    const { rows, srcIdx, container } = _drag;
+    if (targetIdx === srcIdx || targetIdx === srcIdx + 1) return;
+
+    const bar = document.createElement('div');
+    bar.className = 'plng-drop-indicator';
+
+    if (targetIdx >= rows.length) {
+      container.appendChild(bar);
+    } else {
+      container.insertBefore(bar, rows[targetIdx]);
+    }
+  }
+
+  function _onDragPointerUp() {
+    if (_drag.active) _finalizeDrag(_drag.overIdx);
+    _cleanupDrag();
+  }
+
+  function _onDragCancel() {
+    _cleanupDrag();
+  }
+
+  function _finalizeDrag(overIdx) {
+    const ids    = _users().map(u => u.id);
+    const srcIdx = ids.indexOf(_drag.srcId);
+    if (srcIdx < 0) return;
+
+    let dest = overIdx;
+    if (dest === srcIdx || dest === srcIdx + 1) return;
+
+    ids.splice(srcIdx, 1);
+    if (dest > srcIdx) dest--;
+    ids.splice(dest, 0, _drag.srcId);
+    _saveOrder(ids);
+  }
+
+  function _cleanupDrag() {
+    if (_drag.handle) {
+      _drag.handle.removeEventListener('pointermove',   _onDragPointerMove);
+      _drag.handle.removeEventListener('pointerup',     _onDragPointerUp);
+      _drag.handle.removeEventListener('pointercancel', _onDragCancel);
+    }
+    if (_drag.ghost)  _drag.ghost.remove();
+    if (_drag.srcRow) _drag.srcRow.classList.remove('plng-dragging');
+    document.querySelectorAll('.plng-drop-indicator').forEach(el => el.remove());
+
+    _drag.active = false; _drag.pending = false;
+    _drag.srcId  = null;  _drag.srcRow  = null;
+    _drag.srcIdx = -1;    _drag.overIdx = -1;
+    _drag.ghost  = null;  _drag.rows    = [];
+    _drag.container = null; _drag.handle = null;
+  }
+
   // ── MAIN RENDER ──
 
   function render() {
@@ -1539,6 +1800,7 @@
     el.innerHTML = h;
 
     if (_view !== 'day' && !_loading) _attachTableEvents();
+    if (_view === 'week' && !_loading) _attachOrderDrag();
   }
 
   // ── ENTRY POINT ──
@@ -1570,5 +1832,7 @@
     _openShiftMgmt, _addMgmtRow, _removeMgmtRow, _saveShiftMgmt,
     _exportCsv,
     _openMissionPanel,
+    _showOrderMenu, _moveUser,
+    _onUsersUpdate: render,
   };
 })();

@@ -1384,7 +1384,8 @@
           }
         } catch(e) {}
       }
-      if (state.currentPage === "admin") MX.Pages.Admin.render();
+      if (state.currentPage === "admin")    MX.Pages.Admin.render();
+      if (state.currentPage === "planning" && window.MX.Pages.Planning && MX.Pages.Planning._onUsersUpdate) MX.Pages.Planning._onUsersUpdate();
     });
 
     DB.listenRoles(list => {

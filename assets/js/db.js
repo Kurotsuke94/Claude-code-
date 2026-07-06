@@ -212,9 +212,10 @@
     await R.messages().doc(id).delete();
   }
 
-  async function addUser(data)        { await R.users().add(data); }
-  async function updateUser(id, data) { await R.users().doc(id).update(data); }
-  async function deleteUser(id)       { await R.users().doc(id).delete(); }
+  async function addUser(data)                      { await R.users().add(data); }
+  async function updateUser(id, data)               { await R.users().doc(id).update(data); }
+  async function updateUserPlanningOrder(id, order) { await R.users().doc(id).update({ planningOrder: order }); }
+  async function deleteUser(id)                     { await R.users().doc(id).delete(); }
 
   async function addLog(data) {
     await R.logs().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
@@ -1143,7 +1144,7 @@
     addProduct, updateProduct, deleteProduct,
     uploadMessageImage, sendMessage, deleteMessage,
     listenPlanning, uploadPlanningImage, savePlanning, clearPlanning,
-    addUser, updateUser, deleteUser,
+    addUser, updateUser, updateUserPlanningOrder, deleteUser,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,

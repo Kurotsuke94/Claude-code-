@@ -1365,7 +1365,10 @@
     if (u) u[f] = v;
   }
   function addUser() {
-    MX.DB.addUser({ name: "Nouveau", role: "technicien" })
+    const maxOrder = (MX.state.users || []).reduce(
+      (m, u) => typeof u.planningOrder === 'number' ? Math.max(m, u.planningOrder) : m, -1
+    );
+    MX.DB.addUser({ name: "Nouveau", role: "technicien", planningOrder: maxOrder + 1 })
       .then(() => MX.toast("Utilisateur ajouté ✓"))
       .catch(() => MX.toast("Erreur", true));
   }
