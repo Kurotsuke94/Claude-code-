@@ -51,6 +51,9 @@
   let _aiWiz = null;
   const _AI_STEPS = ['Mois & Source', 'Options IA', 'Prévisualisation', 'Confirmation'];
 
+  // ── DENSITY / DISPLAY MODE ──
+  let _density = 'normal'; // 'compact' | 'normal' | 'comfort'
+
   // ── ORDER DRAG STATE ──
   const _drag = {
     active: false, pending: false,
@@ -662,8 +665,12 @@
     const entries    = _entries();
     const visible    = _filterUser ? users.filter(u => u.id === _filterUser) : users;
     const canReorder = _canReorder();
-    const panelW     = canReorder ? 220 : 188;
-    const hdrPad     = canReorder ? 224 : 192;
+    const panelW     = _density === 'compact'
+      ? (canReorder ? 176 : 148)
+      : _density === 'comfort'
+        ? (canReorder ? 252 : 220)
+        : (canReorder ? 220 : 188);
+    const hdrPad     = panelW + 8;
 
     _ensureWeekDoc(_weekKeyOf(days[0]));
 
@@ -681,14 +688,16 @@
     });
 
     // ── Coverage per day ──
-    const dayCov = {};
+    const dayCov    = {};
+    const dayAbsent = {};
     days.forEach(ds => {
-      dayCov[ds] = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
+      dayCov[ds]    = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && WORK_CODES.has(e.shiftCode); }).length;
+      dayAbsent[ds] = users.filter(u => { const e = entries[u.id + '_' + ds]; return e && (e.shiftCode === 'CP' || e.shiftCode === 'RTT' || e.shiftCode === 'RH'); }).length;
     });
 
     const totalSlots = users.length * days.length;
 
-    // ── Stat cards (icon + counter + % + glow + progress bar) ──
+    // ── Stat cards ──
     const STAT_DEFS = [
       { label: 'Techniciens actifs', val: activeTechs.size,        max: users.length || 1, icon: 'fa-users',          color: 'var(--cyan)', key: null },
       { label: 'Matins',             val: wStats['1'],             max: totalSlots || 1,    icon: 'fa-sun',            color: '#FDE047',     key: '1'  },
@@ -698,48 +707,55 @@
       { label: 'Congés / RTT',       val: wStats.CP + wStats.RTT,  max: totalSlots || 1,    icon: 'fa-plane-departure',color: '#F97316',     key: null },
     ];
 
-    let h = `<div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">`;
+    let h = `<div class="plng-week-root plng-density-${esc(_density)}">`;
 
-    // Stat row
-    h += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    // ── Stat row ──
+    h += `<div class="plng-wk-stats">`;
     STAT_DEFS.forEach(sd => {
       const isActive = sd.key && _filterShift === sd.key;
       const pct = Math.round((sd.val / sd.max) * 100);
-      h += `<div style="flex:1;min-width:130px;background:var(--bg2);border:1px solid ${isActive ? sd.color : 'var(--border)'};border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:all 0.18s;box-shadow:0 0 18px -6px ${sd.color}${sd.key ? ';cursor:pointer' : ''}"
-        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'"` : ''}>
-        <div style="display:flex;align-items:center;gap:10px">
-          <i class="fas ${sd.icon}" style="color:${sd.color};font-size:18px;flex-shrink:0"></i>
-          <div style="flex:1">
-            <div style="font-size:22px;font-weight:700;color:var(--text1);line-height:1;font-family:var(--ffm)">${sd.val}</div>
-            <div style="font-size:10px;color:var(--text3);font-weight:600;margin-top:2px;letter-spacing:0.3px">${esc(sd.label)}</div>
-          </div>
-          <div style="font-size:11px;font-weight:700;color:${sd.color}">${pct}%</div>
+      h += `<div class="plng-wk-stat${isActive ? ' plng-wk-stat-active' : ''}" style="--sc:${sd.color}"
+        ${sd.key ? `onclick="MX.Pages.Planning._setFilterShift('${esc(isActive ? '' : sd.key)}')" title="Filtrer : ${esc(sd.label)}"` : ''}>
+        <div class="plng-wk-stat-top">
+          <i class="fas ${sd.icon} plng-wk-stat-ico"></i>
+          <span class="plng-wk-stat-val">${sd.val}</span>
+          <span class="plng-wk-stat-pct">${pct}%</span>
         </div>
-        <div style="height:3px;border-radius:2px;background:var(--bg3);overflow:hidden">
-          <div style="height:100%;width:${pct}%;background:${sd.color};border-radius:2px;transition:width 0.3s"></div>
-        </div>
+        <div class="plng-wk-stat-lbl">${esc(sd.label)}</div>
+        <div class="plng-wk-stat-bar"><div class="plng-wk-stat-fill" style="width:${pct}%"></div></div>
       </div>`;
     });
     h += `</div>`;
 
-    // Day column headers (aligned with tech cell columns)
-    h += `<div style="display:flex;gap:4px;padding-left:${hdrPad}px">`;
+    // ── Day column headers ──
+    h += `<div class="plng-wk-hdrs" style="padding-left:${hdrPad}px">`;
     days.forEach(ds => {
-      const dow  = new Date(ds + 'T00:00:00').getDay();
-      const isWE = dow === 0 || dow === 6;
-      const isTd = ds === today;
-      const cov  = dayCov[ds];
-      const covColor = (!isWE && cov === 0) ? '#EF4444' : (!isWE && cov === 1) ? '#F97316' : 'var(--text3)';
-      h += `<div style="flex:1;text-align:center;padding:6px 4px 4px;border-radius:8px;background:${isTd ? 'rgba(0,245,212,0.08)' : isWE ? 'rgba(139,92,246,0.05)' : 'transparent'}">
-        <div style="font-size:10px;font-weight:700;color:${isTd ? 'var(--cyan)' : isWE ? '#8B5CF6' : 'var(--text3)'};letter-spacing:0.5px">${DAY_LABELS[dow]}</div>
-        <div style="font-size:14px;font-weight:700;color:${isTd ? 'var(--cyan)' : 'var(--text1)'};font-family:var(--ffm)">${new Date(ds + 'T00:00:00').getDate()}</div>
-        ${!isWE ? `<div style="font-size:9px;color:${covColor};margin-top:2px;font-weight:600">${cov}<i class="fas fa-user" style="font-size:8px;margin-left:2px"></i></div>` : `<div style="height:15px"></div>`}
+      const dow      = new Date(ds + 'T00:00:00').getDay();
+      const isWE     = dow === 0 || dow === 6;
+      const isTd     = ds === today;
+      const cov      = dayCov[ds];
+      const abs      = dayAbsent[ds];
+      const total    = users.length || 1;
+      const covPct   = Math.round((cov / total) * 100);
+      const dayAlert = !isWE ? (cov === 0 && users.length > 0 ? 'critical' : covPct < 50 ? 'warn' : 'ok') : 'we';
+      const covColor = dayAlert === 'critical' ? '#EF4444' : dayAlert === 'warn' ? '#F97316' : isTd ? 'var(--cyan)' : '#22C55E';
+
+      h += `<div class="plng-wk-day-hdr plng-wk-day-${dayAlert}${isTd ? ' plng-wk-day-today' : ''}">
+        <div class="plng-wk-day-dow">${DAY_LABELS[dow]}</div>
+        <div class="plng-wk-day-num">${new Date(ds + 'T00:00:00').getDate()}</div>
+        ${!isWE ? `<div class="plng-wk-day-footer">
+          <div class="plng-wk-day-bar" style="--covw:${covPct}%;--covc:${covColor}"></div>
+          <div class="plng-wk-day-cov-row">
+            <span class="plng-wk-day-cov" style="color:${covColor}">${cov}<i class="fas fa-user plng-wk-day-cov-ico"></i></span>
+            ${abs > 0 ? `<span class="plng-wk-day-abs"><i class="fas fa-plane-departure"></i>${abs}</span>` : ''}
+          </div>
+        </div>` : `<div class="plng-wk-day-we-lbl">WE</div>`}
       </div>`;
     });
     h += `</div>`;
 
-    // Tech cards container (keeps .plng-month-wrap for drag-select)
-    h += `<div class="plng-month-wrap" style="display:flex;flex-direction:column;gap:6px;overflow-x:auto">`;
+    // ── Tech card rows ──
+    h += `<div class="plng-month-wrap plng-wk-cards">`;
 
     if (!visible.length) {
       h += `<div class="plng-empty"><i class="fas fa-users" style="font-size:28px"></i><span>Aucun agent</span></div>`;
@@ -751,64 +767,66 @@
         if (!has) return;
       }
 
-      const taskCount = _userWeekTaskCount(user, days, entries);
-      const loadLabel = taskCount === 0 ? '<span style="color:var(--text3)">Aucune mission</span>'
-        : taskCount <= 4  ? `<span style="color:#EF4444">${taskCount} miss. · Faible</span>`
-        : taskCount <= 10 ? `<span style="color:#F97316">${taskCount} miss. · Moyen</span>`
-        : `<span style="color:#22C55E">${taskCount} miss. · Chargé</span>`;
+      const taskCount    = _userWeekTaskCount(user, days, entries);
+      const maxTaskCount = users.reduce((mx, u) => Math.max(mx, _userWeekTaskCount(u, days, entries)), 1);
+      const loadPct      = maxTaskCount > 0 ? Math.round((taskCount / maxTaskCount) * 100) : 0;
+      const loadColor    = taskCount === 0 ? 'var(--text3)' : loadPct > 70 ? '#22C55E' : loadPct > 35 ? '#F97316' : '#EF4444';
+      const avatarSz     = _density === 'compact' ? 28 : _density === 'comfort' ? 40 : 34;
 
-      h += `<div data-order-uid="${esc(user.id)}" style="display:flex;align-items:stretch;background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;min-width:560px;transition:box-shadow 0.18s,opacity 0.15s" onmouseover="this.style.boxShadow='0 0 0 1px var(--cyan-border, rgba(0,245,212,0.3))'" onmouseout="this.style.boxShadow='none'">`;
+      h += `<div class="plng-wk-row" data-order-uid="${esc(user.id)}">`;
 
-      // Left: user info panel (width adapts when reorder is enabled)
-      h += `<div ${canReorder ? `class="plng-drag-panel" data-drag-uid="${esc(user.id)}"` : ''} style="width:${panelW}px;min-width:${panelW}px;display:flex;align-items:center;gap:8px;padding:10px 8px 10px 12px;border-right:1px solid var(--border)">
-        ${canReorder ? '<i class="fas fa-grip-vertical" style="font-size:9px;color:var(--text3);opacity:0.45;flex-shrink:0;cursor:grab" title="Glisser pour réorganiser"></i>' : ''}
-        ${_avatar(user, 32)}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text1)">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
-          <div style="font-size:10px;margin-top:3px">${loadLabel}</div>
+      // ─ Left user panel ─
+      h += `<div class="plng-wk-user${canReorder ? ' plng-drag-panel' : ''}" data-drag-uid="${esc(user.id)}" style="width:${panelW}px;min-width:${panelW}px">
+        ${canReorder ? `<i class="fas fa-grip-vertical plng-wk-grip" title="Glisser pour réorganiser"></i>` : ''}
+        <div class="plng-wk-avatar-wrap">${_avatar(user, avatarSz)}</div>
+        <div class="plng-wk-uinfo">
+          <div class="plng-wk-uname">${MX.badgeTag ? MX.badgeTag(user.name) : ''}${esc(user.name)}</div>
+          ${_density !== 'compact' ? `<div class="plng-wk-load" style="--lc:${loadColor};--lw:${loadPct}%">
+            <div class="plng-wk-load-bar"></div>
+            <span class="plng-wk-load-n">${taskCount ? taskCount + ' miss.' : '—'}</span>
+          </div>` : ''}
         </div>
-        ${canEdit ? `<div style="display:flex;gap:2px;flex-shrink:0">
+        ${canEdit ? `<div class="plng-wk-uacts">
           ${canReorder ? `<button class="plng-user-btn" title="Réorganiser" onclick="event.stopPropagation();MX.Pages.Planning._showOrderMenu('${esc(user.id)}',this)"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
           <button class="plng-user-btn" title="Copier la semaine" onclick="MX.Pages.Planning._copyWeek('${esc(user.id)}')"><i class="fas fa-copy"></i></button>
           <button class="plng-user-btn" title="Coller la semaine" onclick="MX.Pages.Planning._pasteWeek('${esc(user.id)}')"><i class="fas fa-paste"></i></button>
         </div>` : ''}
       </div>`;
 
-      // Right: 7 day cells
-      h += `<div style="display:flex;flex:1;min-width:0">`;
+      // ─ Day cells ─
+      h += `<div class="plng-wk-cells">`;
       days.forEach((ds, di) => {
-        const dow    = new Date(ds + 'T00:00:00').getDay();
-        const isWE   = dow === 0 || dow === 6;
-        const isTd   = ds === today;
-        const entry  = entries[user.id + '_' + ds];
-        const shift  = entry ? _shiftByCode(entry.shiftCode) : null;
-        const badge  = entry ? _badgeFor(entry.shiftCode) : null;
+        const dow      = new Date(ds + 'T00:00:00').getDay();
+        const isWE     = dow === 0 || dow === 6;
+        const isTd     = ds === today;
+        const entry    = entries[user.id + '_' + ds];
+        const shift    = entry ? _shiftByCode(entry.shiftCode) : null;
+        const badge    = entry ? _badgeFor(entry.shiftCode) : null;
         const dayTasks = entry ? _userTasksForDay(user, ds, entry.shiftCode) : [];
-        const selKey = user.id + '_' + ds;
-        const isSel  = _selected.has(selKey);
-        const isDim  = _filterShift && entry && entry.shiftCode !== _filterShift;
-        const isLast = di === 6;
+        const selKey   = user.id + '_' + ds;
+        const isSel    = _selected.has(selKey);
+        const isDim    = _filterShift && entry && entry.shiftCode !== _filterShift;
+        const isLast   = di === 6;
 
-        const cellClass = 'plng-cell'
+        const cellClass = 'plng-cell plng-wk-cell'
           + (isWE  ? ' plng-we'     : '')
           + (isTd  ? ' plng-today'  : '')
           + (isSel ? ' plng-sel'    : '')
           + (isDim ? ' plng-dimmed' : '');
 
         h += `<div class="${cellClass}" data-uid="${esc(user.id)}" data-date="${ds}"
-          style="flex:1;height:64px;min-width:0;display:flex;align-items:center;justify-content:center;${isLast ? '' : 'border-right:1px solid var(--border);'}padding:4px;"
+          style="${isLast ? '' : 'border-right:1px solid var(--border);'}"
           ${canEdit ? `onmousedown="MX.Pages.Planning._cellMouseDown(event,'${esc(user.id)}','${ds}')"` : ''}>`;
 
         if (shift) {
           const nb = shift.color === '#FFFFFF';
-          h += `<div class="plng-cell-in" style="width:calc(100% - 4px);height:56px;border-radius:10px;flex-direction:column;gap:1px;background:${shift.color};color:${shift.textColor}${nb ? ';border:1px solid rgba(0,0,0,0.15)' : ''}">
-            <span class="plng-cell-code" style="font-weight:${shift.bold ? 700 : 600};font-size:10px;white-space:nowrap">${badge.emoji} ${esc(badge.abbr)}</span>
-            ${shift.start ? `<span class="plng-cell-time">${shift.start}–${shift.end}</span>` : ''}
-            ${dayTasks.length ? `<span style="pointer-events:auto;cursor:pointer;font-size:8px;font-weight:700;margin-top:1px;display:inline-flex;align-items:center;gap:2px;background:rgba(0,0,0,0.18);border-radius:5px;padding:1px 5px"
-                onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${ds}')">${dayTasks.length} miss.<i class="fas fa-chevron-right" style="font-size:6px"></i></span>` : ''}
+          h += `<div class="plng-wk-badge" style="background:${shift.color};color:${shift.textColor}${nb ? ';outline:1px solid rgba(0,0,0,0.15)' : ''}">
+            <span class="plng-wk-bc">${badge.emoji} ${esc(badge.abbr)}</span>
+            ${shift.start && _density !== 'compact' ? `<span class="plng-wk-bt">${shift.start}–${shift.end}</span>` : ''}
+            ${dayTasks.length ? `<span class="plng-wk-bm" onclick="event.stopPropagation();MX.Pages.Planning._openMissionPanel('${esc(user.id)}','${ds}')">${dayTasks.length}<i class="fas fa-chevron-right" style="font-size:5px;margin-left:1px"></i></span>` : ''}
           </div>`;
         } else {
-          h += `<div class="plng-cell-in plng-cell-empty-in" style="width:calc(100% - 4px);height:56px;border-radius:10px"></div>`;
+          h += `<div class="plng-wk-badge-empty"></div>`;
         }
 
         h += `</div>`;
@@ -2319,6 +2337,22 @@
     const titleEl = document.getElementById('topbar-title');
     if (titleEl) titleEl.textContent = 'Planning';
 
+    // Header stat chips (week view only)
+    const hEntries = _entries();
+    let hAbsent = 0, hActiveCt = 0;
+    if (_view === 'week') {
+      const wDays  = _weekDays(_day);
+      const WC     = new Set(['1','3','4']);
+      const actSet = new Set();
+      users.forEach(u => wDays.forEach(ds => {
+        const e = hEntries[u.id + '_' + ds];
+        if (!e) return;
+        if (WC.has(e.shiftCode)) actSet.add(u.id);
+        if (e.shiftCode === 'CP' || e.shiftCode === 'RTT') hAbsent++;
+      }));
+      hActiveCt = actSet.size;
+    }
+
     let h = `
 <div class="ph">
   <div class="ph-eye">PLANNING</div>
@@ -2327,6 +2361,11 @@
       <div class="ph-title">${MX.esc(title)}</div>
       <div class="ph-sub">Planification des horaires d'équipe</div>
     </div>
+    ${_view === 'week' ? `<div class="plng-ph-chips">
+      <span class="plng-ph-chip"><i class="fas fa-users"></i> ${users.length} tech.</span>
+      ${hActiveCt > 0 ? `<span class="plng-ph-chip plng-ph-chip-ok"><i class="fas fa-circle-check"></i> ${hActiveCt} actif${hActiveCt > 1 ? 's' : ''}</span>` : ''}
+      ${hAbsent > 0 ? `<span class="plng-ph-chip plng-ph-chip-warn"><i class="fas fa-plane-departure"></i> ${hAbsent} congé${hAbsent > 1 ? 's' : ''}</span>` : ''}
+    </div>` : ''}
   </div>
 </div>
 <div class="plng-page">
@@ -2352,6 +2391,11 @@
         ${shifts.map(s => `<option value="${MX.esc(s.code)}"${_filterShift===s.code?' selected':''}>${MX.esc(s.code)} — ${MX.esc(s.name)}</option>`).join('')}
       </select>
     </div>
+    ${_view === 'week' ? `<div class="plng-density-toggle" title="Densité d'affichage">
+      <button class="plng-den-btn${_density==='compact'?' active':''}" onclick="MX.Pages.Planning._setDensity('compact')" title="Compact"><i class="fas fa-grip-lines"></i></button>
+      <button class="plng-den-btn${_density==='normal'?' active':''}"  onclick="MX.Pages.Planning._setDensity('normal')"  title="Normal"><i class="fas fa-grip"></i></button>
+      <button class="plng-den-btn${_density==='comfort'?' active':''}" onclick="MX.Pages.Planning._setDensity('comfort')" title="Confort"><i class="fas fa-align-justify"></i></button>
+    </div>` : ''}
     ${canEdit ? `<button class="plng-ai-open-btn" onclick="MX.Pages.Planning._openAIWizard()" title="Assistant IA de Planification"><i class="fas fa-robot"></i> <span>Générer avec l'IA</span></button>` : ''}
   </div>
   ${canEdit && _view !== 'day' ? _renderQuickBar(shifts) : ''}
@@ -2378,6 +2422,10 @@
     if (_view !== 'day' && !_loading) _attachTableEvents();
     if (_view === 'week' && !_loading) _attachOrderDrag();
   }
+
+  // ── DENSITY ──
+
+  function _setDensity(v) { _density = v; render(); }
 
   // ── ENTRY POINT ──
 
@@ -2413,5 +2461,6 @@
     _openAIWizard, _aiWizClose, _aiWizNext, _aiWizBack,
     _aiWizSet, _aiWizSetSrc, _aiWizOpt, _aiWizStep, _aiWizGenerate, _aiWizApply,
     _aiRestoreBackup,
+    _setDensity,
   };
 })();
