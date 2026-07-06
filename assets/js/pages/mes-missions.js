@@ -566,61 +566,92 @@
     h += '<div class="mm-v3-content">';
 
     if (_activeTab === 'checklist') {
-      // Slot-grouped display
-      var tabTasks = myMissions.filter(function (t) { return t.missionType === 'checklist'; });
-      var filtered = _applyFilters(tabTasks, todayISO);
+      // ── Slot-first display: show all 3 slots with claim status ──
+      var todayDayId = MX.todayId();
+      var CLK_SLOTS  = ['matin', 'journee', 'soir'];
+      var myClaims   = 0;
 
-      var SLOTS = ['matin', 'journee', 'soir'];
-      var hasAny = false;
+      CLK_SLOTS.forEach(function (slotKey) {
+        var si         = SLOT_INFO[slotKey];
+        var claims     = MX.state.dailyClaims || {};
+        var claim      = claims[slotKey] || {};
+        var claimName  = claim.name || '';
+        var lockedBy   = claim.lockedBy || '';
+        var weekAsgn   = (MX.state.assignments || {})[todayDayId + '_' + slotKey] || '';
+        var effective  = claimName || weekAsgn;
+        var isMine     = effective === cu.name;
 
-      SLOTS.forEach(function (slotKey) {
-        var si = SLOT_INFO[slotKey];
-        var slotTasks     = tabTasks.filter(function (t) { return t.slot === slotKey; });
-        var slotFiltered  = filtered.filter(function (t) { return t.slot === slotKey; });
-        if (slotTasks.length === 0) return;
-        hasAny = true;
-        var slotDone  = slotTasks.filter(function (t) { return t.done; }).length;
-        var slotTotal = slotTasks.length;
-        var slotPct   = slotTotal ? Math.round(slotDone / slotTotal * 100) : 0;
-        var barCol    = slotPct === 100 ? TC.checklist : slotPct >= 50 ? '#f97316' : TC.intervention;
+        if (isMine) myClaims++;
+
+        var mSlotTasks = isMine
+          ? checklistTasks.filter(function (t) { return t.slot === slotKey && t.mine; })
+          : [];
+        var mSlotDone  = mSlotTasks.filter(function (t) { return t.done; }).length;
+        var mSlotPct   = mSlotTasks.length ? Math.round(mSlotDone / mSlotTasks.length * 100) : 0;
+        var barCol     = mSlotPct === 100 ? TC.checklist : mSlotPct >= 50 ? '#f97316' : TC.intervention;
 
         h += '<div class="mm-v3-slot-group">'
           + '<div class="mm-v3-slot-hd">'
           + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
           + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
-          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>'
-          + '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + slotPct + '%;background:' + barCol + '"></div></div>'
-          + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + slotDone + '/' + slotTotal + '</span>'
-          + '</div>';
+          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>';
 
-        if (slotFiltered.length === 0) {
-          h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
-        } else {
-          h += '<div class="mm-v3-cards">';
-          slotFiltered.forEach(function (task) { h += _checklistCard(task); });
-          h += '</div>';
+        if (isMine && mSlotTasks.length) {
+          h += '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + mSlotPct + '%;background:' + barCol + '"></div></div>'
+            + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + mSlotDone + '/' + mSlotTasks.length + '</span>';
         }
+
+        h += '</div>';
+
+        // ── Status banner ──
+        if (lockedBy) {
+          h += '<div class="mm-v3-slot-status mm-v3-slot-status--locked">'
+            + '<i class="fas fa-lock"></i>'
+            + (claimName ? (' Pris par <strong>' + e(claimName) + '</strong>') : ' Non assigné')
+            + ' <span class="mm-v3-slot-lock-badge">Responsable</span>'
+            + '</div>';
+        } else if (isMine) {
+          h += '<div class="mm-v3-slot-status mm-v3-slot-status--mine">'
+            + '<span><i class="fas fa-check-circle"></i> Votre créneau</span>'
+            + '<button class="mm-v3-slot-unclaim" onclick="MX.Pages.Checklist.unclaimSlot(\'' + e(slotKey) + '\')">'
+            + '<i class="fas fa-right-from-bracket"></i> Rendre le créneau</button>'
+            + '</div>';
+        } else if (claimName) {
+          var nc2 = MX.userColors ? MX.userColors(claimName) : { bg: 'var(--cyan)', fg: '#fff' };
+          h += '<div class="mm-v3-slot-status mm-v3-slot-status--taken">'
+            + '<i class="fas fa-user-check"></i> Pris par '
+            + '<span class="mm-v3-slot-who" style="background:' + nc2.bg + ';color:' + nc2.fg + '">' + e(claimName.substring(0, 2).toUpperCase()) + '</span>'
+            + ' <strong>' + e(claimName) + '</strong>'
+            + '</div>';
+        } else {
+          h += '<div class="mm-v3-slot-status mm-v3-slot-status--free">'
+            + '<span><i class="fas fa-circle-dot"></i> Disponible</span>'
+            + '<button class="mm-v3-slot-claim" onclick="MX.Pages.Checklist.claimSlot(\'' + e(slotKey) + '\')">'
+            + '<i class="fas fa-hand-pointer"></i> Prendre le créneau</button>'
+            + '</div>';
+        }
+
+        // ── Tasks — only when this is my slot ──
+        if (isMine) {
+          var slotFiltered = _applyFilters(mSlotTasks, todayISO);
+          if (mSlotTasks.length === 0) {
+            h += '<div class="mm-v3-slot-empty">Aucune tâche dans ce créneau.</div>';
+          } else if (slotFiltered.length === 0) {
+            h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
+          } else {
+            h += '<div class="mm-v3-cards">';
+            slotFiltered.forEach(function (task) { h += _checklistCard(task); });
+            h += '</div>';
+          }
+        }
+
         h += '</div>';
       });
 
-      // Available unassigned
-      if (availableTasks.length) {
-        hasAny = true;
-        h += '<div class="mm-v3-slot-group mm-v3-slot-group--avail">'
-          + '<div class="mm-v3-slot-hd">'
-          + '<span class="mm-v3-slot-icon">📋</span>'
-          + '<span class="mm-v3-slot-name">Disponibles</span>'
-          + '<span class="mm-v3-slot-sub">Non assignées</span>'
-          + '<span class="mm-v3-slot-ct" style="color:var(--text3)">' + availableTasks.length + '</span>'
-          + '</div><div class="mm-v3-cards">';
-        availableTasks.forEach(function (task) { h += _availableCard(task); });
-        h += '</div></div>';
-      }
-
-      if (!hasAny) {
+      if (myClaims === 0) {
         h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
-          + '<div class="mm-v3-empty-ttl">Aucune mission aujourd\'hui</div>'
-          + '<div class="mm-v3-empty-sub">Votre responsable n\'a pas encore assigné de tâches.</div></div>';
+          + '<div class="mm-v3-empty-ttl">Aucun créneau pris</div>'
+          + '<div class="mm-v3-empty-sub">Prenez un créneau ci-dessus pour afficher vos tâches.</div></div>';
       }
 
       // Congrats + confetti when all done

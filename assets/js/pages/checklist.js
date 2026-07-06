@@ -630,6 +630,8 @@
   }
 
   // ── DAILY CLAIMS (auto-attribution) ──
+  const _SLOT_LBL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
+
   async function claimSlot(slot) {
     const cu = MX.state.currentUser;
     if (!cu) return MX.toast("Connectez-vous pour prendre un créneau", true);
@@ -639,8 +641,22 @@
     if (existing.name && existing.name !== cu.name) return MX.toast("Ce créneau est déjà pris par " + existing.name, true);
     try {
       await MX.DB.setDailyClaim(dateStr, slot, cu.name, "");
-      MX.toast("Créneau pris ✓");
-      MX.DB.addLog({ workerName: cu.name, action: "claim", taskText: "[Aujourd'hui] " + cu.name + " a pris le créneau " + slot, dayId: MX.todayId(), slot }).catch(() => {});
+      const todayDayId = MX.todayId();
+      const key = todayDayId + '_' + slot;
+      const tasks = MX.state.tasks[key] || [];
+      if (tasks.length) {
+        const newItems = tasks.map(t => {
+          if (t.customized) return t;
+          const u = Object.assign({}, t);
+          u.assignedTo = cu.name;
+          return u;
+        });
+        MX.DB.setTasks(todayDayId, slot, newItems)
+          .then(() => { MX.state.tasks[key] = newItems; })
+          .catch(() => {});
+      }
+      MX.toast("Créneau " + (_SLOT_LBL[slot] || slot) + " pris ✓");
+      MX.DB.addLog({ workerName: cu.name, action: "claim", taskText: "[Aujourd'hui] " + cu.name + " a pris le créneau " + slot, dayId: todayDayId, slot }).catch(() => {});
     } catch(e) { MX.toast("Erreur", true); }
   }
 
@@ -653,18 +669,48 @@
     if (existing.name !== cu.name) return;
     try {
       await MX.DB.clearDailyClaim(dateStr, slot);
-      MX.toast("Créneau libéré");
-      MX.DB.addLog({ workerName: cu.name, action: "unclaim", taskText: "[Aujourd'hui] " + cu.name + " a quitté le créneau " + slot, dayId: MX.todayId(), slot }).catch(() => {});
+      const todayDayId = MX.todayId();
+      const key = todayDayId + '_' + slot;
+      const tasks = MX.state.tasks[key] || [];
+      if (tasks.length) {
+        const newItems = tasks.map(t => {
+          if (t.customized) return t;
+          const u = Object.assign({}, t);
+          delete u.assignedTo;
+          return u;
+        });
+        MX.DB.setTasks(todayDayId, slot, newItems)
+          .then(() => { MX.state.tasks[key] = newItems; })
+          .catch(() => {});
+      }
+      MX.toast("Créneau rendu");
+      MX.DB.addLog({ workerName: cu.name, action: "unclaim", taskText: "[Aujourd'hui] " + cu.name + " a rendu le créneau " + slot, dayId: todayDayId, slot }).catch(() => {});
     } catch(e) { MX.toast("Erreur", true); }
   }
 
   async function assignToday(slot, name) {
-    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
-    const existing = (MX.state.dailyClaims || {})[slot] || {};
+    const dateStr = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
+    const actor   = MX.state.adminUser ? (MX.state.adminUser.email || "admin") : (MX.state.currentUser ? MX.state.currentUser.name : "resp");
     try {
-      await MX.DB.setDailyClaim(dateStr, slot, name, existing.lockedBy || "");
-      const actor = MX.state.adminUser ? MX.state.adminUser.email : (MX.state.currentUser ? MX.state.currentUser.name : "inconnu");
-      MX.DB.addLog({ workerName: actor, action: "assign", taskText: "[Aujourd'hui] " + slot + " → " + (name || "(aucun)"), dayId: MX.todayId(), slot }).catch(() => {});
+      await MX.DB.setDailyClaim(dateStr, slot, name, actor);
+      if (name) {
+        const todayDayId = MX.todayId();
+        const key = todayDayId + '_' + slot;
+        const tasks = MX.state.tasks[key] || [];
+        if (tasks.length) {
+          const newItems = tasks.map(t => {
+            if (t.customized) return t;
+            const u = Object.assign({}, t);
+            u.assignedTo = name;
+            return u;
+          });
+          MX.DB.setTasks(todayDayId, slot, newItems)
+            .then(() => { MX.state.tasks[key] = newItems; })
+            .catch(() => {});
+        }
+      }
+      MX.toast((_SLOT_LBL[slot] || slot) + " → " + (name || "(aucun)") + " ✓");
+      MX.DB.addLog({ workerName: actor, action: "assign", taskText: "[Aujourd'hui] " + slot + " → " + (name || "(aucun)") + " (verrouillé)", dayId: MX.todayId(), slot }).catch(() => {});
     } catch(e) { MX.toast("Erreur lors de l'assignation", true); }
   }
 

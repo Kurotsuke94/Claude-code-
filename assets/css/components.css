@@ -12591,6 +12591,94 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   font-style: italic;
 }
 
+/* ── Slot status banner (claim/taken/free/locked) ── */
+.mm-v3-slot-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.mm-v3-slot-status i { font-size: 11px; }
+.mm-v3-slot-status--mine {
+  background: rgba(0,245,212,.06);
+  color: var(--cyan);
+  justify-content: space-between;
+}
+.mm-v3-slot-status--free {
+  color: var(--text3);
+  justify-content: space-between;
+}
+.mm-v3-slot-status--taken {
+  color: var(--text2);
+}
+.mm-v3-slot-status--locked {
+  background: rgba(245,158,11,.06);
+  color: var(--orange);
+  gap: 6px;
+}
+.mm-v3-slot-lock-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(245,158,11,.15);
+  color: var(--orange);
+  letter-spacing: .3px;
+  margin-left: 4px;
+}
+.mm-v3-slot-who {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  font-size: 10px; font-weight: 700;
+  flex-shrink: 0;
+}
+.mm-v3-slot-claim,
+.mm-v3-slot-unclaim {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: none;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  font-family: var(--ffs);
+  flex-shrink: 0;
+  transition: opacity .15s;
+}
+.mm-v3-slot-claim {
+  background: var(--cyan-dim, rgba(0,245,212,.12));
+  border: 1px solid var(--cyan-border, rgba(0,245,212,.25));
+  color: var(--cyan);
+}
+.mm-v3-slot-unclaim {
+  background: rgba(239,68,68,.1);
+  border: 1px solid rgba(239,68,68,.2);
+  color: var(--red, #ef4444);
+}
+.mm-v3-slot-claim:active,
+.mm-v3-slot-unclaim:active { opacity: .7; }
+
+/* ── Responsable today selector in slot-card ── */
+.sc-today-sel {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  color: var(--text1);
+  font-family: var(--ffs);
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 130px;
+}
+
 /* ── V3 Card ── */
 .mm-v3-card {
   display: flex;
