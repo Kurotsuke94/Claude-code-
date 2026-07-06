@@ -1,4 +1,4 @@
-importScripts('/version.js');
+importScripts('/version.js?_ts=' + Date.now());
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
@@ -112,24 +112,36 @@ const BYPASS = [
 
 // ── INSTALL — préchargement du shell complet ──
 self.addEventListener("install", e => {
-  console.log("[SW] Maintix v" + MX_VERSION + " (build " + MX_BUILD + ") — install");
+  console.log("[PWA] install — Maintix v" + MX_VERSION + " build " + MX_BUILD + " — cache: " + CACHE);
   e.waitUntil(
     caches.open(CACHE)
-      .then(c => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
+      .then(c => {
+        console.log("[PWA] install — caching " + SHELL.length + " SHELL assets…");
+        return c.addAll(SHELL);
+      })
+      .then(() => {
+        console.log("[PWA] install — SHELL cached — skipWaiting()");
+        return self.skipWaiting();
+      })
   );
 });
 
 // ── ACTIVATE — nettoyage des anciens caches + rechargement automatique ──
 self.addEventListener("activate", e => {
-  console.log("[SW] Maintix v" + MX_VERSION + " — activate, cache: " + CACHE);
+  console.log("[PWA] activate — Maintix v" + MX_VERSION + " — keeping cache: " + CACHE);
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE).map(k => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+      .then(keys => {
+        const old = keys.filter(k => k !== CACHE);
+        if (old.length) console.log("[PWA] activate — deleting old caches:", old);
+        return Promise.all(old.map(k => caches.delete(k)));
+      })
+      .then(() => {
+        console.log("[PWA] activate — claiming all clients");
+        return self.clients.claim();
+      })
       .then(() => self.clients.matchAll({ type: "window" }).then(list => {
+        console.log("[PWA] activate — notifying " + list.length + " window client(s)");
         list.forEach(client => client.postMessage({ type: "SW_UPDATED", version: MX_VERSION, build: MX_BUILD }));
       }))
   );

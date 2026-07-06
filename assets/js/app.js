@@ -1613,29 +1613,36 @@
     setTimeout(() => { MX.Auth.promptLogin && MX.Auth.promptLogin(); }, 600);
 
     if ("serviceWorker" in navigator) {
+      console.log('[PWA] Registering service worker…');
       const _swHadController = !!navigator.serviceWorker.controller;
       let _swReg = null;
       navigator.serviceWorker.register("/sw.js").then(reg => {
         _swReg = reg;
-        // Vérification toutes les 5 minutes (au lieu de 1 heure)
+        console.log('[PWA] SW registered — state:', reg.active ? reg.active.state : 'none', '| hadController:', _swHadController);
+        // Vérification toutes les 5 minutes
         setInterval(() => reg.update().catch(() => {}), 5 * 60 * 1000);
-      }).catch(() => {});
-      // Vérification au retour au premier plan (swipe-back, alt-tab, etc.)
+        // Vérification serveur 3s après l'enregistrement
+        setTimeout(_pwaCheckServerVersion, 3000);
+      }).catch(err => { console.warn('[PWA] SW registration failed:', err); });
+      // Vérification au retour au premier plan
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && _swReg) {
+          console.log('[PWA] Tab visible — checking for SW update');
           _swReg.update().catch(() => {});
+          setTimeout(_pwaCheckServerVersion, 500);
         }
       });
-      // Rechargement obligatoire à chaque nouveau SW — écran de déploiement
+      // Nouveau SW actif
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        console.log('[PWA] controllerchange — new SW took control | hadController:', _swHadController);
         if (_swHadController) {
           _showUpdateOverlay(window.MX_VERSION || _APP_VER);
         }
       });
-      // Écoute du message SW_UPDATED (envoyé par activate → clients.claim)
+      // Message SW_UPDATED (envoyé par activate → clients.claim)
       navigator.serviceWorker.addEventListener('message', e => {
         if (e.data && e.data.type === 'SW_UPDATED') {
-          console.log('[Maintix] SW mis à jour → v' + e.data.version + ' build ' + e.data.build);
+          console.log('[PWA] SW_UPDATED received — v' + e.data.version + ' build ' + e.data.build);
           _showUpdateOverlay(e.data.version || _APP_VER);
         }
       });
@@ -2248,12 +2255,14 @@
     };
   })();
 
-  // ── MANDATORY UPDATE OVERLAY ──
+  // ── UPDATE PROMPT ──
   var _updateOverlayShown = false;
   function _showUpdateOverlay(version) {
     if (_updateOverlayShown) return;
     _updateOverlayShown = true;
     var ver = version || _APP_VER;
+    console.log('[PWA] New version available — v' + ver + ' — showing update prompt');
+    try { localStorage.setItem('mx_pwa_last_update', String(Date.now())); } catch(e) {}
     var el = document.createElement('div');
     el.id = 'mx-update-overlay';
     el.className = 'mx-update-overlay';
@@ -2261,42 +2270,66 @@
       '<div class="mx-update-box">' +
         '<img src="/assets/icons/maintix-logo.png" class="mx-update-logo" alt="Maintix">' +
         '<div class="mx-update-brand">MAINTIX</div>' +
-        '<div class="mx-update-title">Mise à jour en cours</div>' +
+        '<div class="mx-update-title">Mise à jour disponible</div>' +
         '<div class="mx-update-ver">v' + ver + '</div>' +
-        '<div class="mx-update-steps" id="mx-upd-steps">' +
-          '<div class="mx-update-step mx-update-step--active" id="mx-upd-s1"><i class="fas fa-download"></i> Téléchargement…</div>' +
-          '<div class="mx-update-step" id="mx-upd-s2"><i class="fas fa-gears"></i> Optimisation du cache…</div>' +
-          '<div class="mx-update-step" id="mx-upd-s3"><i class="fas fa-rotate"></i> Redémarrage…</div>' +
+        '<div class="mx-update-footer">Une nouvelle version est prête.</div>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;width:100%">' +
+          '<button onclick="window.location.reload(true)" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;background:var(--cyan);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--ffs)">' +
+            '<i class="fas fa-rotate"></i> Mettre à jour maintenant' +
+          '</button>' +
+          '<button onclick="document.getElementById(\'mx-update-overlay\').remove()" style="padding:10px 20px;background:transparent;border:1px solid var(--border1);border-radius:10px;color:var(--text2);font-size:13px;cursor:pointer;font-family:var(--ffs)">' +
+            'Plus tard' +
+          '</button>' +
         '</div>' +
-        '<div class="mx-update-progress-wrap"><div class="mx-update-bar" id="mx-upd-bar"></div></div>' +
-        '<div class="mx-update-footer">Application mise à jour automatiquement</div>' +
       '</div>';
     document.body.appendChild(el);
-    // Animate steps then reload
-    function _step(n, pct) {
-      var steps = ['mx-upd-s1', 'mx-upd-s2', 'mx-upd-s3'];
-      steps.forEach(function(id, i) {
-        var s = document.getElementById(id);
-        if (!s) return;
-        s.classList.remove('mx-update-step--active', 'mx-update-step--done');
-        if (i < n) s.classList.add('mx-update-step--done');
-        else if (i === n) s.classList.add('mx-update-step--active');
-      });
-      var bar = document.getElementById('mx-upd-bar');
-      if (bar) bar.style.width = pct + '%';
-    }
-    setTimeout(function() { _step(0, 40); }, 100);
-    setTimeout(function() { _step(1, 70);
-      if ('caches' in window) caches.keys().then(function(keys) { return Promise.all(keys.map(function(k) { return caches.delete(k); })); }).catch(function(){});
-    }, 1200);
-    setTimeout(function() { _step(2, 95); }, 2200);
-    setTimeout(function() {
-      var bar = document.getElementById('mx-upd-bar');
-      if (bar) bar.style.width = '100%';
-    }, 2800);
-    setTimeout(function() { window.location.reload(true); }, 3200);
   }
   window.MX._showUpdateOverlay = _showUpdateOverlay;
+
+  // ── PWA VERSION CHECK (server vs local) ──
+  function _pwaCheckServerVersion() {
+    if (!navigator.onLine) return;
+    fetch('/version.js?_=' + Date.now(), { cache: 'no-store' })
+      .then(function(r) { return r.text(); })
+      .then(function(text) {
+        var m = text.match(/MX_BUILD\s*=\s*(\d+)/);
+        if (!m) return;
+        var serverBuild = parseInt(m[1], 10);
+        var localBuild  = parseInt(window.MX_BUILD, 10) || 0;
+        console.log('[PWA] Version check: local build', localBuild, '→ server build', serverBuild);
+        if (serverBuild > localBuild) {
+          console.log('[PWA] Server has newer build — triggering SW update check');
+          if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+            navigator.serviceWorker.ready.then(function(reg) { reg.update().catch(function(){}); });
+          }
+        }
+      })
+      .catch(function() {});
+  }
+  window.MX._pwaCheckServerVersion = _pwaCheckServerVersion;
+
+  // ── FORCE UPDATE (unregister SW + clear all caches + reload) ──
+  function _forceUpdate() {
+    console.log('[PWA] Force update: clearing caches + unregistering SW…');
+    var p = [];
+    if ('caches' in window) {
+      p.push(caches.keys().then(function(keys) {
+        console.log('[PWA] Force update: deleting caches:', keys);
+        return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+      }));
+    }
+    if ('serviceWorker' in navigator) {
+      p.push(navigator.serviceWorker.getRegistrations().then(function(regs) {
+        console.log('[PWA] Force update: unregistering', regs.length, 'SW(s)');
+        return Promise.all(regs.map(function(r) { return r.unregister(); }));
+      }));
+    }
+    Promise.all(p).then(function() {
+      console.log('[PWA] Force update complete — reloading');
+      window.location.reload(true);
+    }).catch(function() { window.location.reload(true); });
+  }
+  window.MX._forceUpdate = _forceUpdate;
 
   // ── VERSION UPDATES MODULE ──
   window.MX.Updates = (function() {

@@ -25,6 +25,7 @@
     { id: 'permissions',   icon: 'fa-lock',            l: 'Permissions', adminOnly: true },
     { id: 'journal',       icon: 'fa-clock-rotate-left', l: 'Journal' },
     { id: 'nouveautes',    icon: 'fa-rocket',           l: 'Nouveautés' },
+    { id: 'informations',  icon: 'fa-shield-halved',    l: 'Informations' },
     { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
     { id: 'maintenance',   icon: 'fa-wrench',           l: 'Maintenance', adminOnly: true },
   ];
@@ -999,6 +1000,112 @@
       </div>`;
   }
 
+  // ── INFORMATIONS PWA ──
+  function _renderInformations() {
+    const ver   = (window.MX && MX.appVer)  || (window.MX_VERSION || '—');
+    const build = window.MX_BUILD || '—';
+    const lastUpdateRaw = localStorage.getItem('mx_pwa_last_update');
+    const lastUpdate = lastUpdateRaw
+      ? new Date(parseInt(lastUpdateRaw, 10)).toLocaleString('fr-FR')
+      : '—';
+    const swState = (navigator.serviceWorker && navigator.serviceWorker.controller) ? 'Actif' : 'Inactif';
+    const swStateColor = swState === 'Actif' ? 'var(--green)' : 'var(--text3)';
+    const swUrl = (navigator.serviceWorker && navigator.serviceWorker.controller)
+      ? navigator.serviceWorker.controller.scriptURL.replace(location.origin, '')
+      : '—';
+
+    // Remplissage async après rendu
+    setTimeout(function() {
+      if ('caches' in window) {
+        caches.keys().then(function(keys) {
+          var found = keys.find(function(k) { return k.startsWith('maintix-'); }) || '—';
+          var el = document.getElementById('pwa-cache-name');
+          if (el) el.textContent = found;
+        }).catch(function() {});
+      }
+      if (navigator.onLine) {
+        fetch('/version.js?_=' + Date.now(), { cache: 'no-store' })
+          .then(function(r) { return r.text(); })
+          .then(function(text) {
+            var m = text.match(/MX_VERSION\s*=\s*"([^"]+)"/);
+            var mb = text.match(/MX_BUILD\s*=\s*(\d+)/);
+            var el = document.getElementById('pwa-server-ver');
+            if (el) {
+              var sv = m ? m[1] : '?';
+              var sb = mb ? mb[1] : '?';
+              var localBuild = parseInt(window.MX_BUILD, 10) || 0;
+              var serverBuild = mb ? parseInt(mb[1], 10) : 0;
+              var badge = serverBuild > localBuild
+                ? '<span style="margin-left:6px;font-size:10px;padding:2px 6px;border-radius:4px;background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan-border)">Nouvelle version</span>'
+                : '';
+              el.innerHTML = 'v' + MX.esc(sv) + ' (build ' + MX.esc(String(sb)) + ')' + badge;
+            }
+          })
+          .catch(function() {
+            var el = document.getElementById('pwa-server-ver');
+            if (el) el.textContent = 'Inaccessible';
+          });
+      } else {
+        var el = document.getElementById('pwa-server-ver');
+        if (el) el.textContent = 'Hors ligne';
+      }
+    }, 100);
+
+    return `
+      <div class="stt-section-head"><i class="fas fa-shield-halved"></i> Informations</div>
+      <div class="stt-card">
+        <div class="stt-card-title">Version application</div>
+        <div class="stt-info-list">
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-tag"></i> Version locale</span>
+            <span class="stt-info-val" style="color:var(--cyan);font-weight:700">v${MX.esc(String(ver))} (build ${MX.esc(String(build))})</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-cloud"></i> Version serveur</span>
+            <span class="stt-info-val" id="pwa-server-ver" style="font-size:12px">Vérification…</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-clock-rotate-left"></i> Dernière mise à jour</span>
+            <span class="stt-info-val">${lastUpdate}</span>
+          </div>
+        </div>
+      </div>
+      <div class="stt-card" style="margin-top:12px">
+        <div class="stt-card-title">Service Worker</div>
+        <div class="stt-info-list">
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-circle-dot"></i> État</span>
+            <span class="stt-info-val" style="color:${swStateColor}">${swState}</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-hard-drive"></i> Cache actif</span>
+            <span class="stt-info-val" id="pwa-cache-name">…</span>
+          </div>
+          <div class="stt-info-row">
+            <span class="stt-info-label"><i class="fas fa-file-code"></i> Script</span>
+            <span class="stt-info-val" style="font-size:11px">${MX.esc(swUrl)}</span>
+          </div>
+        </div>
+        <button class="stt-btn" style="margin-top:12px" onclick="MX.Pages.Settings._refreshInfos()">
+          <i class="fas fa-rotate"></i> Actualiser
+        </button>
+        <button class="stt-btn" style="margin-top:8px;background:var(--red-dim);color:var(--red);border-color:var(--red)" onclick="MX.Pages.Settings._confirmForceUpdate()">
+          <i class="fas fa-fire"></i> Forcer la mise à jour
+        </button>
+      </div>`;
+  }
+
+  function _confirmForceUpdate() {
+    MX.showModal(
+      'Forcer la mise à jour',
+      'Ceci va vider tous les caches, désinscrire le service worker et recharger l\'application. L\'opération peut prendre quelques secondes.',
+      [
+        { label: 'Forcer', cls: 'danger', cb: function() { if (window.MX && MX._forceUpdate) MX._forceUpdate(); else window.location.reload(true); } },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    );
+  }
+
   // ── DIAGNOSTIC PANEL ──
   let _diagTaps = 0, _diagTimer = null;
 
@@ -1214,6 +1321,7 @@
       permissions:   _renderPermissions,
       journal:       _renderJournal,
       nouveautes:    _renderNouveautes,
+      informations:  _renderInformations,
       apropos:       _renderApropos,
       diagnostic:    _renderDiagnostic,
       maintenance:   _renderMaintenance,
@@ -1321,6 +1429,8 @@
     _avatarHtml,
     _diagVersionTap,
     _refreshDiag: () => _showSection('diagnostic'),
+    _refreshInfos: () => _showSection('informations'),
+    _confirmForceUpdate,
     _toggleSound,
     _previewSound,
     _maintToggle,
