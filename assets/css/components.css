@@ -15447,6 +15447,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmp-beyond-label { padding: 6px 12px; font-size: 12px; color: var(--text3); font-weight: 500; display: flex; align-items: center; gap: 6px; }
 .pmp-beyond-label::before { content: ''; flex: 1; height: 1px; background: var(--border1); }
 .pmp-beyond-label::after  { content: ''; flex: 1; height: 1px; background: var(--border1); }
+.pmp-beyond-hint { margin: 8px 12px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border1); border-radius: 8px; font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 8px; }
 
 /* AI assistance block */
 .pmp-ai-block { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }

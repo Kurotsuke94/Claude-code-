@@ -218,7 +218,7 @@
         return true;
       })
       .map(function (m) {
-        var isPmp = m.isPmp || m.missionType === 'pmp';
+        var isPmp = m.isPmp || m.missionType === 'pmp' || m.category === 'pmp';
         var type  = isPmp ? 'pmp' : (m.missionType || 'intervention');
         var pd    = m.pmpData || {};
         return {
@@ -457,7 +457,7 @@
     // Tab counts
     var clCount  = myMissions.filter(function (t) { return t.missionType === 'checklist';    }).length;
     var intCount = myMissions.filter(function (t) { return t.missionType === 'intervention'; }).length;
-    var pmpCount = myMissions.filter(function (t) { return t.missionType === 'pmp';          }).length;
+    var pmpCount = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; }).length;
 
     // Unseen badges
     var unseenInt = _allMissions.filter(function (m) {
@@ -734,6 +734,25 @@
         else { todayPmp.push(t); if (isFallback) fallbackPmp.push(t.id); }
       });
 
+      // [PMP AUDIT] — trace Firestore → filtres → classification → rendu
+      console.group('[PMP AUDIT] ' + new Date().toLocaleTimeString());
+      console.log('Étape 1 | Firestore _allMissions PMP  :', _dbgFirestore);
+      console.log('Étape 2 | allTasks (buildTasks) PMP   :', _dbgAllTasks);
+      console.log('Étape 3 | myMissions PMP (incl. done) :', _dbgMyMissions);
+      console.log('Étape 4 | pmpAllTasks (non-terminées) :', pmpAllTasks.length);
+      console.log('Étape 5 | Classification ->',
+        { aujourd_hui: todayPmp.length, a_venir: upcomingPmp.length,
+          en_cours: inProgPmp.length,    urgent: urgentPmp.length, fallback: fallbackPmp.length });
+      if (fallbackPmp.length > 0) console.warn('[PMP AUDIT] \u26a0 Missions sans categorie :', fallbackPmp);
+      console.log('Étape 6 | Onglet actif :', _pmpSubTab, '| upcomingRange :', _upcomingRange + ' j');
+      console.log('Étape 7 | pmpAllTasks détail :',
+        pmpAllTasks.map(function (t) {
+          return { id: t.id, text: (t.text || '').slice(0, 30),
+            dueDate: _normalizeMissionDate(t), takenBy: t.takenBy || null,
+            cat: _getPmpCategory(t, todayISO, curName2) };
+        }));
+      console.groupEnd();
+
       // Visual debug block
       h += '<details class="pmp-debug-block" style="margin:8px 12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border1);border-radius:8px;font-size:11px;color:var(--text3);font-family:monospace;">'
         + '<summary style="cursor:pointer;color:var(--text2);font-weight:600;font-size:12px;">🔍 Debug flux PMP</summary>'
@@ -804,6 +823,14 @@
             + '<div class="mm-v3-empty-ttl">Aucune maintenance à venir</div>'
             + '<div class="mm-v3-empty-sub">Aucun PMP planifié dans le futur.</div></div>';
         } else {
+          // When no missions fall within the selected range, show a banner before the beyond-range cards
+          if (upcomingInRange.length === 0 && upcomingBeyond.length > 0) {
+            h += '<div class="pmp-beyond-hint">'
+              + '<i class="fas fa-calendar-xmark"></i> '
+              + 'Aucun PMP dans les ' + _upcomingRange + ' prochains jours — '
+              + upcomingBeyond.length + ' planifié' + (upcomingBeyond.length > 1 ? 's' : '') + ' au-delà'
+              + '</div>';
+          }
           if (upcomingInRange.length > 0) {
             h += '<div class="mm-v3-cards">';
             upcomingInRange.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
@@ -814,10 +841,6 @@
               + '<div class="mm-v3-cards">';
             upcomingBeyond.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
             h += '</div>';
-          }
-          if (upcomingInRange.length === 0 && upcomingBeyond.length > 0) {
-            // All missions beyond range with current filter — show them anyway
-            h = h; // already rendered above
           }
         }
       } else if (_pmpSubTab === 'inprogress') {
