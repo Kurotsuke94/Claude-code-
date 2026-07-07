@@ -1,5 +1,12 @@
 # Changelog — Maintix
 
+## v1.1.07 — 2026-07-07
+
+- Redesign en cours du planning.
+- Correctifs PMP.
+- Améliorations de stabilité.
+- Mise à jour PWA.
+
 ## v1.0.34 — 2026-07-04 🚀 Espace de travail Mission & Déploiement automatique
 
 - Espace de travail quotidien : vue 25 %/75 % avec panneau latéral de tâches

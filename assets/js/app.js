@@ -776,6 +776,16 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.07', date: '2026-07-07', emoji: '🗓️',
+      title: 'Redesign Planning & correctifs PMP',
+      changes: [
+        'Redesign complet de la page Planning : architecture plnx-, cartes techniciens premium, colonnes jours avec stats, tooltips CSS-only',
+        'Correctifs PMP : stabilité et cohérence des données',
+        'Améliorations de stabilité globale',
+        'Mise à jour PWA — cache maintix-1.1.07, invalidation anciens assets',
+      ]
+    },
+    {
       ver: '1.1.06', date: '2026-07-05', emoji: '📱',
       title: 'Bottom Navigation — reconstruction native iOS/Android',
       changes: [
@@ -1057,11 +1067,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.06";
+  window.MX.appVer = window.MX_VERSION || "1.1.07";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.06";
-  const _APP_BUILD = window.MX_BUILD   || 206;
+  const _APP_VER   = window.MX_VERSION || "1.1.07";
+  const _APP_BUILD = window.MX_BUILD   || 207;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
