@@ -28,6 +28,7 @@
     { id: 'informations',  icon: 'fa-shield-halved',    l: 'Informations' },
     { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
     { id: 'maintenance',   icon: 'fa-wrench',           l: 'Maintenance', adminOnly: true },
+    { id: 'energie', icon: 'fa-bolt-lightning', l: 'Performance énergie', adminOnly: true },
   ];
 
   // ── AVATAR CANVAS CROP ──
@@ -1213,6 +1214,158 @@
   var _maintUnsub = null;
   var _deployLog = [];
 
+
+  // ── PERFORMANCE ÉNERGIE — Paramètres des seuils ──
+  function _renderEnergie() {
+    const isAdmin = MX.Auth.canSeeAll();
+    if (!isAdmin) return '<div class="stt-card"><p>Accès réservé à l'administrateur.</p></div>';
+
+    const db = firebase.firestore();
+    const DEFAULTS = {
+      thresholds: {
+        eau_froide:  { excellent: 120, bon: 145, correct: 170, moyen: 190, mauvais: 220 },
+        eau_chaude:  { excellent:  45, bon:  60, correct:  75, moyen:  90, mauvais: 110 },
+        electricite: { excellent:   3, bon:   4, correct:   5, moyen:   6, mauvais:   7 },
+        gaz:         { excellent:   2, bon:   3, correct:   4, moyen:   5, mauvais:   6 },
+      },
+      classes: {
+        excellent: { l: 'Excellent', color: '#22c55e', scoreCenter: 95 },
+        bon:       { l: 'Bon',       color: '#86efac', scoreCenter: 82 },
+        correct:   { l: 'Correct',   color: '#fbbf24', scoreCenter: 67 },
+        moyen:     { l: 'Moyen',     color: '#f97316', scoreCenter: 52 },
+        mauvais:   { l: 'Mauvais',   color: '#ef4444', scoreCenter: 37 },
+        critique:  { l: 'Critique',  color: '#991b1b', scoreCenter: 15 },
+      },
+    };
+    const CLASS_ORDER = ['excellent','bon','correct','moyen','mauvais','critique'];
+    const TYPE_META = {
+      eau_froide:  { label: 'Eau froide',  unit: 'L/client', icon: '💧' },
+      eau_chaude:  { label: 'Eau chaude',  unit: 'L/client', icon: '🔥' },
+      electricite: { label: 'Électricité', unit: 'kWh/client', icon: '⚡' },
+      gaz:         { label: 'Gaz',         unit: 'kWh/client', icon: '🌬' },
+    };
+
+    // Threshold type sections
+    const typeHtml = Object.entries(TYPE_META).map(([type, {label, unit, icon}]) => {
+      const def = DEFAULTS.thresholds[type] || {};
+      return `<div class="stt-card pe-stt-card" id="pe-thr-${type}">
+        <div class="stt-section-head">${icon} ${label} <span class="pe-unit-lbl">${unit}</span></div>
+        <div class="pe-thr-grid">
+          ${CLASS_ORDER.filter(k=>k!=='critique').map(k => `
+          <div class="pe-thr-row">
+            <label class="pe-thr-lbl" id="lbl-${type}-${k}">${k.charAt(0).toUpperCase()+k.slice(1)}</label>
+            <span class="pe-thr-op">≤</span>
+            <input class="pe-thr-inp fi" id="pe-inp-${type}-${k}" type="number" min="0" step="0.5"
+              value="${def[k] || ''}" placeholder="${def[k] || ''}">
+            <span class="pe-thr-unit">${unit}</span>
+          </div>`).join('')}
+          <div class="pe-thr-row pe-thr-row--critique">
+            <label class="pe-thr-lbl">Critique</label>
+            <span class="pe-thr-op">&gt; seuil Mauvais</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Class colors & score
+    const classHtml = `<div class="stt-card pe-stt-card">
+      <div class="stt-section-head">🎨 Couleurs & scores des classes</div>
+      <div class="pe-cls-grid">
+        ${CLASS_ORDER.map(k => {
+          const def = DEFAULTS.classes[k];
+          return `<div class="pe-cls-row">
+            <input class="pe-cls-color" id="pe-col-${k}" type="color" value="${def.color}">
+            <span class="pe-cls-name">${def.l}</span>
+            <label class="pe-cls-sc-lbl">Score centre</label>
+            <input class="pe-cls-score fi" id="pe-sc-${k}" type="number" min="0" max="100" value="${def.scoreCenter}" style="width:64px">
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+    const saveBtn = `<div class="pe-stt-actions">
+      <button class="primary-btn" onclick="window._sttSaveEnergie()">
+        <i class="fas fa-save"></i> Sauvegarder
+      </button>
+      <button class="cso-ibtn" onclick="window._sttResetEnergie()">
+        <i class="fas fa-rotate-left"></i> Rétablir les valeurs par défaut
+      </button>
+    </div>`;
+
+    // Load current values from Firestore async after render
+    setTimeout(() => {
+      db.collection('cso_perf_config').get().then(snap => {
+        let fsThresholds = {}, fsClasses = {};
+        snap.docs.forEach(d => {
+          if (d.id === 'thresholds') fsThresholds = d.data();
+          if (d.id === 'classes')    fsClasses    = d.data();
+        });
+        // Populate threshold inputs
+        Object.entries(TYPE_META).forEach(([type]) => {
+          const typeT = fsThresholds[type] || {};
+          CLASS_ORDER.filter(k=>k!=='critique').forEach(k => {
+            const inp = document.getElementById('pe-inp-'+type+'-'+k);
+            if (inp && typeT[k] !== undefined) inp.value = typeT[k];
+          });
+        });
+        // Populate class color/score inputs
+        CLASS_ORDER.forEach(k => {
+          const colInp = document.getElementById('pe-col-'+k);
+          const scInp  = document.getElementById('pe-sc-'+k);
+          if (fsClasses[k]) {
+            if (colInp && fsClasses[k].color) colInp.value = fsClasses[k].color;
+            if (scInp  && fsClasses[k].scoreCenter !== undefined) scInp.value = fsClasses[k].scoreCenter;
+          }
+        });
+      }).catch(e => console.warn('[Energie settings] Load error:', e));
+    }, 100);
+
+    window._sttSaveEnergie = async function() {
+      const thresholds = {};
+      Object.keys(TYPE_META).forEach(type => {
+        thresholds[type] = {};
+        CLASS_ORDER.filter(k=>k!=='critique').forEach(k => {
+          const v = parseFloat(document.getElementById('pe-inp-'+type+'-'+k)?.value);
+          if (!isNaN(v)) thresholds[type][k] = v;
+        });
+      });
+      const classes = {};
+      CLASS_ORDER.forEach(k => {
+        classes[k] = {};
+        const col = document.getElementById('pe-col-'+k)?.value;
+        const sc  = parseInt(document.getElementById('pe-sc-'+k)?.value);
+        if (col) classes[k].color = col;
+        if (!isNaN(sc)) classes[k].scoreCenter = sc;
+      });
+      try {
+        await db.collection('cso_perf_config').doc('thresholds').set(thresholds);
+        await db.collection('cso_perf_config').doc('classes').set(classes);
+        MX.toast('Seuils énergétiques sauvegardés');
+      } catch(e) { MX.toast('Erreur sauvegarde', true); console.error(e); }
+    };
+
+    window._sttResetEnergie = async function() {
+      if (!confirm('Rétablir tous les seuils par défaut ?')) return;
+      try {
+        await db.collection('cso_perf_config').doc('thresholds').set(DEFAULTS.thresholds);
+        await db.collection('cso_perf_config').doc('classes').set(DEFAULTS.classes);
+        MX.toast('Valeurs par défaut restaurées');
+        MX.Pages.Settings._showSection('energie');
+      } catch(e) { MX.toast('Erreur', true); console.error(e); }
+    };
+
+    return `<div class="pe-stt-wrap">
+      <div class="stt-section-intro">
+        Configurez les seuils de performance énergétique propres à votre établissement.<br>
+        Ces valeurs sont stockées dans Firestore et s'appliquent à tous les calculs de ratios et de score.
+      </div>
+      ${typeHtml}
+      ${classHtml}
+      ${saveBtn}
+    </div>`;
+  }
+
+
   function _renderMaintenance() {
     const d = _maintData || {};
     const active = !!d.active;
@@ -1316,6 +1469,7 @@
       apropos:       _renderApropos,
       diagnostic:    _renderDiagnostic,
       maintenance:   _renderMaintenance,
+      energie:        _renderEnergie,
     };
     if (id === 'maintenance') _maintInit();
     content.innerHTML = (renderers[id] || (() => ''))();

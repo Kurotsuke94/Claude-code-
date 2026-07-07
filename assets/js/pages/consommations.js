@@ -22,6 +22,7 @@
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
   let _recalcInProgress = false;
+  let _perfCfg   = { thresholds: {}, classes: {} }; // Performance thresholds from Firestore
 
   // ── FIRESTORE ERROR HANDLER ──
   function _fsErr(coll) {
@@ -47,6 +48,7 @@
     readings: () => db.collection('cso_readings'),
     clients:  () => db.collection('cso_clients'),
     alerts:   () => db.collection('cso_energy_alerts'),
+    perfConfig: () => db.collection('cso_perf_config'),
     log:      () => db.collection('cso_activity_log'),
   };
 
@@ -66,8 +68,99 @@
     { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',            mob: 'Relevés'   },
     { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',           mob: 'Analyses'  },
     { id: 'alertes',   icon: 'fa-shield-halved', l: 'Supervision',        mob: 'Superv.'   },
+    { id: 'performance', icon: 'fa-bolt-lightning', l: 'Performance', mob: 'Perf.' },
     { id: 'exports',   icon: 'fa-file-export',  l: 'Exports',            mob: 'Exports'   },
   ];
+
+  // ── PERFORMANCE ÉNERGÉTIQUE — Valeurs par défaut (Firestore prend le dessus) ──
+  const PERF_DEFAULTS = {
+    thresholds: {
+      eau_froide:  { excellent: 120, bon: 145, correct: 170, moyen: 190, mauvais: 220 },
+      eau_chaude:  { excellent:  45, bon:  60, correct:  75, moyen:  90, mauvais: 110 },
+      electricite: { excellent:   3, bon:   4, correct:   5, moyen:   6, mauvais:   7 },
+      gaz:         { excellent:   2, bon:   3, correct:   4, moyen:   5, mauvais:   6 },
+    },
+    classes: {
+      excellent: { l: 'Excellent', color: '#22c55e', scoreCenter: 95 },
+      bon:       { l: 'Bon',       color: '#86efac', scoreCenter: 82 },
+      correct:   { l: 'Correct',   color: '#fbbf24', scoreCenter: 67 },
+      moyen:     { l: 'Moyen',     color: '#f97316', scoreCenter: 52 },
+      mauvais:   { l: 'Mauvais',   color: '#ef4444', scoreCenter: 37 },
+      critique:  { l: 'Critique',  color: '#991b1b', scoreCenter: 15 },
+    },
+    classOrder: ['excellent', 'bon', 'correct', 'moyen', 'mauvais', 'critique'],
+  };
+
+  // ─ Merge Firestore config with defaults ─
+  function _perfT() {
+    const t = {};
+    Object.keys(PERF_DEFAULTS.thresholds).forEach(type => {
+      t[type] = Object.assign({}, PERF_DEFAULTS.thresholds[type],
+        (_perfCfg.thresholds && _perfCfg.thresholds[type]) || {});
+    });
+    return t;
+  }
+  function _perfC() {
+    const c = {};
+    PERF_DEFAULTS.classOrder.forEach(k => {
+      c[k] = Object.assign({}, PERF_DEFAULTS.classes[k],
+        (_perfCfg.classes && _perfCfg.classes[k]) || {});
+    });
+    return c;
+  }
+
+  // Returns {key, l, color, scoreCenter} for a type+ratio value
+  function _getGrade(type, ratio) {
+    const t = _perfT()[type];
+    const c = _perfC();
+    const na = { key: 'na', l: '—', color: '#64748b', scoreCenter: 0 };
+    if (!t || ratio === null || ratio === undefined || isNaN(ratio)) return na;
+    for (const k of PERF_DEFAULTS.classOrder) {
+      if (k === 'critique') return { key: k, ...c[k] };
+      if (ratio <= t[k]) return { key: k, ...c[k] };
+    }
+    return { key: 'critique', ...c.critique };
+  }
+
+  // Returns per-type ratio for a given date
+  function _perfRatio(type, date) {
+    const ids  = _meters.filter(m => m.type === type).map(m => m.id);
+    if (!ids.length) return null;
+    const val  = _readings.filter(r => ids.includes(r.meterId) && r.date === date)
+                          .reduce((s, r) => s + (r.consumption || 0), 0);
+    if (!val) return null;
+    const cli  = _clients[date] || 0;
+    if (!cli) return null;
+    const isW  = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+    return isW ? val * 1000 / cli : val / cli;
+  }
+
+  // Per-type raw consumption for a date
+  function _perfConso(type, date) {
+    const ids = _meters.filter(m => m.type === type).map(m => m.id);
+    return _readings.filter(r => ids.includes(r.meterId) && r.date === date)
+                    .reduce((s, r) => s + (r.consumption || 0), 0) || null;
+  }
+
+  // Global score from today's ratios (based on configurable thresholds)
+  function _calcPerfScore(date) {
+    const d   = date || _today();
+    const cli = _clients[d] || 0;
+    if (!cli) return null;
+    const types = ['eau_froide', 'eau_chaude', 'electricite'];
+    let sum = 0, count = 0;
+    types.forEach(type => {
+      const ratio = _perfRatio(type, d);
+      if (ratio === null) return;
+      const grade = _getGrade(type, ratio);
+      if (grade.key === 'na') return;
+      sum += grade.scoreCenter;
+      count++;
+    });
+    return count ? Math.round(sum / count) : null;
+  }
+
+
 
   // ── HELPERS ──
   function _today()     { return new Date().toISOString().slice(0, 10); }
@@ -683,6 +776,14 @@
       _rerender();
     }, _fsErr('cso_clients'));
     _unsubCso.alerts = CSO.alerts().orderBy('ts', 'desc').limit(100).onSnapshot(snap => {
+    _unsubCso.perfConfig = CSO.perfConfig().onSnapshot(snap => {
+      _perfCfg = { thresholds: {}, classes: {} };
+      snap.docs.forEach(d => {
+        if (d.id === 'thresholds') _perfCfg.thresholds = d.data();
+        if (d.id === 'classes')    _perfCfg.classes    = d.data();
+      });
+      _rerender();
+    }, _fsErr('cso_perf_config'));
       _csoAlerts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _checkCriticalBanner();
       _rerender();
@@ -799,6 +900,7 @@
     switch (_curTab) {
       case 'compteurs': return _tCompteurs();
       case 'releves':   return _tReleves();
+      case 'performance': return _tPerformance();
       case 'analyses':  return _tAnalyses();
       case 'alertes':   return _tAlertes();
       case 'exports':   return _tExports();
@@ -1743,6 +1845,288 @@
     default:     ['Vérifier le compteur', 'Contrôler les relevés', 'Analyser les consommations'],
   };
 
+
+  // ══════════════════════════════════════════════════════════
+  // PERFORMANCE ÉNERGÉTIQUE TAB (v1)
+  // ══════════════════════════════════════════════════════════
+  function _tPerformance() {
+    const today    = _today();
+    const peDate   = window._peSelDate || today;
+    const cli      = _clients[peDate] || 0;
+    const e        = MX.esc || (s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+    const c        = _perfC();
+    const t        = _perfT();
+    const isW      = type => ['eau_froide','eau_chaude','eau_glacee'].includes(type);
+
+    // ── Comparison dates ──
+    const d_hier   = _daysAgo(peDate === today ? 1 : Math.ceil((new Date(today)-new Date(peDate))/86400000)+1);
+    const d_s7     = _daysAgo(7);
+    const d_m1     = _daysAgo(30);
+    const d_a1     = _daysAgo(365);
+
+    // ── Grade badge HTML ──
+    function gradeBadge(key) {
+      if (!key || key === 'na') return '<span class="pe-grade pe-grade--na">—</span>';
+      const g = c[key] || {};
+      return `<span class="pe-grade" style="background:${g.color}20;color:${g.color};border:1px solid ${g.color}50">${g.l || key}</span>`;
+    }
+
+    // ── Delta chip HTML ──
+    function deltaBadge(curr, prev) {
+      if (curr === null || prev === null || prev === 0) return '<span class="pe-delta pe-delta--na">—</span>';
+      const pct = (curr - prev) / prev * 100;
+      const abs = Math.abs(pct);
+      const up  = pct > 0;
+      const col = up ? '#ef4444' : '#22c55e'; // for energy: up = bad
+      const ico = up ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+      return `<span class="pe-delta" style="color:${col}"><i class="fas ${ico}"></i> ${up?'+':''}${_fmt(pct,1)}%</span>`;
+    }
+
+    // ── Global performance score ──
+    const perfScore = _calcPerfScore(peDate);
+    const scoreStr  = perfScore !== null ? String(perfScore) : '—';
+    const scoreGrade = perfScore === null ? 'na'
+      : perfScore >= 90 ? 'excellent'
+      : perfScore >= 75 ? 'bon'
+      : perfScore >= 60 ? 'correct'
+      : perfScore >= 45 ? 'moyen'
+      : perfScore >= 30 ? 'mauvais' : 'critique';
+    const scoreMeta = c[scoreGrade] || {};
+    const scoreLbl  = scoreMeta.l || '—';
+    const scoreCol  = scoreMeta.color || '#64748b';
+    const classLbl  = { excellent: 'A', bon: 'B', correct: 'C', moyen: 'D', mauvais: 'E', critique: 'F' };
+    const scoreLetter = classLbl[scoreGrade] || '—';
+
+    // Score ring SVG
+    const r = 42, circ = 2 * Math.PI * r;
+    const arc = perfScore !== null ? (perfScore / 100 * circ).toFixed(1) : '0';
+    const scoreSVG = `<svg class="pe-score-ring" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="9"/>
+      <circle cx="50" cy="50" r="${r}" fill="none" stroke="${scoreCol}" stroke-width="9"
+        stroke-dasharray="${arc} ${circ.toFixed(1)}" stroke-linecap="round"
+        transform="rotate(-90 50 50)"/>
+      <text x="50" y="43" text-anchor="middle" fill="${scoreCol}" font-size="22" font-weight="700" font-family="Space Mono,monospace">${scoreStr}</text>
+      <text x="50" y="57" text-anchor="middle" fill="${scoreCol}" font-size="9" font-weight="600" font-family="sans-serif">/100</text>
+    </svg>`;
+
+    // ── Ratio cards per type ──
+    const TYPES = ['eau_froide','eau_chaude','electricite','gaz','vapeur','eau_glacee'];
+    let ratioCards = '';
+    const typeBreakdown = [];
+
+    TYPES.forEach(type => {
+      if (!_meters.some(m => m.type === type)) return;
+      const meta   = MT[type];
+      const conso  = _perfConso(type, peDate);
+      const ratio  = _perfRatio(type, peDate);
+      const grade  = _getGrade(type, ratio);
+      const rUnit  = isW(type) ? 'L/client' : `${meta.unit}/client`;
+      const ratioFmt = ratio !== null ? `${_fmt(ratio, isW(type) ? 0 : 2)} ${rUnit}` : '—';
+      const consoFmt = conso !== null ? `${_fmt(conso)} ${meta.unit}` : '—';
+
+      const ratioHier = _perfRatio(type, d_hier);
+      const delta     = deltaBadge(ratio, ratioHier);
+
+      // Threshold info: next class up/down
+      const thresh = t[type] || {};
+      const threshKeys = Object.keys(thresh);
+      let seuilHtml = '';
+      if (grade.key !== 'na' && threshKeys.length) {
+        const excellent_max = thresh.excellent || '—';
+        seuilHtml = `<div class="pe-card-seuil">Seuil Excellent : ≤ ${excellent_max} ${rUnit}</div>`;
+      }
+
+      typeBreakdown.push({ type, meta, ratio, rUnit, grade });
+
+      ratioCards += `<div class="pe-ratio-card" style="--type-col:${meta.color}">
+        <div class="pe-ratio-card-head">
+          <span class="pe-ratio-ico">${meta.icon}</span>
+          <span class="pe-ratio-lbl">${meta.label}</span>
+          ${gradeBadge(grade.key)}
+        </div>
+        <div class="pe-ratio-body">
+          <div class="pe-ratio-val">${consoFmt}</div>
+          <div class="pe-ratio-cli">${cli > 0 ? `${cli} clients` : 'Clients non renseignés'}</div>
+          ${cli > 0 && ratio !== null ? `<div class="pe-ratio-result">= <strong>${ratioFmt}</strong></div>` : ''}
+          ${cli === 0 ? '<div class="pe-ratio-warn"><i class="fas fa-triangle-exclamation"></i> Renseigner le nombre de clients</div>' : ''}
+          <div class="pe-ratio-delta">${delta} vs hier</div>
+        </div>
+        ${seuilHtml}
+      </div>`;
+    });
+
+    if (!ratioCards) {
+      ratioCards = '<div class="cso-empty-state"><i class="fas fa-bolt-lightning" style="font-size:32px;opacity:.2"></i><p>Aucun compteur configuré</p></div>';
+    }
+
+    // ── Per-type score breakdown ──
+    let breakdownHtml = '';
+    typeBreakdown.forEach(({ type, meta, ratio, rUnit, grade }) => {
+      const g = c[grade.key] || {};
+      const pct = grade.key !== 'na' ? (grade.scoreCenter || 0) : 0;
+      breakdownHtml += `<div class="pe-breakdown-row">
+        <span class="pe-bd-ico">${meta.icon}</span>
+        <span class="pe-bd-lbl">${meta.label}</span>
+        <span class="pe-bd-val">${ratio !== null ? `${_fmt(ratio, isW(type)?0:2)} ${rUnit}` : '—'}</span>
+        <div class="pe-bd-bar-wrap"><div class="pe-bd-bar" style="width:${pct}%;background:${g.color || '#64748b'}"></div></div>
+        ${gradeBadge(grade.key)}
+      </div>`;
+    });
+
+    // ── Comparison table ──
+    const compDates = [
+      { lbl: "Aujourd'hui", d: peDate },
+      { lbl: 'Hier',        d: d_hier },
+      { lbl: '7 jours',     d: d_s7  },
+      { lbl: '30 jours',    d: d_m1  },
+      { lbl: '1 an',        d: d_a1  },
+    ];
+    const compTypes = typeBreakdown.slice(0, 4);
+    let compHead = '<tr><th>Période</th>';
+    compTypes.forEach(({meta}) => { compHead += `<th>${meta.icon} ${meta.label}</th>`; });
+    compHead += '</tr>';
+    let compBody = '';
+    compDates.forEach(({lbl, d}) => {
+      compBody += `<tr><td class="pe-comp-per">${lbl}</td>`;
+      compTypes.forEach(({type, rUnit}) => {
+        const r = _perfRatio(type, d);
+        const g = r !== null ? _getGrade(type, r) : { key: 'na' };
+        const col = (c[g.key] || {}).color || '#64748b';
+        compBody += `<td style="color:${col}">${r !== null ? `${_fmt(r, isW(type)?0:2)} ${rUnit}` : '—'}</td>`;
+      });
+      compBody += '</tr>';
+    });
+
+    // ── Prévisions fin de mois ──
+    const todayDt    = new Date(today);
+    const daysInMonth = new Date(todayDt.getFullYear(), todayDt.getMonth()+1, 0).getDate();
+    const dayOfMonth  = todayDt.getDate();
+    const daysLeft    = daysInMonth - dayOfMonth;
+    let forecastHtml  = '';
+    typeBreakdown.slice(0,3).forEach(({type, meta, ratio, rUnit, grade}) => {
+      const ratios7 = Array.from({length:7},(_,i)=>_perfRatio(type,_daysAgo(i+1))).filter(v=>v!==null);
+      const avg7    = ratios7.length ? ratios7.reduce((a,b)=>a+b,0)/ratios7.length : (ratio || 0);
+      const foreG   = avg7 ? _getGrade(type, avg7) : { key: 'na' };
+      const foreCol = (c[foreG.key]||{}).color || '#64748b';
+      forecastHtml += `<div class="pe-fc-row">
+        <span class="pe-fc-ico">${meta.icon}</span>
+        <div class="pe-fc-body">
+          <div class="pe-fc-lbl">${meta.label}</div>
+          <div class="pe-fc-val" style="color:${foreCol}">${avg7 ? `${_fmt(avg7, isW(type)?0:2)} ${rUnit}` : '—'}</div>
+          <div class="pe-fc-sub">Moy. 7 derniers jours · ${daysLeft} j restants</div>
+        </div>
+        ${gradeBadge(foreG.key)}
+      </div>`;
+    });
+
+    // ── Alertes intelligentes ──
+    let alertsHtml = '';
+    const ALERT_CHECKS = [
+      { l: 'Fuite possible', t: 'eau_froide', msg: 'Consommation d\'eau froide anormalement élevée. Vérifier : fuites, robinets ouverts, remplissage piscine.' },
+      { l: 'ECS excessive',  t: 'eau_chaude', msg: 'Consommation d\'eau chaude anormalement élevée. Vérifier : thermostat chauffe-eau, pertes sur le réseau.' },
+      { l: 'Surconso élec',  t: 'electricite', msg: 'Consommation électrique anormalement élevée. Vérifier : climatisation, éclairage laissé allumé, équipements défaillants.' },
+    ];
+    ALERT_CHECKS.forEach(({l, t, msg}) => {
+      const ratio    = _perfRatio(t, peDate);
+      if (ratio === null) return;
+      const grade    = _getGrade(t, ratio);
+      if (!['moyen','mauvais','critique'].includes(grade.key)) return;
+      const col      = (c[grade.key]||{}).color || '#ef4444';
+      const last30   = Array.from({length:30},(_,i)=>_perfRatio(t,_daysAgo(i+1))).filter(v=>v!==null);
+      const avg30    = last30.length ? last30.reduce((a,b)=>a+b,0)/last30.length : null;
+      const pct      = avg30 ? Math.round((ratio-avg30)/avg30*100) : null;
+      const meta     = MT[t];
+      alertsHtml += `<div class="pe-alert-card" style="border-left:3px solid ${col}">
+        <div class="pe-alert-head"><i class="fas fa-triangle-exclamation" style="color:${col}"></i> <strong>${l}</strong></div>
+        <div class="pe-alert-body">
+          <span class="pe-alert-cur">${meta.icon} ${_fmt(ratio, isW(t)?0:2)} ${isW(t)?'L':meta.unit}/client</span>
+          ${avg30 !== null ? `<span class="pe-alert-avg">Moy. : ${_fmt(avg30, isW(t)?0:2)}</span>` : ''}
+          ${pct !== null ? `<span class="pe-alert-pct" style="color:${col}">${pct>0?'+':''}${pct}%</span>` : ''}
+        </div>
+        <div class="pe-alert-msg">${msg}</div>
+      </div>`;
+    });
+    if (!alertsHtml) alertsHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Aucune alerte — Consommations dans les normes</div>';
+
+    // ── Date selector ──
+    const dateSel = `<div class="pe-date-row">
+      <button class="cso-ibtn" onclick="MX.Pages.Conso._peDatePrev()"><i class="fas fa-chevron-left"></i></button>
+      <span class="pe-date-lbl">${peDate === today ? "Aujourd'hui" : peDate}</span>
+      <button class="cso-ibtn" onclick="MX.Pages.Conso._peDateNext()" ${peDate===today?'disabled':''}><i class="fas fa-chevron-right"></i></button>
+    </div>`;
+
+    return `<div class="cso-inner pe-page">
+      <div class="pe-toolbar">
+        ${dateSel}
+        <button class="pe-cfg-btn" onclick="window._settingsTab='energie';MX.showPage('settings')">
+          <i class="fas fa-sliders"></i> Configurer les seuils
+        </button>
+      </div>
+
+      ${cli === 0 ? `<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ${peDate} — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate('${peDate}')">Renseigner</button></div>` : ''}
+
+      <div class="pe-grid">
+        <div class="pe-section pe-section--score">
+          <div class="pe-section-head"><i class="fas fa-star"></i> Score énergétique</div>
+          <div class="pe-score-body">
+            <div class="pe-score-ring-wrap">
+              ${scoreSVG}
+              <div class="pe-score-class-badge" style="color:${scoreCol}">${scoreLetter}</div>
+              <div class="pe-score-lbl" style="color:${scoreCol}">${scoreLbl}</div>
+            </div>
+            <div class="pe-score-breakdown">${breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>'}</div>
+          </div>
+        </div>
+
+        <div class="pe-section pe-section--ratios">
+          <div class="pe-section-head"><i class="fas fa-divide"></i> Ratios par client</div>
+          <div class="pe-ratio-grid">${ratioCards}</div>
+        </div>
+      </div>
+
+      <div class="pe-section pe-section--comp">
+        <div class="pe-section-head"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>
+        <div class="pe-comp-table-wrap">
+          <table class="pe-comp-table"><thead>${compHead}</thead><tbody>${compBody}</tbody></table>
+        </div>
+      </div>
+
+      <div class="pe-grid pe-grid--2col">
+        <div class="pe-section pe-section--forecast">
+          <div class="pe-section-head"><i class="fas fa-chart-line"></i> Tendance & Prévisions</div>
+          <div class="pe-fc-sub-hd">Basé sur les 7 derniers jours — fin de mois estimée</div>
+          <div class="pe-fc-list">${forecastHtml || '<div class="pe-bd-empty">Données insuffisantes</div>'}</div>
+        </div>
+        <div class="pe-section pe-section--alerts">
+          <div class="pe-section-head"><i class="fas fa-triangle-exclamation"></i> Alertes intelligentes</div>
+          ${alertsHtml}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Date navigation for performance tab
+  function _peDatePrev() {
+    const d = new Date((window._peSelDate || _today()) + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    window._peSelDate = d.toISOString().slice(0, 10);
+    MX.Pages.Conso._tab('performance');
+  }
+  function _peDateNext() {
+    const today = _today();
+    if (!window._peSelDate || window._peSelDate >= today) return;
+    const d = new Date(window._peSelDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    window._peSelDate = d.toISOString().slice(0, 10);
+    if (window._peSelDate >= today) window._peSelDate = '';
+    MX.Pages.Conso._tab('performance');
+  }
+  function _editCliDate(date) {
+    window._csoSelDate = date || _today();
+    MX.Pages.Conso._tab('compteurs');
+  }
+
+
   function _tAlertes() {
     const today = _today();
     const per   = window._csoSupPer || '30';
@@ -2594,5 +2978,6 @@
     _resolveAlert, _createIntFromAlert, _critDismiss, _supView,
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
+    _peDatePrev, _peDateNext, _editCliDate,
   };
 })();
