@@ -892,6 +892,7 @@
     if (el) el.innerHTML = _body();
     _checkCriticalBanner();
     if (_curTab === 'analyses') setTimeout(_anInit, 30);
+    if (_curTab === 'performance') setTimeout(_peInitAnimations, 60);
     if (MX.state && MX.state.currentPage === 'home') {
       MX.Pages && MX.Pages.Home && MX.Pages.Home.render();
     }
@@ -2486,58 +2487,210 @@
       ? '<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ' + peDate + ' — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate(\'' + peDate + '\')">Renseigner</button></div>'
       : '';
 
-    var kpiRow = '<div class="pe-kpi-row">' + _buildClientsKPI() + _buildConsoKPI() + '</div>';
     var monthlyChart = _buildMonthlyChart();
     var monthlyTable = _buildMonthlyTable();
+    // keep legacy KPI builders available for fallback but V4 uses its own strip
+    var _kpiLegacy = _buildClientsKPI() + _buildConsoKPI();
 
-    return '<div class="cso-inner pe-page">' +
-      '<div class="pe-toolbar">' + dateSel +
-        '<button class="pe-cfg-btn" onclick="MX.Pages.Conso._peOpenConfig()">' +
-        '<i class="fas fa-sliders"></i> Configurer</button>' +
-      '</div>' +
-      noCliBanner +
-      kpiRow +
-      '<div class="pe-grid">' +
-        '<div class="pe-section pe-section--score">' +
-          '<div class="pe-section-head"><i class="fas fa-star"></i> Score énergétique</div>' +
-          '<div class="pe-score-body">' +
-            '<div class="pe-score-ring-wrap">' +
-              scoreSVG +
-              '<div class="pe-score-class-badge" style="color:' + scoreCol + '">' + scoreLetter + '</div>' +
-              '<div class="pe-score-lbl" style="color:' + scoreCol + '">' + scoreLbl + '</div>' +
-            '</div>' +
-            '<div class="pe-score-breakdown">' + (breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>') + '</div>' +
-          '</div>' +
-        '</div>' +
-        '<div class="pe-section pe-section--ratios">' +
-          '<div class="pe-section-head"><i class="fas fa-divide"></i> Ratios par client</div>' +
-          '<div class="pe-ratio-grid">' + ratioCards + '</div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="pe-section pe-section--ia">' +
-        '<div class="pe-section-head"><i class="fas fa-robot"></i> Analyse automatique</div>' +
-        '<div class="pe-ia-rows">' + _iaAnalysisHtml() + '</div>' +
-      '</div>' +
-      '<div class="pe-section pe-section--comp">' +
-        '<div class="pe-section-head"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>' +
-        '<div class="pe-comp-table-wrap"><table class="pe-comp-table"><thead>' + compHead + '</thead><tbody>' + compBody + '</tbody></table></div>' +
-      '</div>' +
-      monthlyChart +
-      monthlyTable +
-      histTable +
-      '<div class="pe-grid pe-grid--2col">' +
-        '<div class="pe-section pe-section--forecast">' +
-          '<div class="pe-section-head"><i class="fas fa-chart-line"></i> Tendance &amp; Prévisions</div>' +
-          '<div class="pe-fc-sub-hd">Basé sur les 7 derniers jours — fin de mois estimée</div>' +
-          '<div class="pe-fc-list">' + (forecastHtml || '<div class="pe-bd-empty">Données insuffisantes</div>') + '</div>' +
-        '</div>' +
-        '<div class="pe-section pe-section--alerts">' +
-          '<div class="pe-section-head"><i class="fas fa-triangle-exclamation"></i> Alertes intelligentes</div>' +
-          alertsHtml +
+    // ── V4: extra KPI data for strip ──
+    var v4Now = new Date(today + 'T00:00:00');
+    var v4MoTot = 0;
+    Object.keys(_clients).forEach(function(d4k) {
+      var dd4 = new Date(d4k + 'T00:00:00');
+      var cl4b = _cliForDate(d4k);
+      if (dd4.getFullYear() === v4Now.getFullYear() && dd4.getMonth() === v4Now.getMonth() && cl4b > 0) v4MoTot += cl4b;
+    });
+    var v4EauToday = _perfConso('eau_froide', peDate);
+    var v4RatioToday = _perfRatio('eau_froide', peDate);
+    var v4RatioGrade = v4RatioToday !== null ? _getGrade('eau_froide', v4RatioToday) : { key: 'na' };
+    var v4RatioCol = (c[v4RatioGrade.key] || {}).color || '#3b82f6';
+
+    // ── V4: 5-card KPI strip ──
+    var v4Strip =
+      '<div class="pe-v4-kpi-card" style="--kc:#6366f1">' +
+        '<div class="pe-v4-kpi-ico" style="background:#6366f120;color:#6366f1"><i class="fas fa-users"></i></div>' +
+        '<div class="pe-v4-kpi-info">' +
+          '<div class="pe-v4-kpi-lbl">Clients aujourd\'hui</div>' +
+          '<div class="pe-v4-kpi-val">' + (cli > 0 ? cli.toLocaleString('fr-FR') : '—') + '</div>' +
+          '<div class="pe-v4-kpi-sub">' + (peDate === today ? 'Aujourd\'hui' : peDate) + '</div>' +
         '</div>' +
       '</div>' +
-      objHtml +
+      '<div class="pe-v4-kpi-card" style="--kc:#8b5cf6">' +
+        '<div class="pe-v4-kpi-ico" style="background:#8b5cf620;color:#8b5cf6"><i class="fas fa-calendar-days"></i></div>' +
+        '<div class="pe-v4-kpi-info">' +
+          '<div class="pe-v4-kpi-lbl">Clients ce mois</div>' +
+          '<div class="pe-v4-kpi-val">' + (v4MoTot > 0 ? v4MoTot.toLocaleString('fr-FR') : '—') + '</div>' +
+          '<div class="pe-v4-kpi-sub">Cumul mensuel</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pe-v4-kpi-card" style="--kc:#3b82f6">' +
+        '<div class="pe-v4-kpi-ico" style="background:#3b82f620;color:#3b82f6"><i class="fas fa-droplet"></i></div>' +
+        '<div class="pe-v4-kpi-info">' +
+          '<div class="pe-v4-kpi-lbl">Eau froide aujourd\'hui</div>' +
+          '<div class="pe-v4-kpi-val">' + (v4EauToday !== null ? _fmt(v4EauToday, 1) + ' m³' : '—') + '</div>' +
+          '<div class="pe-v4-kpi-sub">Consommation totale EF</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pe-v4-kpi-card" style="--kc:' + v4RatioCol + '">' +
+        '<div class="pe-v4-kpi-ico" style="background:' + v4RatioCol + '20;color:' + v4RatioCol + '"><i class="fas fa-chart-simple"></i></div>' +
+        '<div class="pe-v4-kpi-info">' +
+          '<div class="pe-v4-kpi-lbl">Ratio L/client</div>' +
+          '<div class="pe-v4-kpi-val" style="color:' + v4RatioCol + '">' + (v4RatioToday !== null ? Math.round(v4RatioToday) + ' L' : '—') + '</div>' +
+          '<div class="pe-v4-kpi-sub">Eau froide · ' + gradeBadge(v4RatioGrade.key) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pe-v4-kpi-card" style="--kc:' + scoreCol + '">' +
+        '<div class="pe-v4-kpi-ico" style="background:' + scoreCol + '20;color:' + scoreCol + '"><i class="fas fa-star"></i></div>' +
+        '<div class="pe-v4-kpi-info">' +
+          '<div class="pe-v4-kpi-lbl">Score du jour</div>' +
+          '<div class="pe-v4-kpi-val" style="color:' + scoreCol + '">' + (perfScore !== null ? perfScore : '—') + '</div>' +
+          '<div class="pe-v4-kpi-sub">Classe ' + scoreLetter + ' · ' + scoreLbl + '</div>' +
+        '</div>' +
       '</div>';
+
+    // ── V4: header score badge ──
+    var v4HdrBadge =
+      '<div class="pe-v4-hdr-score">' +
+        '<span class="pe-v4-hdr-letter" style="background:' + scoreCol + '20;color:' + scoreCol + '">' + scoreLetter + '</span>' +
+        '<div class="pe-v4-hdr-sc-info">' +
+          '<span class="pe-v4-hdr-sc-num" style="color:' + scoreCol + '">' + scoreStr + '<small>/100</small></span>' +
+          '<span class="pe-v4-hdr-sc-lbl">' + scoreLbl + '</span>' +
+        '</div>' +
+      '</div>';
+
+    // ── V4: energy cards with progress bars ──
+    var v4EnergyCards = '';
+    typeBreakdown.forEach(function(etd) {
+      var etype = etd.type, emeta = etd.meta, eratio = etd.ratio, erUnit = etd.rUnit, egrade = etd.grade;
+      var egData = c[egrade.key] || {};
+      var egCol = egData.color || '#64748b';
+      var epct = egrade.key !== 'na' ? (egData.scoreCenter || 0) : 0;
+      var eobj = (_perfCfg.objectifs && _perfCfg.objectifs[etype]) ? parseFloat(_perfCfg.objectifs[etype].target) : null;
+      var eecart = (eratio !== null && eobj !== null && eobj > 0) ? ((eratio - eobj) / eobj * 100) : null;
+      var eecartStr = eecart !== null ? ((eecart > 0 ? '+' : '') + _fmt(eecart, 1) + '%') : null;
+      var eecartCol = eecart === null ? '#64748b' : (eecart <= 0 ? '#22c55e' : '#ef4444');
+      v4EnergyCards +=
+        '<div class="pe-v4-ec" style="--ec:' + emeta.color + '">' +
+          '<div class="pe-v4-ec-hd">' +
+            '<span class="pe-v4-ec-ico">' + emeta.icon + '</span>' +
+            '<span class="pe-v4-ec-lbl">' + emeta.label + '</span>' +
+            gradeBadge(egrade.key) +
+          '</div>' +
+          '<div class="pe-v4-ec-ratio">' + (eratio !== null ? _fmt(eratio, isW(etype) ? 0 : 2) + ' ' + erUnit : '—') + '</div>' +
+          '<div class="pe-v4-ec-bar-wrap"><div class="pe-v4-ec-bar" style="width:' + epct + '%;background:' + egCol + '"></div></div>' +
+          (eobj !== null && !isNaN(eobj) ?
+            '<div class="pe-v4-ec-obj">Obj. ' + eobj + ' ' + erUnit +
+            (eecartStr ? ' <span style="color:' + eecartCol + ';font-weight:700">' + eecartStr + '</span>' : '') +
+            '</div>' : '') +
+        '</div>';
+    });
+
+    // ── V4: assembled layout ──
+    return '<div class="cso-inner pe-page pe-page--v4">' +
+
+      '<div class="pe-v4-hdr">' +
+        '<div class="pe-v4-hdr-left">' + dateSel + '</div>' +
+        '<div class="pe-v4-hdr-center">' +
+          '<button class="pe-cfg-btn" onclick="MX.Pages.Conso._peOpenConfig()">' +
+          '<i class="fas fa-sliders"></i> Configurer</button>' +
+        '</div>' +
+        '<div class="pe-v4-hdr-right">' + v4HdrBadge + '</div>' +
+      '</div>' +
+
+      noCliBanner +
+
+      '<div class="pe-v4-layout">' +
+
+        '<div class="pe-v4-main">' +
+
+          '<div class="pe-v4-kpi-strip">' + v4Strip + '</div>' +
+
+          '<div class="pe-v4-row2">' +
+            '<div class="pe-v4-card pe-v4-score-sec">' +
+              '<div class="pe-v4-card-hd"><i class="fas fa-star"></i> Score énergétique</div>' +
+              '<div class="pe-v4-score-inner">' +
+                '<div class="pe-score-ring-wrap">' +
+                  scoreSVG +
+                  '<div class="pe-score-class-badge" style="color:' + scoreCol + '">' + scoreLetter + '</div>' +
+                  '<div class="pe-score-lbl" style="color:' + scoreCol + '">' + scoreLbl + '</div>' +
+                '</div>' +
+                '<div class="pe-v4-breakdown">' + (breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>') + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="pe-v4-card pe-v4-energy-sec">' +
+              '<div class="pe-v4-card-hd"><i class="fas fa-divide"></i> Ratios par énergie</div>' +
+              '<div class="pe-v4-energy-grid">' +
+                (v4EnergyCards || '<div class="cso-empty-state" style="padding:20px"><i class="fas fa-bolt-lightning" style="font-size:22px;opacity:.2"></i><p>Aucun compteur configuré</p></div>') +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="pe-v4-card pe-v4-sec--ai">' +
+            '<div class="pe-v4-card-hd"><i class="fas fa-robot"></i> Analyse automatique <span class="pe-v4-card-sub">14 derniers jours</span></div>' +
+            '<div class="pe-v4-ai-timeline">' + _iaAnalysisHtml() + '</div>' +
+          '</div>' +
+
+          monthlyChart +
+          monthlyTable +
+          histTable +
+
+          '<div class="pe-v4-card pe-v4-sec--forecast">' +
+            '<div class="pe-v4-card-hd"><i class="fas fa-chart-line"></i> Tendances &amp; Prévisions <span class="pe-v4-card-sub">Fin de mois estimée</span></div>' +
+            '<div class="pe-fc-list">' + (forecastHtml || '<div class="pe-bd-empty">Données insuffisantes</div>') + '</div>' +
+          '</div>' +
+
+        '</div>' +
+
+        '<aside class="pe-v4-sidebar">' +
+
+          '<div class="pe-v4-sw">' +
+            '<div class="pe-v4-sw-hd"><i class="fas fa-star"></i> Score global</div>' +
+            '<div class="pe-v4-sw-score-body">' +
+              '<div class="pe-v4-sw-score-num" style="color:' + scoreCol + '">' + scoreStr + '<small>/100</small></div>' +
+              gradeBadge(scoreGrade) +
+              '<div class="pe-v4-sw-score-cls" style="color:' + scoreCol + '">Classe ' + scoreLetter + ' — ' + scoreLbl + '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="pe-v4-sw">' +
+            '<div class="pe-v4-sw-hd"><i class="fas fa-triangle-exclamation"></i> Alertes</div>' +
+            alertsHtml +
+          '</div>' +
+
+          '<div class="pe-v4-sw">' +
+            '<div class="pe-v4-sw-hd"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>' +
+            '<div class="pe-v4-sw-tbl-wrap"><table class="pe-comp-table"><thead>' + compHead + '</thead><tbody>' + compBody + '</tbody></table></div>' +
+          '</div>' +
+
+          (objRows ?
+            '<div class="pe-v4-sw">' +
+              '<div class="pe-v4-sw-hd"><i class="fas fa-bullseye"></i> Objectifs</div>' +
+              '<div class="pe-v4-sw-tbl-wrap"><table class="pe-obj-table">' +
+              '<thead><tr><th>Type</th><th>Obj.</th><th>Auj.</th><th>Mois</th><th>OK</th></tr></thead>' +
+              '<tbody>' + objRows + '</tbody>' +
+              '</table></div>' +
+            '</div>' : '') +
+
+        '</aside>' +
+
+      '</div>' +
+
+    '</div>';
+  }
+
+  function _peInitAnimations() {
+    document.querySelectorAll('.pe-v4-ec-bar').forEach(function(bar) {
+      var target = bar.style.width;
+      bar.style.transition = 'none';
+      bar.style.width = '0';
+      setTimeout(function() { bar.style.transition = 'width .8s cubic-bezier(.4,0,.2,1)'; bar.style.width = target; }, 40);
+    });
+    document.querySelectorAll('.pe-bd-bar').forEach(function(bar) {
+      var target = bar.style.width;
+      bar.style.transition = 'none';
+      bar.style.width = '0';
+      setTimeout(function() { bar.style.transition = 'width .7s cubic-bezier(.4,0,.2,1)'; bar.style.width = target; }, 100);
+    });
   }
 
   // Date navigation for performance tab
