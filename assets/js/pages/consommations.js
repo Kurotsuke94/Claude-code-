@@ -2122,9 +2122,9 @@
     });
     if (!alertsHtml) alertsHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Aucune alerte — Consommations dans les normes</div>';
 
-    // ── Helper: get client count for a date ──
+    // ── Helper: client count for a date ──
     function _cliForDate(d) {
-      const v = _clients[d];
+      var v = _clients[d];
       if (!v) return 0;
       return typeof v === 'object' ? (v.count || 0) : v;
     }
@@ -2157,8 +2157,192 @@
       return triggered;
     }
 
+    // ── Period selector for history table ──
+    var pePeriod = window._pePeriod || '14';
+    var nHistDays = pePeriod === 'today' ? 1 : pePeriod === '7' ? 7 : pePeriod === '30' ? 30 : pePeriod === '90' ? 90 : 14;
+    var PERIOD_BTNS = [
+      { key: 'today', l: "Aujourd'hui" },
+      { key: '7',   l: 'Semaine' },
+      { key: '14',  l: '14 jours' },
+      { key: '30',  l: 'Mois' },
+      { key: '90',  l: '3 mois' },
+    ];
+    var quickNav = '<div class="pe-hist-nav">' +
+      PERIOD_BTNS.map(function(b) {
+        return '<button class="pe-hist-nav-btn' + (pePeriod === b.key ? ' pe-hist-nav-btn--active' : '') + '" onclick="window._pePeriod=\'' + b.key + '\';MX.Pages.Conso._tab(\'performance\')">' + b.l + '</button>';
+      }).join('') +
+    '</div>';
+
+    // ── KPI: Clients du mois ──
+    function _buildClientsKPI() {
+      var now2 = new Date(today + 'T00:00:00');
+      var y2 = now2.getFullYear(), mo2 = now2.getMonth();
+      var total = 0, cnt2 = 0, maxC = null, minC = null;
+      var prevMo2 = mo2 === 0 ? 11 : mo2 - 1, prevYr2 = mo2 === 0 ? y2 - 1 : y2;
+      var prevTotal = 0;
+      var MN = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+      Object.keys(_clients).forEach(function(d2) {
+        var dd2 = new Date(d2 + 'T00:00:00');
+        var cli2 = _cliForDate(d2);
+        if (dd2.getFullYear() === y2 && dd2.getMonth() === mo2 && cli2 > 0) {
+          total += cli2; cnt2++;
+          if (maxC === null || cli2 > maxC) maxC = cli2;
+          if (minC === null || cli2 < minC) minC = cli2;
+        } else if (dd2.getFullYear() === prevYr2 && dd2.getMonth() === prevMo2 && cli2 > 0) {
+          prevTotal += cli2;
+        }
+      });
+      var avg2 = cnt2 ? Math.round(total / cnt2) : null;
+      var evol2 = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
+      var evolCol2 = evol2 === null ? '#64748b' : (evol2 >= 0 ? '#22c55e' : '#ef4444');
+      var evolIco2 = evol2 === null ? '' : (evol2 >= 0 ? '<i class="fas fa-arrow-trend-up"></i> ' : '<i class="fas fa-arrow-trend-down"></i> ');
+      return '<div class="pe-kpi-card">' +
+        '<div class="pe-kpi-lbl">Clients du mois</div>' +
+        '<div class="pe-kpi-month">' + MN[mo2] + '</div>' +
+        '<div class="pe-kpi-main">' + (total > 0 ? total.toLocaleString('fr-FR') : '—') + '</div>' +
+        '<div class="pe-kpi-subs">' +
+          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Moyenne / jour</span><span class="pe-kpi-sub-val">' + (avg2 !== null ? avg2.toLocaleString('fr-FR') : '—') + '</span></div>' +
+          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Maximum</span><span class="pe-kpi-sub-val">' + (maxC !== null ? maxC.toLocaleString('fr-FR') : '—') + '</span></div>' +
+          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Minimum</span><span class="pe-kpi-sub-val">' + (minC !== null ? minC.toLocaleString('fr-FR') : '—') + '</span></div>' +
+          (evol2 !== null ? '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">vs mois préc.</span><span class="pe-kpi-sub-val" style="color:' + evolCol2 + '">' + evolIco2 + (evol2 > 0 ? '+' : '') + _fmt(evol2, 1) + '%</span></div>' : '') +
+        '</div>' +
+      '</div>';
+    }
+
+    // ── KPI: Consommation moyenne ──
+    function _buildConsoKPI() {
+      var ratioTd2 = _perfRatio('eau_froide', today);
+      var ratioMo2 = _monthAvgRatio('eau_froide');
+      var now2b = new Date(today + 'T00:00:00');
+      var y2b = now2b.getFullYear();
+      var yrSum2 = 0, yrCnt2 = 0;
+      for (var mo3a = 0; mo3a <= now2b.getMonth(); mo3a++) {
+        var dIM2 = new Date(y2b, mo3a + 1, 0).getDate();
+        for (var dda = 1; dda <= dIM2; dda++) {
+          if (mo3a === now2b.getMonth() && dda > now2b.getDate()) break;
+          var dsa = new Date(y2b, mo3a, dda).toISOString().slice(0, 10);
+          var rra = _perfRatio('eau_froide', dsa);
+          if (rra !== null) { yrSum2 += rra; yrCnt2++; }
+        }
+      }
+      var ratioYr2 = yrCnt2 ? yrSum2 / yrCnt2 : null;
+      var objEF2 = (_perfCfg.objectifs && _perfCfg.objectifs.eau_froide) ? parseFloat(_perfCfg.objectifs.eau_froide.target) : null;
+      function cmpCol3(v2) {
+        if (v2 === null || objEF2 === null || isNaN(objEF2)) return '#64748b';
+        return v2 <= objEF2 ? '#22c55e' : (v2 <= objEF2 * 1.1 ? '#f59e0b' : '#ef4444');
+      }
+      return '<div class="pe-kpi-card">' +
+        '<div class="pe-kpi-lbl">Consommation moyenne</div>' +
+        '<div class="pe-kpi-month">Eau froide · L/client</div>' +
+        '<div class="pe-kpi-subs pe-kpi-subs--conso">' +
+          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Aujourd\'hui</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioTd2 !== null ? Math.round(ratioTd2) : null) + '">' + (ratioTd2 !== null ? Math.round(ratioTd2) + ' L/cl.' : '—') + '</span></div>' +
+          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Ce mois</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioMo2 !== null ? Math.round(ratioMo2) : null) + '">' + (ratioMo2 !== null ? Math.round(ratioMo2) + ' L/cl.' : '—') + '</span></div>' +
+          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Cette année</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioYr2 !== null ? Math.round(ratioYr2) : null) + '">' + (ratioYr2 !== null ? Math.round(ratioYr2) + ' L/cl.' : '—') + '</span></div>' +
+          (objEF2 !== null && !isNaN(objEF2) ? '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Objectif</span><span class="pe-kpi-sub-val" style="color:#22c55e">' + objEF2 + ' L/cl.</span></div>' : '') +
+        '</div>' +
+      '</div>';
+    }
+
+    // ── Monthly evolution chart (SVG bar) ──
+    function _buildMonthlyChart() {
+      var now2c = new Date(today + 'T00:00:00');
+      var y2c = now2c.getFullYear();
+      var MLBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+      var objEF3 = (_perfCfg.objectifs && _perfCfg.objectifs.eau_froide) ? parseFloat(_perfCfg.objectifs.eau_froide.target) : null;
+      var months3 = [];
+      for (var mo3c = 0; mo3c <= now2c.getMonth(); mo3c++) {
+        var dIM3 = new Date(y2c, mo3c + 1, 0).getDate();
+        var mSum3 = 0, mCnt3 = 0;
+        for (var ddc = 1; ddc <= dIM3; ddc++) {
+          if (mo3c === now2c.getMonth() && ddc > now2c.getDate()) break;
+          var dsc = new Date(y2c, mo3c, ddc).toISOString().slice(0, 10);
+          var rrc = _perfRatio('eau_froide', dsc);
+          if (rrc !== null) { mSum3 += rrc; mCnt3++; }
+        }
+        months3.push({ lbl: MLBL[mo3c], val: mCnt3 ? Math.round(mSum3 / mCnt3) : null });
+      }
+      if (!months3.some(function(m3){ return m3.val !== null; })) return '';
+      var vals3 = months3.map(function(m3){ return m3.val || 0; });
+      var allVals = vals3.concat((objEF3 && !isNaN(objEF3)) ? [objEF3] : []).concat([50]);
+      var maxV3 = Math.max.apply(null, allVals);
+      var W3 = 560, H3 = 150, PL = 36, PR = 50, PB = 24, PT = 14;
+      var cW3 = W3 - PL - PR, cH3 = H3 - PT - PB;
+      var colW3 = cW3 / months3.length;
+      var barW3 = Math.min(30, colW3 - 4);
+      var bars3 = '', gridY3 = '';
+      for (var gi = 1; gi <= 4; gi++) {
+        var gy3 = (PT + cH3 - (gi / 4) * cH3).toFixed(0);
+        var gv3 = Math.round((gi / 4) * maxV3);
+        gridY3 += '<line x1="' + (PL-3) + '" y1="' + gy3 + '" x2="' + (W3-PR) + '" y2="' + gy3 + '" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>';
+        gridY3 += '<text x="' + (PL-5) + '" y="' + (+gy3+3) + '" text-anchor="end" font-size="7" fill="var(--text3)">' + gv3 + '</text>';
+      }
+      months3.forEach(function(m3, i3) {
+        if (m3.val === null) return;
+        var bh3 = Math.max(2, Math.round((m3.val / maxV3) * cH3));
+        var bx3 = (PL + i3 * colW3 + (colW3 - barW3) / 2).toFixed(1);
+        var by3 = (PT + cH3 - bh3).toFixed(1);
+        var grade3c = _getGrade('eau_froide', m3.val);
+        var col3c = (c[grade3c.key] || {}).color || '#3b82f6';
+        bars3 += '<rect x="' + bx3 + '" y="' + by3 + '" width="' + barW3 + '" height="' + bh3 + '" rx="3" fill="' + col3c + '" opacity="0.85"/>';
+        bars3 += '<text x="' + (+bx3 + barW3/2).toFixed(1) + '" y="' + (+by3-3).toFixed(1) + '" text-anchor="middle" font-size="8" fill="' + col3c + '" font-weight="700">' + m3.val + '</text>';
+        bars3 += '<text x="' + (+bx3 + barW3/2).toFixed(1) + '" y="' + (H3-6).toFixed(1) + '" text-anchor="middle" font-size="8" fill="var(--text3)">' + m3.lbl + '</text>';
+      });
+      var objLine3 = '';
+      if (objEF3 !== null && !isNaN(objEF3)) {
+        var oy3 = (PT + cH3 - Math.round((objEF3 / maxV3) * cH3)).toFixed(0);
+        objLine3 = '<line x1="' + PL + '" y1="' + oy3 + '" x2="' + (W3-PR) + '" y2="' + oy3 + '" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.8"/>' +
+          '<text x="' + (W3-PR+3) + '" y="' + (+oy3+4) + '" font-size="8" fill="#22c55e">Obj. ' + objEF3 + '</text>';
+      }
+      return '<div class="pe-section pe-section--chart">' +
+        '<div class="pe-section-head"><i class="fas fa-chart-bar"></i> Évolution mensuelle — Eau froide (L/client)</div>' +
+        '<div class="pe-monthly-chart-wrap"><svg class="pe-monthly-chart" viewBox="0 0 ' + W3 + ' ' + H3 + '" preserveAspectRatio="xMidYMid meet">' +
+          '<line x1="' + PL + '" y1="' + PT + '" x2="' + PL + '" y2="' + (PT+cH3) + '" stroke="var(--border)" stroke-width="1"/>' +
+          '<line x1="' + PL + '" y1="' + (PT+cH3) + '" x2="' + (W3-PR) + '" y2="' + (PT+cH3) + '" stroke="var(--border)" stroke-width="1"/>' +
+          gridY3 + bars3 + objLine3 +
+        '</svg></div></div>';
+    }
+
+    // ── Monthly bilan table ──
+    function _buildMonthlyTable() {
+      var now2d = new Date(today + 'T00:00:00');
+      var y2d = now2d.getFullYear();
+      var MFULL = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+      var trows = '';
+      for (var mo3d = 0; mo3d <= now2d.getMonth(); mo3d++) {
+        var dIM4 = new Date(y2d, mo3d + 1, 0).getDate();
+        var mCli4 = 0, mEau4 = 0, mRS4 = 0, mRC4 = 0;
+        for (var ddd = 1; ddd <= dIM4; ddd++) {
+          if (mo3d === now2d.getMonth() && ddd > now2d.getDate()) break;
+          var dsd = new Date(y2d, mo3d, ddd).toISOString().slice(0, 10);
+          var cl4 = _cliForDate(dsd);
+          if (cl4 > 0) mCli4 += cl4;
+          var eau4 = _perfConso('eau_froide', dsd);
+          if (eau4 !== null) mEau4 += eau4;
+          var rrd = _perfRatio('eau_froide', dsd);
+          if (rrd !== null) { mRS4 += rrd; mRC4++; }
+        }
+        if (!mCli4 && !mEau4) continue;
+        var avgR4 = mRC4 ? Math.round(mRS4 / mRC4) : null;
+        var grade4 = avgR4 !== null ? _getGrade('eau_froide', avgR4) : null;
+        var col4 = grade4 ? ((c[grade4.key] || {}).color || '#64748b') : '#64748b';
+        trows += '<tr>' +
+          '<td class="pe-mt-month">' + MFULL[mo3d] + '</td>' +
+          '<td class="pe-mt-val">' + (mCli4 > 0 ? mCli4.toLocaleString('fr-FR') : '—') + '</td>' +
+          '<td class="pe-mt-val">' + (mEau4 > 0 ? _fmt(mEau4, 1) + ' m³' : '—') + '</td>' +
+          '<td class="pe-mt-val" style="color:' + col4 + ';font-weight:700">' + (avgR4 !== null ? avgR4 : '—') + '</td>' +
+          '<td class="pe-mt-val">' + (grade4 && grade4.key !== 'na' ? gradeBadge(grade4.key) : '—') + '</td>' +
+          '</tr>';
+      }
+      if (!trows) return '';
+      return '<div class="pe-section pe-section--monthly-tbl">' +
+        '<div class="pe-section-head"><i class="fas fa-table"></i> Bilan mensuel — Eau froide</div>' +
+        '<div class="pe-mt-wrap"><table class="pe-mt-table"><thead>' +
+        '<tr><th>Mois</th><th>Clients</th><th>Eau totale</th><th>L/client</th><th>Score</th></tr>' +
+        '</thead><tbody>' + trows + '</tbody></table></div></div>';
+    }
+
     // ── 14-day history table — per ref-meter columns for EF ──
-    const histDays = Array.from({length: 14}, (_, i) => _daysAgo(i)).reverse();
+    const histDays = Array.from({length: nHistDays}, (_, i) => _daysAgo(i)).reverse();
     // EF ref meters → dynamic column headers
     const efRefIds   = _refMeterIds('eau_froide');
     const efRefMtrs  = efRefIds.map(function(id){ return _meters.find(function(m){ return m.id === id; }); }).filter(Boolean);
@@ -2218,8 +2402,10 @@
       histBody += row;
     });
 
+    var histPeriodLbl = pePeriod === 'today' ? "Aujourd'hui" : pePeriod === '7' ? '7 jours' : pePeriod === '30' ? '30 jours' : pePeriod === '90' ? '90 jours' : '14 jours';
     const histTable = '<div class="pe-section pe-section--history">' +
-      '<div class="pe-section-head"><i class="fas fa-table-list"></i> Historique 14 jours — Eau froide <span class="pe-hist-hint">Cliquer pour le détail</span></div>' +
+      '<div class="pe-section-head"><i class="fas fa-table-list"></i> Historique — Eau froide <span class="pe-hist-hint">Cliquer pour le détail</span></div>' +
+      quickNav +
       '<div class="pe-hist-wrap"><table class="pe-hist-table">' +
       '<thead>' + histHead + '</thead>' +
       '<tbody>' + (histBody || '<tr><td colspan="' + histColSpan + '" class="pe-hist-nd" style="text-align:center;padding:20px">Aucune donnée</td></tr>') + '</tbody>' +
@@ -2300,12 +2486,17 @@
       ? '<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ' + peDate + ' — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate(\'' + peDate + '\')">Renseigner</button></div>'
       : '';
 
+    var kpiRow = '<div class="pe-kpi-row">' + _buildClientsKPI() + _buildConsoKPI() + '</div>';
+    var monthlyChart = _buildMonthlyChart();
+    var monthlyTable = _buildMonthlyTable();
+
     return '<div class="cso-inner pe-page">' +
       '<div class="pe-toolbar">' + dateSel +
-        '<button class="pe-cfg-btn" onclick="window._settingsTab=\'energie\';MX.showPage(\'settings\')">' +
+        '<button class="pe-cfg-btn" onclick="MX.Pages.Conso._peOpenConfig()">' +
         '<i class="fas fa-sliders"></i> Configurer</button>' +
       '</div>' +
       noCliBanner +
+      kpiRow +
       '<div class="pe-grid">' +
         '<div class="pe-section pe-section--score">' +
           '<div class="pe-section-head"><i class="fas fa-star"></i> Score énergétique</div>' +
@@ -2331,6 +2522,8 @@
         '<div class="pe-section-head"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>' +
         '<div class="pe-comp-table-wrap"><table class="pe-comp-table"><thead>' + compHead + '</thead><tbody>' + compBody + '</tbody></table></div>' +
       '</div>' +
+      monthlyChart +
+      monthlyTable +
       histTable +
       '<div class="pe-grid pe-grid--2col">' +
         '<div class="pe-section pe-section--forecast">' +
@@ -2556,6 +2749,218 @@
       : (document.querySelector('.pe-day-modal-backdrop') && document.querySelector('.pe-day-modal-backdrop').remove());
   }
 
+
+  // ── Configuration drawer ──
+  function _peOpenConfig() {
+    var ex = document.getElementById('pe-cfg-drawer');
+    if (ex) { ex.remove(); return; }
+    var esc2 = MX.esc || function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    var REF_TYPES2 = ['eau_froide','eau_chaude','electricite','gaz'];
+    var CLASS_ORD2 = ['excellent','bon','correct','moyen','mauvais','critique'];
+    var TYPE_META2 = {
+      eau_froide:  { label: 'Eau froide',  unit: 'L/client',   icon: '💧' },
+      eau_chaude:  { label: 'Eau chaude',  unit: 'L/client',   icon: '🔥' },
+      electricite: { label: 'Électricité', unit: 'kWh/client', icon: '⚡' },
+      gaz:         { label: 'Gaz',         unit: 'kWh/client', icon: '🌬' },
+    };
+    var OBJ_TYPES2 = ['eau_froide','eau_chaude','electricite'];
+    var cfgRef2 = _perfCfg.ref_meters || {};
+
+    // ── Compteurs de référence ──
+    var refSecHtml = '';
+    REF_TYPES2.forEach(function(type) {
+      var typeMeters = _meters.filter(function(m){ return m.type === type; });
+      if (!typeMeters.length) return;
+      var mt2 = MT[type]; if (!mt2) return;
+      var selIds = cfgRef2[type] || [];
+      refSecHtml += '<div class="pe-cfg-type-block">' +
+        '<div class="pe-cfg-type-hd">' + mt2.icon + ' ' + esc2(mt2.label) + '</div>' +
+        '<div class="pe-cfg-meter-list">' +
+        typeMeters.map(function(m2) {
+          var checked = !selIds.length || selIds.indexOf(m2.id) !== -1;
+          return '<label class="pe-cfg-meter-item"><input type="checkbox" class="pe-cfg-ref-cb" data-type="' + type + '" data-id="' + esc2(m2.id) + '"' + (checked ? ' checked' : '') + '> ' + esc2(m2.name) + (m2.zone ? ' <small>(' + esc2(m2.zone) + ')</small>' : '') + '</label>';
+        }).join('') +
+        '</div></div>';
+    });
+    if (!refSecHtml) refSecHtml = '<div class="pe-hist-nd" style="padding:6px 0;font-size:12px">Aucun compteur configuré</div>';
+
+    // ── Clients ──
+    var todayD2 = _today(), hierD2 = _daysAgo(1);
+    function _cliD(d){ var v = _clients[d]; if(!v)return 0; return typeof v==='object'?(v.count||0):v; }
+    var now3 = new Date(), y3 = now3.getFullYear(), mo3b = now3.getMonth();
+    var prevMo3 = mo3b===0?11:mo3b-1, prevYr3 = mo3b===0?y3-1:y3;
+    var cliMo3 = 0, cliPrev3 = 0;
+    Object.keys(_clients).forEach(function(d3){ var dd3=new Date(d3+'T00:00:00'); var n3=_cliD(d3); if(dd3.getFullYear()===y3&&dd3.getMonth()===mo3b)cliMo3+=n3; else if(dd3.getFullYear()===prevYr3&&dd3.getMonth()===prevMo3)cliPrev3+=n3; });
+    var cliHtml2 = '<div class="pe-cfg-cli-grid">' +
+      '<div class="pe-cfg-cli-item"><span class="pe-cfg-cli-lbl">Aujourd\'hui</span><span class="pe-cfg-cli-val">' + (_cliD(todayD2)||'—') + '</span><button class="cso-ibtn" onclick="document.getElementById(\'pe-cfg-drawer\').remove();MX.Pages.Conso._editCliDate(\'' + todayD2 + '\')"><i class="fas fa-pen"></i></button></div>' +
+      '<div class="pe-cfg-cli-item"><span class="pe-cfg-cli-lbl">Hier</span><span class="pe-cfg-cli-val">' + (_cliD(hierD2)||'—') + '</span><button class="cso-ibtn" onclick="document.getElementById(\'pe-cfg-drawer\').remove();MX.Pages.Conso._editCliDate(\'' + hierD2 + '\')"><i class="fas fa-pen"></i></button></div>' +
+      '<div class="pe-cfg-cli-item"><span class="pe-cfg-cli-lbl">Ce mois</span><span class="pe-cfg-cli-val">' + (cliMo3>0?cliMo3.toLocaleString('fr-FR'):'—') + '</span></div>' +
+      '<div class="pe-cfg-cli-item"><span class="pe-cfg-cli-lbl">Mois précédent</span><span class="pe-cfg-cli-val">' + (cliPrev3>0?cliPrev3.toLocaleString('fr-FR'):'—') + '</span></div>' +
+    '</div>';
+
+    // ── Objectifs & seuils ──
+    var thrCfg2 = _perfCfg.thresholds || {}, clsCfg2 = _perfCfg.classes || {}, objCfg2 = _perfCfg.objectifs || {};
+    var objSecHtml2 = '';
+    OBJ_TYPES2.forEach(function(type) {
+      var mt3 = TYPE_META2[type]; if (!mt3) return;
+      var defThr = PERF_DEFAULTS.thresholds[type] || {};
+      var cfgThr = thrCfg2[type] || {};
+      var obj3 = objCfg2[type] || {};
+      objSecHtml2 += '<div class="pe-cfg-type-block">' +
+        '<div class="pe-cfg-type-hd">' + mt3.icon + ' ' + esc2(mt3.label) + '</div>' +
+        '<div class="pe-cfg-thr-grid">' +
+        CLASS_ORD2.filter(function(k){ return k!=='critique'; }).map(function(k) {
+          var def2 = PERF_DEFAULTS.classes[k] || {};
+          var cfgCls2 = clsCfg2[k] || {};
+          var col2 = cfgCls2.color || def2.color || '#64748b';
+          var val2 = cfgThr[k] !== undefined ? cfgThr[k] : (defThr[k] || '');
+          return '<div class="pe-cfg-thr-row">' +
+            '<span class="pe-cfg-thr-dot" style="background:' + col2 + '"></span>' +
+            '<label class="pe-cfg-thr-lbl">' + (k.charAt(0).toUpperCase()+k.slice(1)) + '</label>' +
+            '<span class="pe-cfg-thr-op">≤</span>' +
+            '<input class="fi pe-cfg-thr-inp" id="pe-cfg-thr-' + type + '-' + k + '" type="number" min="0" step="0.5" value="' + val2 + '">' +
+            '<span class="pe-cfg-thr-unit">' + mt3.unit + '</span>' +
+            '<input class="pe-cfg-col-inp" id="pe-cfg-col-' + type + '-' + k + '" type="color" value="' + col2 + '">' +
+          '</div>';
+        }).join('') +
+        '</div>' +
+        '<div class="pe-cfg-obj-row">' +
+          '<label class="pe-cfg-obj-lbl">Objectif <input class="fi pe-cfg-obj-inp" id="pe-cfg-obj-' + type + '" type="number" min="0" step="0.5" value="' + (obj3.target||'') + '" placeholder="—"> <span class="pe-cfg-thr-unit">' + mt3.unit + '</span></label>' +
+          '<label class="pe-cfg-obj-lbl">Tolérance <input class="fi pe-cfg-obj-inp" id="pe-cfg-tol-' + type + '" type="number" min="0" max="100" step="1" value="' + (obj3.tolerance||10) + '" placeholder="10"> <span class="pe-cfg-thr-unit">%</span></label>' +
+        '</div>' +
+      '</div>';
+    });
+
+    // ── Alertes ──
+    var rulesArr2 = ((_perfCfg.alert_rules && _perfCfg.alert_rules.rules) || []).slice();
+    var aRL = { eau_froide:'💧 EF', eau_chaude:'🔥 ECS', electricite:'⚡ Élec' };
+    var aTL = { total:'Total', ratio:'Ratio', variation:'Variation' };
+    var aUL = { total:'m³', ratio:'L/client', variation:'%' };
+    function renderRules2(arr) {
+      return arr.length
+        ? arr.map(function(r, i){ return '<div class="pe-alert-rule-row"><span class="pe-alert-rule-lbl">' + (aRL[r.resource]||r.resource) + ' — ' + (aTL[r.type]||r.type) + ' &gt; <strong>' + r.value + '</strong> ' + (aUL[r.type]||'') + '</span><button class="pe-alert-rule-del cso-ibtn" onclick="window._peCfgDelRule(' + i + ')"><i class="fas fa-trash"></i></button></div>'; }).join('')
+        : '<div class="pe-hist-nd" style="font-size:12px;padding:6px 0">Aucune règle configurée</div>';
+    }
+
+    var drawerHtml2 = '<div id="pe-cfg-drawer" class="pe-cfg-drawer">' +
+      '<div class="pe-cfg-backdrop" onclick="document.getElementById(\'pe-cfg-drawer\').remove()"></div>' +
+      '<div class="pe-cfg-panel">' +
+        '<div class="pe-cfg-hd">' +
+          '<span class="pe-cfg-ttl"><i class="fas fa-sliders"></i> Configuration Performance</span>' +
+          '<button class="cso-ibtn pe-cfg-close" onclick="document.getElementById(\'pe-cfg-drawer\').remove()"><i class="fas fa-times"></i></button>' +
+        '</div>' +
+        '<div class="pe-cfg-body">' +
+          '<div class="pe-cfg-section"><div class="pe-cfg-section-hd"><i class="fas fa-crosshairs"></i> Compteurs de référence</div>' +
+          '<p class="pe-ref-intro">Sélectionnez les compteurs utilisés pour le calcul des ratios officiels (L/client).</p>' +
+          refSecHtml + '</div>' +
+          '<div class="pe-cfg-section"><div class="pe-cfg-section-hd"><i class="fas fa-users"></i> Nombre de clients</div>' +
+          cliHtml2 + '</div>' +
+          '<div class="pe-cfg-section"><div class="pe-cfg-section-hd"><i class="fas fa-bullseye"></i> Objectifs &amp; seuils</div>' +
+          '<p class="pe-ref-intro">Seuils par classe (≤ valeur) et objectif L/client. Couleur modifiable par classe.</p>' +
+          objSecHtml2 + '</div>' +
+          '<div class="pe-cfg-section"><div class="pe-cfg-section-hd"><i class="fas fa-bell"></i> Alertes</div>' +
+          '<p class="pe-ref-intro">Déclenchement automatique si un seuil est dépassé sur la journée.</p>' +
+          '<div id="pe-cfg-alert-list" class="pe-alert-rules-list">' + renderRules2(rulesArr2) + '</div>' +
+          '<div class="pe-alert-add-form">' +
+            '<select class="fi pe-alert-sel" id="pe-cfg-alt"><option value="total">Total &gt;</option><option value="ratio">Ratio &gt;</option><option value="variation">Variation &gt;</option></select>' +
+            '<select class="fi pe-alert-sel" id="pe-cfg-ares"><option value="eau_froide">💧 EF</option><option value="eau_chaude">🔥 ECS</option><option value="electricite">⚡ Élec</option></select>' +
+            '<input class="fi pe-alert-val" id="pe-cfg-aval" type="number" min="0" step="0.1" placeholder="Seuil">' +
+            '<button class="cso-ibtn pe-alert-add-btn" onclick="window._peCfgAddRule()"><i class="fas fa-plus"></i> Ajouter</button>' +
+          '</div></div>' +
+        '</div>' +
+        '<div class="pe-cfg-footer">' +
+          '<button class="cso-ibtn pe-cfg-reset-btn" onclick="window._peCfgReset()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>' +
+          '<button class="cso-ibtn" onclick="document.getElementById(\'pe-cfg-drawer\').remove()">Annuler</button>' +
+          '<button class="cso-ibtn cso-ibtn--primary pe-cfg-save-btn" onclick="window._peCfgSave()"><i class="fas fa-save"></i> Sauvegarder</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    document.body.insertAdjacentHTML('beforeend', drawerHtml2);
+    window._peCfgRulesArr = rulesArr2;
+
+    window._peCfgRenderRules = function() {
+      var el = document.getElementById('pe-cfg-alert-list');
+      if (el) el.innerHTML = renderRules2(window._peCfgRulesArr);
+    };
+    window._peCfgAddRule = function() {
+      var t = document.getElementById('pe-cfg-alt').value;
+      var r = document.getElementById('pe-cfg-ares').value;
+      var v = parseFloat(document.getElementById('pe-cfg-aval').value);
+      if (isNaN(v) || v <= 0) { if (MX.toast) MX.toast('Saisissez une valeur > 0', true); return; }
+      window._peCfgRulesArr.push({ type: t, resource: r, value: v });
+      document.getElementById('pe-cfg-aval').value = '';
+      window._peCfgRenderRules();
+    };
+    window._peCfgDelRule = function(i) {
+      window._peCfgRulesArr.splice(i, 1);
+      window._peCfgRenderRules();
+    };
+    window._peCfgSave = function() {
+      var saveBtn = document.querySelector('.pe-cfg-save-btn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+      var thrData3 = {};
+      ['eau_froide','eau_chaude','electricite','gaz'].forEach(function(type) {
+        thrData3[type] = {};
+        ['excellent','bon','correct','moyen','mauvais'].forEach(function(k) {
+          var el = document.getElementById('pe-cfg-thr-' + type + '-' + k);
+          if (el && el.value !== '') thrData3[type][k] = parseFloat(el.value);
+        });
+      });
+      var clsData3 = {};
+      CLASS_ORD2.forEach(function(k) {
+        var def3 = PERF_DEFAULTS.classes[k] || {};
+        clsData3[k] = { l: def3.l, scoreCenter: def3.scoreCenter };
+        var colEl = document.getElementById('pe-cfg-col-eau_froide-' + k);
+        clsData3[k].color = colEl ? colEl.value : (def3.color || '#64748b');
+      });
+      var refData3 = {};
+      document.querySelectorAll('.pe-cfg-ref-cb').forEach(function(cb) {
+        if (!refData3[cb.dataset.type]) refData3[cb.dataset.type] = [];
+        if (cb.checked) refData3[cb.dataset.type].push(cb.dataset.id);
+      });
+      var objData3 = {};
+      OBJ_TYPES2.forEach(function(ot) {
+        var tEl = document.getElementById('pe-cfg-obj-' + ot);
+        var tolEl = document.getElementById('pe-cfg-tol-' + ot);
+        if (tEl && tEl.value !== '') objData3[ot] = { target: parseFloat(tEl.value), tolerance: (tolEl && tolEl.value !== '') ? parseFloat(tolEl.value) : 10 };
+      });
+      var alertData3 = { rules: window._peCfgRulesArr || [] };
+      var db4 = firebase.firestore();
+      var pc4 = db4.collection('cso_perf_config');
+      Promise.all([
+        pc4.doc('thresholds').set(thrData3, { merge: true }),
+        pc4.doc('classes').set(clsData3, { merge: true }),
+        pc4.doc('ref_meters').set(refData3, { merge: true }),
+        pc4.doc('objectifs').set(objData3, { merge: true }),
+        pc4.doc('alert_rules').set(alertData3),
+      ]).then(function() {
+        var d4 = document.getElementById('pe-cfg-drawer'); if (d4) d4.remove();
+        if (MX.toast) MX.toast('Configuration enregistrée');
+      }).catch(function(err) {
+        if (MX.toast) MX.toast('Erreur : ' + err.message, true);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Sauvegarder'; }
+      });
+    };
+    window._peCfgReset = function() {
+      if (!confirm('Réinitialiser les paramètres par défaut ?')) return;
+      ['eau_froide','eau_chaude','electricite','gaz'].forEach(function(type) {
+        var def3 = PERF_DEFAULTS.thresholds[type] || {};
+        ['excellent','bon','correct','moyen','mauvais'].forEach(function(k) {
+          var el = document.getElementById('pe-cfg-thr-' + type + '-' + k);
+          if (el) el.value = def3[k] || '';
+          var colEl = document.getElementById('pe-cfg-col-' + type + '-' + k);
+          if (colEl) colEl.value = (PERF_DEFAULTS.classes[k] || {}).color || '#64748b';
+        });
+      });
+      OBJ_TYPES2.forEach(function(ot) {
+        var el1 = document.getElementById('pe-cfg-obj-' + ot), el2 = document.getElementById('pe-cfg-tol-' + ot);
+        if (el1) el1.value = ''; if (el2) el2.value = 10;
+      });
+      window._peCfgRulesArr = [];
+      window._peCfgRenderRules();
+    };
+  }
 
   function _tAlertes() {
     const today = _today();
@@ -3409,6 +3814,6 @@
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
     _peDatePrev, _peDateNext, _editCliDate,
-    _peShowDay, _peAddJustif, _peSaveJustif,
+    _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig,
   };
 })();

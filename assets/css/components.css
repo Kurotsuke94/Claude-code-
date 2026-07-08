@@ -16562,3 +16562,84 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pe-alert-sel { font-size: 12px; padding: 5px 8px; }
 .pe-alert-val { font-size: 12px; padding: 5px 8px; width: 100px; }
 .pe-alert-add-btn { font-size: 12px; padding: 5px 12px; white-space: nowrap; }
+
+/* ── Performance V3 : Configuration Drawer ─────────────────────────────── */
+.pe-cfg-drawer { position: fixed; inset: 0; z-index: 1060; display: flex; pointer-events: auto; }
+.pe-cfg-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.4); backdrop-filter: blur(2px); }
+.pe-cfg-panel { position: relative; margin-left: auto; width: min(520px, 100vw); height: 100%; display: flex; flex-direction: column; background: var(--bg); box-shadow: -4px 0 28px rgba(0,0,0,.2); animation: pe-cfg-in .2s cubic-bezier(.22,1,.36,1); overflow: hidden; }
+@keyframes pe-cfg-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.pe-cfg-hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.pe-cfg-ttl { font-size: 15px; font-weight: 700; color: var(--text1); display: flex; align-items: center; gap: 8px; }
+.pe-cfg-body { flex: 1; overflow-y: auto; padding-bottom: 4px; }
+.pe-cfg-section { padding: 14px 18px; border-bottom: 1px solid var(--border, rgba(0,0,0,.07)); }
+.pe-cfg-section:last-child { border-bottom: none; }
+.pe-cfg-section-hd { font-size: 12px; font-weight: 700; color: var(--text1); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: .04em; }
+.pe-cfg-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+.pe-cfg-reset-btn { margin-right: auto; color: var(--text3) !important; }
+.cso-ibtn--primary { background: var(--blue,#3b82f6); color: #fff !important; border-color: var(--blue,#3b82f6) !important; font-weight: 600; }
+.cso-ibtn--primary:hover { opacity: .88; }
+
+/* ── Configurer: compteurs de référence ─────────────────────────────────── */
+.pe-cfg-type-block { margin-bottom: 12px; }
+.pe-cfg-type-block:last-child { margin-bottom: 0; }
+.pe-cfg-type-hd { font-size: 12px; font-weight: 700; color: var(--text1); margin-bottom: 6px; }
+.pe-cfg-meter-list { display: flex; flex-direction: column; gap: 5px; padding-left: 2px; }
+.pe-cfg-meter-item { font-size: 13px; color: var(--text1); display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.pe-cfg-meter-item input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+
+/* ── Configurer: clients ─────────────────────────────────────────────────── */
+.pe-cfg-cli-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pe-cfg-cli-item { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: 8px; background: var(--bg2,rgba(0,0,0,.03)); font-size: 12px; }
+.pe-cfg-cli-lbl { flex: 1; color: var(--text2); }
+.pe-cfg-cli-val { font-weight: 700; color: var(--text1); font-variant-numeric: tabular-nums; }
+
+/* ── Configurer: seuils ─────────────────────────────────────────────────── */
+.pe-cfg-thr-grid { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.pe-cfg-thr-row { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+.pe-cfg-thr-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.pe-cfg-thr-lbl { width: 66px; color: var(--text2); font-weight: 600; }
+.pe-cfg-thr-op { color: var(--text3); font-size: 11px; }
+.pe-cfg-thr-inp { width: 68px; }
+.pe-cfg-thr-unit { color: var(--text3); font-size: 11px; white-space: nowrap; flex: 1; }
+.pe-cfg-col-inp { width: 28px; height: 22px; padding: 1px 2px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; flex-shrink: 0; }
+.pe-cfg-obj-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border,rgba(0,0,0,.08)); }
+.pe-cfg-obj-lbl { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 5px; }
+.pe-cfg-obj-inp { width: 68px; }
+
+/* ── Performance V3 : KPI cards row ────────────────────────────────────── */
+.pe-kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-bottom: 4px; }
+@media (max-width: 520px) { .pe-kpi-row { grid-template-columns: 1fr; } }
+.pe-kpi-card { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.pe-kpi-lbl { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; }
+.pe-kpi-month { font-size: 12px; font-weight: 600; color: var(--text2); }
+.pe-kpi-main { font-size: 30px; font-weight: 800; color: var(--text1); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.pe-kpi-subs { display: flex; flex-direction: column; gap: 4px; }
+.pe-kpi-subs--conso { gap: 6px; }
+.pe-kpi-sub { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; }
+.pe-kpi-sub-lbl { color: var(--text3); }
+.pe-kpi-sub-val { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text1); }
+.pe-kpi-sub--lg .pe-kpi-sub-lbl { font-size: 12px; }
+.pe-kpi-sub--lg .pe-kpi-sub-val { font-size: 14px; }
+.pe-kpi-evol { display: inline-flex; align-items: center; gap: 3px; }
+
+/* ── Performance V3 : monthly evolution chart ───────────────────────────── */
+.pe-section--chart { }
+.pe-monthly-chart-wrap { overflow-x: auto; padding: 4px 0 2px; }
+.pe-monthly-chart { width: 100%; max-width: 560px; display: block; height: auto; }
+
+/* ── Performance V3 : monthly bilan table ───────────────────────────────── */
+.pe-section--monthly-tbl { }
+.pe-mt-wrap { overflow-x: auto; }
+.pe-mt-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 360px; }
+.pe-mt-table thead th { padding: 7px 10px; text-align: left; font-size: 11px; font-weight: 600; color: var(--text3); border-bottom: 1px solid var(--border,rgba(0,0,0,.1)); white-space: nowrap; }
+.pe-mt-table thead th:not(:first-child) { text-align: right; }
+.pe-mt-month { color: var(--text1); font-weight: 600; padding: 7px 10px; white-space: nowrap; }
+.pe-mt-val { text-align: right !important; font-variant-numeric: tabular-nums; padding: 7px 10px; color: var(--text2); }
+.pe-mt-table tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border,rgba(0,0,0,.05)); }
+.pe-mt-table tbody tr:hover td { background: var(--bg2,rgba(0,0,0,.02)); }
+
+/* ── Performance V3 : history quick nav ────────────────────────────────── */
+.pe-hist-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.pe-hist-nav-btn { font-size: 11px; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); background: none; color: var(--text2); cursor: pointer; transition: all .15s; white-space: nowrap; font-family: inherit; }
+.pe-hist-nav-btn:hover { border-color: var(--blue,#3b82f6); color: var(--blue,#3b82f6); }
+.pe-hist-nav-btn--active { background: var(--blue,#3b82f6) !important; color: #fff !important; border-color: var(--blue,#3b82f6) !important; font-weight: 700; }
