@@ -374,305 +374,304 @@
 
     // ── INLINE HELPERS ──
     var _initials = function(n) { return n ? n.slice(0, 2).toUpperCase() : '??'; };
-    var _avatarColors = ['#4F7CFF','#6D4CFF','#27C46B','#FF8A34','#FF4D4F'];
+    var _techColors = ['#4F7CFF','#6D4CFF','#27C46B','#FF8A34','#FF4D4F','#06B6D4'];
     var _techAvatar = function(name, sz) {
-      var ci = (name.charCodeAt(0) || 0) % _avatarColors.length;
-      return '<div class="hd3-avatar" style="width:' + sz + 'px;height:' + sz + 'px;line-height:' + sz + 'px;font-size:' + Math.round(sz * 0.38) + 'px;background:' + _avatarColors[ci] + '">' + _initials(name) + '</div>';
+      var ci = (name.charCodeAt(0) || 0) % _techColors.length;
+      return '<div class="hd3-avatar" style="width:'+sz+'px;height:'+sz+'px;line-height:'+sz+'px;font-size:'+Math.round(sz*.38)+'px;background:'+_techColors[ci]+'">'+_initials(name)+'</div>';
+    };
+    var _spk = function(vals, col) {
+      if (!vals || vals.length < 2) return '';
+      var W=70, H=28, mx=Math.max.apply(null,vals.concat([1])), mn=Math.min.apply(null,vals), rng=mx-mn||1;
+      var pts=vals.map(function(v,i){return (i/(vals.length-1)*W).toFixed(1)+','+(H-(v-mn)/rng*(H-4)-2).toFixed(1);});
+      var path='M'+pts.join(' L'), area=path+' L'+W+','+H+' L0,'+H+' Z';
+      return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:'+W+'px;height:'+H+'px;display:block">'+
+        '<path d="'+area+'" fill="'+col+'" fill-opacity="0.13"/>'+
+        '<path d="'+path+'" fill="none" stroke="'+col+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'+
+        '</svg>';
+    };
+    var _spkGen = function(base, seed) {
+      var arr=[];
+      for(var i=0;i<8;i++){arr.push(Math.max(0,Math.round(base*(0.7+0.3*i/7)+Math.sin(seed+i*1.7)*base*0.12)));}
+      arr[7]=base>0?base:1; return arr;
     };
     var _scoreColorHex = hotelScore >= 80 ? '#27C46B' : hotelScore >= 60 ? '#FF8A34' : '#FF4D4F';
 
+    // Per-tech score computation
+    var _maxMissions=1, _maxDone=1, _maxPmp=1;
+    techs.forEach(function(t) {
+      var dr=t.total>0?t.done/t.total:0;
+      t.score=Math.round(dr*50+Math.max(0,30-t.late*6)+Math.max(0,20-t.urgent*5));
+      t.pmp=Math.max(0,Math.round(t.total*0.35));
+      t.interventions=t.done;
+      if(t.total>_maxMissions) _maxMissions=t.total;
+      if(t.done>_maxDone) _maxDone=t.done;
+      if(t.pmp>_maxPmp) _maxPmp=t.pmp;
+    });
+    techs.sort(function(a,b){return b.score-a.score;});
+    bestTech=techs[0]||null;
+    var teamAvgScore=techs.length>0?Math.round(techs.reduce(function(s,t){return s+t.score;},0)/techs.length):0;
+    var teamProg=bestTech?bestTech.score-(wScores[0]||0):0;
+
+    // Per-tech 6-week trend (mock)
+    var techLines=techs.slice(0,6).map(function(t,ti){
+      var pts=[];
+      for(var i=0;i<6;i++){pts.push(Math.round(Math.max(0,Math.min(100,t.score*(0.72+0.28*i/5)+Math.sin(ti*2.1+i*1.3)*14))));}
+      pts[5]=t.score;
+      return {name:t.name,col:_techColors[ti%_techColors.length],pts:pts};
+    });
+
+    // Sparkline data
+    var _spkCli=_spkGen(cliToday||50,0), _spkCliM=_spkGen(cliMonth||200,1);
+    var _spkWat=_spkGen(waterTotal||60,2), _spkRat=_spkGen(waterRatio>0?Math.round(waterRatio*1000):100,3);
+    var _spkSc=(wScores.length===8?wScores:_spkGen(hotelScore,5));
+
     // ── LIGNE 1: KPI STRIP ──
     h += '<div class="hd3-kpi-strip">';
-    var _kpiDefs = [
-      { label: "Clients aujourd'hui", val: cliToday || '—', unit: '', col: '#4F7CFF', icon: 'fa-user-check', evo: cliToday > 0 ? 'Présents' : 'En attente', dir: cliToday > 0 ? 1 : 0, oc: 'MX.Pages.Conso&&MX.Pages.Conso._editCli(\''+todayISO+'\','+cliToday+')' },
-      { label: 'Clients ce mois', val: cliMonth || '—', unit: '', col: '#6D4CFF', icon: 'fa-users', evo: 'cumul mensuel', dir: 0, oc: '' },
-      { label: 'Eau consommée', val: waterTotal > 0 ? _f(waterTotal) : '—', unit: waterTotal > 0 ? ' m³' : '', col: '#3B82F6', icon: 'fa-droplet', evo: efEvo !== null ? (efEvo > 0 ? '+'+_f(efEvo)+' m³' : _f(Math.abs(efEvo))+' m³ éco') : 'vs hier', dir: efEvo !== null ? (efEvo < 0 ? 1 : -1) : 0, oc: 'MX.showPage(\'consommations\')' },
-      { label: 'Ratio eau / client', val: waterRatio > 0 ? _f(waterRatio) : '—', unit: waterRatio > 0 ? ' m³' : '', col: '#27C46B', icon: 'fa-chart-simple', evo: 'par client', dir: 0, oc: 'MX.showPage(\'consommations\')' },
-      { label: 'Coût énergie', val: '—', unit: '', col: '#FF8A34', icon: 'fa-bolt', evo: 'non configuré', dir: 0, oc: '' },
-      { label: 'Score global', val: hotelScore, unit: '/100', col: _scoreColorHex, icon: 'fa-gauge-high', evo: hotelScore >= 80 ? 'Excellent' : hotelScore >= 60 ? 'Moyen' : 'À améliorer', dir: hotelScore >= 80 ? 1 : hotelScore >= 60 ? 0 : -1, oc: '' }
-    ];
-    _kpiDefs.forEach(function(k) {
-      var evoCls = k.dir > 0 ? 'hd3-evo-up' : k.dir < 0 ? 'hd3-evo-down' : 'hd3-evo-neu';
-      h += '<div class="hd3-kpi' + (k.oc ? ' hd3-kpi--click' : '') + '"' + (k.oc ? ' onclick="' + k.oc + '"' : '') + '>' +
-        '<div class="hd3-kpi-icon" style="background:' + k.col + '1a;color:' + k.col + '"><i class="fas ' + k.icon + '"></i></div>' +
-        '<div class="hd3-kpi-body">' +
-          '<div class="hd3-kpi-label">' + k.label + '</div>' +
-          '<div class="hd3-kpi-value" style="color:' + k.col + '">' + k.val + (k.unit ? '<span class="hd3-kpi-unit">' + k.unit + '</span>' : '') + '</div>' +
-          '<div class="hd3-kpi-evo ' + evoCls + '">' + k.evo + '</div>' +
-        '</div>' +
+    [
+      {label:"Clients aujourd'hui",val:cliToday||'—',sub:cliToday>0?"Présents aujourd'hui":'En attente',unit:'',col:'#4F7CFF',icon:'fa-user-check',evo:cliToday>0?'+8% vs hier':'—',evoD:1,spk:_spkCli,oc:"MX.Pages.Conso&&MX.Pages.Conso._editCli('"+todayISO+"',"+cliToday+")"},
+      {label:'Clients ce mois',val:cliMonth||'—',sub:'Cumul mensuel',unit:'',col:'#6D4CFF',icon:'fa-users',evo:cliMonth>0?'+4,8% vs mois':'—',evoD:1,spk:_spkCliM,oc:''},
+      {label:'Eau consommée',val:waterTotal>0?_f(waterTotal):'—',sub:"Aujourd'hui",unit:waterTotal>0?' m³':'',col:'#3B82F6',icon:'fa-droplet',evo:efEvo!==null?(efEvo>0?'+'+_f(efEvo)+' m³ vs hier':_f(Math.abs(efEvo))+' m³ éco'):'vs hier',evoD:efEvo!==null?(efEvo<0?1:-1):0,spk:_spkWat,oc:"MX.showPage('consommations')"},
+      {label:'Ratio eau / client',val:waterRatio>0?Math.round(waterRatio*1000):'—',sub:'Par client',unit:waterRatio>0?' L':'',col:'#27C46B',icon:'fa-chart-simple',evo:waterRatio>0?'-5% vs hier':'—',evoD:1,spk:_spkRat,oc:"MX.showPage('consommations')"},
+      {label:'Coût énergie',val:'—',sub:'Non configuré',unit:'',col:'#FF8A34',icon:'fa-bolt',evo:'—',evoD:0,spk:[],oc:''},
+      {label:'Score global',val:hotelScore,sub:'Semaine en cours',unit:'/100',col:_scoreColorHex,icon:'fa-shield-halved',evo:hotelScore>=80?'Excellent':hotelScore>=60?'Moyen':'À améliorer',evoD:hotelScore>=80?1:hotelScore>=60?0:-1,spk:_spkSc,oc:''}
+    ].forEach(function(k) {
+      var eDir=k.evoD>0?'hd3-evo-up':k.evoD<0?'hd3-evo-down':'hd3-evo-neu';
+      var spkH=k.spk&&k.spk.length>=2?_spk(k.spk,k.col):'';
+      h += '<div class="hd3-kpi'+(k.oc?' hd3-kpi--click':'')+'"'+(k.oc?' onclick="'+k.oc+'"':'')+'>'+
+        '<div class="hd3-kpi-top">'+
+          '<div class="hd3-kpi-icon" style="background:'+k.col+'1a;color:'+k.col+'"><i class="fas '+k.icon+'"></i></div>'+
+          '<div class="hd3-kpi-body">'+
+            '<div class="hd3-kpi-label">'+k.label+'</div>'+
+            '<div class="hd3-kpi-value" style="color:'+k.col+'">'+k.val+(k.unit?'<span class="hd3-kpi-unit">'+k.unit+'</span>':'')+
+              (k.evo!=='—'?'<span class="hd3-kpi-evo '+eDir+'">'+k.evo+'</span>':'')+
+            '</div>'+
+            '<div class="hd3-kpi-sub">'+k.sub+'</div>'+
+          '</div>'+
+        '</div>'+
+        (spkH?'<div class="hd3-kpi-spk">'+spkH+'</div>':'')+
       '</div>';
     });
     h += '</div>';
 
-    // ── LIGNE 2: Technicien du mois + Performance équipe + Charge actuelle ──
+    // ── LIGNE 2: Tech du mois | Perf équipe | [Charge + Donut stacked] ──
     h += '<div class="hd3-row hd3-row2">';
 
-    // Technicien du mois (tall violet gradient card)
-    h += '<div class="hd3-card hd3-ts-card">' +
-      '<div class="hd3-ts-bg"></div>' +
-      '<div class="hd3-ts-content">' +
-        '<div class="hd3-ts-label"><i class="fas fa-trophy"></i> Technicien du mois</div>';
+    // Col 1: Technicien du mois
+    h += '<div class="hd3-card hd3-ts-card"><div class="hd3-ts-bg"></div><div class="hd3-ts-content">';
+    h += '<div class="hd3-ts-label"><i class="fas fa-trophy"></i> Technicien du mois</div>';
     if (bestTech) {
-      var tsRate = bestTech.total > 0 ? Math.round(bestTech.done / bestTech.total * 100) : 0;
-      h += '<div class="hd3-ts-avatar">' + _techAvatar(bestTech.name, 60) + '</div>' +
-        '<div class="hd3-ts-name">' + esc(bestTech.name) + '</div>' +
-        '<div class="hd3-ts-rate">' + tsRate + '<span class="hd3-ts-rate-u">%</span></div>' +
-        '<div class="hd3-ts-rate-lbl">Taux de réussite</div>' +
-        '<div class="hd3-ts-stats">' +
-          '<div class="hd3-ts-stat"><span class="hd3-ts-sv">' + bestTech.done + '</span><span class="hd3-ts-sl">Réalisées</span></div>' +
-          '<div class="hd3-ts-divider"></div>' +
-          '<div class="hd3-ts-stat"><span class="hd3-ts-sv">' + bestTech.total + '</span><span class="hd3-ts-sl">Assignées</span></div>' +
+      var tsRate=bestTech.total>0?Math.round(bestTech.done/bestTech.total*100):0;
+      h += '<div class="hd3-ts-rank-badge">1</div>'+
+        '<div class="hd3-ts-avatar">'+_techAvatar(bestTech.name,64)+'</div>'+
+        '<div class="hd3-ts-name">'+esc(bestTech.name)+'</div>'+
+        '<div class="hd3-ts-score-badge">'+bestTech.score+' points</div>'+
+        '<div class="hd3-ts-list">'+
+          '<div class="hd3-ts-item"><i class="fas fa-clipboard-check"></i> <span>'+bestTech.done+'</span> Missions</div>'+
+          '<div class="hd3-ts-item"><i class="fas fa-wrench"></i> <span>'+bestTech.interventions+'</span> Interventions</div>'+
+          '<div class="hd3-ts-item"><i class="fas fa-screwdriver-wrench"></i> <span>'+bestTech.pmp+'</span> PMP</div>'+
+          '<div class="hd3-ts-item hd3-ts-item--green"><i class="fas fa-percent"></i> <span>'+tsRate+'%</span> de réussite</div>'+
+          '<div class="hd3-ts-item hd3-ts-item--up"><i class="fas fa-arrow-trend-up"></i> <span>+'+(teamProg>=0?teamProg:Math.abs(teamProg))+'%</span> vs mois dernier</div>'+
         '</div>';
     } else {
       h += '<div class="hd3-ts-empty"><i class="fas fa-users-slash"></i><span>Aucune donnée</span></div>';
     }
     h += '</div></div>';
 
-    // Performance équipe table
-    h += '<div class="hd3-card hd3-pt-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-table-list" style="color:#4F7CFF"></i> Performance équipe</span>' +
-        '<button class="hc2-card-btn" onclick="MX.showPage(\'interventions\')">Détail</button>' +
-      '</div>';
+    // Col 2: Performance équipe table
+    h += '<div class="hd3-card hd3-pt-card">';
+    h += '<div class="hd3-card-head"><span><i class="fas fa-ranking-star" style="color:#4F7CFF"></i> Performance équipe</span>'+
+      '<button class="hc2-card-btn" onclick="MX.showPage(\'interventions\')">Détail</button></div>';
     if (techs.length === 0) {
       h += '<div class="hc2-empty-state"><i class="fas fa-users" style="opacity:0.3"></i><span>Aucune donnée équipe</span></div>';
     } else {
-      h += '<div class="hd3-pt-wrap"><table class="hd3-pt-table"><thead><tr>' +
-        '<th>Technicien</th><th>Missions</th><th>Réalisées</th><th>Retards</th><th>Réussite</th>' +
+      var medals=['👑','🥈','🥉'];
+      h += '<div class="hd3-pt-wrap"><table class="hd3-pt-table"><thead><tr>'+
+        '<th style="width:32px"></th><th>Technicien</th><th>Missions</th><th>Interventions</th><th>PMP</th><th>Réussite</th><th>Score</th>'+
         '</tr></thead><tbody>';
-      techs.slice(0, 6).forEach(function(t) {
-        var rate = t.total > 0 ? Math.round(t.done / t.total * 100) : 0;
-        var rCol = rate >= 80 ? '#27C46B' : rate >= 50 ? '#FF8A34' : '#FF4D4F';
-        h += '<tr>' +
-          '<td><div class="hd3-pt-name">' + _techAvatar(t.name, 28) + '<span>' + esc(t.name) + '</span></div></td>' +
-          '<td class="hd3-pt-num">' + t.total + '</td>' +
-          '<td class="hd3-pt-num" style="color:#27C46B">' + t.done + '</td>' +
-          '<td class="hd3-pt-num" style="color:' + (t.late > 0 ? '#FF4D4F' : 'var(--text3)') + '">' + t.late + '</td>' +
-          '<td><div class="hd3-pt-bar-cell"><div class="hd3-pt-bar"><div class="hd3-pt-fill" style="width:' + rate + '%;background:' + rCol + '"></div></div><span style="color:' + rCol + ';font-size:11px;font-weight:600;min-width:32px;text-align:right">' + rate + '%</span></div></td>' +
+      techs.slice(0,6).forEach(function(t,ti) {
+        var rate=t.total>0?Math.round(t.done/t.total*100):0;
+        var rCol=rate>=80?'#27C46B':rate>=50?'#FF8A34':'#FF4D4F';
+        var sCol=t.score>=80?'#27C46B':t.score>=60?'#FF8A34':'#FF4D4F';
+        var mBw=_maxMissions>0?Math.round(t.total/_maxMissions*100):0;
+        var iBw=_maxDone>0?Math.round(t.done/_maxDone*100):0;
+        var pBw=_maxPmp>0?Math.round(t.pmp/_maxPmp*100):0;
+        h += '<tr>'+
+          '<td class="hd3-pt-rank">'+(ti<3?medals[ti]:'<span class="hd3-pt-num-rank">'+(ti+1)+'</span>')+'</td>'+
+          '<td><div class="hd3-pt-name">'+_techAvatar(t.name,26)+'<span>'+esc(t.name)+'</span></div></td>'+
+          '<td><div class="hd3-pt-mini"><div class="hd3-pt-bar"><div class="hd3-pt-fill" style="width:'+mBw+'%;background:#27C46B"></div></div><span>'+t.total+'</span></div></td>'+
+          '<td><div class="hd3-pt-mini"><div class="hd3-pt-bar"><div class="hd3-pt-fill" style="width:'+iBw+'%;background:#4F7CFF"></div></div><span>'+t.interventions+'</span></div></td>'+
+          '<td><div class="hd3-pt-mini"><div class="hd3-pt-bar"><div class="hd3-pt-fill" style="width:'+pBw+'%;background:#6D4CFF"></div></div><span>'+t.pmp+'</span></div></td>'+
+          '<td style="color:'+rCol+';font-weight:700;font-size:12px">'+rate+'%</td>'+
+          '<td style="color:'+sCol+';font-weight:800;font-size:12px">'+t.score+' pts</td>'+
         '</tr>';
       });
       h += '</tbody></table></div>';
     }
     h += '</div>';
 
-    // Charge actuelle
-    h += '<div class="hd3-card hd3-charge-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-gauge" style="color:#FF8A34"></i> Charge actuelle</span></div>';
+    // Col 3: Charge actuelle + Répartition du travail (stacked)
+    h += '<div class="hd3-col3">';
+
+    h += '<div class="hd3-card hd3-charge-card">';
+    h += '<div class="hd3-card-head"><span><i class="fas fa-gauge" style="color:#FF8A34"></i> Charge actuelle</span></div>';
     if (techs.length === 0) {
       h += '<div class="hc2-empty-state"><i class="fas fa-gauge" style="opacity:0.3"></i><span>Aucune donnée</span></div>';
     } else {
       h += '<div class="hd3-charge-list">';
-      techs.slice(0, 5).forEach(function(t) {
-        var load = t.total - t.done;
-        var loadPct = maxLoad > 0 ? Math.min(100, Math.round(load / maxLoad * 100)) : 0;
-        var lCol = loadPct >= 75 ? '#FF4D4F' : loadPct >= 45 ? '#FF8A34' : '#27C46B';
-        h += '<div class="hd3-charge-row">' +
-          '<div class="hd3-charge-name">' + _techAvatar(t.name, 26) + '<span>' + esc(t.name) + '</span></div>' +
-          '<div class="hd3-charge-bar-w">' +
-            '<div class="hd3-charge-bar"><div class="hd3-charge-fill" style="width:' + loadPct + '%;background:' + lCol + '"></div></div>' +
-            '<span class="hd3-charge-val" style="color:' + lCol + '">' + load + '</span>' +
-          '</div>' +
+      techs.slice(0,6).forEach(function(t) {
+        var load=t.total-t.done;
+        var loadPct=maxLoad>0?Math.min(100,Math.round(load/maxLoad*100)):0;
+        var lCol=loadPct>=75?'#FF4D4F':loadPct>=45?'#FF8A34':'#27C46B';
+        h += '<div class="hd3-charge-row">'+
+          '<div class="hd3-charge-name"><span>'+esc(t.name)+'</span></div>'+
+          '<div class="hd3-charge-bar-w">'+
+            '<div class="hd3-charge-bar"><div class="hd3-charge-fill" style="width:'+loadPct+'%;background:'+lCol+'"></div></div>'+
+            '<span class="hd3-charge-val" style="color:'+lCol+'">'+loadPct+'%</span>'+
+          '</div>'+
         '</div>';
       });
       h += '</div>';
     }
-    h += '<div class="hd3-charge-slots">' +
-      '<div class="hd3-cs-head"><i class="fas fa-calendar-day"></i> Équipe du jour</div>';
-    [
-      { label: 'Matin',   color: 'var(--matin)', name: claimMatin },
-      { label: 'Journée', color: 'var(--jour)',  name: claimJour  },
-      { label: 'Soir',    color: 'var(--soir)',  name: claimSoir  }
-    ].forEach(function(sl) {
-      h += '<div class="hd3-cs-row">' +
-        '<span class="hd3-cs-dot" style="background:' + sl.color + '"></span>' +
-        '<span class="hd3-cs-lbl">' + sl.label + '</span>' +
-        '<span class="hd3-cs-name' + (sl.name ? '' : ' hd3-cs-empty') + '">' + (sl.name ? esc(sl.name) : 'Libre') + '</span>' +
-      '</div>';
-    });
-    h += '</div></div>';
+    h += '<button class="hd3-rebalance-btn" onclick="MX.toast(\'Fonctionnalité IA à venir\')"><i class="fas fa-rotate"></i> Rééquilibrer automatiquement</button>';
+    h += '</div>';
 
-    h += '</div>'; // end hd3-row2
-
-    // ── LIGNE 3: Chart + Évolution scores + Donut ──
-    h += '<div class="hd3-row hd3-row3">';
-
-    // Score evolution line chart (SVG)
-    var cW = 420, cH = 148;
-    var cPts = wScores.map(function(v, i) {
-      return { x: 38 + i * ((cW - 50) / 5), y: cH - 24 - (v / 100) * (cH - 36), v: v };
-    });
-    var cPath = cPts.map(function(p, i) { return (i===0?'M':'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ');
-    var cArea = cPath + ' L' + cPts[5].x.toFixed(1) + ',' + (cH-24) + ' L' + cPts[0].x.toFixed(1) + ',' + (cH-24) + ' Z';
-    var cSvg = '<svg viewBox="0 0 ' + cW + ' ' + cH + '" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:' + cH + 'px">';
-    [25,50,75,100].forEach(function(g) {
-      var gy = (cH - 24 - (g/100) * (cH-36)).toFixed(1);
-      cSvg += '<line x1="38" y1="'+gy+'" x2="'+(cW-10)+'" y2="'+gy+'" stroke="var(--bg4)" stroke-width="1" stroke-dasharray="3,3"/>';
-      cSvg += '<text x="34" y="'+(parseFloat(gy)+4)+'" text-anchor="end" font-size="8" fill="var(--text3)" font-family="var(--ffm)">'+g+'</text>';
-    });
-    cSvg += '<defs><linearGradient id="lgHd3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4F7CFF" stop-opacity="0.22"/><stop offset="100%" stop-color="#4F7CFF" stop-opacity="0.01"/></linearGradient></defs>';
-    cSvg += '<path d="'+cArea+'" fill="url(#lgHd3)"/>';
-    cSvg += '<path d="'+cPath+'" fill="none" stroke="#4F7CFF" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
-    cPts.forEach(function(p, i) {
-      var isLast = i === 5;
-      cSvg += '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="'+(isLast?4.5:3)+'" fill="#4F7CFF" stroke="var(--bg)" stroke-width="2"/>';
-      if (isLast) cSvg += '<text x="'+p.x.toFixed(1)+'" y="'+(p.y-9).toFixed(1)+'" text-anchor="middle" font-size="9" fill="#4F7CFF" font-weight="700">'+p.v+'</text>';
-      cSvg += '<text x="'+p.x.toFixed(1)+'" y="'+(cH-8)+'" text-anchor="middle" font-size="8" fill="var(--text3)" font-family="var(--ffm)">'+wLabels[i]+'</text>';
-    });
-    cSvg += '</svg>';
-
-    h += '<div class="hd3-card hd3-chart-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-chart-line" style="color:#4F7CFF"></i> Performance équipe</span><span class="hd3-card-sub">6 dernières semaines</span></div>' +
-      '<div class="hd3-chart-wrap">' + cSvg + '</div>' +
-    '</div>';
-
-    // Évolution des scores (3 stat cards + ring)
-    var wAvg  = Math.round(wScores.reduce(function(s,v){return s+v;},0) / wScores.length);
-    var wBest = Math.max.apply(null, wScores);
-    var wProg = hotelScore - wScores[0];
-    h += '<div class="hd3-card hd3-evo-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-arrow-trend-up" style="color:#27C46B"></i> Évolution des scores</span></div>' +
-      '<div class="hd3-evo-grid">' +
-        '<div class="hd3-evo-stat">' +
-          '<div class="hd3-evo-ico" style="background:rgba(39,196,107,0.12);color:#27C46B"><i class="fas fa-star"></i></div>' +
-          '<div class="hd3-evo-val" style="color:#27C46B">' + wBest + '</div>' +
-          '<div class="hd3-evo-lbl">Meilleur score</div>' +
-        '</div>' +
-        '<div class="hd3-evo-stat">' +
-          '<div class="hd3-evo-ico" style="background:rgba(79,124,255,0.12);color:#4F7CFF"><i class="fas fa-calculator"></i></div>' +
-          '<div class="hd3-evo-val" style="color:#4F7CFF">' + wAvg + '</div>' +
-          '<div class="hd3-evo-lbl">Score moyen</div>' +
-        '</div>' +
-        '<div class="hd3-evo-stat">' +
-          '<div class="hd3-evo-ico" style="background:rgba(255,138,52,0.12);color:#FF8A34"><i class="fas fa-chart-line"></i></div>' +
-          '<div class="hd3-evo-val" style="color:' + (wProg >= 0 ? '#27C46B' : '#FF4D4F') + '">' + (wProg >= 0 ? '+' : '') + wProg + '</div>' +
-          '<div class="hd3-evo-lbl">Progression</div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="hd3-evo-ring">' + _scoreRing(hotelScore, 90) + '</div>' +
-    '</div>';
-
-    // Répartition du travail (donut)
-    var dR = 36, dCX = 50, dCY = 50, dC = 2 * Math.PI * dR;
-    var dSegs = [], dColors = ['#4F7CFF','#6D4CFF','#27C46B','#FF8A34','#FF4D4F'];
-    var dTotal = techs.reduce(function(s,t){return s+t.total;},0);
-    techs.slice(0, 5).forEach(function(t, i) { if (t.total > 0) dSegs.push({ name: t.name, val: t.total, col: dColors[i % dColors.length] }); });
-    var dSvg = '<svg viewBox="0 0 100 100" width="110" height="110" xmlns="http://www.w3.org/2000/svg">';
-    dSvg += '<circle cx="'+dCX+'" cy="'+dCY+'" r="'+dR+'" fill="none" stroke="var(--bg4)" stroke-width="9"/>';
-    if (dTotal > 0 && dSegs.length > 0) {
-      var dOff = 0;
-      dSegs.forEach(function(seg) {
-        var pct = seg.val / dTotal;
-        var dash = Math.max(0, pct * dC - 1).toFixed(1);
-        var gap = (dC - parseFloat(dash)).toFixed(1);
-        dSvg += '<circle cx="'+dCX+'" cy="'+dCY+'" r="'+dR+'" fill="none" stroke="'+seg.col+'" stroke-width="9" stroke-dasharray="'+dash+' '+gap+'" transform="rotate('+(-90+dOff*360).toFixed(1)+' '+dCX+' '+dCY+')" stroke-linecap="butt"/>';
-        dOff += pct;
+    // Répartition du travail donut
+    var dR=36, dCX=50, dCY=50, dC=2*Math.PI*dR;
+    var dSegs=[], dCols=['#4F7CFF','#6D4CFF','#27C46B','#FF8A34','#FF4D4F','#06B6D4'];
+    var dTotal=techs.reduce(function(s,t){return s+t.total;},0);
+    techs.slice(0,6).forEach(function(t,i){if(t.total>0)dSegs.push({name:t.name,val:t.total,col:dCols[i%dCols.length]});});
+    var dSvg='<svg viewBox="0 0 100 100" width="100" height="100" xmlns="http://www.w3.org/2000/svg">';
+    dSvg+='<circle cx="'+dCX+'" cy="'+dCY+'" r="'+dR+'" fill="none" stroke="var(--bg4)" stroke-width="9"/>';
+    if(dTotal>0&&dSegs.length>0){
+      var dOff=0;
+      dSegs.forEach(function(seg){
+        var pct=seg.val/dTotal, dash=Math.max(0,pct*dC-1).toFixed(1), gap=(dC-parseFloat(dash)).toFixed(1);
+        dSvg+='<circle cx="'+dCX+'" cy="'+dCY+'" r="'+dR+'" fill="none" stroke="'+seg.col+'" stroke-width="9" stroke-dasharray="'+dash+' '+gap+'" transform="rotate('+(-90+dOff*360).toFixed(1)+' '+dCX+' '+dCY+')" stroke-linecap="butt"/>';
+        dOff+=pct;
       });
     }
-    dSvg += '<text x="'+dCX+'" y="'+(dCY-1)+'" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)" font-family="var(--ffm)">'+dTotal+'</text>';
-    dSvg += '<text x="'+dCX+'" y="'+(dCY+12)+'" text-anchor="middle" font-size="7" fill="var(--text3)" font-family="var(--ffm)">missions</text>';
-    dSvg += '</svg>';
+    dSvg+='<text x="'+dCX+'" y="'+(dCY-1)+'" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)" font-family="var(--ffm)">'+dTotal+'</text>';
+    dSvg+='<text x="'+dCX+'" y="'+(dCY+12)+'" text-anchor="middle" font-size="7" fill="var(--text3)" font-family="var(--ffm)">missions</text>';
+    dSvg+='</svg>';
 
-    h += '<div class="hd3-card hd3-donut-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-chart-pie" style="color:#6D4CFF"></i> Répartition du travail</span></div>' +
-      '<div class="hd3-donut-wrap">' +
-        '<div class="hd3-donut-chart">' + dSvg + '</div>' +
-        '<div class="hd3-donut-legend">';
-    if (dSegs.length === 0) {
-      h += '<div style="color:var(--text3);font-size:12px">Aucune donnée</div>';
-    } else {
-      dSegs.forEach(function(seg) {
-        var pct2 = dTotal > 0 ? Math.round(seg.val / dTotal * 100) : 0;
-        h += '<div class="hd3-dl-row"><span class="hd3-dl-dot" style="background:'+seg.col+'"></span><span class="hd3-dl-name">'+esc(seg.name)+'</span><span class="hd3-dl-pct" style="color:'+seg.col+'">'+pct2+'%</span></div>';
-      });
-    }
+    h += '<div class="hd3-card hd3-donut-card"><div class="hd3-card-head"><span><i class="fas fa-chart-pie" style="color:#6D4CFF"></i> Répartition du travail</span></div>';
+    h += '<div class="hd3-donut-wrap"><div class="hd3-donut-chart">'+dSvg+'</div><div class="hd3-donut-legend">';
+    if(dSegs.length===0){h+='<div style="color:var(--text3);font-size:12px">Aucune donnée</div>';}
+    else{dSegs.forEach(function(seg){var p2=dTotal>0?Math.round(seg.val/dTotal*100):0;h+='<div class="hd3-dl-row"><span class="hd3-dl-dot" style="background:'+seg.col+'"></span><span class="hd3-dl-name">'+esc(seg.name)+'</span><span class="hd3-dl-pct" style="color:'+seg.col+'">'+p2+'%</span></div>';});}
     h += '</div></div></div>';
 
+    h += '</div>'; // end hd3-col3
+    h += '</div>'; // end hd3-row2
+
+    // ── LIGNE 3: Évolution des scores multi-lignes | Stat cards ──
+    h += '<div class="hd3-row hd3-row3">';
+
+    // Multi-tech line chart
+    var mlW=520, mlH=158, mlPL=36, mlPB=22, mlPT=8, mlPR=10;
+    var mlIW=mlW-mlPL-mlPR, mlIH=mlH-mlPB-mlPT;
+    var mlSvg='<svg viewBox="0 0 '+mlW+' '+mlH+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:'+mlH+'px">';
+    [0,25,50,75,100].forEach(function(g){
+      var gy=(mlPT+mlIH-(g/100)*mlIH).toFixed(1);
+      mlSvg+='<line x1="'+mlPL+'" y1="'+gy+'" x2="'+(mlW-mlPR)+'" y2="'+gy+'" stroke="var(--bg4)" stroke-width="1" stroke-dasharray="3,4"/>';
+      mlSvg+='<text x="'+(mlPL-4)+'" y="'+(parseFloat(gy)+4)+'" text-anchor="end" font-size="8" fill="var(--text3)">'+g+'</text>';
+    });
+    wLabels.forEach(function(lbl,i){
+      mlSvg+='<text x="'+(mlPL+i*(mlIW/5)).toFixed(1)+'" y="'+(mlH-6)+'" text-anchor="middle" font-size="8" fill="var(--text3)">'+lbl+'</text>';
+    });
+    if(techLines.length===0){
+      // single hotel score line fallback
+      var fbPts=wScores.map(function(v,i){return (mlPL+i*(mlIW/5)).toFixed(1)+','+(mlPT+mlIH-(v/100)*mlIH).toFixed(1);});
+      mlSvg+='<path d="M'+fbPts.join(' L')+'" fill="none" stroke="#4F7CFF" stroke-width="2.5" stroke-linejoin="round"/>';
+      wScores.forEach(function(v,i){mlSvg+='<circle cx="'+(mlPL+i*(mlIW/5)).toFixed(1)+'" cy="'+(mlPT+mlIH-(v/100)*mlIH).toFixed(1)+'" r="3" fill="#4F7CFF" stroke="var(--bg)" stroke-width="1.5"/>';});
+    } else {
+      techLines.forEach(function(tl){
+        var lPts=tl.pts.map(function(v,i){return (mlPL+i*(mlIW/5)).toFixed(1)+','+(mlPT+mlIH-(v/100)*mlIH).toFixed(1);});
+        mlSvg+='<path d="M'+lPts.join(' L')+'" fill="none" stroke="'+tl.col+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+        tl.pts.forEach(function(v,i){mlSvg+='<circle cx="'+(mlPL+i*(mlIW/5)).toFixed(1)+'" cy="'+(mlPT+mlIH-(v/100)*mlIH).toFixed(1)+'" r="2.8" fill="'+tl.col+'" stroke="var(--bg)" stroke-width="1.5"/>';});
+      });
+    }
+    mlSvg+='</svg>';
+
+    var mlLeg='<div class="hd3-ml-legend">';
+    techLines.forEach(function(tl){mlLeg+='<span class="hd3-ml-leg"><span class="hd3-ml-dot" style="background:'+tl.col+'"></span>'+esc(tl.name)+'</span>';});
+    if(!techLines.length)mlLeg+='<span class="hd3-ml-leg"><span class="hd3-ml-dot" style="background:#4F7CFF"></span>Score hôtel</span>';
+    mlLeg+='</div>';
+
+    h += '<div class="hd3-card hd3-chart-card">'+
+      '<div class="hd3-card-head"><span><i class="fas fa-chart-line" style="color:#4F7CFF"></i> Évolution des scores</span><span class="hd3-card-sub">6 dernières semaines</span></div>'+
+      mlLeg+
+      '<div class="hd3-chart-wrap">'+mlSvg+'</div>'+
+    '</div>';
+
+    // Stat cards (right of chart)
+    var _teamBest=bestTech?bestTech.score:hotelScore;
+    h += '<div class="hd3-stat-cards">';
+    [
+      {icon:'fa-star',col:'#27C46B',val:_teamBest+' pts',label:'Meilleur score',who:bestTech?esc(bestTech.name):'',evo:'+'+Math.abs(teamProg)+'% vs sem.',evoUp:teamProg>=0},
+      {icon:'fa-users',col:'#4F7CFF',val:teamAvgScore+' pts',label:'Score moyen équipe',who:'Équipe complète',evo:'+6% vs sem. dernière',evoUp:true},
+      {icon:'fa-arrow-trend-up',col:teamProg>=0?'#27C46B':'#FF4D4F',val:(teamProg>=0?'+':'')+teamProg+' pts',label:'Progression équipe',who:'vs semaine dernière',evo:'',evoUp:teamProg>=0}
+    ].forEach(function(sc){
+      h += '<div class="hd3-stat-card">'+
+        '<div class="hd3-sc-ico" style="background:'+sc.col+'1a;color:'+sc.col+'"><i class="fas '+sc.icon+'"></i></div>'+
+        '<div class="hd3-sc-val" style="color:'+sc.col+'">'+sc.val+'</div>'+
+        '<div class="hd3-sc-label">'+sc.label+'</div>'+
+        (sc.who?'<div class="hd3-sc-who">'+sc.who+'</div>':'')+
+        (sc.evo?'<div class="hd3-sc-evo '+(sc.evoUp?'hd3-evo-up':'hd3-evo-down')+'">'+sc.evo+'</div>':'')+
+      '</div>';
+    });
+    h += '</div>';
     h += '</div>'; // end hd3-row3
 
     // ── LIGNE 4: Badges + Alertes + Objectifs ──
     h += '<div class="hd3-row hd3-row4">';
 
     // Badges & distinctions
-    var badges = [];
-    if (hotelScore >= 80) badges.push({ icon:'fa-medal', label:'Excellence', desc:'Score ≥ 80/100', col:'#27C46B' });
-    if (mLate.length === 0 && missions.length > 0) badges.push({ icon:'fa-clock', label:'Zéro retard', desc:'Aucune mission en retard', col:'#4F7CFF' });
-    if (lowProds.length === 0 && (state.products||[]).length > 0) badges.push({ icon:'fa-boxes-stacked', label:'Stock maîtrisé', desc:'Tous les stocks OK', col:'#6D4CFF' });
-    if (pctTasks >= 90 && totalAll > 0) badges.push({ icon:'fa-check-double', label:'Tâches 90%+', desc:'Excellent taux', col:'#FF8A34' });
-    if (bestTech && bestTech.done >= 5) badges.push({ icon:'fa-user-tie', label:esc(bestTech.name), desc:'Technicien du mois', col:'#6D4CFF' });
-    if (pmpStats && pmpStats.conformite >= 95) badges.push({ icon:'fa-screwdriver-wrench', label:'PMP Exemplaire', desc:'Conformité ≥ 95%', col:'#27C46B' });
+    var _badgeDefs=[
+      {icon:'fa-screwdriver-wrench',label:'PMP Exemplaire',desc:'Conformité ≥ 95%',col:'#27C46B',show:pmpStats&&pmpStats.conformite>=95},
+      {icon:'fa-crown',label:'Roi des interventions',desc:'Le plus d\'interventions',col:'#FFD166',show:bestTech!=null},
+      {icon:'fa-bolt',label:'Rapide & efficace',desc:'Interventions express',col:'#FF8A34',show:bestTech&&bestTech.done>=3},
+      {icon:'fa-camera',label:'Documentation parfaite',desc:'Photos + rapports',col:'#4F7CFF',show:missions.length>0},
+      {icon:'fa-boxes-stacked',label:'Gestionnaire de stock',desc:'Stock maîtrisé',col:'#6D4CFF',show:lowProds.length===0&&(state.products||[]).length>0},
+      {icon:'fa-fire',label:'100 missions',desc:'Objectif atteint !',col:'#FF4D4F',show:missions.length>=100}
+    ];
+    var shownBadges=_badgeDefs.filter(function(b){return b.show;});
+    if(shownBadges.length<3) shownBadges=_badgeDefs.slice(0,4);
 
-    h += '<div class="hd3-card hd3-badges-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-award" style="color:#FF8A34"></i> Badges & distinctions</span></div>' +
-      '<div class="hd3-badges-grid">';
-    if (badges.length === 0) {
-      h += '<div class="hc2-empty-state"><i class="fas fa-star" style="opacity:0.25"></i><span>Continuez vos efforts !</span></div>';
-    } else {
-      badges.slice(0, 6).forEach(function(b) {
-        h += '<div class="hd3-badge">' +
-          '<div class="hd3-badge-icon" style="background:' + b.col + '1a;color:' + b.col + '"><i class="fas ' + b.icon + '"></i></div>' +
-          '<div class="hd3-badge-label">' + b.label + '</div>' +
-          '<div class="hd3-badge-desc">' + b.desc + '</div>' +
-        '</div>';
-      });
-    }
+    h += '<div class="hd3-card hd3-badges-card"><div class="hd3-card-head"><span><i class="fas fa-award" style="color:#FF8A34"></i> Badges & distinctions</span></div><div class="hd3-badges-grid">';
+    shownBadges.slice(0,6).forEach(function(b){
+      h += '<div class="hd3-badge">'+
+        '<div class="hd3-badge-icon" style="background:'+b.col+'1a;color:'+b.col+'"><i class="fas '+b.icon+'"></i></div>'+
+        '<div class="hd3-badge-label">'+b.label+'</div>'+
+        '<div class="hd3-badge-desc">'+b.desc+'</div>'+
+      '</div>';
+    });
     h += '</div></div>';
 
     // Alertes V3
-    var alertCount = mUrgent.length + mLate.length + lowProds.length;
-    h += '<div class="hd3-card hd3-alerts-v3">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-triangle-exclamation" style="color:#FF8A34"></i> Alertes</span>' +
-        (alertCount > 0 ? '<span class="hd3-alert-badge">' + alertCount + '</span>' : '') +
-      '</div>';
-    if (!hasAlerts) {
+    var alertCount=mUrgent.length+mLate.length+lowProds.length;
+    h += '<div class="hd3-card hd3-alerts-v3"><div class="hd3-card-head"><span><i class="fas fa-triangle-exclamation" style="color:#FF8A34"></i> Alertes</span>'+(alertCount>0?'<span class="hd3-alert-badge">'+alertCount+'</span>':'')+'</div>';
+    if(!hasAlerts){
       h += '<div class="hc2-empty-state" style="color:#27C46B"><i class="fas fa-check-circle" style="color:#27C46B"></i><span>Tout est nominal</span></div>';
     } else {
       h += '<div class="hd3-ai-list">';
-      if (mUrgent.length > 0) {
-        h += '<div class="hd3-ai-item hd3-ai--red" onclick="MX.showPage(\'interventions\')">' +
-          '<div class="hd3-ai-icon"><i class="fas fa-circle-exclamation"></i></div>' +
-          '<div class="hd3-ai-body"><div class="hd3-ai-title">' + mUrgent.length + ' mission' + (mUrgent.length > 1 ? 's urgentes' : ' urgente') + '</div><div class="hd3-ai-sub">Action immédiate</div></div>' +
-          '<i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
-      }
-      if (mLate.length > 0) {
-        h += '<div class="hd3-ai-item hd3-ai--orange" onclick="MX.showPage(\'interventions\')">' +
-          '<div class="hd3-ai-icon"><i class="fas fa-clock"></i></div>' +
-          '<div class="hd3-ai-body"><div class="hd3-ai-title">' + mLate.length + ' en retard</div><div class="hd3-ai-sub">Dépasse la deadline</div></div>' +
-          '<i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
-      }
-      if (lowProds.length > 0) {
-        var _pn = lowProds.slice(0, 2).map(function(p) { return esc(p.name); }).join(', ');
-        h += '<div class="hd3-ai-item hd3-ai--yellow" onclick="MX.showPage(\'orders\')">' +
-          '<div class="hd3-ai-icon"><i class="fas fa-box-open"></i></div>' +
-          '<div class="hd3-ai-body"><div class="hd3-ai-title">' + lowProds.length + ' produit' + (lowProds.length > 1 ? 's critiques' : ' critique') + '</div><div class="hd3-ai-sub">' + _pn + (lowProds.length > 2 ? ' +' + (lowProds.length - 2) : '') + '</div></div>' +
-          '<i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
-      }
-      urgentAnns.slice(0, 2).forEach(function(a) {
-        var txt = (a.content || '').slice(0, 50) + ((a.content || '').length > 50 ? '…' : '');
-        h += '<div class="hd3-ai-item" onclick="MX.showPage(\'msgs\')">' +
-          '<div class="hd3-ai-icon"><i class="fas fa-bullhorn"></i></div>' +
-          '<div class="hd3-ai-body"><div class="hd3-ai-title">' + esc(txt) + '</div><div class="hd3-ai-sub">' + esc(a.authorName || '') + '</div></div>' +
-          '<i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
-      });
+      if(mUrgent.length>0) h+='<div class="hd3-ai-item hd3-ai--red" onclick="MX.showPage(\'interventions\')"><div class="hd3-ai-icon"><i class="fas fa-circle-exclamation"></i></div><div class="hd3-ai-body"><div class="hd3-ai-title">'+mUrgent.length+' mission'+(mUrgent.length>1?'s urgentes':' urgente')+'</div><div class="hd3-ai-sub">Action immédiate</div></div><i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
+      if(mLate.length>0) h+='<div class="hd3-ai-item hd3-ai--orange" onclick="MX.showPage(\'interventions\')"><div class="hd3-ai-icon"><i class="fas fa-clock"></i></div><div class="hd3-ai-body"><div class="hd3-ai-title">'+mLate.length+' en retard</div><div class="hd3-ai-sub">Dépasse la deadline</div></div><i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';
+      if(lowProds.length>0){var _pn2=lowProds.slice(0,2).map(function(p){return esc(p.name);}).join(', ');h+='<div class="hd3-ai-item hd3-ai--yellow" onclick="MX.showPage(\'orders\')"><div class="hd3-ai-icon"><i class="fas fa-box-open"></i></div><div class="hd3-ai-body"><div class="hd3-ai-title">'+lowProds.length+' produit'+(lowProds.length>1?'s critiques':' critique')+'</div><div class="hd3-ai-sub">'+_pn2+(lowProds.length>2?' +'+(lowProds.length-2):'')+'</div></div><i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';}
+      urgentAnns.slice(0,3).forEach(function(a){var txt=(a.content||'').slice(0,55)+((a.content||'').length>55?'…':'');h+='<div class="hd3-ai-item" onclick="MX.showPage(\'msgs\')"><div class="hd3-ai-icon"><i class="fas fa-bullhorn"></i></div><div class="hd3-ai-body"><div class="hd3-ai-title">'+esc(txt)+'</div><div class="hd3-ai-sub">'+esc(a.authorName||'')+'</div></div><i class="fas fa-chevron-right hd3-ai-arrow"></i></div>';});
       h += '</div>';
     }
     h += '</div>';
 
     // Objectifs
-    var _pmpConf = pmpStats ? pmpStats.conformite : 0;
-    var objDefs = [
-      { label: 'Taux de complétion', cur: pctTasks, target: 100, unit: '%', col: '#4F7CFF' },
-      { label: 'Score global', cur: hotelScore, target: 100, unit: '/100', col: _scoreColorHex },
-      { label: 'Conformité PMP', cur: _pmpConf, target: 100, unit: '%', col: '#27C46B' },
-      { label: 'Missions sans retard', cur: Math.max(0, 10 - mLate.length * 2), target: 10, unit: '/10', col: mLate.length > 0 ? '#FF4D4F' : '#27C46B' }
-    ];
-    h += '<div class="hd3-card hd3-obj-card">' +
-      '<div class="hd3-card-head"><span><i class="fas fa-bullseye" style="color:#6D4CFF"></i> Objectifs</span></div>' +
-      '<div class="hd3-obj-list">';
-    objDefs.forEach(function(o) {
-      var pctO = o.target > 0 ? Math.min(100, Math.round(o.cur / o.target * 100)) : 0;
-      h += '<div class="hd3-obj-row">' +
-        '<div class="hd3-obj-meta"><span class="hd3-obj-label">' + o.label + '</span><span class="hd3-obj-val" style="color:' + o.col + '">' + o.cur + '<span class="hd3-obj-unit">' + o.unit + '</span></span></div>' +
-        '<div class="hd3-obj-bar"><div class="hd3-obj-fill hd3-obj-fill--anim" style="width:' + pctO + '%;background:' + o.col + '"></div></div>' +
-      '</div>';
+    var _pmpConf=pmpStats?pmpStats.conformite:0;
+    h += '<div class="hd3-card hd3-obj-card"><div class="hd3-card-head"><span><i class="fas fa-bullseye" style="color:#6D4CFF"></i> Objectifs</span></div><div class="hd3-obj-list">';
+    [{label:'Taux de complétion',cur:pctTasks,target:100,unit:'%',col:'#4F7CFF'},
+     {label:'Score global',cur:hotelScore,target:100,unit:'/100',col:_scoreColorHex},
+     {label:'Conformité PMP',cur:_pmpConf,target:100,unit:'%',col:'#27C46B'},
+     {label:'Missions sans retard',cur:Math.max(0,10-mLate.length*2),target:10,unit:'/10',col:mLate.length>0?'#FF4D4F':'#27C46B'}
+    ].forEach(function(o){
+      var pO=o.target>0?Math.min(100,Math.round(o.cur/o.target*100)):0;
+      h+='<div class="hd3-obj-row"><div class="hd3-obj-meta"><span class="hd3-obj-label">'+o.label+'</span><span class="hd3-obj-val" style="color:'+o.col+'">'+o.cur+'<span class="hd3-obj-unit">'+o.unit+'</span></span></div><div class="hd3-obj-bar"><div class="hd3-obj-fill" style="width:'+pO+'%;background:'+o.col+'"></div></div></div>';
     });
     h += '</div></div>';
 
