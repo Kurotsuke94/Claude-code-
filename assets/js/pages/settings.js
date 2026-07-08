@@ -1314,6 +1314,29 @@
       }).join('') +
       '</div></div>';
 
+    // Alertes configurables
+    const alertRuleTypeLbl = { total: 'Total (m³)', ratio: 'Ratio (L/client)', variation: 'Variation (%)' };
+    const alertResourceLbl = { eau_froide: '💧 Eau froide', eau_chaude: '🔥 Eau chaude', electricite: '⚡ Électricité' };
+    const alertHtml = '<div class="stt-card pe-stt-card">' +
+      '<div class="stt-section-head"><i class="fas fa-bell"></i> Règles d\'alertes</div>' +
+      '<div class="pe-ref-intro">Définissez les seuils qui déclenchent une alerte. Les alertes apparaissent dans l\'historique 14 jours et le détail de chaque journée.</div>' +
+      '<div id="pe-alert-rules-list" class="pe-alert-rules-list"><div class="pe-ref-loading"><i class="fas fa-spinner fa-spin"></i> Chargement…</div></div>' +
+      '<div class="pe-alert-add-form">' +
+        '<select class="fi pe-alert-sel" id="pe-alert-type">' +
+          '<option value="total">Total &gt;</option>' +
+          '<option value="ratio">Ratio &gt;</option>' +
+          '<option value="variation">Variation &gt;</option>' +
+        '</select>' +
+        '<select class="fi pe-alert-sel" id="pe-alert-resource">' +
+          '<option value="eau_froide">💧 Eau froide</option>' +
+          '<option value="eau_chaude">🔥 Eau chaude</option>' +
+          '<option value="electricite">⚡ Électricité</option>' +
+        '</select>' +
+        '<input class="fi pe-alert-val" id="pe-alert-value" type="number" min="0" step="0.1" placeholder="Valeur seuil">' +
+        '<button class="cso-ibtn pe-alert-add-btn" onclick="window._sttAddAlertRule()"><i class="fas fa-plus"></i> Ajouter</button>' +
+      '</div>' +
+      '</div>';
+
     const saveBtn = '<div class="pe-stt-actions">' +
       '<button class="primary-btn" onclick="window._sttSaveEnergie()">' +
         '<i class="fas fa-save"></i> Sauvegarder' +
@@ -1323,6 +1346,45 @@
       '</button>' +
     '</div>';
 
+    // In-memory alert rules for this settings session
+    window._sttAlertRules = [];
+
+    window._sttRenderAlertRules = function() {
+      const el = document.getElementById('pe-alert-rules-list');
+      if (!el) return;
+      const rules = window._sttAlertRules;
+      if (!rules.length) {
+        el.innerHTML = '<div class="pe-ref-loading" style="color:var(--text3)">Aucune règle définie — utilisez le formulaire ci-dessous pour en ajouter.</div>';
+        return;
+      }
+      el.innerHTML = rules.map(function(r, i) {
+        const tLbl = alertRuleTypeLbl[r.type] || r.type;
+        const rLbl = alertResourceLbl[r.resource] || r.resource;
+        return '<div class="pe-alert-rule-row">' +
+          '<span class="pe-alert-rule-lbl">' + rLbl + ' — ' + tLbl + ' &gt; <strong>' + r.value + '</strong></span>' +
+          '<button class="pe-alert-rule-del cso-ibtn" onclick="window._sttDelAlertRule(' + i + ')" title="Supprimer"><i class="fas fa-trash"></i></button>' +
+          '</div>';
+      }).join('');
+    };
+
+    window._sttAddAlertRule = function() {
+      const type     = (document.getElementById('pe-alert-type') || {}).value;
+      const resource = (document.getElementById('pe-alert-resource') || {}).value;
+      const valueEl  = document.getElementById('pe-alert-value');
+      const value    = parseFloat(valueEl && valueEl.value);
+      if (!type || !resource || isNaN(value) || value <= 0) {
+        MX.toast('Renseignez un type, une ressource et une valeur > 0', true); return;
+      }
+      window._sttAlertRules.push({ type: type, resource: resource, value: value });
+      if (valueEl) valueEl.value = '';
+      window._sttRenderAlertRules();
+    };
+
+    window._sttDelAlertRule = function(i) {
+      window._sttAlertRules.splice(i, 1);
+      window._sttRenderAlertRules();
+    };
+
     // Load all config + meters async after render
     setTimeout(function() {
       Promise.all([
@@ -1330,12 +1392,13 @@
         db.collection('cso_meters').get(),
       ]).then(function(results) {
         const cfgSnap = results[0], meterSnap = results[1];
-        let fsThresholds = {}, fsClasses = {}, fsRefMeters = {}, fsObjectifs = {};
+        let fsThresholds = {}, fsClasses = {}, fsRefMeters = {}, fsObjectifs = {}, fsAlertRules = {};
         cfgSnap.docs.forEach(function(d) {
-          if (d.id === 'thresholds') fsThresholds = d.data();
-          if (d.id === 'classes')    fsClasses    = d.data();
-          if (d.id === 'ref_meters') fsRefMeters  = d.data();
-          if (d.id === 'objectifs')  fsObjectifs  = d.data();
+          if (d.id === 'thresholds')  fsThresholds  = d.data();
+          if (d.id === 'classes')     fsClasses     = d.data();
+          if (d.id === 'ref_meters')  fsRefMeters   = d.data();
+          if (d.id === 'objectifs')   fsObjectifs   = d.data();
+          if (d.id === 'alert_rules') fsAlertRules  = d.data();
         });
         const allMeters = meterSnap.docs
           .map(function(d) { return Object.assign({ id: d.id }, d.data()); })
@@ -1368,28 +1431,32 @@
         });
         // Render ref meters checkboxes
         const el = document.getElementById('pe-ref-meters-content');
-        if (!el) return;
-        const REF_TYPES = ['eau_froide','eau_chaude','electricite','gaz'];
-        let refHtml = '';
-        REF_TYPES.forEach(function(type) {
-          const mt = TYPE_META[type]; if (!mt) return;
-          const typeMeters = allMeters.filter(function(m) { return m.type === type; });
-          if (!typeMeters.length) return;
-          const savedIds = Array.isArray(fsRefMeters[type]) ? fsRefMeters[type] : [];
-          const useAll = !savedIds.length;
-          refHtml += '<div class="pe-ref-type-block">' +
-            '<div class="pe-ref-type-hd">' + mt.icon + ' ' + mt.label + '</div>' +
-            '<div class="pe-ref-meter-list">';
-          typeMeters.forEach(function(m) {
-            const checked = useAll || savedIds.indexOf(m.id) !== -1;
-            refHtml += '<label class="pe-ref-meter-item">' +
-              '<input type="checkbox" class="pe-ref-chk" data-type="' + type + '" data-id="' + m.id + '"' + (checked ? ' checked' : '') + '> ' +
-              (m.name || m.id) + (m.zone ? ' <span class="pe-day-zone">' + m.zone + '</span>' : '') +
-              '</label>';
+        if (el) {
+          const REF_TYPES = ['eau_froide','eau_chaude','electricite','gaz'];
+          let refHtml = '';
+          REF_TYPES.forEach(function(type) {
+            const mt = TYPE_META[type]; if (!mt) return;
+            const typeMeters = allMeters.filter(function(m) { return m.type === type; });
+            if (!typeMeters.length) return;
+            const savedIds = Array.isArray(fsRefMeters[type]) ? fsRefMeters[type] : [];
+            const useAll = !savedIds.length;
+            refHtml += '<div class="pe-ref-type-block">' +
+              '<div class="pe-ref-type-hd">' + mt.icon + ' ' + mt.label + '</div>' +
+              '<div class="pe-ref-meter-list">';
+            typeMeters.forEach(function(m) {
+              const checked = useAll || savedIds.indexOf(m.id) !== -1;
+              refHtml += '<label class="pe-ref-meter-item">' +
+                '<input type="checkbox" class="pe-ref-chk" data-type="' + type + '" data-id="' + m.id + '"' + (checked ? ' checked' : '') + '> ' +
+                (m.name || m.id) + (m.zone ? ' <span class="pe-day-zone">' + m.zone + '</span>' : '') +
+                '</label>';
+            });
+            refHtml += '</div></div>';
           });
-          refHtml += '</div></div>';
-        });
-        el.innerHTML = refHtml || '<div class="pe-ref-loading">Aucun compteur trouvé</div>';
+          el.innerHTML = refHtml || '<div class="pe-ref-loading">Aucun compteur trouvé</div>';
+        }
+        // Load alert rules into memory and render
+        window._sttAlertRules = Array.isArray(fsAlertRules.rules) ? fsAlertRules.rules.slice() : [];
+        window._sttRenderAlertRules();
       }).catch(function(err) { console.warn('[Energie settings] Load error:', err); });
     }, 100);
 
@@ -1440,11 +1507,14 @@
           objectifs[ot] = { target: target, tolerance: isNaN(tol) ? 10 : tol };
         }
       });
+      // Alert rules
+      const alertRules = { rules: (window._sttAlertRules || []).filter(function(r) { return r.type && r.resource && r.value > 0; }) };
       try {
         await db.collection('cso_perf_config').doc('thresholds').set(thresholds);
         await db.collection('cso_perf_config').doc('classes').set(classes);
         await db.collection('cso_perf_config').doc('ref_meters').set(refMeters);
         await db.collection('cso_perf_config').doc('objectifs').set(objectifs);
+        await db.collection('cso_perf_config').doc('alert_rules').set(alertRules);
         MX.toast('Paramètres énergétiques sauvegardés');
       } catch(err) { MX.toast('Erreur sauvegarde', true); console.error(err); }
     };
@@ -1468,6 +1538,7 @@
       classHtml +
       refMetersHtml +
       objHtml +
+      alertHtml +
       saveBtn +
       '</div>';
   }

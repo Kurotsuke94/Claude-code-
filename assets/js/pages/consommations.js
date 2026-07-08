@@ -22,7 +22,7 @@
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
   let _recalcInProgress = false;
-  let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {} }; // Performance config from Firestore
+  let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {}, alert_rules: {} }; // Performance config from Firestore
 
   // ── FIRESTORE ERROR HANDLER ──
   function _fsErr(coll) {
@@ -788,13 +788,14 @@
       _rerender();
     }, _fsErr('cso_energy_alerts'));
     _unsubCso.perfConfig = CSO.perfConfig().onSnapshot(snap => {
-      _perfCfg = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {} };
+      _perfCfg = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {}, alert_rules: {} };
       snap.docs.forEach(d => {
         if (d.id === 'thresholds')     _perfCfg.thresholds     = d.data();
         if (d.id === 'classes')        _perfCfg.classes        = d.data();
         if (d.id === 'ref_meters')     _perfCfg.ref_meters     = d.data();
         if (d.id === 'objectifs')      _perfCfg.objectifs      = d.data();
         if (d.id === 'justifications') _perfCfg.justifications = d.data();
+        if (d.id === 'alert_rules')    _perfCfg.alert_rules    = d.data();
       });
       _rerender();
     }, _fsErr('cso_perf_config'));
@@ -2121,84 +2122,172 @@
     });
     if (!alertsHtml) alertsHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Aucune alerte — Consommations dans les normes</div>';
 
-    // ── 14-day history table ──
-    const HIST_TYPES = ['eau_froide', 'eau_chaude', 'electricite'];
-    const histDays = Array.from({length: 14}, (_, i) => _daysAgo(i)).reverse();
-    function scoreToGradeKey(sc) {
-      if (sc === null) return 'na';
-      if (sc >= 90) return 'excellent';
-      if (sc >= 75) return 'bon';
-      if (sc >= 60) return 'correct';
-      if (sc >= 45) return 'moyen';
-      if (sc >= 30) return 'mauvais';
-      return 'critique';
+    // ── Helper: get client count for a date ──
+    function _cliForDate(d) {
+      const v = _clients[d];
+      if (!v) return 0;
+      return typeof v === 'object' ? (v.count || 0) : v;
     }
-    let histHead = '<tr><th>Date</th><th>Clients</th>';
-    HIST_TYPES.forEach(ht => {
-      const mt = MT[ht]; if (!mt) return;
-      histHead += '<th>' + mt.icon + ' ' + e(mt.label) + '</th>';
-    });
-    histHead += '<th>Score</th><th></th></tr>';
-    let histBody = '';
-    histDays.forEach(hDate => {
-      const cliD = (_clients[hDate] || {}).count || (_clients[hDate] || 0);
-      const cliN = typeof cliD === 'object' ? cliD.count || 0 : cliD;
-      const isToday = hDate === today;
-      const hasJustif = !!(_perfCfg.justifications && _perfCfg.justifications[hDate]);
-      let row = '<tr class="pe-hist-row' + (isToday ? ' pe-hist-today' : '') + '" onclick="MX.Pages.Conso._peShowDay(\'' + hDate + '\')" title="Voir le détail du ' + hDate + '">';
-      row += '<td><span class="pe-hist-date">' + (isToday ? '<span class="pe-today-badge">Auj.</span> ' : '') + hDate + '</span>' + (hasJustif ? ' <i class="fas fa-comment-dots pe-justif-icon" title="Justification"></i>' : '') + '</td>';
-      row += '<td class="pe-hist-cli">' + (cliN || '—') + '</td>';
-      HIST_TYPES.forEach(ht => {
-        const ratio = _perfRatio(ht, hDate);
-        if (ratio === null) { row += '<td class="pe-hist-nd">—</td>'; return; }
-        const grade = _getGrade(ht, ratio);
-        const col = (c[grade.key] || {}).color || '#64748b';
-        const val = _fmt(ratio, isW(ht) ? 0 : 2);
-        row += '<td><span class="pe-hist-val" style="color:' + col + '">' + val + '</span></td>';
+
+    // ── Helper: check configured alert rules for a date, returns array of triggered alerts ──
+    function _getTriggeredAlerts(date) {
+      const rules = (_perfCfg.alert_rules && _perfCfg.alert_rules.rules) || [];
+      const triggered = [];
+      rules.forEach(function(rule) {
+        const res = rule.resource || 'eau_froide';
+        const val = parseFloat(rule.value);
+        if (isNaN(val)) return;
+        if (rule.type === 'total') {
+          const conso = _perfConso(res, date);
+          if (conso !== null && conso > val) triggered.push({ rule: rule, actual: conso, unit: 'm³' });
+        } else if (rule.type === 'ratio') {
+          const ratio = _perfRatio(res, date);
+          if (ratio !== null && ratio > val) triggered.push({ rule: rule, actual: ratio, unit: 'L/client' });
+        } else if (rule.type === 'variation') {
+          const ratio = _perfRatio(res, date);
+          const dObj = new Date(date + 'T00:00:00'); dObj.setDate(dObj.getDate() - 1);
+          const prevDate = dObj.toISOString().slice(0, 10);
+          const prev = _perfRatio(res, prevDate);
+          if (ratio !== null && prev !== null && prev > 0) {
+            const pct = (ratio - prev) / prev * 100;
+            if (pct > val) triggered.push({ rule: rule, actual: pct, unit: '%' });
+          }
+        }
       });
-      const sc = _calcPerfScore(hDate);
-      row += '<td>' + gradeBadge(scoreToGradeKey(sc)) + '</td>';
+      return triggered;
+    }
+
+    // ── 14-day history table — per ref-meter columns for EF ──
+    const histDays = Array.from({length: 14}, (_, i) => _daysAgo(i)).reverse();
+    // EF ref meters → dynamic column headers
+    const efRefIds   = _refMeterIds('eau_froide');
+    const efRefMtrs  = efRefIds.map(function(id){ return _meters.find(function(m){ return m.id === id; }); }).filter(Boolean);
+    const histColSpan = efRefMtrs.length + 4; // date + clients + meters + total + L/client + classe + arrow
+
+    let histHead = '<tr><th>Date</th><th>Clients</th>';
+    efRefMtrs.forEach(function(m){ histHead += '<th>' + e(m.name) + '</th>'; });
+    if (!efRefMtrs.length) histHead += '<th>Total EF</th>';
+    histHead += '<th>Total EF m³</th><th>L/client</th><th>Classe</th><th></th></tr>';
+
+    let histBody = '';
+    histDays.forEach(function(hDate) {
+      const cliN    = _cliForDate(hDate);
+      const isToday = hDate === today;
+      const hasJustif  = !!(_perfCfg.justifications && _perfCfg.justifications[hDate]);
+      const triggered  = _getTriggeredAlerts(hDate);
+      const hasAlert   = triggered.length > 0;
+
+      let row = '<tr class="pe-hist-row' + (isToday ? ' pe-hist-today' : '') + (hasAlert ? ' pe-hist-alert' : '') +
+        '" onclick="MX.Pages.Conso._peShowDay(\'' + hDate + '\')" title="Voir le détail du ' + hDate + '">';
+      // Date cell
+      row += '<td><span class="pe-hist-date">' +
+        (isToday ? '<span class="pe-today-badge">Auj.</span> ' : '') + hDate +
+        '</span>' +
+        (hasJustif ? ' <i class="fas fa-comment-dots pe-justif-icon" title="Justification enregistrée"></i>' : '') +
+        (hasAlert  ? ' <i class="fas fa-circle-exclamation pe-alert-icon" title="' + triggered.length + ' alerte(s)"></i>' : '') +
+        '</td>';
+      // Clients
+      row += '<td class="pe-hist-cli">' + (cliN || '—') + '</td>';
+      // Per ref-meter columns (m³)
+      let totalEF = 0;
+      efRefMtrs.forEach(function(m) {
+        const conso = _readings.filter(function(r){ return r.meterId === m.id && r.date === hDate; })
+          .reduce(function(s, r){ return s + (r.consumption || 0); }, 0);
+        totalEF += conso;
+        row += '<td class="pe-hist-m3">' + (conso > 0 ? _fmt(conso, 1) : '<span class="pe-hist-nd">—</span>') + '</td>';
+      });
+      if (!efRefMtrs.length) {
+        // fallback: show raw total from _perfConso
+        const raw = _perfConso('eau_froide', hDate);
+        totalEF = raw || 0;
+        row += '<td class="pe-hist-m3">' + (raw !== null ? _fmt(raw, 1) : '<span class="pe-hist-nd">—</span>') + '</td>';
+      }
+      // Total EF
+      row += '<td class="pe-hist-total pe-hist-m3">' + (totalEF > 0 ? _fmt(totalEF, 1) : '<span class="pe-hist-nd">—</span>') + '</td>';
+      // L/client
+      const efRatioVal = cliN > 0 && totalEF > 0 ? Math.round(totalEF * 1000 / cliN) : null;
+      const efRatioCfg = _perfRatio('eau_froide', hDate); // use configured ratio (may differ if _perfConso uses different logic)
+      const displayRatio = efRatioCfg !== null ? Math.round(efRatioCfg) : (efRatioVal !== null ? efRatioVal : null);
+      row += '<td class="pe-hist-ratio">' + (displayRatio !== null ? '<strong>' + displayRatio + '</strong>' : '<span class="pe-hist-nd">—</span>') + '</td>';
+      // Classe
+      const efGrade = displayRatio !== null ? _getGrade('eau_froide', displayRatio) : { key: 'na' };
+      row += '<td>' + gradeBadge(efGrade.key) + '</td>';
+      // Arrow
       row += '<td class="pe-hist-action"><i class="fas fa-chevron-right pe-hist-arr"></i></td>';
       row += '</tr>';
       histBody += row;
     });
+
     const histTable = '<div class="pe-section pe-section--history">' +
-      '<div class="pe-section-head"><i class="fas fa-table-list"></i> Historique 14 jours <span class="pe-hist-hint">Cliquer pour le détail</span></div>' +
+      '<div class="pe-section-head"><i class="fas fa-table-list"></i> Historique 14 jours — Eau froide <span class="pe-hist-hint">Cliquer pour le détail</span></div>' +
       '<div class="pe-hist-wrap"><table class="pe-hist-table">' +
       '<thead>' + histHead + '</thead>' +
-      '<tbody>' + (histBody || '<tr><td colspan="6" class="pe-hist-nd">Aucune donnée</td></tr>') + '</tbody>' +
+      '<tbody>' + (histBody || '<tr><td colspan="' + histColSpan + '" class="pe-hist-nd" style="text-align:center;padding:20px">Aucune donnée</td></tr>') + '</tbody>' +
       '</table></div></div>';
 
-    // ── Objectifs énergétiques ──
-    const objCfg = _perfCfg.objectifs || {};
-    let objCards = '';
-    HIST_TYPES.forEach(ot => {
+    // ── Objectifs énergétiques — tableau de bord complet ──
+    const objCfg   = _perfCfg.objectifs || {};
+    const OBJ_TYPES = ['eau_froide', 'eau_chaude', 'electricite'];
+    // Compute monthly average ratios (current month, days 1 to today)
+    function _monthAvgRatio(type) {
+      const now = new Date(today + 'T00:00:00');
+      const daysThisMonth = now.getDate(); // day of month (1-based)
+      let sum = 0, cnt = 0;
+      for (let d = 1; d <= daysThisMonth; d++) {
+        const dt = new Date(now.getFullYear(), now.getMonth(), d);
+        const ds = dt.toISOString().slice(0, 10);
+        const r  = _perfRatio(type, ds);
+        if (r !== null) { sum += r; cnt++; }
+      }
+      return cnt ? sum / cnt : null;
+    }
+    let objRows = '';
+    OBJ_TYPES.forEach(function(ot) {
       const obj = objCfg[ot]; if (!obj || !obj.target) return;
       const mt = MT[ot]; if (!mt) return;
-      const ratio = _perfRatio(ot, peDate);
-      const target = parseFloat(obj.target);
-      const tol = parseFloat(obj.tolerance || 10);
-      const upper = target * (1 + tol / 100);
-      let objStatus = 'ok', objStatusLbl = 'Objectif atteint', objStatusCol = '#22c55e', objIco = 'fa-check-circle';
-      if (ratio !== null) {
-        if (ratio > upper) { objStatus = 'over'; objStatusLbl = 'Dépassement'; objStatusCol = '#ef4444'; objIco = 'fa-times-circle'; }
-        else if (ratio > target) { objStatus = 'warn'; objStatusLbl = 'Légèrement au-dessus'; objStatusCol = '#f59e0b'; objIco = 'fa-exclamation-circle'; }
+      const target  = parseFloat(obj.target);
+      const tol     = parseFloat(obj.tolerance || 10);
+      const upper   = target * (1 + tol / 100);
+      const ratioToday = _perfRatio(ot, peDate);
+      const ratioMonth = _monthAvgRatio(ot);
+      const isWater    = isW(ot);
+      const unit       = isWater ? 'L/client' : e(mt.unit) + '/client';
+      function fmtR(v) { return v !== null ? _fmt(v, isWater ? 0 : 2) : '—'; }
+      // Status: compare today vs target
+      let todayStatus = 'na', todayCol = '#64748b';
+      if (ratioToday !== null) {
+        if (ratioToday <= target)       { todayStatus = 'ok';   todayCol = '#22c55e'; }
+        else if (ratioToday <= upper)   { todayStatus = 'warn'; todayCol = '#f59e0b'; }
+        else                            { todayStatus = 'over'; todayCol = '#ef4444'; }
       }
-      const pct = ratio !== null && target > 0 ? Math.round((ratio - target) / target * 100) : null;
-      objCards += '<div class="pe-obj-card pe-obj--' + objStatus + '">' +
-        '<div class="pe-obj-head">' + mt.icon + ' ' + e(mt.label) + '</div>' +
-        '<div class="pe-obj-vals">' +
-        '<span class="pe-obj-target">Objectif : ' + _fmt(target, isW(ot) ? 0 : 2) + ' ' + (isW(ot) ? 'L' : e(mt.unit)) + '/client</span>' +
-        (ratio !== null ? '<span class="pe-obj-actual">Actuel : ' + _fmt(ratio, isW(ot) ? 0 : 2) + '</span>' : '<span class="pe-obj-actual pe-hist-nd">—</span>') +
-        (pct !== null ? '<span class="pe-obj-delta" style="color:' + objStatusCol + '">' + (pct > 0 ? '+' : '') + pct + '%</span>' : '') +
-        '</div>' +
-        '<div class="pe-obj-status" style="color:' + objStatusCol + '"><i class="fas ' + objIco + '"></i> ' + objStatusLbl + ' <small>(tolérance ' + tol + '%)</small></div>' +
-        '</div>';
+      const todayPct = ratioToday !== null && target > 0 ? (ratioToday - target) / target * 100 : null;
+      // Status: compare month vs target
+      let monthStatus = 'na', monthCol = '#64748b';
+      if (ratioMonth !== null) {
+        if (ratioMonth <= target)       { monthStatus = 'ok';   monthCol = '#22c55e'; }
+        else if (ratioMonth <= upper)   { monthStatus = 'warn'; monthCol = '#f59e0b'; }
+        else                            { monthStatus = 'over'; monthCol = '#ef4444'; }
+      }
+      // Objectif atteint (today)
+      const achieved = ratioToday !== null ? todayStatus !== 'over' : null;
+      objRows += '<tr class="pe-obj-tr">' +
+        '<td><span class="pe-obj-type-lbl">' + mt.icon + ' ' + e(mt.label) + '</span></td>' +
+        '<td class="pe-obj-target-cell">' + fmtR(target) + ' <small>' + unit + '</small></td>' +
+        '<td class="pe-obj-today-cell" style="color:' + todayCol + ';font-weight:700">' + fmtR(ratioToday) +
+          (todayPct !== null ? ' <span class="pe-obj-pct">(' + (todayPct > 0 ? '+' : '') + _fmt(todayPct, 1) + '%)</span>' : '') + '</td>' +
+        '<td class="pe-obj-month-cell" style="color:' + monthCol + '">' + fmtR(ratioMonth) + '</td>' +
+        '<td class="pe-obj-ach-cell">' + (achieved === null ? '<span class="pe-hist-nd">—</span>' :
+          achieved ? '<span class="pe-obj-ach pe-obj-ach--yes"><i class="fas fa-check-circle"></i> Oui</span>'
+                   : '<span class="pe-obj-ach pe-obj-ach--no"><i class="fas fa-times-circle"></i> Non</span>') +
+          '<small class="pe-obj-tol">±' + tol + '%</small></td>' +
+        '</tr>';
     });
-    const objHtml = objCards ? '<div class="pe-section pe-section--obj">' +
+    const objHtml = objRows ? '<div class="pe-section pe-section--obj">' +
       '<div class="pe-section-head"><i class="fas fa-bullseye"></i> Objectifs énergétiques</div>' +
-      '<div class="pe-obj-grid">' + objCards + '</div>' +
-      '</div>' : '';
+      '<div class="pe-obj-table-wrap"><table class="pe-obj-table">' +
+      '<thead><tr><th>Énergie</th><th>Objectif</th><th>Aujourd\'hui</th><th>Mois en cours</th><th>Atteint</th></tr></thead>' +
+      '<tbody>' + objRows + '</tbody>' +
+      '</table></div></div>' : '';
 
     // ── Date selector ──
     const dateSel = '<div class="pe-date-row">' +
@@ -2280,29 +2369,71 @@
   }
 
   function _peShowDay(date) {
-    const e  = MX.esc || (s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-    const c  = _perfC();
+    const esc = MX.esc || (s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    const c   = _perfC();
     const TYPES = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
-    const isW = type => ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
-    const cli = (_clients[date] || {}).count || (_clients[date] || 0);
-    const cliN = typeof cli === 'object' ? cli.count || 0 : cli;
-    const justif = (_perfCfg.justifications && _perfCfg.justifications[date]) || '';
-    const perfSc = _calcPerfScore(date);
+    const isW   = type => ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+    const cliRaw = _clients[date];
+    const cliN   = typeof cliRaw === 'object' ? (cliRaw && cliRaw.count || 0) : (cliRaw || 0);
+    const justif  = (_perfCfg.justifications && _perfCfg.justifications[date]) || '';
+    const perfSc  = _calcPerfScore(date);
 
+    // ── EF summary at top (ref meters + total + ratio) ──
+    const efRefIds  = _refMeterIds('eau_froide');
+    const efRefMtrs = efRefIds.map(id => _meters.find(m => m.id === id)).filter(Boolean);
+    let efSummaryRows = '';
+    let efTotal = 0;
+    efRefMtrs.forEach(m => {
+      const conso = _readings.filter(r => r.meterId === m.id && r.date === date)
+        .reduce((s, r) => s + (r.consumption || 0), 0);
+      efTotal += conso;
+      efSummaryRows += '<div class="pe-day-ef-row">' +
+        '<span class="pe-day-ef-nm">' + esc(m.name) + '</span>' +
+        '<span class="pe-day-ef-v">' + (conso > 0 ? _fmt(conso, 1) + ' m³' : '<span class="pe-hist-nd">—</span>') + '</span>' +
+        '</div>';
+    });
+    const efRatio = cliN > 0 && efTotal > 0 ? Math.round(efTotal * 1000 / cliN) : (_perfRatio('eau_froide', date) !== null ? Math.round(_perfRatio('eau_froide', date)) : null);
+    const efGrade = efRatio !== null ? _getGrade('eau_froide', efRatio) : { key: 'na', l: '—', color: '#64748b' };
+    const efCol   = (c[efGrade.key] || {}).color || '#64748b';
+    const efSummaryHtml = efSummaryRows ? (
+      '<div class="pe-day-ef-summary">' +
+        efSummaryRows +
+        '<div class="pe-day-ef-total">' +
+          '<span class="pe-day-ef-nm"><strong>Total EF</strong></span>' +
+          '<span class="pe-day-ef-v"><strong>' + _fmt(efTotal, 1) + ' m³</strong></span>' +
+        '</div>' +
+        (efRatio !== null ?
+          '<div class="pe-day-ef-ratio" style="color:' + efCol + '">' +
+            '<span><i class="fas fa-divide"></i> Ratio officiel</span>' +
+            '<span><strong>' + efRatio + ' L/client</strong> ' +
+              '<span class="pe-day-grade pe-grade" style="background:' + efCol + '20;color:' + efCol + ';border:1px solid ' + efCol + '50">' + (efGrade.l || '—') + '</span>' +
+            '</span>' +
+          '</div>'
+        : '') +
+      '</div>'
+    ) : '';
+
+    // ── Per-type detailed breakdown (all meters) ──
     let rowsHtml = '';
     TYPES.forEach(type => {
       const mt = MT[type]; if (!mt) return;
-      const ids = _refMeterIds(type);
-      if (!ids.length) return;
+      // Show ALL meters for this type (not just ref), grouped
+      const typeIds = _meters.filter(m => m.type === type).map(m => m.id);
+      if (!typeIds.length) return;
       let meterRows = '';
-      ids.forEach(id => {
+      typeIds.forEach(id => {
         const m = _meters.find(x => x.id === id); if (!m) return;
-        const r = _readings.filter(rd => rd.meterId === id && rd.date === date);
-        const conso = r.reduce((s, rd) => s + (rd.consumption || 0), 0);
+        const conso = _readings.filter(rd => rd.meterId === id && rd.date === date)
+          .reduce((s, rd) => s + (rd.consumption || 0), 0);
         if (!conso) return;
+        const isRef = efRefIds.includes(id) && type === 'eau_froide';
         meterRows += '<div class="pe-day-meter-row">' +
-          '<span class="pe-day-meter-nm">' + e(m.name) + (m.zone ? ' <small class="pe-day-zone">' + e(m.zone) + '</small>' : '') + '</span>' +
-          '<span class="pe-day-meter-v">' + _fmt(conso, 2) + ' ' + e(m.unit || mt.unit) + '</span>' +
+          '<span class="pe-day-meter-nm">' +
+            esc(m.name) +
+            (m.zone ? ' <small class="pe-day-zone">' + esc(m.zone) + '</small>' : '') +
+            (isRef ? ' <span class="pe-day-ref-tag"><i class="fas fa-crosshairs"></i></span>' : '') +
+          '</span>' +
+          '<span class="pe-day-meter-v">' + _fmt(conso, 2) + ' ' + esc(m.unit || mt.unit) + '</span>' +
           '</div>';
       });
       if (!meterRows) return;
@@ -2312,21 +2443,66 @@
       rowsHtml += '<div class="pe-day-type-block">' +
         '<div class="pe-day-type-hd" style="border-left:3px solid ' + col + '">' +
           '<span class="pe-day-type-ico">' + mt.icon + '</span>' +
-          '<span class="pe-day-type-lbl">' + e(mt.label) + '</span>' +
-          (ratio !== null ? '<span class="pe-day-ratio" style="color:' + col + '">' + _fmt(ratio, isW(type) ? 0 : 2) + ' ' + (isW(type) ? 'L' : e(mt.unit)) + '/client</span>' : '') +
+          '<span class="pe-day-type-lbl">' + esc(mt.label) + '</span>' +
+          (ratio !== null ? '<span class="pe-day-ratio" style="color:' + col + '">' + _fmt(ratio, isW(type) ? 0 : 2) + ' ' + (isW(type) ? 'L' : esc(mt.unit)) + '/client</span>' : '') +
           '<span class="pe-day-grade pe-grade" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '50">' + (grade.l || '—') + '</span>' +
         '</div>' +
         '<div class="pe-day-meters">' + meterRows + '</div>' +
         '</div>';
     });
 
+    // ── Triggered alerts for this day ──
+    const triggered = (function() {
+      const rules = (_perfCfg.alert_rules && _perfCfg.alert_rules.rules) || [];
+      const out = [];
+      rules.forEach(function(rule) {
+        const res = rule.resource || 'eau_froide';
+        const mt  = MT[res] || {};
+        const val = parseFloat(rule.value);
+        if (isNaN(val)) return;
+        let actual = null, label = '', unit = '';
+        if (rule.type === 'total') {
+          actual = _perfConso(res, date);
+          label  = 'Total ' + (mt.label || res); unit = 'm³';
+          if (actual === null || actual <= val) return;
+        } else if (rule.type === 'ratio') {
+          actual = _perfRatio(res, date);
+          label  = 'Ratio ' + (mt.label || res); unit = 'L/client';
+          if (actual === null || actual <= val) return;
+        } else if (rule.type === 'variation') {
+          const dObj = new Date(date + 'T00:00:00'); dObj.setDate(dObj.getDate() - 1);
+          const prev = _perfRatio(res, dObj.toISOString().slice(0, 10));
+          actual = _perfRatio(res, date);
+          if (actual === null || prev === null || prev <= 0) return;
+          actual = (actual - prev) / prev * 100;
+          label  = 'Variation ' + (mt.label || res); unit = '%';
+          if (actual <= val) return;
+        } else return;
+        out.push({ label: label, val: val, actual: actual, unit: unit });
+      });
+      return out;
+    })();
+
+    let alertsHtml = '';
+    if (triggered.length) {
+      alertsHtml = '<div class="pe-day-alerts-block">' +
+        '<div class="pe-day-justif-lbl" style="color:#ef4444"><i class="fas fa-circle-exclamation"></i> Alertes déclenchées</div>';
+      triggered.forEach(function(a) {
+        alertsHtml += '<div class="pe-day-alert-row">' +
+          '<span class="pe-day-alert-nm">' + esc(a.label) + ' &gt; ' + _fmt(a.val, a.unit==='%'?0:1) + ' ' + esc(a.unit) + '</span>' +
+          '<span class="pe-day-alert-actual" style="color:#ef4444">' + _fmt(a.actual, a.unit==='%'?1:0) + ' ' + esc(a.unit) + '</span>' +
+          '</div>';
+      });
+      alertsHtml += '</div>';
+    }
+
     const scoreStr = perfSc !== null ? perfSc + '/100' : '—';
     const justifSection = '<div class="pe-day-justif-block">' +
-      '<div class="pe-day-justif-lbl"><i class="fas fa-comment-dots"></i> Justification</div>' +
+      '<div class="pe-day-justif-lbl"><i class="fas fa-comment-dots"></i> Justification / Commentaire</div>' +
       (justif
-        ? '<div class="pe-day-justif-text">' + e(justif) + '</div>' +
+        ? '<div class="pe-day-justif-text">' + esc(justif) + '</div>' +
           '<button class="pe-justif-add-btn" onclick="MX.Pages.Conso._peAddJustif(\'' + date + '\')"><i class="fas fa-pen"></i> Modifier</button>'
-        : '<button class="pe-justif-add-btn" onclick="MX.Pages.Conso._peAddJustif(\'' + date + '\')"><i class="fas fa-plus"></i> Ajouter une justification</button>') +
+        : '<button class="pe-justif-add-btn" onclick="MX.Pages.Conso._peAddJustif(\'' + date + '\')"><i class="fas fa-plus"></i> Ajouter un commentaire</button>') +
       '</div>';
 
     const html = '<div class="pe-day-modal-backdrop" onclick="this.remove()">' +
@@ -2338,7 +2514,10 @@
         '<div class="pe-day-modal-meta">' +
           '<span><i class="fas fa-users"></i> ' + (cliN || '—') + ' clients</span>' +
           '<span><i class="fas fa-star"></i> Score : ' + scoreStr + '</span>' +
+          (triggered.length ? '<span style="color:#ef4444"><i class="fas fa-circle-exclamation"></i> ' + triggered.length + ' alerte(s)</span>' : '') +
         '</div>' +
+        (efSummaryHtml ? '<div class="pe-day-ef-wrap">' + efSummaryHtml + '</div>' : '') +
+        alertsHtml +
         '<div class="pe-day-types">' + (rowsHtml || '<div class="pe-bd-empty">Aucun relevé pour cette date</div>') + '</div>' +
         justifSection +
       '</div>' +
