@@ -22,7 +22,7 @@
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
   let _recalcInProgress = false;
-  let _perfCfg   = { thresholds: {}, classes: {} }; // Performance thresholds from Firestore
+  let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {} }; // Performance config from Firestore
 
   // ── FIRESTORE ERROR HANDLER ──
   function _fsErr(coll) {
@@ -122,9 +122,16 @@
     return { key: 'critique', ...c.critique };
   }
 
-  // Returns per-type ratio for a given date
+  // Returns meter IDs for ratio calc: configured ref meters or all meters of that type
+  function _refMeterIds(type) {
+    const cfg = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
+    if (Array.isArray(cfg) && cfg.length) return cfg;
+    return _meters.filter(m => m.type === type).map(m => m.id);
+  }
+
+  // Returns per-type ratio for a given date (uses ref meters only)
   function _perfRatio(type, date) {
-    const ids  = _meters.filter(m => m.type === type).map(m => m.id);
+    const ids  = _refMeterIds(type);
     if (!ids.length) return null;
     const val  = _readings.filter(r => ids.includes(r.meterId) && r.date === date)
                           .reduce((s, r) => s + (r.consumption || 0), 0);
@@ -135,9 +142,9 @@
     return isW ? val * 1000 / cli : val / cli;
   }
 
-  // Per-type raw consumption for a date
+  // Per-type raw consumption for a date (uses ref meters only)
   function _perfConso(type, date) {
-    const ids = _meters.filter(m => m.type === type).map(m => m.id);
+    const ids = _refMeterIds(type);
     return _readings.filter(r => ids.includes(r.meterId) && r.date === date)
                     .reduce((s, r) => s + (r.consumption || 0), 0) || null;
   }
@@ -776,18 +783,21 @@
       _rerender();
     }, _fsErr('cso_clients'));
     _unsubCso.alerts = CSO.alerts().orderBy('ts', 'desc').limit(100).onSnapshot(snap => {
-    _unsubCso.perfConfig = CSO.perfConfig().onSnapshot(snap => {
-      _perfCfg = { thresholds: {}, classes: {} };
-      snap.docs.forEach(d => {
-        if (d.id === 'thresholds') _perfCfg.thresholds = d.data();
-        if (d.id === 'classes')    _perfCfg.classes    = d.data();
-      });
-      _rerender();
-    }, _fsErr('cso_perf_config'));
       _csoAlerts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _checkCriticalBanner();
       _rerender();
     }, _fsErr('cso_energy_alerts'));
+    _unsubCso.perfConfig = CSO.perfConfig().onSnapshot(snap => {
+      _perfCfg = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {} };
+      snap.docs.forEach(d => {
+        if (d.id === 'thresholds')     _perfCfg.thresholds     = d.data();
+        if (d.id === 'classes')        _perfCfg.classes        = d.data();
+        if (d.id === 'ref_meters')     _perfCfg.ref_meters     = d.data();
+        if (d.id === 'objectifs')      _perfCfg.objectifs      = d.data();
+        if (d.id === 'justifications') _perfCfg.justifications = d.data();
+      });
+      _rerender();
+    }, _fsErr('cso_perf_config'));
   }
 
   // ── RENDER ──
@@ -1849,6 +1859,66 @@
   // ══════════════════════════════════════════════════════════
   // PERFORMANCE ÉNERGÉTIQUE TAB (v1)
   // ══════════════════════════════════════════════════════════
+  // ── IA: automated trend analysis text ──
+  function _iaAnalysisHtml() {
+    const types = ['eau_froide', 'eau_chaude', 'electricite'];
+    const analyses = [];
+    types.forEach(type => {
+      const meta = MT[type];
+      const isW  = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+      const data = [];
+      for (let i = 1; i <= 14; i++) {
+        const d = _daysAgo(i);
+        const ratio = _perfRatio(type, d);
+        if (ratio !== null) data.push({ d, ratio, cli: _clients[d] || 0 });
+      }
+      if (data.length < 4) return;
+      const halfN      = Math.min(4, Math.floor(data.length / 2));
+      const recentData = data.slice(0, halfN);
+      const olderData  = data.slice(halfN);
+      if (!olderData.length) return;
+      const recentAvg = recentData.reduce((s, x) => s + x.ratio, 0) / recentData.length;
+      const olderAvg  = olderData.reduce((s, x) => s + x.ratio, 0)  / olderData.length;
+      if (!olderAvg) return;
+      const trendPct = (recentAvg - olderAvg) / olderAvg * 100;
+      if (Math.abs(trendPct) < 8) return;
+      const recentCli = recentData.reduce((s, x) => s + x.cli, 0) / recentData.length;
+      const olderCli  = olderData.reduce((s, x) => s + x.cli, 0)  / olderData.length;
+      const cliPct    = olderCli > 0 ? (recentCli - olderCli) / olderCli * 100 : 0;
+      const clientLinked = Math.sign(cliPct) === Math.sign(trendPct) && Math.abs(cliPct) > 5;
+      const dir  = trendPct > 0 ? 'augmente' : 'diminue';
+      const absT = Math.abs(trendPct);
+      let note = 'Depuis ' + data.length + ' jours, la consommation ' + meta.label.toLowerCase() +
+                 ' ' + dir + ' (' + (trendPct > 0 ? '+' : '') + Math.round(trendPct) + '% vs période précédente).';
+      let severity = absT > 25 ? 'critique' : 'warn';
+      if (type === 'eau_froide' && trendPct > 15 && !clientLinked) {
+        note += ' La variation est indépendante du nombre de clients — fuite probable à investiguer.';
+        severity = 'critique';
+      } else if (clientLinked) {
+        note += ' La variation semble liée à l\'activité (nombre de clients).';
+        severity = 'info';
+      } else if (trendPct < -12) {
+        note += ' Amélioration notable des performances.';
+        severity = 'info';
+      }
+      analyses.push({ meta, note, severity });
+    });
+    if (!analyses.length) {
+      return '<div class="pe-ia-row pe-ia--ok"><i class="fas fa-robot" style="color:var(--cyan)"></i>' +
+             ' <span>Consommations stables sur les 14 derniers jours — aucune tendance significative détectée.</span></div>';
+    }
+    return analyses.map(function(a) {
+      const col  = a.severity === 'critique' ? '#ef4444' : a.severity === 'warn' ? '#f59e0b' : '#06b6d4';
+      const icon = a.severity === 'critique' ? 'fa-circle-exclamation' : a.severity === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-info';
+      return '<div class="pe-ia-row pe-ia--' + a.severity + '" style="border-left:3px solid ' + col + '">' +
+        '<i class="fas ' + icon + '" style="color:' + col + ';flex-shrink:0;margin-top:2px"></i>' +
+        '<div class="pe-ia-body">' +
+          '<span class="pe-ia-type">' + a.meta.icon + ' ' + a.meta.label + '</span>' +
+          '<span class="pe-ia-txt">' + a.note + '</span>' +
+        '</div></div>';
+    }).join('');
+  }
+
   function _tPerformance() {
     const today    = _today();
     const peDate   = window._peSelDate || today;
@@ -1936,6 +2006,9 @@
         seuilHtml = `<div class="pe-card-seuil">Seuil Excellent : ≤ ${excellent_max} ${rUnit}</div>`;
       }
 
+      const refIds   = _refMeterIds(type);
+      const refNames = refIds.map(id => { const m = _meters.find(x => x.id === id); return m ? e(m.name) : null; }).filter(Boolean);
+      const refBadge = refNames.length ? '<div class="pe-ref-badge"><i class="fas fa-crosshairs"></i> ' + refNames.join(', ') + '</div>' : '';
       typeBreakdown.push({ type, meta, ratio, rUnit, grade });
 
       ratioCards += `<div class="pe-ratio-card" style="--type-col:${meta.color}">
@@ -1951,7 +2024,7 @@
           ${cli === 0 ? '<div class="pe-ratio-warn"><i class="fas fa-triangle-exclamation"></i> Renseigner le nombre de clients</div>' : ''}
           <div class="pe-ratio-delta">${delta} vs hier</div>
         </div>
-        ${seuilHtml}
+        ${seuilHtml}${refBadge}
       </div>`;
     });
 
@@ -2048,61 +2121,141 @@
     });
     if (!alertsHtml) alertsHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Aucune alerte — Consommations dans les normes</div>';
 
+    // ── 14-day history table ──
+    const HIST_TYPES = ['eau_froide', 'eau_chaude', 'electricite'];
+    const histDays = Array.from({length: 14}, (_, i) => _daysAgo(i)).reverse();
+    function scoreToGradeKey(sc) {
+      if (sc === null) return 'na';
+      if (sc >= 90) return 'excellent';
+      if (sc >= 75) return 'bon';
+      if (sc >= 60) return 'correct';
+      if (sc >= 45) return 'moyen';
+      if (sc >= 30) return 'mauvais';
+      return 'critique';
+    }
+    let histHead = '<tr><th>Date</th><th>Clients</th>';
+    HIST_TYPES.forEach(ht => {
+      const mt = MT[ht]; if (!mt) return;
+      histHead += '<th>' + mt.icon + ' ' + e(mt.label) + '</th>';
+    });
+    histHead += '<th>Score</th><th></th></tr>';
+    let histBody = '';
+    histDays.forEach(hDate => {
+      const cliD = (_clients[hDate] || {}).count || (_clients[hDate] || 0);
+      const cliN = typeof cliD === 'object' ? cliD.count || 0 : cliD;
+      const isToday = hDate === today;
+      const hasJustif = !!(_perfCfg.justifications && _perfCfg.justifications[hDate]);
+      let row = '<tr class="pe-hist-row' + (isToday ? ' pe-hist-today' : '') + '" onclick="MX.Pages.Conso._peShowDay(\'' + hDate + '\')" title="Voir le détail du ' + hDate + '">';
+      row += '<td><span class="pe-hist-date">' + (isToday ? '<span class="pe-today-badge">Auj.</span> ' : '') + hDate + '</span>' + (hasJustif ? ' <i class="fas fa-comment-dots pe-justif-icon" title="Justification"></i>' : '') + '</td>';
+      row += '<td class="pe-hist-cli">' + (cliN || '—') + '</td>';
+      HIST_TYPES.forEach(ht => {
+        const ratio = _perfRatio(ht, hDate);
+        if (ratio === null) { row += '<td class="pe-hist-nd">—</td>'; return; }
+        const grade = _getGrade(ht, ratio);
+        const col = (c[grade.key] || {}).color || '#64748b';
+        const val = _fmt(ratio, isW(ht) ? 0 : 2);
+        row += '<td><span class="pe-hist-val" style="color:' + col + '">' + val + '</span></td>';
+      });
+      const sc = _calcPerfScore(hDate);
+      row += '<td>' + gradeBadge(scoreToGradeKey(sc)) + '</td>';
+      row += '<td class="pe-hist-action"><i class="fas fa-chevron-right pe-hist-arr"></i></td>';
+      row += '</tr>';
+      histBody += row;
+    });
+    const histTable = '<div class="pe-section pe-section--history">' +
+      '<div class="pe-section-head"><i class="fas fa-table-list"></i> Historique 14 jours <span class="pe-hist-hint">Cliquer pour le détail</span></div>' +
+      '<div class="pe-hist-wrap"><table class="pe-hist-table">' +
+      '<thead>' + histHead + '</thead>' +
+      '<tbody>' + (histBody || '<tr><td colspan="6" class="pe-hist-nd">Aucune donnée</td></tr>') + '</tbody>' +
+      '</table></div></div>';
+
+    // ── Objectifs énergétiques ──
+    const objCfg = _perfCfg.objectifs || {};
+    let objCards = '';
+    HIST_TYPES.forEach(ot => {
+      const obj = objCfg[ot]; if (!obj || !obj.target) return;
+      const mt = MT[ot]; if (!mt) return;
+      const ratio = _perfRatio(ot, peDate);
+      const target = parseFloat(obj.target);
+      const tol = parseFloat(obj.tolerance || 10);
+      const upper = target * (1 + tol / 100);
+      let objStatus = 'ok', objStatusLbl = 'Objectif atteint', objStatusCol = '#22c55e', objIco = 'fa-check-circle';
+      if (ratio !== null) {
+        if (ratio > upper) { objStatus = 'over'; objStatusLbl = 'Dépassement'; objStatusCol = '#ef4444'; objIco = 'fa-times-circle'; }
+        else if (ratio > target) { objStatus = 'warn'; objStatusLbl = 'Légèrement au-dessus'; objStatusCol = '#f59e0b'; objIco = 'fa-exclamation-circle'; }
+      }
+      const pct = ratio !== null && target > 0 ? Math.round((ratio - target) / target * 100) : null;
+      objCards += '<div class="pe-obj-card pe-obj--' + objStatus + '">' +
+        '<div class="pe-obj-head">' + mt.icon + ' ' + e(mt.label) + '</div>' +
+        '<div class="pe-obj-vals">' +
+        '<span class="pe-obj-target">Objectif : ' + _fmt(target, isW(ot) ? 0 : 2) + ' ' + (isW(ot) ? 'L' : e(mt.unit)) + '/client</span>' +
+        (ratio !== null ? '<span class="pe-obj-actual">Actuel : ' + _fmt(ratio, isW(ot) ? 0 : 2) + '</span>' : '<span class="pe-obj-actual pe-hist-nd">—</span>') +
+        (pct !== null ? '<span class="pe-obj-delta" style="color:' + objStatusCol + '">' + (pct > 0 ? '+' : '') + pct + '%</span>' : '') +
+        '</div>' +
+        '<div class="pe-obj-status" style="color:' + objStatusCol + '"><i class="fas ' + objIco + '"></i> ' + objStatusLbl + ' <small>(tolérance ' + tol + '%)</small></div>' +
+        '</div>';
+    });
+    const objHtml = objCards ? '<div class="pe-section pe-section--obj">' +
+      '<div class="pe-section-head"><i class="fas fa-bullseye"></i> Objectifs énergétiques</div>' +
+      '<div class="pe-obj-grid">' + objCards + '</div>' +
+      '</div>' : '';
+
     // ── Date selector ──
-    const dateSel = `<div class="pe-date-row">
-      <button class="cso-ibtn" onclick="MX.Pages.Conso._peDatePrev()"><i class="fas fa-chevron-left"></i></button>
-      <span class="pe-date-lbl">${peDate === today ? "Aujourd'hui" : peDate}</span>
-      <button class="cso-ibtn" onclick="MX.Pages.Conso._peDateNext()" ${peDate===today?'disabled':''}><i class="fas fa-chevron-right"></i></button>
-    </div>`;
+    const dateSel = '<div class="pe-date-row">' +
+      '<button class="cso-ibtn" onclick="MX.Pages.Conso._peDatePrev()"><i class="fas fa-chevron-left"></i></button>' +
+      '<span class="pe-date-lbl">' + (peDate === today ? "Aujourd'hui" : peDate) + '</span>' +
+      '<button class="cso-ibtn" onclick="MX.Pages.Conso._peDateNext()"' + (peDate === today ? ' disabled' : '') + '><i class="fas fa-chevron-right"></i></button>' +
+      '</div>';
 
-    return `<div class="cso-inner pe-page">
-      <div class="pe-toolbar">
-        ${dateSel}
-        <button class="pe-cfg-btn" onclick="window._settingsTab='energie';MX.showPage('settings')">
-          <i class="fas fa-sliders"></i> Configurer les seuils
-        </button>
-      </div>
+    const noCliBanner = cli === 0
+      ? '<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ' + peDate + ' — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate(\'' + peDate + '\')">Renseigner</button></div>'
+      : '';
 
-      ${cli === 0 ? `<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ${peDate} — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate('${peDate}')">Renseigner</button></div>` : ''}
-
-      <div class="pe-grid">
-        <div class="pe-section pe-section--score">
-          <div class="pe-section-head"><i class="fas fa-star"></i> Score énergétique</div>
-          <div class="pe-score-body">
-            <div class="pe-score-ring-wrap">
-              ${scoreSVG}
-              <div class="pe-score-class-badge" style="color:${scoreCol}">${scoreLetter}</div>
-              <div class="pe-score-lbl" style="color:${scoreCol}">${scoreLbl}</div>
-            </div>
-            <div class="pe-score-breakdown">${breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>'}</div>
-          </div>
-        </div>
-
-        <div class="pe-section pe-section--ratios">
-          <div class="pe-section-head"><i class="fas fa-divide"></i> Ratios par client</div>
-          <div class="pe-ratio-grid">${ratioCards}</div>
-        </div>
-      </div>
-
-      <div class="pe-section pe-section--comp">
-        <div class="pe-section-head"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>
-        <div class="pe-comp-table-wrap">
-          <table class="pe-comp-table"><thead>${compHead}</thead><tbody>${compBody}</tbody></table>
-        </div>
-      </div>
-
-      <div class="pe-grid pe-grid--2col">
-        <div class="pe-section pe-section--forecast">
-          <div class="pe-section-head"><i class="fas fa-chart-line"></i> Tendance & Prévisions</div>
-          <div class="pe-fc-sub-hd">Basé sur les 7 derniers jours — fin de mois estimée</div>
-          <div class="pe-fc-list">${forecastHtml || '<div class="pe-bd-empty">Données insuffisantes</div>'}</div>
-        </div>
-        <div class="pe-section pe-section--alerts">
-          <div class="pe-section-head"><i class="fas fa-triangle-exclamation"></i> Alertes intelligentes</div>
-          ${alertsHtml}
-        </div>
-      </div>
-    </div>`;
+    return '<div class="cso-inner pe-page">' +
+      '<div class="pe-toolbar">' + dateSel +
+        '<button class="pe-cfg-btn" onclick="window._settingsTab=\'energie\';MX.showPage(\'settings\')">' +
+        '<i class="fas fa-sliders"></i> Configurer</button>' +
+      '</div>' +
+      noCliBanner +
+      '<div class="pe-grid">' +
+        '<div class="pe-section pe-section--score">' +
+          '<div class="pe-section-head"><i class="fas fa-star"></i> Score énergétique</div>' +
+          '<div class="pe-score-body">' +
+            '<div class="pe-score-ring-wrap">' +
+              scoreSVG +
+              '<div class="pe-score-class-badge" style="color:' + scoreCol + '">' + scoreLetter + '</div>' +
+              '<div class="pe-score-lbl" style="color:' + scoreCol + '">' + scoreLbl + '</div>' +
+            '</div>' +
+            '<div class="pe-score-breakdown">' + (breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>') + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pe-section pe-section--ratios">' +
+          '<div class="pe-section-head"><i class="fas fa-divide"></i> Ratios par client</div>' +
+          '<div class="pe-ratio-grid">' + ratioCards + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pe-section pe-section--ia">' +
+        '<div class="pe-section-head"><i class="fas fa-robot"></i> Analyse automatique</div>' +
+        '<div class="pe-ia-rows">' + _iaAnalysisHtml() + '</div>' +
+      '</div>' +
+      '<div class="pe-section pe-section--comp">' +
+        '<div class="pe-section-head"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>' +
+        '<div class="pe-comp-table-wrap"><table class="pe-comp-table"><thead>' + compHead + '</thead><tbody>' + compBody + '</tbody></table></div>' +
+      '</div>' +
+      histTable +
+      '<div class="pe-grid pe-grid--2col">' +
+        '<div class="pe-section pe-section--forecast">' +
+          '<div class="pe-section-head"><i class="fas fa-chart-line"></i> Tendance &amp; Prévisions</div>' +
+          '<div class="pe-fc-sub-hd">Basé sur les 7 derniers jours — fin de mois estimée</div>' +
+          '<div class="pe-fc-list">' + (forecastHtml || '<div class="pe-bd-empty">Données insuffisantes</div>') + '</div>' +
+        '</div>' +
+        '<div class="pe-section pe-section--alerts">' +
+          '<div class="pe-section-head"><i class="fas fa-triangle-exclamation"></i> Alertes intelligentes</div>' +
+          alertsHtml +
+        '</div>' +
+      '</div>' +
+      objHtml +
+      '</div>';
   }
 
   // Date navigation for performance tab
@@ -2124,6 +2277,104 @@
   function _editCliDate(date) {
     window._csoSelDate = date || _today();
     MX.Pages.Conso._tab('compteurs');
+  }
+
+  function _peShowDay(date) {
+    const e  = MX.esc || (s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    const c  = _perfC();
+    const TYPES = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
+    const isW = type => ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+    const cli = (_clients[date] || {}).count || (_clients[date] || 0);
+    const cliN = typeof cli === 'object' ? cli.count || 0 : cli;
+    const justif = (_perfCfg.justifications && _perfCfg.justifications[date]) || '';
+    const perfSc = _calcPerfScore(date);
+
+    let rowsHtml = '';
+    TYPES.forEach(type => {
+      const mt = MT[type]; if (!mt) return;
+      const ids = _refMeterIds(type);
+      if (!ids.length) return;
+      let meterRows = '';
+      ids.forEach(id => {
+        const m = _meters.find(x => x.id === id); if (!m) return;
+        const r = _readings.filter(rd => rd.meterId === id && rd.date === date);
+        const conso = r.reduce((s, rd) => s + (rd.consumption || 0), 0);
+        if (!conso) return;
+        meterRows += '<div class="pe-day-meter-row">' +
+          '<span class="pe-day-meter-nm">' + e(m.name) + (m.zone ? ' <small class="pe-day-zone">' + e(m.zone) + '</small>' : '') + '</span>' +
+          '<span class="pe-day-meter-v">' + _fmt(conso, 2) + ' ' + e(m.unit || mt.unit) + '</span>' +
+          '</div>';
+      });
+      if (!meterRows) return;
+      const ratio = _perfRatio(type, date);
+      const grade = ratio !== null ? _getGrade(type, ratio) : { key: 'na', l: '—', color: '#64748b' };
+      const col = (c[grade.key] || {}).color || '#64748b';
+      rowsHtml += '<div class="pe-day-type-block">' +
+        '<div class="pe-day-type-hd" style="border-left:3px solid ' + col + '">' +
+          '<span class="pe-day-type-ico">' + mt.icon + '</span>' +
+          '<span class="pe-day-type-lbl">' + e(mt.label) + '</span>' +
+          (ratio !== null ? '<span class="pe-day-ratio" style="color:' + col + '">' + _fmt(ratio, isW(type) ? 0 : 2) + ' ' + (isW(type) ? 'L' : e(mt.unit)) + '/client</span>' : '') +
+          '<span class="pe-day-grade pe-grade" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '50">' + (grade.l || '—') + '</span>' +
+        '</div>' +
+        '<div class="pe-day-meters">' + meterRows + '</div>' +
+        '</div>';
+    });
+
+    const scoreStr = perfSc !== null ? perfSc + '/100' : '—';
+    const justifSection = '<div class="pe-day-justif-block">' +
+      '<div class="pe-day-justif-lbl"><i class="fas fa-comment-dots"></i> Justification</div>' +
+      (justif
+        ? '<div class="pe-day-justif-text">' + e(justif) + '</div>' +
+          '<button class="pe-justif-add-btn" onclick="MX.Pages.Conso._peAddJustif(\'' + date + '\')"><i class="fas fa-pen"></i> Modifier</button>'
+        : '<button class="pe-justif-add-btn" onclick="MX.Pages.Conso._peAddJustif(\'' + date + '\')"><i class="fas fa-plus"></i> Ajouter une justification</button>') +
+      '</div>';
+
+    const html = '<div class="pe-day-modal-backdrop" onclick="this.remove()">' +
+      '<div class="pe-day-modal" onclick="event.stopPropagation()">' +
+        '<div class="pe-day-modal-hd">' +
+          '<span class="pe-day-modal-ttl"><i class="fas fa-calendar-day"></i> Détail du ' + date + '</span>' +
+          '<button class="pe-day-modal-close" onclick="this.closest(\'.pe-day-modal-backdrop\').remove()"><i class="fas fa-times"></i></button>' +
+        '</div>' +
+        '<div class="pe-day-modal-meta">' +
+          '<span><i class="fas fa-users"></i> ' + (cliN || '—') + ' clients</span>' +
+          '<span><i class="fas fa-star"></i> Score : ' + scoreStr + '</span>' +
+        '</div>' +
+        '<div class="pe-day-types">' + (rowsHtml || '<div class="pe-bd-empty">Aucun relevé pour cette date</div>') + '</div>' +
+        justifSection +
+      '</div>' +
+    '</div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+
+  function _peAddJustif(date) {
+    const existing = (_perfCfg.justifications && _perfCfg.justifications[date]) || '';
+    const backdrop = document.querySelector('.pe-day-modal-backdrop');
+    const modal = backdrop ? backdrop.querySelector('.pe-day-modal') : null;
+    if (!modal) return;
+    const prev = modal.querySelector('.pe-day-justif-block');
+    if (prev) prev.remove();
+    const block = document.createElement('div');
+    block.className = 'pe-day-justif-block';
+    block.innerHTML = '<div class="pe-day-justif-lbl"><i class="fas fa-comment-dots"></i> Justification</div>' +
+      '<textarea class="pe-justif-textarea" id="pe-justif-ta" rows="3" placeholder="Ex : fermeture partielle, événement spécial...">' + existing.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>' +
+      '<div class="pe-justif-btns">' +
+        '<button class="pe-justif-save-btn" onclick="MX.Pages.Conso._peSaveJustif(\'' + date + '\',document.getElementById(\'pe-justif-ta\').value)"><i class="fas fa-save"></i> Enregistrer</button>' +
+        '<button class="pe-justif-cancel-btn" onclick="document.querySelector(\'.pe-day-modal-backdrop\').remove()"><i class="fas fa-times"></i> Annuler</button>' +
+      '</div>';
+    modal.appendChild(block);
+    setTimeout(() => { const ta = document.getElementById('pe-justif-ta'); if (ta) ta.focus(); }, 50);
+  }
+
+  function _peSaveJustif(date, text) {
+    const val = (text || '').trim();
+    const ref = CSO.perfConfig().doc('justifications');
+    const op = val
+      ? ref.set({ [date]: val }, { merge: true })
+      : ref.update({ [date]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+    op && op.then
+      ? op.then(() => { document.querySelector('.pe-day-modal-backdrop') && document.querySelector('.pe-day-modal-backdrop').remove(); })
+          .catch(err => { if (window.MX && MX.toast) MX.toast('Erreur : ' + err.message, 'error'); })
+      : (document.querySelector('.pe-day-modal-backdrop') && document.querySelector('.pe-day-modal-backdrop').remove());
   }
 
 
@@ -2979,5 +3230,6 @@
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
     _peDatePrev, _peDateNext, _editCliDate,
+    _peShowDay, _peAddJustif, _peSaveJustif,
   };
 })();
