@@ -21,7 +21,8 @@
   let _currentCritAlert = null;
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
-  let _recalcInProgress = false;
+  const _recalcLocks   = new Set(); // meters currently being recalculated
+  const _recalcPending = new Set(); // meters waiting for a re-run once current lock releases
   let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {}, alert_rules: {} }; // Performance config from Firestore
 
   // ── FIRESTORE ERROR HANDLER ──
@@ -3682,7 +3683,7 @@
       });
       _logReadingEdit(r.meterId, r.meterName || m.name, r.index, newIndex, motif);
       _showRecalcProgress('Recalcul des analyses… ███████');
-      await _recalcMeter(r.meterId);
+      await recalculateConsumption(r.meterId);
       _hideRecalcProgress();
       MX.toast('Relevé modifié · Recalcul terminé');
     } catch(e) {
@@ -3692,50 +3693,74 @@
     }
   }
 
-  async function _recalcMeter(meterId) {
-    if (_recalcInProgress) return;
-    _recalcInProgress = true;
+  // ── recalculateConsumption — unified entry point ──────────────────────────
+  // Called automatically after every create / edit / delete of a reading.
+  // Uses per-meter locking so different meters recalculate in parallel, and
+  // a pending queue so a mid-recalc modification is never silently dropped.
+  async function recalculateConsumption(meterId) {
+    if (!meterId) return;
+    if (_recalcLocks.has(meterId)) {
+      // Recalc in progress for this meter — schedule one re-run after it finishes
+      _recalcPending.add(meterId);
+      return;
+    }
+    _recalcLocks.add(meterId);
     try {
-      const snap = await CSO.readings().where('meterId', '==', meterId).get();
-      const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      all.sort((a, b) => {
-        if ((a.date || '') < (b.date || '')) return -1;
-        if ((a.date || '') > (b.date || '')) return 1;
-        return _tsMs(a.createdAt) - _tsMs(b.createdAt);
-      });
-
-      const CHUNK = 499;
-      let batchStart   = 0;
-      let lastIndex    = null;
-      let newLastIndex = null;
-
-      while (batchStart < all.length) {
-        const b     = db.batch();
-        const chunk = all.slice(batchStart, batchStart + CHUNK);
-        chunk.forEach(r => {
-          const newCons = (lastIndex !== null && r.index != null && r.index >= lastIndex)
-            ? Math.round((r.index - lastIndex) * 1000) / 1000
-            : null;
-          b.update(CSO.readings().doc(r.id), { consumption: newCons });
-          if (r.index != null) { lastIndex = r.index; newLastIndex = r.index; }
-        });
-        await b.commit();
-        batchStart += CHUNK;
-      }
-
-      if (newLastIndex !== null) {
-        await CSO.meters().doc(meterId).update({ lastIndex: newLastIndex });
-      }
+      await _recalcMeter(meterId);
     } finally {
-      _recalcInProgress = false;
+      _recalcLocks.delete(meterId);
+      if (_recalcPending.has(meterId)) {
+        _recalcPending.delete(meterId);
+        // Run once more to pick up any change that arrived mid-recalc
+        setTimeout(() => recalculateConsumption(meterId), 0);
+      }
+    }
+  }
+
+  async function _recalcMeter(meterId) {
+    const snap = await CSO.readings().where('meterId', '==', meterId).get();
+    const all  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Sort chronologically; within the same date, older createdAt comes first
+    all.sort((a, b) => {
+      if ((a.date || '') < (b.date || '')) return -1;
+      if ((a.date || '') > (b.date || '')) return 1;
+      return _tsMs(a.createdAt) - _tsMs(b.createdAt);
+    });
+
+    const CHUNK = 499;
+    let batchStart   = 0;
+    let lastIndex    = null;
+    let newLastIndex = null;
+
+    while (batchStart < all.length) {
+      const b     = db.batch();
+      const chunk = all.slice(batchStart, batchStart + CHUNK);
+      chunk.forEach(r => {
+        const newCons = (lastIndex !== null && r.index != null && r.index >= lastIndex)
+          ? Math.round((r.index - lastIndex) * 1000) / 1000
+          : null;
+        b.update(CSO.readings().doc(r.id), { consumption: newCons });
+        if (r.index != null) { lastIndex = r.index; newLastIndex = r.index; }
+      });
+      await b.commit();
+      batchStart += CHUNK;
+    }
+
+    if (newLastIndex !== null) {
+      await CSO.meters().doc(meterId).update({ lastIndex: newLastIndex });
     }
   }
 
   function _delReading(id) {
+    // Look up meterId BEFORE the modal so it's captured in the closure after deletion
+    const _delR    = _readings.find(x => x.id === id);
+    const _delMId  = _delR ? _delR.meterId : null;
     MX.showModal('Supprimer le relevé', 'Cette action est irréversible.', [
       { label: 'Supprimer', cls: 'danger', fn: async () => {
         await CSO.readings().doc(id).delete();
         MX.toast('Relevé supprimé');
+        // Recalculate all consumptions for the meter so subsequent readings update
+        if (_delMId) recalculateConsumption(_delMId).catch(e => console.error('[CSO] recalcDel:', e));
       }},
       { label: 'Annuler', cls: 'cancel' }
     ]);
@@ -3879,6 +3904,8 @@
       await CSO.meters().doc(meterId).update({ lastIndex: index, lastReadAt: FV.serverTimestamp() });
       _photoB64 = null;
       MX.toast(consumption !== null ? `Relevé enregistré · +${_fmtIdx(consumption)} ${m.unit}` : 'Relevé enregistré');
+      // Recalculate ALL consumptions for this meter to keep subsequent readings consistent
+      recalculateConsumption(meterId).catch(e => console.error('[CSO] recalcSave:', e));
       if (_relQueue.length && _relQueueIdx < _relQueue.length) {
         _relQueueIdx++;
         setTimeout(() => _nextQueueReading(), 600);
@@ -3957,7 +3984,7 @@
   window.MX.Pages.Conso = {
     render,
     _tab, _editCli, _meterForm, _delMeter, _delReading,
-    _editReading, _recalcMeter,
+    _editReading, _recalcMeter, recalculateConsumption,
     _newReading, _onPhoto, _showPhoto, _meterHistory,
     _allMeters, _csv, _pdf,
     _csoDateSet, _csoDatePrev, _csoDateNext,
