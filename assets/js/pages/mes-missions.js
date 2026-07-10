@@ -207,20 +207,26 @@
   }
 
   function _getAllTasks(checklistTasks) {
-    var todayId = MX.todayId();
+    var todayId  = MX.todayId();
+    var todayISO = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, for reliable comparison
     var firestoreTasks = _allMissions
       .filter(function (m) {
-        var dayId = m.dayId || '';
         var isPmp = m.isPmp || m.missionType === 'pmp' || m.category === 'pmp';
-        // PMP missions have future dueDate by design — don't filter them out
-        // Only skip future-dated checklist and intervention missions
-        if (!isPmp && dayId > todayId) return false;
+        // PMP missions always shown (may have future dueDate by design)
+        // Non-PMP: only exclude genuinely future missions — normalize date first to avoid YYYYMMDD vs YYYY-MM-DD mismatch
+        if (!isPmp) {
+          var dayNorm = _normalizeMissionDate({ dueDate: m.dueDate || m.dayId });
+          // A past or today mission must NEVER be removed — only exclude future
+          if (dayNorm && dayNorm > todayISO) return false;
+        }
         return true;
       })
       .map(function (m) {
         var isPmp = m.isPmp || m.missionType === 'pmp' || m.category === 'pmp';
         var type  = isPmp ? 'pmp' : (m.missionType || 'intervention');
         var pd    = m.pmpData || {};
+        // Normalize dueDate to YYYY-MM-DD for all missions so comparisons are reliable
+        var normalizedDueDate = _normalizeMissionDate(isPmp ? m : { dueDate: m.dueDate, dayId: m.dayId }) || '';
         return {
           id:               m.id,
           firestoreId:      m.id,
@@ -240,7 +246,7 @@
           zone:             (isPmp ? pd.zone : m.zone) || '',
           subZone:          (isPmp ? pd.subZone : m.subZone) || '',
           estimatedDuration: (isPmp ? pd.estimatedDuration : m.estimatedDuration) || '',
-          dueDate:          (isPmp ? pd.dueDate : m.dueDate) || m.dayId || '',
+          dueDate:          normalizedDueDate,
           sortOrder:        10,
           // PMP fields
           isPmp:            isPmp,
@@ -352,6 +358,23 @@
   }
 
   // ══════════════════════════════════════════════
+  // UNIFIED STATUS HELPER (requested by bug-fix spec)
+  // Returns: 'done' | 'progress' | 'late' | 'today' | 'future'
+  // ══════════════════════════════════════════════
+  function getMissionStatus(mission) {
+    var todayISO = new Date().toISOString().slice(0, 10);
+    var cu = MX.state.currentUser;
+    var curName = cu ? cu.name : '';
+    if (mission.done) return 'done';
+    var isRunning = mission.takenBy === curName || (!!(mission.assignedTo) && !!mission.started);
+    if (isRunning) return 'progress';
+    var nd = _normalizeMissionDate({ dueDate: mission.dueDate, dayId: mission.dayId, pmpData: mission.pmpData });
+    if (!nd || nd === todayISO) return 'today';
+    if (nd < todayISO) return 'late';
+    return 'future';
+  }
+
+  // ══════════════════════════════════════════════
   // RENDER — TECHNICIAN VIEW
   // ══════════════════════════════════════════════
 
@@ -368,7 +391,11 @@
     if (_activeFilter === 'urgent') {
       filtered = filtered.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; });
     } else if (_activeFilter === 'retard') {
-      filtered = filtered.filter(function (t) { return t.dueDate && t.dueDate < todayISO && !t.done; });
+      filtered = filtered.filter(function (t) {
+        // Normalize to YYYY-MM-DD before comparing — t.dueDate may be YYYYMMDD (checklist) or YYYY-MM-DD (intervention)
+        var nd = _normalizeMissionDate({ dueDate: t.dueDate, dayId: t.dayId, pmpData: t.pmpData });
+        return nd && nd < todayISO && !t.done;
+      });
     } else if (_activeFilter === 'done') {
       filtered = filtered.filter(function (t) { return t.done; });
     } else if (_activeFilter === 'todo') {
@@ -796,6 +823,14 @@
       h += _pmpSubTabBar({ today: todayPmp.length, upcoming: upcomingPmp.length, inprogress: inProgPmp.length, urgent: urgentPmp.length });
 
       if (_pmpSubTab === 'today') {
+        // Banner alerting the tech about late PMP missions visible in the "Urgent" sub-tab
+        if (urgentPmp.length > 0) {
+          h += '<div class="mm-pmp-late-banner" onclick="MX.MM.setPmpSubTab(\'urgent\')">'
+            + '<i class="fas fa-triangle-exclamation"></i>'
+            + ' <strong>' + urgentPmp.length + '</strong> maintenance' + (urgentPmp.length > 1 ? 's' : '') + ' en retard'
+            + ' <span class="mm-pmp-late-link">Voir <i class="fas fa-arrow-right"></i></span>'
+            + '</div>';
+        }
         if (todayPmp.length === 0) {
           h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">☀️</div>'
             + '<div class="mm-v3-empty-ttl">Aucune maintenance aujourd\'hui</div>'
@@ -806,6 +841,13 @@
           h += '</div>';
         }
       } else if (_pmpSubTab === 'upcoming') {
+        if (urgentPmp.length > 0) {
+          h += '<div class="mm-pmp-late-banner" onclick="MX.MM.setPmpSubTab(\'urgent\')">'
+            + '<i class="fas fa-triangle-exclamation"></i>'
+            + ' <strong>' + urgentPmp.length + '</strong> maintenance' + (urgentPmp.length > 1 ? 's' : '') + ' en retard'
+            + ' <span class="mm-pmp-late-link">Voir <i class="fas fa-arrow-right"></i></span>'
+            + '</div>';
+        }
         // Range = filtre d'affichage uniquement — toutes les missions futures sont classées ici
         var upcomingDueDisplay = _addDaysMM(todayISO, _upcomingRange);
         var upcomingInRange    = upcomingPmp.filter(function (t) { return _normalizeMissionDate(t) <= upcomingDueDisplay; });
@@ -2221,6 +2263,7 @@
     _addPmpComment: _addPmpComment, _addIntComment: _addIntComment,
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,
+    getMissionStatus: getMissionStatus,
   };
   window.MX.MM = window.MX.Pages.MesMissions;
 })();

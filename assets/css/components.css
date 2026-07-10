@@ -15449,6 +15449,11 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmp-beyond-label::after  { content: ''; flex: 1; height: 1px; background: var(--border1); }
 .pmp-beyond-hint { margin: 8px 12px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border1); border-radius: 8px; font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 8px; }
 
+/* Late PMP alert banner — clickable, navigates to Urgent sub-tab */
+.mm-pmp-late-banner { margin: 8px 12px 0; padding: 10px 14px; background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.35); border-radius: 10px; font-size: 13px; color: #ef4444; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: background .15s; }
+.mm-pmp-late-banner:hover { background: rgba(239,68,68,.18); }
+.mm-pmp-late-link { margin-left: auto; font-size: 12px; font-weight: 600; white-space: nowrap; }
+
 /* AI assistance block */
 .pmp-ai-block { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }
 .pmp-ai-block-hdr { font-size: 11px; font-weight: 700; color: #a855f7; display: flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: .05em; }
