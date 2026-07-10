@@ -23,6 +23,8 @@
   let _anHiddenTypes    = new Set();
   const _recalcLocks   = new Set(); // meters currently being recalculated
   const _recalcPending = new Set(); // meters waiting for a re-run once current lock releases
+  const _recalcWaiters = new Map(); // meterId → [{resolve,reject}] Promises waiting for recalc to finish
+  let _readingIndexCache = {};      // docId → last known index value (to detect external modifications)
   let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {}, alert_rules: {} }; // Performance config from Firestore
 
   // ── FIRESTORE ERROR HANDLER ──
@@ -775,7 +777,24 @@
       _rerender();
     }, _fsErr('cso_meters'));
     _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(500).onSnapshot(snap => {
+      // Detect index changes to trigger recalculation for multi-session modifications.
+      // _recalcMeter only writes `consumption` (not `index`), so cache mismatches on
+      // `index` exclusively detect real user edits — no infinite recalc loop possible.
+      const changedMeterIds = new Set();
+      snap.docChanges().forEach(change => {
+        const data = change.doc.data();
+        const id   = change.doc.id;
+        if (change.type === 'modified' || change.type === 'added') {
+          const prevIdx = _readingIndexCache[id];
+          if (prevIdx !== data.index) changedMeterIds.add(data.meterId);
+          _readingIndexCache[id] = data.index;
+        } else if (change.type === 'removed') {
+          if (_readingIndexCache[id] !== undefined) changedMeterIds.add(data.meterId);
+          delete _readingIndexCache[id];
+        }
+      });
       _readings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      changedMeterIds.forEach(mid => recalculateConsumption(mid).catch(() => {}));
       _rerender();
     }, _fsErr('cso_readings'));
     _unsubCso.clients = CSO.clients().orderBy('date', 'desc').limit(90).onSnapshot(snap => {
@@ -3693,28 +3712,49 @@
     }
   }
 
+  // ── _flushRecalcWaiters — resolve/reject all Promises waiting on a meter ──
+  function _flushRecalcWaiters(meterId, err) {
+    const waiters = _recalcWaiters.get(meterId) || [];
+    _recalcWaiters.delete(meterId);
+    waiters.forEach(({ resolve, reject }) => err ? reject(err) : resolve());
+  }
+
   // ── recalculateConsumption — unified entry point ──────────────────────────
   // Called automatically after every create / edit / delete of a reading.
   // Uses per-meter locking so different meters recalculate in parallel, and
   // a pending queue so a mid-recalc modification is never silently dropped.
-  async function recalculateConsumption(meterId) {
-    if (!meterId) return;
+  // Returns a Promise that resolves only after the recalc actually completes,
+  // even when a recalc is already in progress for the same meter (waiter pattern).
+  function recalculateConsumption(meterId) {
+    if (!meterId) return Promise.resolve();
     if (_recalcLocks.has(meterId)) {
-      // Recalc in progress for this meter — schedule one re-run after it finishes
+      // Recalc in progress — queue one re-run and return a Promise that resolves
+      // after that re-run finishes (not immediately).
       _recalcPending.add(meterId);
-      return;
+      return new Promise((resolve, reject) => {
+        const list = _recalcWaiters.get(meterId) || [];
+        _recalcWaiters.set(meterId, [...list, { resolve, reject }]);
+      });
     }
     _recalcLocks.add(meterId);
-    try {
-      await _recalcMeter(meterId);
-    } finally {
-      _recalcLocks.delete(meterId);
-      if (_recalcPending.has(meterId)) {
-        _recalcPending.delete(meterId);
-        // Run once more to pick up any change that arrived mid-recalc
-        setTimeout(() => recalculateConsumption(meterId), 0);
-      }
-    }
+    return _recalcMeter(meterId)
+      .then(() => {
+        // Flush waiters only when there is no pending re-run queued — otherwise
+        // the pending re-run will flush them once it completes.
+        if (!_recalcPending.has(meterId)) _flushRecalcWaiters(meterId);
+      })
+      .catch(e => {
+        _flushRecalcWaiters(meterId, e);
+        throw e;
+      })
+      .finally(() => {
+        _recalcLocks.delete(meterId);
+        if (_recalcPending.has(meterId)) {
+          _recalcPending.delete(meterId);
+          // Run once more to pick up any change that arrived mid-recalc
+          setTimeout(() => recalculateConsumption(meterId), 0);
+        }
+      });
   }
 
   async function _recalcMeter(meterId) {
