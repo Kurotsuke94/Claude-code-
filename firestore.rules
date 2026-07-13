@@ -140,23 +140,19 @@ service cloud.firestore {
     }
 
     // ── MISSIONS ─────────────────────────────────────────────────────────────
-    // PHILOSOPHIE GMAO : aucune suppression physique.
-    // Une mission terminée ou annulée ne doit jamais disparaître définitivement.
-    // Pour masquer une mission : utiliser { archived: true, archivedAt, archivedBy }.
-    // Aucun delete présent dans le code JavaScript actuel → règle sans risque.
+    // PHILOSOPHIE GMAO : suppression physique réservée à l'Admin via Corbeille.
+    // Cycle normal : opérationnel → inTrash:true → archived:true → delete (Admin).
     match /missions/{docId} {
       allow read, create, update: if true;
-      // delete : BLOQUÉ — utiliser archived: true
+      allow delete: if isAdmin();
     }
 
     // ── INTERVENTIONS ────────────────────────────────────────────────────────
-    // PHILOSOPHIE GMAO : suppression physique interdite.
-    // Le JS actuel appelle .delete() sur annulation — ces appels retourneront
-    // permission-denied jusqu'à la migration Phase 2 (inTrash: true).
-    // ⚠ Vérifier les boutons d'annulation avant déploiement.
+    // PHILOSOPHIE GMAO : suppression physique réservée à l'Admin via Corbeille.
+    // Le JS remplace les .delete() par MX.Trash.sendToTrash().
     match /interventions/{docId} {
       allow read, create, update: if true;
-      // delete : BLOQUÉ — utiliser inTrash: true / archived: true
+      allow delete: if isAdmin();
     }
 
     // Transferts liés aux interventions — pas de delete dans le code
@@ -203,16 +199,17 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
     // pmp_interventions : PHILOSOPHIE GMAO — historique d'interventions
-    // Le JS actuel appelle .delete() en cascade → sera bloqué (Phase 2 requis)
-    // ⚠ Vérifier les suppressions d'équipement avant déploiement.
+    // Le JS utilise MX.Trash.sendToTrash() au lieu de .delete().
+    // Suppression physique uniquement depuis Corbeille (Admin).
     match /pmp_interventions/{docId} {
       allow read, create, update: if true;
-      // delete : BLOQUÉ — utiliser inTrash: true / archived: true
+      allow delete: if isAdmin();
     }
     // pmp_plans : PHILOSOPHIE GMAO — plans de maintenance = données critiques
+    // Suppression physique uniquement depuis Corbeille (Admin).
     match /pmp_plans/{docId} {
       allow read, create, update: if true;
-      // delete : BLOQUÉ — utiliser archived: true
+      allow delete: if isAdmin();
     }
     match /pmp_templates/{docId} {
       allow read, create, update, delete: if true;

@@ -117,7 +117,7 @@
     _missionsUnsub = db.collection('missions')
       .where('assignedTo', '==', cu.name)
       .onSnapshot(function (snap) {
-        _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (m) { return !m.inTrash; });
         console.log('[PMP] Listener 1 reçu →', _assignedMissions.length, 'missions assignedTo =', cu.name,
           _assignedMissions.map(function(m){ return {id:m.id, type:m.missionType||m.category, assignedTo:m.assignedTo, takenBy:m.takenBy, done:m.done}; }));
         _mergeAllMissions();
@@ -131,7 +131,7 @@
       .onSnapshot(function (snap) {
         var raw = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
         _unassignedPmpMissions = raw.filter(function (m) {
-          return !m.done && (m.isPmp || m.missionType === 'pmp' || m.category === 'pmp');
+          return !m.inTrash && !m.done && (m.isPmp || m.missionType === 'pmp' || m.category === 'pmp');
         });
         console.log('[PMP] Listener 2 reçu → status:', snap.docChanges().map(function(c){ return {type:c.type, id:c.doc.id, assignedTo:c.doc.data().assignedTo, takenBy:c.doc.data().takenBy}; }),
           '| raw total:', raw.length, '| PMP non-assignés:', _unassignedPmpMissions.length);

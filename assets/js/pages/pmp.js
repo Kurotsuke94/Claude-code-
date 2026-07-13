@@ -232,7 +232,7 @@
       _rerender();
     }, _fsErr('pmp_equipments'));
     _unsubPmp.int = PMP_DB.int().onSnapshot(function (snap) {
-      _pmpInt = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      _pmpInt = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (x) { return !x.inTrash; });
       _rerender();
     }, _fsErr('pmp_interventions'));
     _unsubPmp.tpl = PMP_DB.tpl().onSnapshot(function (snap) {
@@ -241,7 +241,7 @@
     }, _fsErr('pmp_templates'));
 
     _unsubPmp.plans = PMP_DB.plans().onSnapshot(function (snap) {
-      _pmpPlans = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      _pmpPlans = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (x) { return !x.inTrash; });
       _rerender();
     }, _fsErr('pmp_plans'));
 
@@ -1927,29 +1927,41 @@
     var eq   = _pmpEq.find(function (e) { return e.id === id; });
     var name = eq ? eq.name : '';
     MX.showModal("Supprimer l'équipement ?",
-      '"' + esc(name) + '" et ses interventions associées seront supprimés définitivement.',
+      '"' + esc(name) + '" sera supprimé. Plans et interventions liés iront en corbeille.',
       [
         { label: 'Supprimer', cls: 'danger', fn: async function () {
           try {
-            var intList = _pmpInt.filter(function (i) { return i.equipmentId === id; });
-            var intIds  = intList.map(function (i) { return i.id; });
-            for (var j = 0; j < intIds.length; j += 30) {
-              var chunk = intIds.slice(j, j + 30);
+            var now = FV.serverTimestamp();
+            var by  = (MX.state.currentUser && (MX.state.currentUser.name || MX.state.currentUser.id)) ||
+                      (MX.state.adminUser && MX.state.adminUser.email) || 'Inconnu';
+            // Fetch all pmp_interventions (including those already in trash for this eq)
+            var allIntSnap = await PMP_DB.int().where('equipmentId', '==', id).get();
+            var allIntIds  = allIntSnap.docs.map(function (d) { return d.id; });
+            // Trash linked missions
+            for (var j = 0; j < allIntIds.length; j += 30) {
+              var chunk = allIntIds.slice(j, j + 30);
               var mSnap = await db.collection('missions').where('pmpIntId', 'in', chunk).get();
               if (!mSnap.empty) {
                 var mBatch = db.batch();
-                mSnap.docs.forEach(function (d) { mBatch.delete(d.ref); });
+                mSnap.docs.forEach(function (d) {
+                  mBatch.update(d.ref, { inTrash: true, trashedAt: now, trashedBy: by, trashReason: 'Équipement supprimé', _trashName: d.data().title || '', _trashType: 'Mission PMP' });
+                });
                 await mBatch.commit();
               }
             }
+            // Trash pmp_interventions and pmp_plans; physically delete pmp_equipment
+            var allPlanSnap = await PMP_DB.plans().where('equipmentId', '==', id).get();
             var batch = db.batch();
             batch.delete(PMP_DB.eq().doc(id));
-            intList.forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
-            _pmpPlans.filter(function (p) { return p.equipmentId === id; })
-                     .forEach(function (p) { batch.delete(PMP_DB.plans().doc(p.id)); });
+            allIntSnap.docs.forEach(function (d) {
+              batch.update(d.ref, { inTrash: true, trashedAt: now, trashedBy: by, trashReason: 'Équipement supprimé', _trashName: d.data().name || d.data().equipmentName || '', _trashType: 'Intervention PMP' });
+            });
+            allPlanSnap.docs.forEach(function (d) {
+              batch.update(d.ref, { inTrash: true, trashedAt: now, trashedBy: by, trashReason: 'Équipement supprimé', _trashName: d.data().name || '', _trashType: 'Plan PMP' });
+            });
             await batch.commit();
             if (_viewEqId === id) { _viewEqId = null; }
-            MX.toast('Équipement supprimé');
+            MX.toast('Équipement supprimé, données placées en corbeille');
           } catch (e) { console.error('[PMP] delEq:', e); MX.toast('Erreur suppression : ' + e.message, true); }
         }},
         { label: 'Annuler', cls: 'cancel' },
@@ -2364,18 +2376,23 @@
     if (!planId) { MX.toast('Identifiant introuvable', true); return; }
     var plan = _pmpPlans.find(function (p) { return p.id === planId; });
     var name = plan ? plan.name : '';
-    MX.showModal('Supprimer ce plan ?',
-      '"' + esc(name) + '" et ses interventions associées seront supprimés définitivement.',
+    MX.showModal('Mettre le plan en corbeille ?',
+      '"' + esc(name) + '" et ses interventions seront placés en corbeille.',
       [
-        { label: 'Supprimer', cls: 'danger', fn: async function () {
+        { label: 'Mettre à la corbeille', cls: 'danger', fn: async function () {
           try {
+            var now = FV.serverTimestamp();
+            var by  = (MX.state.currentUser && (MX.state.currentUser.name || MX.state.currentUser.id)) ||
+                      (MX.state.adminUser && MX.state.adminUser.email) || 'Inconnu';
             var batch = db.batch();
-            batch.delete(PMP_DB.plans().doc(planId));
+            batch.update(PMP_DB.plans().doc(planId), { inTrash: true, trashedAt: now, trashedBy: by, trashReason: '', _trashName: name, _trashType: 'Plan PMP' });
             _pmpInt.filter(function (i) { return i.planId === planId; })
-                   .forEach(function (i) { batch.delete(PMP_DB.int().doc(i.id)); });
+                   .forEach(function (i) {
+                     batch.update(PMP_DB.int().doc(i.id), { inTrash: true, trashedAt: now, trashedBy: by, trashReason: 'Plan supprimé', _trashName: i.name || i.equipmentName || '', _trashType: 'Intervention PMP' });
+                   });
             await batch.commit();
-            MX.toast('Plan supprimé');
-          } catch (e) { console.error('[PMP] delPlan:', e); MX.toast('Erreur suppression : ' + e.message, true); }
+            MX.toast('Plan placé en corbeille');
+          } catch (e) { console.error('[PMP] delPlan:', e); MX.toast('Erreur : ' + e.message, true); }
         }},
         { label: 'Annuler', cls: 'cancel' },
       ]
@@ -2568,11 +2585,12 @@
   }
 
   function _delInt(id) {
-    MX.showModal('Supprimer cette intervention ?', 'Cette action est irréversible.', [
-      { label: 'Supprimer', cls: 'danger', fn: async function () {
+    var iv = _pmpInt.find(function (i) { return i.id === id; });
+    MX.showModal('Mettre l\'intervention en corbeille ?', '"' + esc((iv && iv.name) || (iv && iv.equipmentName) || '') + '" sera placée en corbeille.', [
+      { label: 'Mettre à la corbeille', cls: 'danger', fn: async function () {
         try {
-          await PMP_DB.int().doc(id).delete();
-          MX.toast('Intervention supprimée');
+          await MX.Trash.sendToTrash('pmp_interventions', id, { name: (iv && iv.name) || (iv && iv.equipmentName) || '', type: 'Intervention PMP', reason: '' });
+          MX.toast('Intervention placée en corbeille');
         } catch (e) { MX.toast('Erreur : ' + e.message, true); }
       }},
       { label: 'Annuler', cls: 'cancel' },

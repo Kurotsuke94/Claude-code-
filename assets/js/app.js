@@ -94,6 +94,7 @@
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
     if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
+    if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -191,6 +192,7 @@
     'utilisateurs':  { icon: 'fa-users',           l: 'Utilisateurs' },
     'equipe':        { icon: 'fa-users-gear',      l: 'Équipe' },
     'badges':        { icon: 'fa-medal',           l: 'Badges' },
+    'corbeille':     { icon: 'fa-trash-can',       l: 'Corbeille' },
   };
 
   let _favsCache = null;
@@ -434,6 +436,9 @@
       aItems += _sec("CONNAISSANCES");
       aItems += _tabBtn("bible-admin",    "fa-book-open",        "Validation Bible");
       aItems += _tabBtn("badges-admin",   "fa-medal",            "Badges");
+
+      aItems += _sec("DONNÉES");
+      aItems += _pageBtn("corbeille",     "fa-trash-can",        "Corbeille & Archives");
 
       if (isAdmin) {
         aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;

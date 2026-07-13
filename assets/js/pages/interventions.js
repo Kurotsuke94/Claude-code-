@@ -189,7 +189,7 @@
       .orderBy('startDate', 'desc')
       .limit(300)
       .onSnapshot(snap => {
-        _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.inTrash);
         _sendIntNotifs(_interventions);
         _autoRetard();
         _rerender();
@@ -1083,15 +1083,16 @@
   function _delInt(id) {
     const iv = _interventions.find(x => x.id === id);
     MX.showModal({
-      title: 'Supprimer l\'intervention',
-      sub: `Supprimer définitivement "${esc(iv?.title || '')}" ?`,
-      body: '',
+      title: 'Mettre à la corbeille',
+      sub: `"${esc(iv?.title || '')}" sera placée en corbeille.`,
+      body: '<div style="margin-bottom:4px"><label style="font-size:12px;color:var(--text3)">Raison (optionnel)</label><input class="fi" id="int-del-reason" placeholder="Motif de suppression…" style="margin-top:4px"></div>',
       actions: [
-        { label: 'Supprimer', cls: 'danger', fn: async () => {
+        { label: 'Mettre à la corbeille', cls: 'danger', fn: async () => {
           try {
-            await DB.int().doc(id).delete();
-            MX.toast('Intervention supprimée');
-          } catch(e) { MX.toast('Erreur', true); }
+            const reason = (document.getElementById('int-del-reason') || {}).value || '';
+            await MX.Trash.sendToTrash('interventions', id, { name: iv?.title || '', type: 'Intervention', reason });
+            MX.toast('Intervention placée en corbeille');
+          } catch(e) { MX.toast('Erreur : ' + (e.message || ''), true); }
         }},
         { label: 'Annuler', cls: 'cancel' }
       ]
