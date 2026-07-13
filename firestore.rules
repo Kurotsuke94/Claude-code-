@@ -1,9 +1,342 @@
 rules_version = '2';
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MAINTIX — RÈGLES FIRESTORE PRODUCTION
+//  Réseau interne fermé · Sécurité intermédiaire
+//  Généré le : 2026-07-13
+//
+//  PHILOSOPHIE :
+//  • Lectures   : libres pour toutes les collections (listeners temps réel)
+//  • Écritures  : libres sur les collections opérationnelles
+//  • Config     : écriture réservée à l'Administrateur (Firebase Auth)
+//  • Suppressions critiques : bloquées au niveau serveur
+//  • Philosophie GMAO : missions jamais supprimées (archivage archived:true)
+//
+//  AUTHENTIFICATION :
+//  • Administrateur  → Firebase Auth (request.auth != null)
+//  • Responsable     → PIN Firestore (pas de Firebase Auth → request.auth null)
+//  • Technicien      → PIN Firestore (pas de Firebase Auth → request.auth null)
+//
+//  NE PAS DÉPLOYER SANS AVOIR RELU CE FICHIER.
+//  Commande de déploiement : firebase deploy --only firestore:rules
+// ════════════════════════════════════════════════════════════════════════════
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Open access — réseau fermé, pas de règles de sécurité requises
-    match /{document=**} {
-      allow read, write: if true;
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : Administrateur Firebase Auth
+    // ────────────────────────────────────────────────────────────────────────
+    function isAdmin() {
+      return request.auth != null;
     }
+
+
+    // ════════════════════════════════════════════════════════════════════════
+    // GROUPE A — COLLECTIONS PROTÉGÉES
+    // Écriture restreinte · Suppression interdite ou admin uniquement
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── CONFIG ──────────────────────────────────────────────────────────────
+    // Documents : week, teams, alerts, assignments, checks, notes, planning,
+    //             bible_permissions, games_config, hotel_config, versions,
+    //             maintenance.
+    // Lecture   : libre (listeners db.js, Cloud Functions)
+    // Écriture  : Admin uniquement (Firebase Auth)
+    // Suppression : JAMAIS — configuration structurelle de l'application
+    match /config/{docId} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      // delete : interdit — aucune suppression de config
+
+      // Sous-collection : config/maintenance/deploy_log
+      // Journal de déploiement en append-only
+      match /deploy_log/{logId} {
+        allow read: if true;
+        allow create: if isAdmin();
+        // update, delete : interdit
+      }
+    }
+
+    // ── USERS ────────────────────────────────────────────────────────────────
+    // Lecture   : libre (auth.js lit les utilisateurs pour valider le PIN)
+    // Création  : Admin uniquement
+    // Mise à jour : libre (mise à jour profil, planningOrder, avatarUrl, PIN)
+    // Suppression : Admin uniquement (panneau admin)
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // ── ROLES ────────────────────────────────────────────────────────────────
+    // Lecture   : libre (auth.js charge les permissions par roleId)
+    // Écriture  : Admin uniquement
+    // Suppression : Admin uniquement (panneau admin)
+    match /roles/{roleId} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── CSO_PERF_CONFIG ──────────────────────────────────────────────────────
+    // Configuration performance énergétique (seuils, classes, objectifs)
+    // Écriture  : libre (consommations.js → settings)
+    // Suppression : JAMAIS — configuration structurelle
+    match /cso_perf_config/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      // delete : interdit
+    }
+
+    // ── ALERT_RULES ──────────────────────────────────────────────────────────
+    // Règles d'alertes configurées (admin.js, app.js)
+    // Écriture  : libre (responsable peut configurer les alertes)
+    // Suppression : JAMAIS — protection contre suppression accidentelle
+    match /alert_rules/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      // delete : interdit
+    }
+
+    // ── FCMTOKENS ────────────────────────────────────────────────────────────
+    // Tokens push notification (client : set/delete sur login/logout)
+    // Cloud Functions gèrent les tokens expirés via Admin SDK (hors règles)
+    match /fcmTokens/{tokenId} {
+      allow read, create, update, delete: if true;
+    }
+
+
+    // ════════════════════════════════════════════════════════════════════════
+    // GROUPE B — COLLECTIONS OPÉRATIONNELLES
+    // Lecture + écriture libres · Suppression selon usage réel audité
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── PRÉSENCE & PRÉFÉRENCES ───────────────────────────────────────────────
+    // Heartbeat toutes les 2 min (presence). Favoris de navigation (user_prefs).
+    // Pas de suppression utilisée dans le code actuel.
+    match /presence/{docId} {
+      allow read, create, update: if true;
+    }
+    match /user_prefs/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── CHECKLISTS ───────────────────────────────────────────────────────────
+    // tasks : batch.set uniquement, jamais supprimé → pas de delete
+    match /tasks/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // weekly_checks : delete utilisé (suppression de templates)
+    match /weekly_checks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // weekHistory : batch.delete pour purge 30 jours
+    match /weekHistory/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── MISSIONS ─────────────────────────────────────────────────────────────
+    // PHILOSOPHIE GMAO : aucune suppression physique.
+    // Une mission terminée ou annulée ne doit jamais disparaître définitivement.
+    // Pour masquer une mission : utiliser { archived: true, archivedAt, archivedBy }.
+    // Aucun delete présent dans le code JavaScript actuel → règle sans risque.
+    match /missions/{docId} {
+      allow read, create, update: if true;
+      // delete : BLOQUÉ — utiliser archived: true
+    }
+
+    // ── INTERVENTIONS ────────────────────────────────────────────────────────
+    // PHILOSOPHIE GMAO : suppression physique interdite.
+    // Le JS actuel appelle .delete() sur annulation — ces appels retourneront
+    // permission-denied jusqu'à la migration Phase 2 (inTrash: true).
+    // ⚠ Vérifier les boutons d'annulation avant déploiement.
+    match /interventions/{docId} {
+      allow read, create, update: if true;
+      // delete : BLOQUÉ — utiliser inTrash: true / archived: true
+    }
+
+    // Transferts liés aux interventions — pas de delete dans le code
+    match /int_transfers/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── RESP_TASKS ───────────────────────────────────────────────────────────
+    match /resp_tasks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── TASK_PHOTOS ──────────────────────────────────────────────────────────
+    // arrayUnion uniquement (ajout de photos) — jamais supprimé
+    match /task_photos/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── LOGS TECHNIQUES ──────────────────────────────────────────────────────
+    // clearLogs supprime les anciennes entrées — delete autorisé
+    match /logs/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── PLANNING ─────────────────────────────────────────────────────────────
+    match /planning_entries/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /planning_shifts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /absences/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // daily_claims : set merge uniquement, pas de delete
+    match /daily_claims/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── PMP — MAINTENANCE PRÉVENTIVE ─────────────────────────────────────────
+    // pmp_equipments : batch.delete sur suppression équipement — autorisé
+    // (les équipements sont des entrées de configuration, pas des historiques)
+    match /pmp_equipments/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // pmp_interventions : PHILOSOPHIE GMAO — historique d'interventions
+    // Le JS actuel appelle .delete() en cascade → sera bloqué (Phase 2 requis)
+    // ⚠ Vérifier les suppressions d'équipement avant déploiement.
+    match /pmp_interventions/{docId} {
+      allow read, create, update: if true;
+      // delete : BLOQUÉ — utiliser inTrash: true / archived: true
+    }
+    // pmp_plans : PHILOSOPHIE GMAO — plans de maintenance = données critiques
+    match /pmp_plans/{docId} {
+      allow read, create, update: if true;
+      // delete : BLOQUÉ — utiliser archived: true
+    }
+    match /pmp_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── STOCK ────────────────────────────────────────────────────────────────
+    match /products/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /orders/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /transfers/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── MESSAGES & JOURNAL ───────────────────────────────────────────────────
+    // messages : delete autorisé (suppression de messages)
+    match /messages/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // announcements + sous-collection replies
+    match /announcements/{annId} {
+      allow read, create, update, delete: if true;
+
+      match /replies/{replyId} {
+        allow read, create, delete: if true;
+      }
+    }
+
+    // admin_journal : delete autorisé (purge manuelle)
+    match /admin_journal/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── NOTIFICATIONS ────────────────────────────────────────────────────────
+    match /notifications/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── BADGES ───────────────────────────────────────────────────────────────
+    // delete utilisé (admin supprime un badge + cascade user_badges)
+    match /badges/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /user_badges/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── GAMIFICATION — REWARDS ───────────────────────────────────────────────
+    match /rewards_rules/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /rewards_grades/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /rewards_items/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // rewards_history : delete lors du resetProfile
+    match /rewards_history/{docId} {
+      allow read, create, delete: if true;
+    }
+    // rewards_users : set merge (increment points/xp) — pas de delete
+    match /rewards_users/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── GAMIFICATION — MINI-JEUX ─────────────────────────────────────────────
+    // games_scores : delete pour reset du classement
+    match /games_scores/{docId} {
+      allow read, create, delete: if true;
+    }
+    // games_achievements : delete lors du resetProfile
+    match /games_achievements/{docId} {
+      allow read, create, delete: if true;
+    }
+    match /games_questions/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── BIBLE MAINTIX ────────────────────────────────────────────────────────
+    // delete utilisé (suppression article + cascade comments)
+    match /bible_articles/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /bible_comments/{docId} {
+      allow read, create, delete: if true;
+    }
+    match /bibleCategories/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── CONSOMMATIONS ÉNERGÉTIQUES ───────────────────────────────────────────
+    match /cso_meters/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // cso_readings : batch.update pour recalcul des consommations
+    match /cso_readings/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /cso_clients/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /cso_energy_alerts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // cso_activity_log : append-only — pas de update ni delete
+    match /cso_activity_log/{docId} {
+      allow read, create: if true;
+    }
+
+    // ── ALERTES DÉCLENCHÉES ──────────────────────────────────────────────────
+    // batch.delete pour purger les anciennes alertes
+    match /triggered_alerts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── ORGANISATION RESPONSABLE ──────────────────────────────────────────────
+    // delete utilisé (suppression tâche hebdomadaire)
+    match /org_tasks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
   }
 }
