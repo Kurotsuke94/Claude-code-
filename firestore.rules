@@ -335,5 +335,17 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
 
+    // ── ORG CONFIG (slot configuration par semaine) ───────────────────────────
+    // Pas de suppression — configuration préservée même pour les semaines passées
+    match /org_config/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── ORG TEMPLATES (modèles de journée) ───────────────────────────────────
+    // delete autorisé (suppression d'un modèle par le responsable)
+    match /org_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
   }
 }
