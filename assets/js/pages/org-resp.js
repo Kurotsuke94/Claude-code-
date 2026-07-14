@@ -33,6 +33,7 @@
   let _weekOffset   = 0;        // 0 = current week, -1 = last week, +1 = next week
   let _slotNames    = {};       // { 'dayId_slot': customName } — persisted in org_config
   let _panelDayId   = null;    // dayId whose gear panel is open, or null
+  let _cpView       = 'planning'; // 'planning' | 'timeline'
 
   // ── WEEK HELPERS ──
   function _isoWk(d) {
@@ -290,76 +291,93 @@
   }
 
   // ═══════════════════════════════════════════════════════
-  //  PLANNING VIEW — HORIZONTAL GRID (or-cp-*)
+  //  PLANNING VIEW — PREMIUM GRID V2
   // ═══════════════════════════════════════════════════════
   function _renderPlanning(mc) {
     const weekDates   = _weekKeyToDates(_weekKey);
     const isCurrentWk = _isCurrentWeek();
     const todayDayId  = _todayDayId();
 
-    // Global stats
     const planTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId);
     const planDone  = planTasks.filter(t => t.done).length;
     const planTotal = planTasks.length;
-    const pct       = planTotal ? Math.round(planDone / planTotal * 100) : 0;
-    const pctC      = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
+    const kbTasks   = _tasks.filter(t => !t.archivedFromActive && !t.dayId);
+    const kbDone    = kbTasks.filter(t => t.done).length;
 
-    // Kanban tab counter
-    const kbTasks = _tasks.filter(t => !t.archivedFromActive && !t.dayId);
-    const kbDone  = kbTasks.filter(t => t.done).length;
-
-    // Week label parts
     const wParts = _weekKey.split('_W');
     const wNum   = parseInt(wParts[1]);
-    const wDates = weekDates;
-    const fmt    = x => x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-    const wRange = `${fmt(wDates[0])} – ${fmt(wDates[6])}`;
+    const fmt    = x => x.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    const wRange = `${fmt(weekDates[0])} → ${fmt(weekDates[6])} ${wParts[0]}`;
 
     let h = `<div class="or-cp-wrap">`;
 
     // ── HEADER ──
-    const orgName = (MX.state.currentUser && MX.state.currentUser.orgName) || (MX.state.adminUser ? 'Administration' : 'Organisation');
     h += `<div class="or-cp-header">
       <div class="or-cp-hdr-left">
         <div class="or-cp-title">Centre de Pilotage</div>
-        <div class="or-cp-subtitle">${MX.esc(orgName)}</div>
+        <div class="or-cp-subtitle">Organisation hebdomadaire des équipes techniques</div>
       </div>
       <div class="or-cp-hdr-center">
         <button class="or-cp-nav-btn" onclick="MX.Pages.OrgResp._prevWeek()" title="Semaine précédente"><i class="fas fa-chevron-left"></i></button>
         <div class="or-cp-week-badge">
-          <div class="or-cp-week-num">
-            Semaine ${wNum}
-            ${isCurrentWk ? '<span class="or-cp-week-cur-tag">En cours</span>' : ''}
-          </div>
+          <div class="or-cp-week-num">Semaine ${wNum} ${isCurrentWk ? '<span class="or-cp-week-cur-tag">● En cours</span>' : ''}</div>
           <div class="or-cp-week-dates">${wRange}</div>
         </div>
         <button class="or-cp-nav-btn" onclick="MX.Pages.OrgResp._nextWeek()" title="Semaine suivante"><i class="fas fa-chevron-right"></i></button>
-        ${!isCurrentWk ? `<button class="or-cp-cal-btn" onclick="MX.Pages.OrgResp._goToCurrentWeek()" title="Revenir à aujourd'hui"><i class="fas fa-house"></i></button>` : ''}
+        ${!isCurrentWk ? `<button class="or-cp-cal-btn" onclick="MX.Pages.OrgResp._goToCurrentWeek()" title="Aujourd'hui"><i class="fas fa-house"></i></button>` : ''}
       </div>
       <div class="or-cp-hdr-right">
-        <button class="or-cp-hbtn or-cp-hbtn--primary" onclick="MX.Pages.OrgResp.openAdd()">
-          <i class="fas fa-plus"></i><span class="or-cp-hbtn-lbl"> Ajouter</span>
-        </button>
-        <button class="or-cp-hbtn" onclick="MX.Pages.OrgResp.openDuplicateDay('')" title="Dupliquer une journée">
-          <i class="fas fa-copy"></i><span class="or-cp-hbtn-lbl"> Copier journée</span>
-        </button>
-        <button class="or-cp-hbtn or-cp-hbtn--accent" onclick="MX.Pages.OrgResp.openDuplicateWeek()">
-          <i class="fas fa-calendar-week"></i><span class="or-cp-hbtn-lbl"> Dupliquer semaine</span>
-        </button>
-        <button class="or-cp-hbtn" onclick="MX.Pages.OrgResp.openTemplateApply('')" title="Appliquer un modèle">
-          <i class="fas fa-wand-magic-sparkles"></i><span class="or-cp-hbtn-lbl"> Modèles</span>
-        </button>
-        <button class="or-cp-hbtn-icon" onclick="MX.Pages.OrgResp.renderHistory()" title="Historique">
-          <i class="fas fa-clock-rotate-left"></i>
-        </button>
+        <button class="or-cp-hbtn-icon" onclick="MX.Pages.OrgResp.renderHistory()" title="Historique"><i class="fas fa-clock-rotate-left"></i></button>
       </div>
     </div>`;
 
-    // ── TABS ──
-    h += `<div class="or-cp-tabs">
-      <button class="or-tab or-tab--active" onclick="MX.Pages.OrgResp._setTab('planning')">
-        <i class="fas fa-calendar-days"></i> Planning
+    // ── ACTION BAR 1 ──
+    h += `<div class="or-cp-actions-bar">
+      <button class="or-cp-ab-btn or-cp-ab-btn--primary" onclick="MX.Pages.OrgResp.openAdd()">
+        <i class="fas fa-plus"></i> Nouvelle mission
+      </button>
+      <div class="or-cp-ab-sep"></div>
+      <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp.openDuplicateDay('')">
+        <i class="fas fa-calendar-day"></i> Copier une journée
+      </button>
+      <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp.openDuplicateWeek()">
+        <i class="fas fa-calendar-week"></i> Copier une semaine
+      </button>
+      <div class="or-cp-ab-sep"></div>
+      <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp.openTemplateApply('')">
+        <i class="fas fa-book-open"></i> Bibliothèque de modèles
+      </button>
+      <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp._openCreateTemplate()">
+        <i class="fas fa-bookmark"></i> Créer un modèle
+      </button>
+    </div>`;
+
+    // ── ACTION BAR 2 ──
+    h += `<div class="or-cp-actions-bar or-cp-actions-bar--2">
+      <button class="or-cp-ab-btn or-cp-ab-btn--launch" onclick="MX.Pages.OrgResp._doLaunchWeek()">
+        <i class="fas fa-play"></i> Lancer une nouvelle semaine
+      </button>
+      <button class="or-cp-ab-btn or-cp-ab-btn--close" onclick="MX.Pages.OrgResp._doCloseWeek()">
+        <i class="fas fa-flag-checkered"></i> Clôturer la semaine
+      </button>
+      <button class="or-cp-ab-btn or-cp-ab-btn--reset" onclick="MX.Pages.OrgResp._doResetValidations()">
+        <i class="fas fa-rotate-left"></i> Réinitialiser validations
+      </button>
+      <div style="flex:1"></div>
+      <span style="font-size:11px;color:var(--text3)">${planDone}/${planTotal} validées cette semaine</span>
+    </div>`;
+
+    // ── KPI ROW ──
+    h += _cpRenderKpiRow(planTasks, planDone, planTotal);
+
+    // ── VIEW TABS ──
+    h += `<div class="or-cp-view-tabs">
+      <button class="or-tab${_cpView === 'planning' ? ' or-tab--active' : ''}" onclick="MX.Pages.OrgResp._setCpView('planning')">
+        <i class="fas fa-calendar-days"></i> Vue Planning
         ${planTotal > 0 ? `<span class="or-tab-cnt">${planDone}/${planTotal}</span>` : ''}
+      </button>
+      <button class="or-tab${_cpView === 'timeline' ? ' or-tab--active' : ''}" onclick="MX.Pages.OrgResp._setCpView('timeline')">
+        <i class="fas fa-timeline"></i> Vue Timeline
       </button>
       <button class="or-tab" onclick="MX.Pages.OrgResp._setTab('tasks')">
         <i class="fas fa-list-check"></i> Tâches hebdo
@@ -367,318 +385,493 @@
       </button>
     </div>`;
 
-    // ── PROGRESS ──
-    if (planTotal > 0) {
-      h += `<div class="or-cp-progress">
-        <div class="or-cp-progress-track">
-          <div class="or-cp-progress-fill" style="width:${pct}%;background:${pctC}"></div>
-        </div>
-        <span class="or-cp-progress-lbl" style="color:${pctC}">${pct}% — ${planDone}/${planTotal}</span>
-      </div>`;
+    // ── BODY WRAP ──
+    h += `<div class="or-cp-body-wrap-v2">`;
+
+    if (_cpView === 'timeline') {
+      h += _cpRenderTimeline(weekDates, isCurrentWk, todayDayId);
+    } else {
+      h += `<div class="or-cp-grid-area"><div class="or-cp-grid">`;
+      MX.DAYS.forEach((day, idx) => { h += _cpRenderDayColumn(day, idx, weekDates, isCurrentWk, todayDayId); });
+      h += `</div></div>`;
     }
 
-    // ── BODY WRAP ──
-    h += `<div class="or-cp-body-wrap">`;
-    h += `<div class="or-cp-grid-area"><div class="or-cp-grid">`;
-
-    MX.DAYS.forEach((day, idx) => {
-      const dayId       = day.id;
-      const date        = weekDates[idx];
-      const dateStr     = _fmtDate(date);
-      const isToday     = isCurrentWk && dayId === todayDayId;
-      const activeSlots = _getActiveSlots(dayId);
-      const defaultSlots = _getDefaultSlots(dayId);
-      const isPanelOpen = _panelDayId === dayId;
-
-      h += `<div class="or-cp-col${isToday ? ' or-cp-col--today' : ''}">`;
-
-      // Column header
-      h += `<div class="or-cp-col-hdr">
-        <div class="or-cp-col-hdr-info">
-          <div class="or-cp-col-day">
-            ${day.l.toUpperCase()}
-            ${isToday ? '<span class="or-cp-col-today-badge">Auj.</span>' : ''}
-          </div>
-          <div class="or-cp-col-date">${dateStr}</div>
-        </div>
-        <button class="or-cp-gear-btn${isPanelOpen ? ' or-cp-gear-btn--active' : ''}"
-          onclick="MX.Pages.OrgResp._toggleDayPanel('${dayId}')" title="Configurer ${day.l}">
-          <i class="fas fa-gear"></i>
-        </button>
-      </div>`;
-
-      // Slots
-      if (activeSlots.length === 0) {
-        h += `<div class="or-cp-col-empty"><i class="fas fa-ban"></i>Créneaux désactivés
-          <button class="or-cp-add-btn" style="margin-top:4px" onclick="MX.Pages.OrgResp.openSlotConfig('${dayId}')">Configurer</button>
-        </div>`;
-      } else {
-        ['matin', 'journee', 'soir'].forEach(slot => {
-          if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
-          const disabled  = !activeSlots.includes(slot);
-          const info      = SLOT_INFO[slot];
-          const slotKey   = `${dayId}_${slot}`;
-          const slotTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
-          const doneCnt   = slotTasks.filter(t => t.done).length;
-          const total     = slotTasks.length;
-
-          h += `<div class="or-cp-slot or-cp-slot--${slot}${disabled ? ' or-cp-slot--disabled' : ''}">
-            <div class="or-cp-slot-hdr">
-              <i class="fas ${info.icon} or-cp-slot-ico"></i>
-              <div class="or-cp-slot-info">
-                <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
-                <span class="or-cp-slot-time">${info.time}</span>
-              </div>
-              ${total > 0 ? `<span class="or-cp-slot-cnt">${doneCnt}/${total}</span>` : ''}
-              <div class="or-cp-slot-actions">
-                ${!disabled
-                  ? `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter"><i class="fas fa-plus"></i></button>`
-                  : `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp._reactivateSlot('${dayId}','${slot}')" title="Réactiver"><i class="fas fa-eye"></i></button>`
-                }
-                <button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openSlotMenu('${dayId}','${slot}',this)" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
-              </div>
-            </div>`;
-
-          if (disabled) {
-            h += `<div class="or-cp-slot-disabled"><i class="fas fa-eye-slash"></i> Désactivé</div>`;
-          } else {
-            h += `<div class="or-cp-slot-body" id="or-slot-body-${slotKey}"
-              ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
-              ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
-              ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
-            slotTasks.forEach(t => { h += _cpMissionCard(t, dayId, slot); });
-            h += `</div>
-            <div class="or-cp-add-row">
-              <button class="or-cp-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">
-                <i class="fas fa-plus"></i> Ajouter
-              </button>
-            </div>`;
-          }
-
-          h += `</div>`; // .or-cp-slot
-        });
-      }
-
-      h += `</div>`; // .or-cp-col
-    });
-
-    h += `</div></div>`; // .or-cp-grid, .or-cp-grid-area
-
-    // ── SIDE PANEL ──
-    h += _renderDayPanel();
-    h += `</div>`; // .or-cp-body-wrap
-
-    // ── LEGEND ──
-    h += `<div class="or-cp-legend">
-      <span class="or-cp-legend-item or-cp-legend-item--matin">Matin</span>
-      <span class="or-cp-legend-item or-cp-legend-item--journee">Journée</span>
-      <span class="or-cp-legend-item or-cp-legend-item--soir">Soir</span>
-      <span class="or-cp-legend-hint"><i class="fas fa-grip-vertical" style="font-size:9px"></i> Glisser pour déplacer</span>
-    </div>`;
-
+    h += _cpRenderSidebar(planTasks, planDone, planTotal);
+    h += `</div>`; // .or-cp-body-wrap-v2
     h += `</div>`; // .or-cp-wrap
     mc.innerHTML = h;
   }
 
-  // ── COMPACT MISSION CARD (new grid layout) ──
-  function _cpMissionCard(t, dayId, slot) {
+  // ── KPI ROW ──
+  function _cpRenderKpiRow(planTasks, planDone, planTotal) {
+    const matinT   = planTasks.filter(t => t.slot === 'matin');
+    const journeeT = planTasks.filter(t => t.slot === 'journee');
+    const soirT    = planTasks.filter(t => t.slot === 'soir');
+    const uniqueTechs = [...new Set(planTasks.filter(t => t.assignedTo).map(t => t.assignedTo))].length;
+    const totalDur = planTasks.reduce((s, t) => s + (t.duration || 0), 0);
+    const urgents  = planTasks.filter(t => (t.priority === 'critique' || t.priority === 'urgente') && !t.done).length;
+    const pct      = planTotal ? Math.round(planDone / planTotal * 100) : 0;
+    const pctC     = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
+    const durStr   = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '—';
+
+    const cards = [
+      { emoji:'📋', val:planTotal,        lbl:'Missions semaine', sub:`${planDone} validées`,                     c:pctC             },
+      { emoji:'🌅', val:matinT.length,    lbl:'Matin',            sub:`${matinT.filter(t=>t.done).length} val.`,  c:'#F59E0B'        },
+      { emoji:'☀️', val:journeeT.length,  lbl:'Journée',          sub:`${journeeT.filter(t=>t.done).length} val.`,c:'#3B82F6'        },
+      { emoji:'🌙', val:soirT.length,     lbl:'Soir',             sub:`${soirT.filter(t=>t.done).length} val.`,   c:'#F97316'        },
+      { emoji:'👥', val:uniqueTechs,      lbl:'Techniciens',      sub:'planifiés cette semaine',                  c:'#8B5CF6'        },
+      { emoji:'⏱',  val:durStr,           lbl:'Temps estimé',     sub:'total des missions',                       c:'#06B6D4'        },
+      { emoji:'⚡', val:urgents,          lbl:'Urgences',         sub:urgents>0?'à traiter':'aucune urgence',     c:urgents>0?'#EF4444':'#10B981' },
+      { emoji:'📊', val:`${pct}%`,        lbl:'Avancement',       sub:`${planDone} sur ${planTotal}`,             c:pctC             },
+    ];
+
+    return `<div class="or-cp-kpi-row-v2">${cards.map(c =>
+      `<div class="or-cp-kpi-card-v2" style="--kpi-accent:${c.c}">
+        <div class="or-cp-kpi-ico-v2">${c.emoji}</div>
+        <div class="or-cp-kpi-val-v2">${c.val}</div>
+        <div class="or-cp-kpi-lbl-v2">${c.lbl}</div>
+        <div class="or-cp-kpi-sub-v2">${c.sub}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  // ── DAY COLUMN ──
+  function _cpRenderDayColumn(day, idx, weekDates, isCurrentWk, todayDayId) {
+    const dayId        = day.id;
+    const date         = weekDates[idx];
+    const dateStr      = _fmtDate(date);
+    const isToday      = isCurrentWk && dayId === todayDayId;
+    const activeSlots  = _getActiveSlots(dayId);
+    const defaultSlots = _getDefaultSlots(dayId);
+    const dayTasks     = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId);
+    const dayDone      = dayTasks.filter(t => t.done).length;
+    const dayTotal     = dayTasks.length;
+    const dayPct       = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
+    const dayPctC      = dayPct >= 80 ? '#10B981' : dayPct >= 40 ? '#F59E0B' : '#EF4444';
+    const totalDur     = dayTasks.reduce((s, t) => s + (t.duration || 0), 0);
+
+    let h = `<div class="or-cp-col${isToday ? ' or-cp-col--today' : ''}">`;
+
+    // Header
+    h += `<div class="or-cp-col-hdr">
+      <div class="or-cp-col-hdr-info">
+        <div class="or-cp-col-day">${day.l.toUpperCase()} ${isToday ? '<span class="or-cp-col-today-badge">Auj.</span>' : ''}</div>
+        <div class="or-cp-col-date">${dateStr}</div>
+      </div>
+      <button class="or-cp-gear-btn" onclick="MX.Pages.OrgResp.openDayMenu('${dayId}',this)" title="Actions journée">
+        <i class="fas fa-ellipsis-vertical"></i>
+      </button>
+    </div>`;
+
+    // Day stats bar
+    if (dayTotal > 0) {
+      const durStr = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '';
+      h += `<div class="or-cp-col-day-stats">
+        <span class="or-cp-col-stat-v2"><i class="fas fa-check-circle"></i> ${dayDone}/${dayTotal}</span>
+        ${durStr ? `<span class="or-cp-col-stat-v2"><i class="fas fa-clock"></i> ${durStr}</span>` : ''}
+        <div class="or-cp-col-prog-v2">
+          <div class="or-cp-col-prog-fill-v2" style="width:${dayPct}%;background:${dayPctC}"></div>
+        </div>
+      </div>`;
+    }
+
+    if (activeSlots.length === 0) {
+      h += `<div class="or-cp-col-empty"><i class="fas fa-ban"></i>Créneaux désactivés
+        <button class="or-cp-add-btn" style="margin-top:6px" onclick="MX.Pages.OrgResp.openSlotConfig('${dayId}')">Configurer</button>
+      </div>`;
+    } else {
+      ['matin', 'journee', 'soir'].forEach(slot => {
+        if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
+        const disabled  = !activeSlots.includes(slot);
+        const info      = SLOT_INFO[slot];
+        const slotKey   = `${dayId}_${slot}`;
+        const slotTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
+        const doneCnt   = slotTasks.filter(t => t.done).length;
+        const total     = slotTasks.length;
+        const slotDur   = slotTasks.reduce((s, t) => s + (t.duration || 0), 0);
+        const slotPct   = total ? Math.round(doneCnt / total * 100) : 0;
+        const slotPctC  = slotPct >= 80 ? '#10B981' : slotPct >= 40 ? '#F59E0B' : '#EF4444';
+
+        h += `<div class="or-cp-slot or-cp-slot--${slot}${disabled ? ' or-cp-slot--disabled' : ''}">
+          <div class="or-cp-slot-hdr">
+            <i class="fas ${info.icon} or-cp-slot-ico"></i>
+            <div class="or-cp-slot-info">
+              <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
+              <span class="or-cp-slot-time">${info.time}</span>
+            </div>
+            ${total > 0 ? `<span class="or-cp-slot-cnt">${doneCnt}/${total}</span>` : ''}
+            <div class="or-cp-slot-actions">
+              ${!disabled
+                ? `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter"><i class="fas fa-plus"></i></button>`
+                : `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp._reactivateSlot('${dayId}','${slot}')" title="Réactiver"><i class="fas fa-eye"></i></button>`
+              }
+              <button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openSlotMenu('${dayId}','${slot}',this)" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+            </div>
+          </div>`;
+
+        if (!disabled && total > 0) {
+          const durStr = slotDur > 0 ? `${Math.floor(slotDur/60)}h${slotDur%60>0?String(slotDur%60).padStart(2,'0'):''}` : '';
+          h += `<div class="or-cp-slot-stats">
+            ${durStr ? `<span class="or-cp-slot-stat"><i class="fas fa-clock"></i> ${durStr}</span>` : ''}
+            <span class="or-cp-slot-stat">${total} tâche${total!==1?'s':''}</span>
+            <span class="or-cp-slot-charge" style="background:${slotPctC}22;color:${slotPctC}">${slotPct}%</span>
+          </div>`;
+        }
+
+        if (disabled) {
+          h += `<div class="or-cp-slot-disabled"><i class="fas fa-eye-slash"></i> Désactivé</div>`;
+        } else {
+          h += `<div class="or-cp-slot-body" id="or-slot-body-${slotKey}"
+            ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
+            ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
+            ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
+          slotTasks.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
+          h += `</div>
+          <div class="or-cp-add-row">
+            <button class="or-cp-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">
+              <i class="fas fa-plus"></i> Ajouter une mission
+            </button>
+          </div>`;
+        }
+        h += `</div>`; // .or-cp-slot
+      });
+    }
+
+    h += `</div>`; // .or-cp-col
+    return h;
+  }
+
+  // ── MISSION CARD V2 ──
+  function _cpMissionCardV2(t, dayId, slot) {
     const prio     = _prioConfig(t.priority);
     const cat      = _catConfig(t.category);
     const isDone   = t.done;
     const isInProg = !isDone && t.status === 'inprogress';
+    const statusCls = isDone ? 'or-cp-mv2-status--done' : isInProg ? 'or-cp-mv2-status--prog' : 'or-cp-mv2-status--todo';
+    const catAbbrv  = (t.category || '').slice(0, 4).toUpperCase();
+    const prioBadge = prio ? `<span class="or-cp-mv2-badge" style="background:${prio.bg};color:${prio.color}">${prio.icon}</span>` : '';
+    const catBadge  = `<span class="or-cp-mv2-badge" style="background:${cat.color}18;color:${cat.color}">${catAbbrv}</span>`;
+    const durHtml   = t.duration ? `<span class="or-cp-mv2-dur">${t.duration < 60 ? t.duration + ' min' : Math.floor(t.duration/60) + 'h' + (t.duration % 60 ? String(t.duration%60).padStart(2,'0') : '')}</span>` : '';
+    const locHtml   = t.location ? `<div class="or-cp-mv2-loc"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</div>` : '';
+    const asgHtml   = t.assignedTo ? `<span class="or-cp-mv2-badge" style="background:${_ucolor(t.assignedTo)}22;color:${_ucolor(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
 
-    const dotCls = isDone ? 'or-cp-mission-dot--done' : isInProg ? 'or-cp-mission-dot--prog' : 'or-cp-mission-dot--todo';
-
-    const catAbbrv = (t.category || '').slice(0, 3).toUpperCase();
-    const catBadge = `<span class="or-cp-mbadge" style="background:${cat.color}22;color:${cat.color}">${catAbbrv}</span>`;
-    const prioBadge = prio
-      ? `<span class="or-cp-mbadge" style="background:${prio.bg};color:${prio.color}">${prio.icon}</span>`
-      : '';
-
-    return `<div class="or-cp-mission${isDone ? ' or-cp-mission--done' : ''}"
+    return `<div class="or-cp-mission-v2${isDone ? ' or-cp-mission-v2--done' : ''}"
       data-id="${t.id}" draggable="true"
       ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
       ondragend="MX.Pages.OrgResp._onDragEnd(event)">
-      <span class="or-cp-mission-grab"><i class="fas fa-grip-vertical"></i></span>
-      <span class="or-cp-mission-dot ${dotCls}"></span>
-      <div class="or-cp-mission-body">
-        <div class="or-cp-mission-title">${MX.esc(t.title)}</div>
-        <div class="or-cp-mission-meta">${catBadge}${prioBadge}${t.assignedTo ? `<span class="or-cp-mbadge" style="background:var(--bg3);color:var(--text3)">${_initials(t.assignedTo)}</span>` : ''}</div>
+      <div class="or-cp-mv2-actions">
+        ${!isDone
+          ? `<button class="or-cp-mv2-act or-cp-mv2-act--ok" onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Terminer"><i class="fas fa-check"></i></button>`
+          : `<button class="or-cp-mv2-act" onclick="MX.Pages.OrgResp.unvalidate('${t.id}')" title="Rouvrir"><i class="fas fa-rotate-left"></i></button>`
+        }
+        <button class="or-cp-mv2-act" onclick="MX.Pages.OrgResp.openEdit('${t.id}')" title="Modifier"><i class="fas fa-pen"></i></button>
+        <button class="or-cp-mv2-act or-cp-mv2-act--del" onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
       </div>
-      <div class="or-cp-mission-actions">
-        ${!isDone ? `<button class="or-cp-mact-btn or-cp-mact-btn--ok" onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Terminer"><i class="fas fa-check"></i></button>` : ''}
-        <button class="or-cp-mact-btn" onclick="MX.Pages.OrgResp.openEdit('${t.id}')" title="Modifier"><i class="fas fa-pen"></i></button>
-        <button class="or-cp-mact-btn or-cp-mact-btn--del" onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
+      <div class="or-cp-mv2-top">
+        <span class="or-cp-mv2-grab"><i class="fas fa-grip-vertical"></i></span>
+        <span class="or-cp-mv2-status ${statusCls}"></span>
+        <div class="or-cp-mv2-body">
+          <div class="or-cp-mv2-title">${MX.esc(t.title)}</div>
+          ${locHtml}
+        </div>
       </div>
+      <div class="or-cp-mv2-footer">${durHtml}${catBadge}${prioBadge}${asgHtml}</div>
     </div>`;
   }
 
-  // ── SIDE PANEL RENDER ──
-  function _renderDayPanel() {
-    if (!_panelDayId) {
-      return `<div class="or-cp-panel" id="or-cp-panel"></div>`;
-    }
-    const dayId = _panelDayId;
-    const day   = MX.DAYS.find(d => d.id === dayId);
-    const activeSlots  = _getActiveSlots(dayId);
-    const defaultSlots = _getDefaultSlots(dayId);
-    const allSlots     = ['matin', 'journee', 'soir'];
+  // alias for backward compat
+  function _cpMissionCard(t, dayId, slot) { return _cpMissionCardV2(t, dayId, slot); }
+  function _planTaskCard(t, dayId, slot)  { return _cpMissionCardV2(t, dayId, slot); }
 
-    // Slot checkboxes
-    let slotChecks = allSlots.map(slot => {
-      if (!defaultSlots.includes(slot)) return '';
-      const info    = SLOT_INFO[slot];
-      const isOn    = activeSlots.includes(slot);
-      return `<label class="or-cp-psc${isOn ? ' or-cp-psc--on' : ''}"
-        onclick="event.preventDefault();MX.Pages.OrgResp._panelToggleSlot(this,'${dayId}','${slot}')">
-        <input type="checkbox" ${isOn ? 'checked' : ''} readonly>
-        <i class="fas ${info.icon}" style="color:${info.color};font-size:11px"></i>
-        ${info.l}
-      </label>`;
-    }).join('');
+  // ── SIDEBAR ──
+  function _cpRenderSidebar(planTasks, planDone, planTotal) {
+    const techMap = {};
+    planTasks.forEach(t => {
+      if (!t.assignedTo) return;
+      if (!techMap[t.assignedTo]) techMap[t.assignedTo] = { total:0, done:0, dur:0 };
+      techMap[t.assignedTo].total++;
+      if (t.done) techMap[t.assignedTo].done++;
+      techMap[t.assignedTo].dur += t.duration || 0;
+    });
+    const techList = Object.entries(techMap).sort((a,b) => b[1].total - a[1].total);
+    const maxT     = techList.length ? Math.max(...techList.map(([,v]) => v.total)) : 1;
 
-    // Active slots with times
-    let activeSlotsHtml = activeSlots.map(slot => {
-      const info = SLOT_INFO[slot];
-      const colors = { matin: '#F59E0B', journee: '#3B82F6', soir: '#F97316' };
-      return `<div class="or-cp-active-row">
-        <span class="or-cp-active-dot" style="background:${colors[slot] || info.color}"></span>
-        <span class="or-cp-active-name">${_getSlotName(dayId, slot)}</span>
-        <span class="or-cp-active-time">${info.time}</span>
-      </div>`;
-    }).join('') || `<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun créneau actif</div>`;
-
-    // Templates
-    const tplsHtml = _templates.length === 0
-      ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun modèle enregistré</div>`
-      : _templates.map(tpl => {
-          const cnt = (tpl.slots || []).reduce((s, sl) => s + (sl.tasks || []).length, 0);
-          return `<div class="or-cp-tpl-row" onclick="MX.Pages.OrgResp._applyTemplateQuick('${tpl.id}','${dayId}')">
-            <i class="fas fa-bookmark"></i>
-            ${MX.esc(tpl.name)}
-            <span class="or-cp-tpl-cnt">${cnt} tâche${cnt !== 1 ? 's' : ''}</span>
+    const techHtml = techList.length === 0
+      ? `<div style="font-size:11px;color:var(--text3)">Aucun technicien planifié</div>`
+      : techList.slice(0,8).map(([name, s]) => {
+          const col = _ucolor(name);
+          return `<div class="or-cp-tech-row-v2">
+            <div class="or-cp-tech-av-v2" style="background:${col}">${_initials(name)}</div>
+            <div class="or-cp-tech-info-v2">
+              <div class="or-cp-tech-name-v2" title="${MX.esc(name)}">${MX.esc(name)}</div>
+              <div class="or-cp-tech-bar-v2">
+                <div class="or-cp-tech-bar-fill-v2" style="width:${Math.round(s.total/maxT*100)}%;background:${col}"></div>
+              </div>
+            </div>
+            <div class="or-cp-tech-cnt-v2" style="color:${col}">${s.total}</div>
           </div>`;
         }).join('');
 
-    return `<div class="or-cp-panel or-cp-panel--open" id="or-cp-panel">
-      <div class="or-cp-panel-inner">
-        <div class="or-cp-panel-hdr">
-          <div class="or-cp-panel-titles">
-            <div class="or-cp-panel-title">${day ? day.l : dayId}</div>
-            <div class="or-cp-panel-day">Configuration</div>
-          </div>
-          <button class="or-cp-panel-close" onclick="MX.Pages.OrgResp._closeDayPanel()"><i class="fas fa-xmark"></i></button>
-        </div>
+    const urgents    = planTasks.filter(t => (t.priority==='critique'||t.priority==='urgente') && !t.done);
+    const unassigned = planTasks.filter(t => !t.assignedTo && !t.done);
+    const alerts = [];
+    if (urgents.length)    alerts.push({ c:'#EF4444', txt:`${urgents.length} mission${urgents.length>1?'s':''} urgente${urgents.length>1?'s':''}` });
+    if (unassigned.length) alerts.push({ c:'#F59E0B', txt:`${unassigned.length} mission${unassigned.length>1?'s':''} sans technicien` });
+    const alertHtml = alerts.length === 0
+      ? `<div style="font-size:11px;color:var(--text3)">Aucune alerte active</div>`
+      : alerts.map(a => `<div class="or-cp-alert-item-v2">
+          <div class="or-cp-alert-dot-v2" style="background:${a.c}"></div>
+          <div class="or-cp-alert-txt-v2">${a.txt}</div>
+        </div>`).join('');
 
-        <div class="or-cp-section">
-          <div class="or-cp-section-ttl">Créneaux actifs</div>
-          ${slotChecks}
-          <button class="or-cp-save-btn" onclick="MX.Pages.OrgResp._saveDayPanel('${dayId}')">
-            <i class="fas fa-floppy-disk"></i> Enregistrer
-          </button>
-        </div>
+    const pct  = planTotal ? Math.round(planDone/planTotal*100) : 0;
+    const pctC = pct>=80?'#10B981':pct>=40?'#F59E0B':'#EF4444';
+    const r = 30, cx = 37, circ = 2*Math.PI*r;
+    const inProg  = planTasks.filter(t => !t.done && t.status==='inprogress').length;
+    const pending = planTotal - planDone - inProg;
 
-        <div class="or-cp-section">
-          <div class="or-cp-section-ttl">Horaires</div>
-          ${activeSlotsHtml}
-        </div>
-
-        <div class="or-cp-section">
-          <div class="or-cp-section-ttl">Actions rapides</div>
-          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','matin')">
-            <i class="fas fa-plus"></i> Ajouter une tâche
+    return `<div class="or-cp-sidebar-v2">
+      <div class="or-cp-sb-section">
+        <div class="or-cp-sb-ttl">Tableau de bord</div>
+        <div class="or-cp-sb-mini-grid">
+          <div class="or-cp-sb-mini" style="background:var(--bg3);">
+            <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Total</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--ffm);color:var(--text1);line-height:1.2">${planTotal}</div>
           </div>
-          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openDuplicateDay('${dayId}')">
-            <i class="fas fa-copy"></i> Dupliquer cette journée
-          </div>
-          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openTemplateSave('${dayId}')">
-            <i class="fas fa-bookmark"></i> Sauvegarder comme modèle
+          <div class="or-cp-sb-mini" style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.18);">
+            <div style="font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Validées</div>
+            <div style="font-size:20px;font-weight:800;font-family:var(--ffm);color:#10B981;line-height:1.2">${planDone}</div>
           </div>
         </div>
+      </div>
 
-        <div class="or-cp-section">
-          <div class="or-cp-section-ttl">Modèles disponibles</div>
-          ${tplsHtml}
-          <button class="or-cp-mgr-btn" onclick="MX.Pages.OrgResp.openTemplateApply('${dayId}')">
-            <i class="fas fa-list"></i> Gérer les modèles
-          </button>
+      <div class="or-cp-sb-section">
+        <div class="or-cp-sb-ttl">Progression <span style="color:${pctC};font-weight:800">${pct}%</span></div>
+        <div class="or-cp-ring-wrap-v2">
+          <svg width="${cx*2}" height="${cx*2}" viewBox="0 0 ${cx*2} ${cx*2}">
+            <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="5"/>
+            <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${pctC}" stroke-width="5"
+              stroke-dasharray="${circ*pct/100} ${circ*(1-pct/100)}"
+              stroke-linecap="round" transform="rotate(-90 ${cx} ${cx})"/>
+            <text x="${cx}" y="${cx+5}" text-anchor="middle" fill="var(--text1)" font-size="13" font-weight="800" font-family="monospace">${pct}%</text>
+          </svg>
+          <div class="or-cp-ring-sub-v2">${planDone}/${planTotal} missions</div>
         </div>
+        <div class="or-cp-prog-row-v2"><span class="or-cp-prog-dot-v2" style="background:#10B981"></span><span class="or-cp-prog-lbl-v2">Validées</span><span class="or-cp-prog-cnt-v2">${planDone}</span></div>
+        <div class="or-cp-prog-row-v2"><span class="or-cp-prog-dot-v2" style="background:#3B82F6"></span><span class="or-cp-prog-lbl-v2">En cours</span><span class="or-cp-prog-cnt-v2">${inProg}</span></div>
+        <div class="or-cp-prog-row-v2"><span class="or-cp-prog-dot-v2" style="background:var(--border2)"></span><span class="or-cp-prog-lbl-v2">En attente</span><span class="or-cp-prog-cnt-v2">${pending}</span></div>
+      </div>
+
+      <div class="or-cp-sb-section">
+        <div class="or-cp-sb-ttl">Techniciens planifiés</div>
+        ${techHtml}
+      </div>
+
+      <div class="or-cp-sb-section">
+        <div class="or-cp-sb-ttl">Alertes ${alerts.length>0?`<span style="background:#EF4444;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px">${alerts.length}</span>`:''}</div>
+        ${alertHtml}
       </div>
     </div>`;
   }
 
-  // ── PANEL TOGGLE / CLOSE ──
-  function _toggleDayPanel(dayId) {
-    _panelDayId = (_panelDayId === dayId) ? null : dayId;
-    _doRender();
-  }
-  function _closeDayPanel() {
-    _panelDayId = null;
-    _doRender();
+  // ── TIMELINE VIEW ──
+  function _cpRenderTimeline(weekDates, isCurrentWk, todayDayId) {
+    const hours      = [0,2,4,6,8,10,12,14,16,18,20,22,24];
+    const slotColors = { matin:'#F59E0B', journee:'#3B82F6', soir:'#F97316' };
+    const slotTimes  = { matin:[6,14], journee:[9,17], soir:[14,22] };
+
+    const hdrHtml = hours.map(h => `<div class="or-cp-tl-hour">${h}h</div>`).join('');
+
+    const rowsHtml = MX.DAYS.map((day, idx) => {
+      const dayId      = day.id;
+      const isToday    = isCurrentWk && dayId === todayDayId;
+      const actSlots   = _getActiveSlots(dayId);
+      const barsHtml   = actSlots.map(slot => {
+        const [start, end] = slotTimes[slot] || [6,22];
+        const left   = (start/24*100).toFixed(2);
+        const width  = ((end-start)/24*100).toFixed(2);
+        const tasks  = _tasks.filter(t => !t.archivedFromActive && t.dayId===dayId && t.slot===slot);
+        const done   = tasks.filter(t => t.done).length;
+        const color  = slotColors[slot] || '#6B7280';
+        const allDone = tasks.length>0 && done===tasks.length;
+        return `<div class="or-cp-tl-bar" style="left:${left}%;width:${width}%;background:${color};opacity:${allDone?'.4':'.8'}"
+          title="${_getSlotName(dayId,slot)} — ${tasks.length} tâche${tasks.length!==1?'s':''}, ${done} validée${done!==1?'s':''}"
+          onclick="MX.Pages.OrgResp._setCpView('planning')">
+          ${tasks.length} mission${tasks.length!==1?'s':''}
+        </div>`;
+      }).join('');
+
+      const nowHtml = isToday ? (() => {
+        const now  = new Date();
+        const pct  = ((now.getHours()+now.getMinutes()/60)/24*100).toFixed(2);
+        return `<div class="or-cp-tl-now" style="left:${pct}%"></div>`;
+      })() : '';
+
+      return `<div class="or-cp-tl-row">
+        <div class="or-cp-tl-lbl">
+          <div class="or-cp-tl-day-name${isToday?' or-cp-tl-day-name--today':''}">${day.l}</div>
+          <div class="or-cp-tl-day-date">${_fmtDate(weekDates[idx])}</div>
+        </div>
+        <div class="or-cp-tl-track">${barsHtml}${nowHtml}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="or-cp-tl-wrap">
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text3)">
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:#F59E0B;display:inline-block"></span> Matin (06h–14h)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:#3B82F6;display:inline-block"></span> Journée (09h–17h)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:#F97316;display:inline-block"></span> Soir (14h–22h)</span>
+        <span style="margin-left:auto">Cliquez sur une barre pour revenir en Vue Planning</span>
+      </div>
+      <div class="or-cp-tl-hdr">${hdrHtml}</div>
+      ${rowsHtml}
+    </div>`;
   }
 
-  // Panel slot toggle (without re-render — just visual state)
-  function _panelToggleSlot(label, dayId, slot) {
-    const cb = label.querySelector('input[type="checkbox"]');
-    if (!cb) return;
-    cb.checked = !cb.checked;
-    label.classList.toggle('or-cp-psc--on', cb.checked);
+  // ── PANEL HELPERS (kept for API compat, now call slot config modal) ──
+  function _toggleDayPanel(dayId) { openSlotConfig(dayId); }
+  function _closeDayPanel()       { /* no-op — was panel close */ }
+  function _panelToggleSlot(lbl, dayId, slot) {
+    const cb = lbl.querySelector('input[type="checkbox"]');
+    if (cb) { cb.checked = !cb.checked; lbl.classList.toggle('or-cp-psc--on', cb.checked); }
   }
-
-  // Save panel slot config
   async function _saveDayPanel(dayId) {
     const panel = document.getElementById('or-cp-panel');
     if (!panel) return;
-    const allSlots = ['matin', 'journee', 'soir'];
+    const allSlots = ['matin','journee','soir'];
     const newActive = allSlots.filter(slot => {
       for (const lbl of panel.querySelectorAll('label.or-cp-psc')) {
-        const onclick = lbl.getAttribute('onclick') || '';
-        if (onclick.includes(`'${slot}'`)) return lbl.querySelector('input')?.checked;
+        if ((lbl.getAttribute('onclick')||'').includes(`'${slot}'`)) return lbl.querySelector('input')?.checked;
       }
       return false;
     });
     MX.syncStart();
     try {
-      const newCfg = Object.assign({}, _slotConfig, { [dayId]: newActive });
-      await db.collection('org_config').doc(_weekKey).set({ slotConfig: newCfg }, { merge: true });
-      MX.syncEnd();
-      MX.toast('Créneaux enregistrés ✓');
+      await db.collection('org_config').doc(_weekKey).set({ slotConfig: Object.assign({}, _slotConfig, { [dayId]: newActive }) }, { merge:true });
+      MX.syncEnd(); MX.toast('Créneaux enregistrés ✓');
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
-
-  // Quick apply template to a day
   async function _applyTemplateQuick(tplId, dayId) {
     const tpl = _templates.find(t => t.id === tplId);
     if (!tpl) return MX.toast('Modèle introuvable', true);
-    if (!confirm(`Appliquer le modèle "${tpl.name}" à ${dayId} ? Les tâches existantes seront conservées.`)) return;
+    if (!confirm(`Appliquer le modèle "${tpl.name}" à ${dayId} ?`)) return;
     MX.syncStart();
     try {
-      const name  = _currentUserName();
-      const batch = db.batch();
-      let ops = 0;
-      (tpl.slots || []).forEach(slotEntry => {
-        (slotEntry.tasks || []).forEach((taskData, i) => {
-          if (ops >= 490) return;
-          batch.set(db.collection('org_tasks').doc(), {
-            title: taskData.title || 'Tâche modèle', description: taskData.description || '',
-            category: taskData.category || 'autre', type: taskData.type || 'unique',
-            weekKey: _weekKey, dayId, slot: slotEntry.slot,
-            done: false, status: 'todo', doneBy: null, doneAt: null, comment: null,
-            assignedTo: taskData.assignedTo || null, priority: taskData.priority || 'normale',
-            createdBy: name, createdAt: FV.serverTimestamp(), order: 900 + i, isDefault: false,
-          });
-          ops++;
-        });
-      });
-      await batch.commit();
-      MX.syncEnd();
-      MX.toast(`Modèle "${tpl.name}" appliqué ✓`);
+      const name = _currentUserName(), batch = db.batch(); let ops = 0;
+      (tpl.slots || []).forEach(sl => (sl.tasks||[]).forEach((td,i) => {
+        if (ops>=490) return;
+        batch.set(db.collection('org_tasks').doc(), {
+          title:td.title||'Tâche modèle', description:td.description||'',
+          category:td.category||'autre', type:td.type||'unique',
+          weekKey:_weekKey, dayId, slot:sl.slot,
+          done:false, status:'todo', doneBy:null, doneAt:null, comment:null,
+          assignedTo:td.assignedTo||null, priority:td.priority||'normale',
+          createdBy:name, createdAt:FV.serverTimestamp(), order:900+i, isDefault:false,
+        }); ops++;
+      }));
+      await batch.commit(); MX.syncEnd(); MX.toast(`Modèle "${tpl.name}" appliqué ✓`);
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
-  // Legacy task card kept for compatibility (not used in new grid but may be called externally)
-  function _planTaskCard(t, dayId, slot) {
-    return _cpMissionCard(t, dayId, slot);
+  // ── NEW WEEK ACTIONS ──
+  function _doLaunchWeek() {
+    const nextKey = _offsetWeekKey(_weekKey, 1);
+    const nextLabel = _weekLabel(nextKey).split('—')[0].trim();
+    const undone = _tasks.filter(t => !t.archivedFromActive && t.dayId && !t.done).length;
+    MX.showModal({
+      title: 'Lancer une nouvelle semaine',
+      sub:   nextLabel,
+      body:  `<div style="font-size:13px;color:var(--text2);line-height:1.7">
+        ${undone > 0 ? `<div style="display:flex;align-items:center;gap:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px;margin-bottom:12px">
+          <i class="fas fa-triangle-exclamation" style="color:#F59E0B"></i>
+          <div><strong style="color:var(--text1)">${undone} mission${undone>1?'s':''}</strong> non validée${undone>1?'s':''} cette semaine.</div>
+        </div>` : `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:10px;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-check-circle" style="color:#10B981"></i> Toutes les missions sont validées !
+        </div>`}
+        <p>Passer à la semaine suivante et commencer la planification ?</p>
+      </div>`,
+      actions: [
+        { label: 'Lancer', cls: 'primary-btn', fn: () => { MX.closeModal(); _nextWeek(); MX.toast('Semaine suivante ouverte ✓'); } },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  function _doCloseWeek() {
+    const undone = _tasks.filter(t => !t.archivedFromActive && t.dayId && !t.done).length;
+    MX.showModal({
+      title: 'Clôturer la semaine',
+      sub:   _weekLabel(_weekKey).split('—')[0].trim(),
+      body:  `<div style="font-size:13px;color:var(--text2);line-height:1.7">
+        ${undone > 0 ? `<div style="display:flex;align-items:center;gap:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px;margin-bottom:12px">
+          <i class="fas fa-triangle-exclamation" style="color:#EF4444"></i>
+          <div><strong style="color:var(--text1)">${undone} mission${undone>1?'s':''}</strong> non validée${undone>1?'s':''} seront ignorées.</div>
+        </div>` : `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:10px;margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-check-circle" style="color:#10B981"></i> Semaine entièrement validée !
+        </div>`}
+        <p>Clôturer et passer à la semaine suivante ?</p>
+      </div>`,
+      actions: [
+        { label: 'Clôturer', cls: 'primary-btn', fn: () => { MX.closeModal(); _nextWeek(); MX.toast('Semaine clôturée ✓'); } },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doResetValidations() {
+    const done = _tasks.filter(t => !t.archivedFromActive && t.dayId && t.done);
+    if (done.length === 0) { MX.toast('Aucune validation à réinitialiser'); return; }
+    MX.showModal({
+      title: 'Réinitialiser les validations',
+      sub:   `${done.length} mission${done.length>1?'s':''} validée${done.length>1?'s':''}`,
+      body:  `<div style="display:flex;align-items:flex-start;gap:12px;padding:4px 0">
+        <i class="fas fa-triangle-exclamation" style="color:var(--red);font-size:20px;margin-top:2px;flex-shrink:0"></i>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Cela va remettre <strong style="color:var(--red)">${done.length} mission${done.length>1?'s':''}</strong> en statut "À faire".<br>
+          Les informations de validation seront effacées.
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Réinitialiser', cls: 'danger-btn', fn: async () => {
+            MX.closeModal(); MX.syncStart();
+            try {
+              const batch = db.batch();
+              done.forEach(t => batch.update(db.collection('org_tasks').doc(t.id), { done:false, status:'todo', doneBy:null, doneAt:null, comment:null }));
+              await batch.commit(); MX.syncEnd(); MX.toast('Validations réinitialisées ✓');
+            } catch(e) { MX.syncFail(); MX.toast('Erreur: '+e.message, true); }
+          }
+        },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  function _setCpView(view) { _cpView = view; _doRender(); }
+
+  function _openCreateTemplate() {
+    MX.showModal({
+      title: 'Créer un modèle',
+      sub:   'Sauvegardez la configuration d\'une journée type',
+      body: `<div class="or-form">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;padding:8px 10px;background:var(--bg3);border-radius:8px">
+          <i class="fas fa-info-circle"></i> Choisissez d'abord la journée à sauvegarder comme modèle.
+        </div>
+        <div class="or-form-row">
+          <label class="or-form-lbl">Journée source</label>
+          <select id="or-ctpl-day" class="fi">
+            ${MX.DAYS.map(d => `<option value="${d.id}">${d.l}</option>`).join('')}
+          </select>
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Continuer', cls: 'primary-btn', fn: () => {
+            const dayId = document.getElementById('or-ctpl-day')?.value;
+            MX.closeModal();
+            if (dayId) openTemplateSave(dayId);
+          }
+        },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
   }
 
   // ── WEEK NAVIGATION ──
@@ -1660,6 +1853,16 @@
           </div>
         </div>
       </div>
+      <div class="or-form-2col">
+        <div class="or-form-row">
+          <label class="or-form-lbl">Local / Zone</label>
+          <input id="or-f-location" class="fi" value="${MX.esc(d.location || '')}" placeholder="ex: Hall, Étage 1…" maxlength="100">
+        </div>
+        <div class="or-form-row">
+          <label class="or-form-lbl">Durée (min)</label>
+          <input id="or-f-duration" type="number" class="fi" value="${d.duration || ''}" placeholder="ex: 30" min="5" max="480">
+        </div>
+      </div>
     </div>`;
   }
 
@@ -1674,6 +1877,8 @@
       type:        typeEl ? typeEl.value : 'hebdomadaire',
       dayId:       document.getElementById('or-f-dayid')?.value   || null,
       slot:        document.getElementById('or-f-slot')?.value    || null,
+      location:    (document.getElementById('or-f-location')?.value || '').trim() || null,
+      duration:    parseInt(document.getElementById('or-f-duration')?.value) || null,
     };
   }
 
@@ -1737,11 +1942,14 @@
     MX.closeModal();
     MX.syncStart();
     try {
-      await db.collection('org_tasks').doc(taskId).update({
+      const upd = {
         title: data.title, description: data.description,
         assignedTo: data.assignedTo || null, category: data.category,
         priority: data.priority, type: data.type,
-      });
+        location: data.location || null,
+        duration: data.duration || null,
+      };
+      await db.collection('org_tasks').doc(taskId).update(upd);
       MX.syncEnd();
       MX.toast('Tâche modifiée ✓');
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
@@ -2104,5 +2312,7 @@
     _onDragStart, _onDragEnd, _onDragOver, _onDragLeave, _onDrop,
     // Side panel (new grid layout)
     _toggleDayPanel, _closeDayPanel, _panelToggleSlot, _saveDayPanel, _applyTemplateQuick,
+    // V2 week actions & view control
+    _doLaunchWeek, _doCloseWeek, _doResetValidations, _setCpView, _openCreateTemplate,
   };
 })();
