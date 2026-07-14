@@ -31,6 +31,7 @@
   let _dayExpanded  = {};       // { dayId: bool }
   let _dragData     = null;     // { taskId, srcDayId, srcSlot }
   let _weekOffset   = 0;        // 0 = current week, -1 = last week, +1 = next week
+  let _slotNames    = {};       // { 'dayId_slot': customName } — persisted in org_config
 
   // ── WEEK HELPERS ──
   function _isoWk(d) {
@@ -101,6 +102,9 @@
   function _getActiveSlots(dayId) {
     if (_slotConfig[dayId]) return _slotConfig[dayId];
     return _getDefaultSlots(dayId);
+  }
+  function _getSlotName(dayId, slot) {
+    return _slotNames[dayId + '_' + slot] || SLOT_INFO[slot]?.l || slot;
   }
 
   // ── USER / DISPLAY HELPERS ──
@@ -241,7 +245,9 @@
       _unsubCfg = db.collection('org_config').doc(weekKey)
         .onSnapshot(
           snap => {
-            _slotConfig = (snap.exists && snap.data().slotConfig) ? snap.data().slotConfig : {};
+            const cfgData = snap.exists ? snap.data() : {};
+            _slotConfig = cfgData.slotConfig || {};
+            _slotNames  = cfgData.slotNames  || {};
             if (!_inHistory) _doRender();
           },
           err => console.warn('[OrgResp] cfg:', err.message)
@@ -424,7 +430,7 @@
             h += `<div class="or-slot${disabled ? ' or-slot--disabled' : ''}" id="or-slot-${slotKey}">
               <div class="or-slot-hdr">
                 <i class="fas ${info.icon} or-slot-ico${disabled ? ' or-slot-ico--disabled' : ''}" style="${!disabled ? `color:${info.color}` : ''}"></i>
-                <span class="or-slot-label${disabled ? ' or-slot-label--disabled' : ''}">${info.l}</span>
+                <span class="or-slot-label${disabled ? ' or-slot-label--disabled' : ''}">${_getSlotName(dayId, slot)}</span>
                 <span class="or-slot-time">${info.time}</span>
                 ${total > 0 ? `<span class="or-slot-cnt" style="color:${doneCnt===total?'#10B981':'var(--text3)'}">${doneCnt}/${total}</span>` : ''}
                 <div class="or-slot-hdr-actions">
@@ -487,7 +493,8 @@
 
     return `<div class="or-plan-task${isDone ? ' or-plan-task--done' : isInProg ? ' or-plan-task--prog' : ''}"
       data-id="${t.id}" draggable="true"
-      ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')">
+      ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
+      ondragend="MX.Pages.OrgResp._onDragEnd(event)">
       <div class="or-plan-task-grab"><i class="fas fa-grip-vertical"></i></div>
       <div class="or-plan-task-body">
         <div class="or-plan-task-top">
@@ -615,7 +622,6 @@
   // ═══════════════════════════════════════════════════════
   function openSlotMenu(dayId, slot, btn) {
     _closeDropdowns();
-    const info    = SLOT_INFO[slot];
     const actSlots = _getActiveSlots(dayId);
     const isActive = actSlots.includes(slot);
 
@@ -624,6 +630,12 @@
     menu.innerHTML = `
       <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}');MX.Pages.OrgResp._closeDropdowns()">
         <i class="fas fa-plus"></i> Ajouter une tâche
+      </div>
+      <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openRenameSlot('${dayId}','${slot}');MX.Pages.OrgResp._closeDropdowns()">
+        <i class="fas fa-pen-to-square"></i> Renommer ce créneau
+      </div>
+      <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openDuplicateSlot('${dayId}','${slot}');MX.Pages.OrgResp._closeDropdowns()">
+        <i class="fas fa-copy"></i> Dupliquer ce créneau
       </div>
       <div class="or-dropdown-sep"></div>
       ${isActive
@@ -634,6 +646,9 @@
             <i class="fas fa-eye"></i> Réactiver ce créneau
           </div>`
       }
+      <div class="or-dropdown-item or-dropdown-item--warn" onclick="MX.Pages.OrgResp._resetSlot('${dayId}','${slot}');MX.Pages.OrgResp._closeDropdowns()">
+        <i class="fas fa-rotate-left"></i> Réinitialiser ce créneau
+      </div>
       <div class="or-dropdown-item" onclick="MX.Pages.OrgResp._clearSlot('${dayId}','${slot}');MX.Pages.OrgResp._closeDropdowns()">
         <i class="fas fa-broom"></i> Vider ce créneau
       </div>
@@ -718,17 +733,176 @@
     });
   }
 
+  // ── SLOT RENAME ──
+  function openRenameSlot(dayId, slot) {
+    const info    = SLOT_INFO[slot];
+    const current = _getSlotName(dayId, slot);
+    const day     = MX.DAYS.find(d => d.id === dayId);
+    MX.showModal({
+      title: 'Renommer le créneau',
+      sub:   `${day?.l || dayId} — ${info?.l || slot}`,
+      body:  `<div class="or-form">
+        <div class="or-form-row">
+          <label class="or-form-lbl">Nom affiché <span style="color:var(--red)">*</span></label>
+          <input id="or-ren-name" class="fi" value="${MX.esc(current)}" placeholder="${MX.esc(info?.l || slot)}" maxlength="60">
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:8px">
+          <i class="fas fa-info-circle"></i> Le nom personnalisé s'applique à cette semaine uniquement.
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Enregistrer', cls: 'primary-btn', fn: () => _doRenameSlot(dayId, slot) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+    setTimeout(() => { const el = document.getElementById('or-ren-name'); if (el) { el.focus(); el.select(); } }, 50);
+  }
+
+  async function _doRenameSlot(dayId, slot) {
+    const name = (document.getElementById('or-ren-name')?.value || '').trim();
+    if (!name) { MX.toast('Le nom ne peut pas être vide', true); return; }
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      const key     = dayId + '_' + slot;
+      const updated = Object.assign({}, _slotNames, { [key]: name });
+      await db.collection('org_config').doc(_weekKey).set({ slotNames: updated }, { merge: true });
+      MX.syncEnd();
+      MX.toast('Créneau renommé ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // ── SLOT DUPLICATION ──
+  function openDuplicateSlot(srcDayId, srcSlot) {
+    const srcName = _getSlotName(srcDayId, srcSlot);
+    const srcDay  = MX.DAYS.find(d => d.id === srcDayId);
+    const dstOptions = MX.DAYS.flatMap(day => {
+      if (day.id === srcDayId) return [];
+      return MX.getDaySlots(day.id).map(s =>
+        `<option value="${day.id}:${s}">${MX.esc(day.l)} — ${MX.esc(_getSlotName(day.id, s))}</option>`
+      );
+    }).join('');
+
+    MX.showModal({
+      title: 'Dupliquer le créneau',
+      sub:   `${srcDay?.l || srcDayId} — ${srcName}`,
+      body:  `<div class="or-form">
+        <div class="or-form-row">
+          <label class="or-form-lbl">Destination</label>
+          <select id="or-sdup-dst" class="fi">
+            <option value="">— Choisir un créneau —</option>
+            ${dstOptions}
+          </select>
+        </div>
+        <label class="or-checkbox or-checkbox--warn" style="margin-top:8px">
+          <input type="checkbox" id="or-sdup-replace">
+          <span>Remplacer les tâches existantes à la destination</span>
+        </label>
+      </div>`,
+      actions: [
+        { label: 'Dupliquer', cls: 'primary-btn', fn: () => _doDuplicateSlot(srcDayId, srcSlot) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doDuplicateSlot(srcDayId, srcSlot) {
+    const val = document.getElementById('or-sdup-dst')?.value;
+    if (!val) { MX.toast('Sélectionnez un créneau de destination', true); return; }
+    const [dstDayId, dstSlot] = val.split(':');
+    const replace = document.getElementById('or-sdup-replace')?.checked;
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      const srcTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === srcDayId && t.slot === srcSlot);
+      const name     = _currentUserName();
+      const batch    = db.batch();
+
+      if (replace) {
+        _tasks.filter(t => t.dayId === dstDayId && t.slot === dstSlot)
+          .forEach(t => batch.delete(db.collection('org_tasks').doc(t.id)));
+      }
+      const existing    = replace ? [] : _tasks.filter(t => !t.archivedFromActive && t.dayId === dstDayId && t.slot === dstSlot);
+      const existTitles = existing.map(t => t.title.trim().toLowerCase());
+      let copied = 0;
+
+      srcTasks.forEach((t, i) => {
+        if (!replace && existTitles.includes(t.title.trim().toLowerCase())) return;
+        batch.set(db.collection('org_tasks').doc(), {
+          title: t.title, description: t.description || '',
+          category: t.category || 'autre', type: t.type || 'unique',
+          priority: t.priority || 'normale',
+          assignedTo: t.assignedTo || null,
+          weekKey: _weekKey, dayId: dstDayId, slot: dstSlot,
+          done: false, status: 'todo',
+          doneBy: null, doneAt: null, comment: null,
+          archivedFromActive: false, isDefault: false,
+          createdBy: name, createdAt: FV.serverTimestamp(),
+          order: existing.length + i,
+        });
+        copied++;
+      });
+
+      await batch.commit();
+      MX.syncEnd();
+      MX.toast(`${copied} tâche(s) copiée(s) ✓`);
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // ── SLOT RESET ──
+  function _resetSlot(dayId, slot) {
+    const slotTasks = _tasks.filter(t => t.dayId === dayId && t.slot === slot);
+    const day       = MX.DAYS.find(d => d.id === dayId);
+    const slotName  = _getSlotName(dayId, slot);
+    MX.showModal({
+      title: 'Réinitialiser le créneau',
+      sub:   `${day?.l || dayId} — ${slotName}`,
+      body:  `<div style="display:flex;align-items:flex-start;gap:12px;padding:4px 0">
+        <i class="fas fa-triangle-exclamation" style="color:var(--red);font-size:20px;margin-top:2px;flex-shrink:0"></i>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Cela va <strong style="color:var(--red)">supprimer les ${slotTasks.length} tâche(s)</strong> de ce créneau,
+          le réactiver et effacer son nom personnalisé.<br>Cette action est irréversible.
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Réinitialiser', cls: 'danger-btn', fn: () => _doResetSlot(dayId, slot) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doResetSlot(dayId, slot) {
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      const batch = db.batch();
+      _tasks.filter(t => t.dayId === dayId && t.slot === slot)
+        .forEach(t => batch.delete(db.collection('org_tasks').doc(t.id)));
+      await batch.commit();
+
+      // Re-enable slot and clear custom name
+      const defaultSlots = _getDefaultSlots(dayId);
+      const current = _getActiveSlots(dayId);
+      const updated = [...new Set([...current, slot])].filter(s => defaultSlots.includes(s));
+      const newCfg  = Object.assign({}, _slotConfig, { [dayId]: updated });
+      const newNames = Object.assign({}, _slotNames);
+      delete newNames[dayId + '_' + slot];
+
+      await db.collection('org_config').doc(_weekKey).set(
+        { slotConfig: newCfg, slotNames: newNames },
+        { merge: true }
+      );
+      MX.syncEnd();
+      MX.toast('Créneau réinitialisé ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
   // ═══════════════════════════════════════════════════════
   //  DAY DUPLICATION
   // ═══════════════════════════════════════════════════════
   function openDuplicateDay(srcDayId) {
-    const srcDay = MX.DAYS.find(d => d.id === srcDayId);
+    const srcDay    = MX.DAYS.find(d => d.id === srcDayId);
     const otherDays = MX.DAYS.filter(d => d.id !== srcDayId);
-
-    let previewHtml = `<div class="or-dup-preview" id="or-dup-preview">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aperçu</div>
-      <div style="color:var(--text3);font-size:12px">Sélectionnez un jour de destination</div>
-    </div>`;
 
     const body = `<div>
       <div class="or-form-2col" style="margin-bottom:12px">
@@ -754,8 +928,15 @@
           <input type="checkbox" id="or-dup-replace">
           <span>Remplacer les tâches existantes (sinon : fusionner)</span>
         </label>
+        <label class="or-checkbox" id="or-dup-skip-wrap" style="display:none;margin-top:4px">
+          <input type="checkbox" id="or-dup-skip-uncovered">
+          <span>Ignorer les créneaux non couverts à la destination</span>
+        </label>
       </div>
-      ${previewHtml}
+      <div class="or-dup-preview" id="or-dup-preview">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aperçu</div>
+        <div style="color:var(--text3);font-size:12px">Sélectionnez un jour de destination</div>
+      </div>
     </div>`;
 
     MX.showModal({
@@ -769,31 +950,64 @@
     });
   }
 
-  function _updateDupPreview(srcDayId, dstDayId) {
+  async function _updateDupPreview(srcDayId, dstDayId) {
     const preview = document.getElementById('or-dup-preview');
     if (!preview) return;
+    const skipWrap = document.getElementById('or-dup-skip-wrap');
+
     if (!dstDayId) {
       preview.innerHTML = `<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aperçu</div>
         <div style="color:var(--text3);font-size:12px">Sélectionnez un jour de destination</div>`;
+      if (skipWrap) skipWrap.style.display = 'none';
       return;
     }
+
+    preview.innerHTML = `<div style="text-align:center;padding:12px;color:var(--text3);font-size:12px"><i class="fas fa-spinner fa-spin"></i> Analyse en cours…</div>`;
+
     const srcTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === srcDayId);
     const dstTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dstDayId);
     const srcDay   = MX.DAYS.find(d => d.id === srcDayId);
     const dstDay   = MX.DAYS.find(d => d.id === dstDayId);
 
-    // Analyze absences
-    const absences = MX.state._orgAbsences || [];
-    const date     = _getDateForDay(_weekKey, dstDayId);
-    const dateStr  = date ? date.toISOString().slice(0, 10) : '';
-    const absentUsers = absences
-      .filter(a => a.from && a.from.slice(0, 10) <= dateStr && (a.to || a.from).slice(0, 10) >= dateStr)
-      .map(a => a.userId || a.name).filter(Boolean);
+    // Load absences from Firestore
+    let absentUsers = [];
+    try {
+      const date    = _getDateForDay(_weekKey, dstDayId);
+      const dateStr = date ? date.toISOString().slice(0, 10) : '';
+      if (dateStr) {
+        const absSnap = await db.collection('absences').where('to', '>=', dateStr).get();
+        absentUsers = absSnap.docs.map(d => d.data())
+          .filter(a => (a.from || '').slice(0, 10) <= dateStr)
+          .map(a => a.userId || a.name).filter(Boolean);
+      }
+    } catch(e) { /* non-critical */ }
 
-    const assigned = srcTasks.map(t => t.assignedTo).filter(Boolean);
-    const conflicts = assigned.filter(n => absentUsers.includes(n));
+    // Slot coverage analysis
+    const dstActiveSlots  = _getActiveSlots(dstDayId);
+    const srcSlots        = [...new Set(srcTasks.map(t => t.slot).filter(Boolean))];
+    const uncoveredSlots  = srcSlots.filter(s => !dstActiveSlots.includes(s));
+    const uncoveredCount  = srcTasks.filter(t => t.slot && uncoveredSlots.includes(t.slot)).length;
 
-    preview.innerHTML = `<div class="or-dup-preview">
+    // Absence conflicts
+    const assigned  = srcTasks.map(t => t.assignedTo).filter(Boolean);
+    const conflicts = [...new Set(assigned.filter(n => absentUsers.includes(n)))];
+
+    let warnings = '';
+    if (conflicts.length > 0) {
+      warnings += `<div style="margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;font-size:12px;color:#EF4444">
+        <i class="fas fa-triangle-exclamation"></i> <strong>${MX.esc(conflicts.join(', '))}</strong> ${conflicts.length > 1 ? 'sont absents' : 'est absent(e)'} ce jour-là.
+      </div>`;
+    }
+    if (uncoveredSlots.length > 0) {
+      if (skipWrap) skipWrap.style.display = '';
+      warnings += `<div style="margin-top:8px;padding:8px 10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:12px;color:#F59E0B">
+        <i class="fas fa-triangle-exclamation"></i> ${uncoveredCount} tâche(s) dans des créneaux inactifs à la destination (${uncoveredSlots.map(s => SLOT_INFO[s]?.l || s).join(', ')}).
+      </div>`;
+    } else {
+      if (skipWrap) skipWrap.style.display = 'none';
+    }
+
+    preview.innerHTML = `
       <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aperçu</div>
       <div class="or-dup-preview-grid">
         <div class="or-dup-preview-col">
@@ -806,43 +1020,48 @@
           <div class="or-dup-preview-cnt">${dstTasks.length} tâche(s) existante(s)</div>
         </div>
       </div>
-      ${conflicts.length > 0 ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;font-size:12px;color:#EF4444">
-        <i class="fas fa-triangle-exclamation"></i> Attention : <strong>${conflicts.join(', ')}</strong> ${conflicts.length > 1 ? 'sont absents' : 'est absent(e)'} ce jour-là.
-      </div>` : ''}
-    </div>`;
+      ${warnings}`;
   }
 
   async function _doDuplicateDay(srcDayId) {
-    const dstDayId  = document.getElementById('or-dup-dst')?.value;
-    if (!dstDayId)  { MX.toast('Sélectionnez un jour de destination', true); return; }
-    const copyAssign = document.getElementById('or-dup-assign')?.checked;
-    const copyPrio   = document.getElementById('or-dup-prio')?.checked;
-    const copyCat    = document.getElementById('or-dup-cat')?.checked;
-    const replace    = document.getElementById('or-dup-replace')?.checked;
+    const dstDayId   = document.getElementById('or-dup-dst')?.value;
+    if (!dstDayId)   { MX.toast('Sélectionnez un jour de destination', true); return; }
+    const copyAssign  = document.getElementById('or-dup-assign')?.checked;
+    const copyPrio    = document.getElementById('or-dup-prio')?.checked;
+    const copyCat     = document.getElementById('or-dup-cat')?.checked;
+    const replace     = document.getElementById('or-dup-replace')?.checked;
+    const skipUncov   = document.getElementById('or-dup-skip-uncovered')?.checked;
     MX.closeModal();
     MX.syncStart();
     try {
-      const srcTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === srcDayId);
-      const name     = _currentUserName();
-      const batch    = db.batch();
+      const dstActiveSlots = _getActiveSlots(dstDayId);
+      let srcTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === srcDayId);
+
+      if (skipUncov) {
+        srcTasks = srcTasks.filter(t => !t.slot || dstActiveSlots.includes(t.slot));
+      }
+
+      const name  = _currentUserName();
+      const batch = db.batch();
 
       if (replace) {
-        const dstTasks = _tasks.filter(t => t.dayId === dstDayId);
-        dstTasks.forEach(t => batch.delete(db.collection('org_tasks').doc(t.id)));
+        _tasks.filter(t => t.dayId === dstDayId)
+          .forEach(t => batch.delete(db.collection('org_tasks').doc(t.id)));
       }
 
       const dstExisting = replace ? [] : _tasks.filter(t => !t.archivedFromActive && t.dayId === dstDayId);
       const existTitles = dstExisting.map(t => t.title.trim().toLowerCase());
+      let copied = 0, skipped = 0;
 
       srcTasks.forEach((t, i) => {
-        if (!replace && existTitles.includes(t.title.trim().toLowerCase())) return; // dedupe
-        const doc = {
+        if (!replace && existTitles.includes(t.title.trim().toLowerCase())) { skipped++; return; }
+        batch.set(db.collection('org_tasks').doc(), {
           title:       t.title,
           description: t.description || '',
-          category:    copyCat ? (t.category || 'autre') : 'autre',
+          category:    copyCat  ? (t.category || 'autre')   : 'autre',
           type:        t.type || 'unique',
-          priority:    copyPrio ? (t.priority || 'normale') : 'normale',
-          assignedTo:  copyAssign ? (t.assignedTo || null) : null,
+          priority:    copyPrio ? (t.priority || 'normale')  : 'normale',
+          assignedTo:  copyAssign ? (t.assignedTo || null)   : null,
           weekKey:     _weekKey,
           dayId:       dstDayId,
           slot:        t.slot || null,
@@ -852,21 +1071,22 @@
           isDefault:   false,
           createdBy:   name, createdAt: FV.serverTimestamp(),
           order:       (dstExisting.length + i),
-        };
-        batch.set(db.collection('org_tasks').doc(), doc);
+        });
+        copied++;
       });
 
       await batch.commit();
-      // Log
       db.collection('admin_journal').add({
         action: 'duplicate_day', by: name, at: FV.serverTimestamp(),
-        weekKey: _weekKey, from: srcDayId, to: dstDayId,
-        count: srcTasks.length,
+        weekKey: _weekKey, from: srcDayId, to: dstDayId, count: copied,
       }).catch(() => {});
       MX.syncEnd();
       const srcDay = MX.DAYS.find(d => d.id === srcDayId);
       const dstDay = MX.DAYS.find(d => d.id === dstDayId);
-      MX.toast(`${srcDay?.l || srcDayId} → ${dstDay?.l || dstDayId} dupliqué ✓`);
+      const msg = skipped > 0
+        ? `${copied} tâche(s) copiée(s), ${skipped} déjà présente(s) ✓`
+        : `${srcDay?.l || srcDayId} → ${dstDay?.l || dstDayId} : ${copied} tâche(s) copiée(s) ✓`;
+      MX.toast(msg);
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
@@ -1115,6 +1335,12 @@
     event.dataTransfer.setData('text/plain', taskId);
     const el = event.currentTarget;
     setTimeout(() => el && el.classList.add('or-plan-task--dragging'), 0);
+  }
+
+  function _onDragEnd(event) {
+    const el = event.currentTarget;
+    if (el) el.classList.remove('or-plan-task--dragging');
+    _dragData = null;
   }
 
   function _onDragOver(event, dstDayId, dstSlot) {
@@ -1640,15 +1866,28 @@
     _doAdd, _doEdit, _doDelete, _doValidate,
     moveToInProgress, moveToTodo,
     unvalidate, _histToggle,
-    // Planning
+    // Planning navigation
     _setTab, _toggleDay,
     _prevWeek, _nextWeek, _goToCurrentWeek,
+    // Slot config
     openSlotConfig, _reactivateSlot,
+    _disableSlot, _clearSlot,
     openSlotMenu, openDayMenu, _closeDropdowns,
+    // Slot rename
+    openRenameSlot, _doRenameSlot,
+    // Slot duplication
+    openDuplicateSlot, _doDuplicateSlot,
+    // Slot reset
+    _resetSlot, _doResetSlot,
+    // Task add (planning-aware)
     openAddDayTask,
+    // Day duplication
     openDuplicateDay, _updateDupPreview,
+    // Week duplication
     openDuplicateWeek,
+    // Templates
     openTemplateSave, openTemplateApply, _deleteTemplate,
-    _onDragStart, _onDragOver, _onDragLeave, _onDrop,
+    // Drag and drop
+    _onDragStart, _onDragEnd, _onDragOver, _onDragLeave, _onDrop,
   };
 })();
