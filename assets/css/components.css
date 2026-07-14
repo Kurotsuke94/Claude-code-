@@ -17890,3 +17890,15 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* ── SLOT BODY ── */
 .or-cp-slot-body { display:flex; flex-direction:column; gap:3px; padding:4px 8px 2px; min-height:6px; }
 .or-cp-slot-body.or-slot-body--drag-over { outline:2px dashed var(--cyan); outline-offset:-2px; border-radius:6px; }
+
+/* ── ITEM TYPE PICKER (form) ── */
+.or-itype-pills { display:flex; flex-wrap:wrap; gap:4px; padding:2px 0; }
+.or-itype-pill {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:4px 9px; border-radius:6px;
+  border:1.5px solid var(--border2); background:var(--bg3);
+  color:var(--text2); font-size:10px; font-weight:600;
+  font-family:var(--ffs); cursor:pointer; transition:all .12s; white-space:nowrap;
+}
+.or-itype-pill i { font-size:9px; }
+.or-itype-pill:hover { border-color:var(--border3); color:var(--text1); background:var(--bg4); }

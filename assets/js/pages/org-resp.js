@@ -9,6 +9,18 @@
     soir:    { l: 'Soir',    icon: 'fa-moon',       color: '#8B5CF6', bg: 'rgba(139,92,246,.10)', time: '14h – 22h' },
   };
 
+  // ── ITEM TYPES ──
+  const ITEM_TYPES = {
+    tache:        { l:'Tâche',        icon:'fa-check-circle',        color:'#6B7280', bg:'rgba(107,114,128,.13)' },
+    mission:      { l:'Mission',       icon:'fa-briefcase',           color:'#3B82F6', bg:'rgba(59,130,246,.13)'  },
+    pmp:          { l:'PMP',          icon:'fa-screwdriver-wrench',   color:'#8B5CF6', bg:'rgba(139,92,246,.13)'  },
+    intervention: { l:'Intervention', icon:'fa-triangle-exclamation', color:'#EF4444', bg:'rgba(239,68,68,.13)'   },
+    note:         { l:'Note',         icon:'fa-note-sticky',          color:'#F59E0B', bg:'rgba(245,158,11,.13)'  },
+    reunion:      { l:'Réunion',      icon:'fa-users',                color:'#06B6D4', bg:'rgba(6,182,212,.13)'   },
+    livraison:    { l:'Livraison',    icon:'fa-box-open',             color:'#10B981', bg:'rgba(16,185,129,.13)'  },
+    controle:     { l:'Contrôle',     icon:'fa-clipboard-check',      color:'#EC4899', bg:'rgba(236,72,153,.13)'  },
+  };
+
   // ── DEFAULT ORG TASKS ──
   const DEFAULT_ORG_TASKS = [
     { title: 'Contrôle carnets sécurité',          category: 'sécurité',      description: '', type: 'hebdomadaire' },
@@ -333,8 +345,8 @@
 
     // ── ACTION BAR 1 ──
     h += `<div class="or-cp-actions-bar">
-      <button class="or-cp-ab-btn or-cp-ab-btn--primary" onclick="MX.Pages.OrgResp.openAdd()">
-        <i class="fas fa-plus"></i> Nouvelle mission
+      <button class="or-cp-ab-btn or-cp-ab-btn--primary" onclick="MX.Pages.OrgResp.openAddFromHeader()">
+        <i class="fas fa-plus"></i> Ajouter dans la feuille de route
       </button>
       <div class="or-cp-ab-sep"></div>
       <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp.openDuplicateDay('')">
@@ -380,8 +392,8 @@
         <i class="fas fa-timeline"></i> Vue Timeline
       </button>
       <button class="or-tab" onclick="MX.Pages.OrgResp._setTab('tasks')">
-        <i class="fas fa-list-check"></i> Tâches hebdo
-        ${kbTasks.length > 0 ? `<span class="or-tab-cnt">${kbDone}/${kbTasks.length}</span>` : ''}
+        <i class="fas fa-box-archive"></i> Modèles de tâches
+        ${kbTasks.length > 0 ? `<span class="or-tab-cnt">${kbTasks.length}</span>` : ''}
       </button>
     </div>`;
 
@@ -404,25 +416,26 @@
 
   // ── KPI ROW ──
   function _cpRenderKpiRow(planTasks, planDone, planTotal) {
-    const matinT   = planTasks.filter(t => t.slot === 'matin');
-    const journeeT = planTasks.filter(t => t.slot === 'journee');
-    const soirT    = planTasks.filter(t => t.slot === 'soir');
-    const uniqueTechs = [...new Set(planTasks.filter(t => t.assignedTo).map(t => t.assignedTo))].length;
-    const totalDur = planTasks.reduce((s, t) => s + (t.duration || 0), 0);
-    const urgents  = planTasks.filter(t => (t.priority === 'critique' || t.priority === 'urgente') && !t.done).length;
-    const pct      = planTotal ? Math.round(planDone / planTotal * 100) : 0;
-    const pctC     = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
-    const durStr   = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '—';
+    const interventions = planTasks.filter(t => t.itemType === 'intervention').length;
+    const pmps          = planTasks.filter(t => t.itemType === 'pmp').length;
+    const reunions      = planTasks.filter(t => t.itemType === 'reunion').length;
+    const uniqueTechs   = [...new Set(planTasks.filter(t => t.assignedTo).map(t => t.assignedTo))].length;
+    const totalDur      = planTasks.reduce((s, t) => s + (t.duration || 0), 0);
+    const urgents       = planTasks.filter(t => (t.priority === 'critique' || t.priority === 'urgente') && !t.done).length;
+    const pct           = planTotal ? Math.round(planDone / planTotal * 100) : 0;
+    const pctC          = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
+    const durStr        = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '—';
+    const matinT        = planTasks.filter(t => t.slot === 'matin');
 
     const cards = [
-      { emoji:'📋', val:planTotal,        lbl:'Missions semaine', sub:`${planDone} validées`,                     c:pctC             },
-      { emoji:'🌅', val:matinT.length,    lbl:'Matin',            sub:`${matinT.filter(t=>t.done).length} val.`,  c:'#F59E0B'        },
-      { emoji:'☀️', val:journeeT.length,  lbl:'Journée',          sub:`${journeeT.filter(t=>t.done).length} val.`,c:'#3B82F6'        },
-      { emoji:'🌙', val:soirT.length,     lbl:'Soir',             sub:`${soirT.filter(t=>t.done).length} val.`,   c:'#F97316'        },
-      { emoji:'👥', val:uniqueTechs,      lbl:'Techniciens',      sub:'planifiés cette semaine',                  c:'#8B5CF6'        },
-      { emoji:'⏱',  val:durStr,           lbl:'Temps estimé',     sub:'total des missions',                       c:'#06B6D4'        },
-      { emoji:'⚡', val:urgents,          lbl:'Urgences',         sub:urgents>0?'à traiter':'aucune urgence',     c:urgents>0?'#EF4444':'#10B981' },
-      { emoji:'📊', val:`${pct}%`,        lbl:'Avancement',       sub:`${planDone} sur ${planTotal}`,             c:pctC             },
+      { emoji:'📋', val:planTotal,       lbl:'Feuille de route',  sub:`${planDone} éléments validés`,               c:pctC                          },
+      { emoji:'🔴', val:interventions,   lbl:'Interventions',     sub:interventions>0?'à planifier':'aucune',        c:interventions>0?'#EF4444':'#10B981' },
+      { emoji:'🔧', val:pmps,            lbl:'PMP',               sub:pmps>0?'planifiés':'aucun',                    c:'#8B5CF6'                     },
+      { emoji:'⚡', val:urgents,         lbl:'Urgences',          sub:urgents>0?'à traiter':'aucune urgence',        c:urgents>0?'#EF4444':'#10B981' },
+      { emoji:'👷', val:uniqueTechs,     lbl:'Techniciens',       sub:'planifiés cette semaine',                     c:'#F59E0B'                     },
+      { emoji:'⏱',  val:durStr,          lbl:'Temps estimé',      sub:'total hebdomadaire',                          c:'#06B6D4'                     },
+      { emoji:'🤝', val:reunions,        lbl:'Réunions',          sub:reunions>0?'planifiées':'aucune',              c:'#06B6D4'                     },
+      { emoji:'📊', val:`${pct}%`,       lbl:'Avancement',        sub:`${planDone} sur ${planTotal}`,                c:pctC                          },
     ];
 
     return `<div class="or-cp-kpi-row-v2">${cards.map(c =>
@@ -565,12 +578,13 @@
   // ── COMPACT MISSION CARD ──
   function _cpMissionCardV2(t, dayId, slot) {
     const prio      = _prioConfig(t.priority);
-    const cat       = _catConfig(t.category);
+    const itype     = ITEM_TYPES[t.itemType] || ITEM_TYPES.tache;
     const isDone    = t.done;
     const isInProg  = !isDone && t.status === 'inprogress';
     const statusCls = isDone ? 'or-cp-mc-status--done' : isInProg ? 'or-cp-mc-status--prog' : 'or-cp-mc-status--todo';
-    const prioCls   = (t.priority === 'urgente' || t.priority === 'critique') ? 'or-cp-mc--prio-urgente'
-                    : t.priority === 'haute' ? 'or-cp-mc--prio-haute' : 'or-cp-mc--prio-normale';
+    // Priority urgente/critique overrides border to red; haute → orange; else item type color
+    const borderC   = (t.priority === 'urgente' || t.priority === 'critique') ? '#EF4444'
+                    : t.priority === 'haute' ? '#F59E0B' : itype.color;
     const durFmt    = t.duration
       ? (t.duration < 60 ? t.duration + 'min' : Math.floor(t.duration/60) + 'h' + (t.duration%60 ? String(t.duration%60).padStart(2,'0') : ''))
       : '';
@@ -578,15 +592,16 @@
     const durHtml   = durFmt ? `<span class="or-cp-mc-dur">${durFmt}</span>` : '';
     const avColor   = t.assignedTo ? _ucolor(t.assignedTo) : null;
     const avHtml    = t.assignedTo ? `<span class="or-cp-mc-av" style="background:${avColor}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
-    const catIcon   = `<i class="fas ${cat.icon} or-cp-mc-icon" style="color:${cat.color}"></i>`;
+    const typeIco   = `<i class="fas ${itype.icon} or-cp-mc-icon" style="color:${itype.color}"></i>`;
     const prioIco   = prio ? `<span style="font-size:10px;flex-shrink:0" title="${prio.label}">${prio.icon}</span>` : '';
 
-    return `<div class="or-cp-mc${isDone?' or-cp-mc--done':''} ${prioCls}"
+    return `<div class="or-cp-mc${isDone?' or-cp-mc--done':''}"
+      style="border-left-color:${borderC}"
       data-id="${t.id}" draggable="true"
       ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
       ondragend="MX.Pages.OrgResp._onDragEnd(event)">
       <span class="or-cp-mc-status ${statusCls}"></span>
-      ${catIcon}
+      ${typeIco}
       <span class="or-cp-mc-title">${MX.esc(t.title)}</span>
       ${locHtml}
       ${durHtml}
@@ -601,6 +616,37 @@
   // alias for backward compat
   function _cpMissionCard(t, dayId, slot) { return _cpMissionCardV2(t, dayId, slot); }
   function _planTaskCard(t, dayId, slot)  { return _cpMissionCardV2(t, dayId, slot); }
+
+  // ── ITEM TYPE PICKER ──
+  function _itypePicker(selected) {
+    const sel = selected || 'tache';
+    const pills = Object.entries(ITEM_TYPES).map(([v, cfg]) => {
+      const isOn = v === sel;
+      return `<button type="button" class="or-itype-pill${isOn ? ' or-itype-pill--on' : ''}"
+        data-icolor="${cfg.color}" data-ibg="${cfg.bg}"
+        style="${isOn ? `background:${cfg.bg};color:${cfg.color};border-color:${cfg.color}` : ''}"
+        onclick="MX.Pages.OrgResp._cpSelectItype(this,'${v}')">
+        <i class="fas ${cfg.icon}"></i> ${cfg.l}
+      </button>`;
+    }).join('');
+    return `<input type="hidden" id="or-f-itype" value="${MX.esc(sel)}">
+    <div class="or-itype-pills">${pills}</div>`;
+  }
+
+  function _cpSelectItype(btn, val) {
+    const pills = btn.closest('.or-itype-pills');
+    if (!pills) return;
+    pills.querySelectorAll('.or-itype-pill').forEach(p => {
+      p.classList.remove('or-itype-pill--on');
+      p.style.background = ''; p.style.color = ''; p.style.borderColor = '';
+    });
+    btn.classList.add('or-itype-pill--on');
+    btn.style.background  = btn.dataset.ibg;
+    btn.style.color       = btn.dataset.icolor;
+    btn.style.borderColor = btn.dataset.icolor;
+    const inp = btn.closest('.or-form')?.querySelector('#or-f-itype');
+    if (inp) inp.value = val;
+  }
 
   // ── EXPAND / COLLAPSE ──
   function _cpToggleExpand(expandId) {
@@ -1860,10 +1906,32 @@
     const prio = d.priority || 'normale';
     const type = d.type || (d.dayId ? 'unique' : 'hebdomadaire');
     const cats = ['sécurité','réglementaire','stock','administratif','hébergement','autre'];
-    const hiddenDaySlot = d.dayId
-      ? `<input type="hidden" id="or-f-dayid" value="${MX.esc(d.dayId)}">
-         <input type="hidden" id="or-f-slot"  value="${MX.esc(d.slot || '')}">` : '';
-    return `<div class="or-form">${hiddenDaySlot}
+
+    // Day / slot inputs: hidden when pre-assigned, selectors when from header, absent otherwise
+    let daySlotHtml = '';
+    if (d.dayId) {
+      daySlotHtml = `<input type="hidden" id="or-f-dayid" value="${MX.esc(d.dayId)}">
+        <input type="hidden" id="or-f-slot" value="${MX.esc(d.slot || '')}">`;
+    } else if (d.fromHeader) {
+      const dayOpts  = MX.DAYS.map(dy => `<option value="${dy.id}">${dy.l}</option>`).join('');
+      const slotOpts = Object.entries(SLOT_INFO).map(([k,s]) => `<option value="${k}">${s.l} — ${s.time}</option>`).join('');
+      daySlotHtml = `<div class="or-form-2col">
+        <div class="or-form-row">
+          <label class="or-form-lbl">Journée <span style="color:var(--red)">*</span></label>
+          <select id="or-f-dayid" class="fi"><option value="">— Choisir une journée —</option>${dayOpts}</select>
+        </div>
+        <div class="or-form-row">
+          <label class="or-form-lbl">Créneau <span style="color:var(--red)">*</span></label>
+          <select id="or-f-slot" class="fi"><option value="">— Choisir un créneau —</option>${slotOpts}</select>
+        </div>
+      </div>`;
+    }
+
+    return `<div class="or-form">${daySlotHtml}
+      <div class="or-form-row">
+        <label class="or-form-lbl">Type d'élément</label>
+        ${_itypePicker(d.itemType)}
+      </div>
       <div class="or-form-row">
         <label class="or-form-lbl">Titre <span style="color:var(--red)">*</span></label>
         <input id="or-f-title" class="fi" value="${MX.esc(d.title || '')}" placeholder="Nom de la tâche" maxlength="150">
@@ -1935,6 +2003,7 @@
       slot:        document.getElementById('or-f-slot')?.value    || null,
       location:    (document.getElementById('or-f-location')?.value || '').trim() || null,
       duration:    parseInt(document.getElementById('or-f-duration')?.value) || null,
+      itemType:    document.getElementById('or-f-itype')?.value   || 'tache',
     };
   }
 
@@ -1946,6 +2015,26 @@
       body:    _taskFormBody(),
       actions: [
         { label: 'Créer', cls: 'primary-btn', fn: () => _doAdd() },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+    setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
+  }
+
+  // ── ADD FROM HEADER (requires day + slot selection) ──
+  function openAddFromHeader() {
+    MX.showModal({
+      title:   'Ajouter dans la feuille de route',
+      sub:     _weekLabel(_weekKey),
+      body:    _taskFormBody({ fromHeader: true }),
+      actions: [
+        { label: 'Ajouter', cls: 'primary-btn', fn: () => {
+          const dayid = document.getElementById('or-f-dayid')?.value;
+          if (!dayid) { MX.toast('Sélectionner une journée', true); return; }
+          const slotid = document.getElementById('or-f-slot')?.value;
+          if (!slotid) { MX.toast('Sélectionner un créneau', true); return; }
+          _doAdd();
+        }},
         { label: 'Annuler', cls: 'cancel' }
       ]
     });
@@ -2004,6 +2093,7 @@
         priority: data.priority, type: data.type,
         location: data.location || null,
         duration: data.duration || null,
+        itemType: data.itemType || 'tache',
       };
       await db.collection('org_tasks').doc(taskId).update(upd);
       MX.syncEnd();
@@ -2129,8 +2219,8 @@
     let h = `<div class="or-page">
       <div class="or-header">
         <div class="or-header-left">
-          <div class="or-title">Centre de Pilotage</div>
-          <div class="or-week-label">${_weekLabel(_weekKey)}</div>
+          <div class="or-title">Modèles de tâches</div>
+          <div class="or-week-label">Bibliothèque — ${_weekLabel(_weekKey)}</div>
         </div>
         <div class="or-header-right">
           <button class="or-btn-secondary" onclick="MX.Pages.OrgResp.renderHistory()">
@@ -2158,8 +2248,8 @@
           ${planTasks.length > 0 ? `<span class="or-tab-cnt">${planDone}/${planTasks.length}</span>` : ''}
         </button>
         <button class="or-tab or-tab--active" onclick="MX.Pages.OrgResp._setTab('tasks')">
-          <i class="fas fa-list-check"></i> Tâches hebdo
-          ${total > 0 ? `<span class="or-tab-cnt">${doneCnt}/${total}</span>` : ''}
+          <i class="fas fa-box-archive"></i> Modèles de tâches
+          ${total > 0 ? `<span class="or-tab-cnt">${total}</span>` : ''}
         </button>
       </div>
 
@@ -2371,6 +2461,8 @@
     // V2 week actions & view control
     _doLaunchWeek, _doCloseWeek, _doResetValidations, _setCpView, _openCreateTemplate,
     // V3 planning interactions
-    _cpToggleExpand, _cpMissionMenu,
+    _cpToggleExpand, _cpMissionMenu, _cpSelectItype,
+    // Header quick-add
+    openAddFromHeader,
   };
 })();
