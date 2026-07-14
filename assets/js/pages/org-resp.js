@@ -436,6 +436,7 @@
 
   // ── DAY COLUMN ──
   function _cpRenderDayColumn(day, idx, weekDates, isCurrentWk, todayDayId) {
+    const MAX_VISIBLE  = 4;
     const dayId        = day.id;
     const date         = weekDates[idx];
     const dateStr      = _fmtDate(date);
@@ -446,15 +447,16 @@
     const dayDone      = dayTasks.filter(t => t.done).length;
     const dayTotal     = dayTasks.length;
     const dayPct       = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
-    const dayPctC      = dayPct >= 80 ? '#10B981' : dayPct >= 40 ? '#F59E0B' : '#EF4444';
+    const dayPctC      = dayPct >= 75 ? '#10B981' : dayPct >= 40 ? '#F59E0B' : dayTotal > 0 ? '#EF4444' : 'var(--border2)';
     const totalDur     = dayTasks.reduce((s, t) => s + (t.duration || 0), 0);
+    const dayTechs     = [...new Set(dayTasks.filter(t => t.assignedTo).map(t => t.assignedTo))];
 
     let h = `<div class="or-cp-col${isToday ? ' or-cp-col--today' : ''}">`;
 
-    // Header
+    // ── Column header ──
     h += `<div class="or-cp-col-hdr">
       <div class="or-cp-col-hdr-info">
-        <div class="or-cp-col-day">${day.l.toUpperCase()} ${isToday ? '<span class="or-cp-col-today-badge">Auj.</span>' : ''}</div>
+        <div class="or-cp-col-day">${day.l.toUpperCase()}${isToday ? ' <span class="or-cp-col-today-badge">Auj.</span>' : ''}</div>
         <div class="or-cp-col-date">${dateStr}</div>
       </div>
       <button class="or-cp-gear-btn" onclick="MX.Pages.OrgResp.openDayMenu('${dayId}',this)" title="Actions journée">
@@ -462,17 +464,17 @@
       </button>
     </div>`;
 
-    // Day stats bar
-    if (dayTotal > 0) {
-      const durStr = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '';
-      h += `<div class="or-cp-col-day-stats">
-        <span class="or-cp-col-stat-v2"><i class="fas fa-check-circle"></i> ${dayDone}/${dayTotal}</span>
-        ${durStr ? `<span class="or-cp-col-stat-v2"><i class="fas fa-clock"></i> ${durStr}</span>` : ''}
-        <div class="or-cp-col-prog-v2">
-          <div class="or-cp-col-prog-fill-v2" style="width:${dayPct}%;background:${dayPctC}"></div>
-        </div>
-      </div>`;
-    }
+    // ── Day charge bar (always visible) ──
+    const durStr  = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '';
+    const techStr = dayTechs.map(u => `<span style="color:${_ucolor(u)};font-weight:700">${_initials(u)}</span>`).join(' · ');
+    h += `<div class="or-cp-col-charge">
+      <div class="or-cp-col-charge-bar">
+        <div class="or-cp-col-charge-fill" style="width:${dayTotal>0?dayPct:0}%;background:${dayPctC}"></div>
+      </div>
+      ${dayTotal > 0 ? `<span class="or-cp-col-charge-pct" style="color:${dayPctC}">${dayPct}%</span>` : ''}
+      <span class="or-cp-col-charge-info">${dayTotal > 0 ? `${dayTotal} mission${dayTotal!==1?'s':''}${durStr?' · '+durStr:''}` : 'Journée vide'}</span>
+      ${techStr ? `<span class="or-cp-col-charge-techs">${techStr}</span>` : ''}
+    </div>`;
 
     if (activeSlots.length === 0) {
       h += `<div class="or-cp-col-empty"><i class="fas fa-ban"></i>Créneaux désactivés
@@ -481,24 +483,40 @@
     } else {
       ['matin', 'journee', 'soir'].forEach(slot => {
         if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
-        const disabled  = !activeSlots.includes(slot);
-        const info      = SLOT_INFO[slot];
-        const slotKey   = `${dayId}_${slot}`;
-        const slotTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
-        const doneCnt   = slotTasks.filter(t => t.done).length;
-        const total     = slotTasks.length;
-        const slotDur   = slotTasks.reduce((s, t) => s + (t.duration || 0), 0);
-        const slotPct   = total ? Math.round(doneCnt / total * 100) : 0;
-        const slotPctC  = slotPct >= 80 ? '#10B981' : slotPct >= 40 ? '#F59E0B' : '#EF4444';
+        const disabled    = !activeSlots.includes(slot);
+        const info        = SLOT_INFO[slot];
+        const slotKey     = `${dayId}_${slot}`;
+        const slotTasks   = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
+        const doneCnt     = slotTasks.filter(t => t.done).length;
+        const total       = slotTasks.length;
+        const slotDur     = slotTasks.reduce((s, t) => s + (t.duration || 0), 0);
+        const slotDurStr  = slotDur > 0 ? `${Math.floor(slotDur/60)}h${slotDur%60>0?String(slotDur%60).padStart(2,'0'):''}` : '';
+        const slotTechs   = [...new Set(slotTasks.filter(t => t.assignedTo).map(t => t.assignedTo))];
+
+        // Slot header meta row (count · duration · assignees)
+        let metaHtml = '';
+        if (!disabled && total > 0) {
+          const parts = [];
+          parts.push(`<span class="or-cp-slot-meta-pill"><i class="fas fa-list-check"></i> ${doneCnt}/${total}</span>`);
+          if (slotDurStr) parts.push(`<span class="or-cp-slot-meta-pill"><i class="fas fa-clock"></i> ${slotDurStr}</span>`);
+          if (slotTechs.length) {
+            parts.push(slotTechs.slice(0,3).map(u =>
+              `<span class="or-cp-slot-tech-av" style="color:${_ucolor(u)}">${_initials(u)}</span>`
+            ).join('<span class="or-cp-slot-meta-sep">·</span>'));
+          }
+          metaHtml = `<div class="or-cp-slot-hdr-row">${parts.join('<span class="or-cp-slot-meta-sep">·</span>')}</div>`;
+        }
 
         h += `<div class="or-cp-slot or-cp-slot--${slot}${disabled ? ' or-cp-slot--disabled' : ''}">
           <div class="or-cp-slot-hdr">
             <i class="fas ${info.icon} or-cp-slot-ico"></i>
-            <div class="or-cp-slot-info">
-              <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
-              <span class="or-cp-slot-time">${info.time}</span>
+            <div class="or-cp-slot-info" style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:5px">
+                <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
+                <span class="or-cp-slot-time">${info.time}</span>
+              </div>
+              ${metaHtml}
             </div>
-            ${total > 0 ? `<span class="or-cp-slot-cnt">${doneCnt}/${total}</span>` : ''}
             <div class="or-cp-slot-actions">
               ${!disabled
                 ? `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter"><i class="fas fa-plus"></i></button>`
@@ -508,25 +526,29 @@
             </div>
           </div>`;
 
-        if (!disabled && total > 0) {
-          const durStr = slotDur > 0 ? `${Math.floor(slotDur/60)}h${slotDur%60>0?String(slotDur%60).padStart(2,'0'):''}` : '';
-          h += `<div class="or-cp-slot-stats">
-            ${durStr ? `<span class="or-cp-slot-stat"><i class="fas fa-clock"></i> ${durStr}</span>` : ''}
-            <span class="or-cp-slot-stat">${total} tâche${total!==1?'s':''}</span>
-            <span class="or-cp-slot-charge" style="background:${slotPctC}22;color:${slotPctC}">${slotPct}%</span>
-          </div>`;
-        }
-
         if (disabled) {
           h += `<div class="or-cp-slot-disabled"><i class="fas fa-eye-slash"></i> Désactivé</div>`;
         } else {
+          const visible  = slotTasks.slice(0, MAX_VISIBLE);
+          const hidden   = slotTasks.slice(MAX_VISIBLE);
+          const expandId = `or-exp-${slotKey}`;
+
           h += `<div class="or-cp-slot-body" id="or-slot-body-${slotKey}"
             ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
             ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
             ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
-          slotTasks.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
-          h += `</div>
-          <div class="or-cp-add-row">
+          visible.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
+          if (hidden.length > 0) {
+            h += `<div id="${expandId}" style="display:none;flex-direction:column;gap:3px">`;
+            hidden.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
+            h += `</div>
+            <button class="or-cp-expand-btn" id="${expandId}-btn"
+              onclick="MX.Pages.OrgResp._cpToggleExpand('${expandId}')">
+              <i class="fas fa-chevron-down"></i>&nbsp;${hidden.length} autre${hidden.length!==1?'s':''} mission${hidden.length!==1?'s':''}
+            </button>`;
+          }
+          h += `</div>`;
+          h += `<div class="or-cp-add-row">
             <button class="or-cp-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">
               <i class="fas fa-plus"></i> Ajouter une mission
             </button>
@@ -540,47 +562,81 @@
     return h;
   }
 
-  // ── MISSION CARD V2 ──
+  // ── COMPACT MISSION CARD ──
   function _cpMissionCardV2(t, dayId, slot) {
-    const prio     = _prioConfig(t.priority);
-    const cat      = _catConfig(t.category);
-    const isDone   = t.done;
-    const isInProg = !isDone && t.status === 'inprogress';
-    const statusCls = isDone ? 'or-cp-mv2-status--done' : isInProg ? 'or-cp-mv2-status--prog' : 'or-cp-mv2-status--todo';
-    const catAbbrv  = (t.category || '').slice(0, 4).toUpperCase();
-    const prioBadge = prio ? `<span class="or-cp-mv2-badge" style="background:${prio.bg};color:${prio.color}">${prio.icon}</span>` : '';
-    const catBadge  = `<span class="or-cp-mv2-badge" style="background:${cat.color}18;color:${cat.color}">${catAbbrv}</span>`;
-    const durHtml   = t.duration ? `<span class="or-cp-mv2-dur">${t.duration < 60 ? t.duration + ' min' : Math.floor(t.duration/60) + 'h' + (t.duration % 60 ? String(t.duration%60).padStart(2,'0') : '')}</span>` : '';
-    const locHtml   = t.location ? `<div class="or-cp-mv2-loc"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</div>` : '';
-    const asgHtml   = t.assignedTo ? `<span class="or-cp-mv2-badge" style="background:${_ucolor(t.assignedTo)}22;color:${_ucolor(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
+    const prio      = _prioConfig(t.priority);
+    const cat       = _catConfig(t.category);
+    const isDone    = t.done;
+    const isInProg  = !isDone && t.status === 'inprogress';
+    const statusCls = isDone ? 'or-cp-mc-status--done' : isInProg ? 'or-cp-mc-status--prog' : 'or-cp-mc-status--todo';
+    const prioCls   = (t.priority === 'urgente' || t.priority === 'critique') ? 'or-cp-mc--prio-urgente'
+                    : t.priority === 'haute' ? 'or-cp-mc--prio-haute' : 'or-cp-mc--prio-normale';
+    const durFmt    = t.duration
+      ? (t.duration < 60 ? t.duration + 'min' : Math.floor(t.duration/60) + 'h' + (t.duration%60 ? String(t.duration%60).padStart(2,'0') : ''))
+      : '';
+    const locHtml   = t.location ? `<span class="or-cp-mc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
+    const durHtml   = durFmt ? `<span class="or-cp-mc-dur">${durFmt}</span>` : '';
+    const avColor   = t.assignedTo ? _ucolor(t.assignedTo) : null;
+    const avHtml    = t.assignedTo ? `<span class="or-cp-mc-av" style="background:${avColor}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
+    const catIcon   = `<i class="fas ${cat.icon} or-cp-mc-icon" style="color:${cat.color}"></i>`;
+    const prioIco   = prio ? `<span style="font-size:10px;flex-shrink:0" title="${prio.label}">${prio.icon}</span>` : '';
 
-    return `<div class="or-cp-mission-v2${isDone ? ' or-cp-mission-v2--done' : ''}"
+    return `<div class="or-cp-mc${isDone?' or-cp-mc--done':''} ${prioCls}"
       data-id="${t.id}" draggable="true"
       ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
       ondragend="MX.Pages.OrgResp._onDragEnd(event)">
-      <div class="or-cp-mv2-actions">
-        ${!isDone
-          ? `<button class="or-cp-mv2-act or-cp-mv2-act--ok" onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Terminer"><i class="fas fa-check"></i></button>`
-          : `<button class="or-cp-mv2-act" onclick="MX.Pages.OrgResp.unvalidate('${t.id}')" title="Rouvrir"><i class="fas fa-rotate-left"></i></button>`
-        }
-        <button class="or-cp-mv2-act" onclick="MX.Pages.OrgResp.openEdit('${t.id}')" title="Modifier"><i class="fas fa-pen"></i></button>
-        <button class="or-cp-mv2-act or-cp-mv2-act--del" onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
-      </div>
-      <div class="or-cp-mv2-top">
-        <span class="or-cp-mv2-grab"><i class="fas fa-grip-vertical"></i></span>
-        <span class="or-cp-mv2-status ${statusCls}"></span>
-        <div class="or-cp-mv2-body">
-          <div class="or-cp-mv2-title">${MX.esc(t.title)}</div>
-          ${locHtml}
-        </div>
-      </div>
-      <div class="or-cp-mv2-footer">${durHtml}${catBadge}${prioBadge}${asgHtml}</div>
+      <span class="or-cp-mc-status ${statusCls}"></span>
+      ${catIcon}
+      <span class="or-cp-mc-title">${MX.esc(t.title)}</span>
+      ${locHtml}
+      ${durHtml}
+      ${prioIco}
+      ${avHtml}
+      <button class="or-cp-mc-menu" onclick="event.stopPropagation();MX.Pages.OrgResp._cpMissionMenu('${t.id}',this)" title="Actions">
+        <i class="fas fa-ellipsis-vertical"></i>
+      </button>
     </div>`;
   }
 
   // alias for backward compat
   function _cpMissionCard(t, dayId, slot) { return _cpMissionCardV2(t, dayId, slot); }
   function _planTaskCard(t, dayId, slot)  { return _cpMissionCardV2(t, dayId, slot); }
+
+  // ── EXPAND / COLLAPSE ──
+  function _cpToggleExpand(expandId) {
+    const el  = document.getElementById(expandId);
+    const btn = document.getElementById(expandId + '-btn');
+    if (!el) return;
+    const isHidden = el.style.display === 'none' || el.style.display === '';
+    el.style.display = isHidden ? 'flex' : 'none';
+    if (isHidden) { el.style.flexDirection = 'column'; el.style.gap = '3px'; }
+    if (btn) {
+      const cnt = el.querySelectorAll('.or-cp-mc').length;
+      btn.innerHTML = isHidden
+        ? `<i class="fas fa-chevron-up"></i>&nbsp;Réduire`
+        : `<i class="fas fa-chevron-down"></i>&nbsp;${cnt} autre${cnt!==1?'s':''} mission${cnt!==1?'s':''}`;
+    }
+  }
+
+  // ── MISSION CONTEXT MENU ──
+  function _cpMissionMenu(taskId, btn) {
+    _closeDropdowns();
+    const t = _tasks.find(x => x.id === taskId);
+    if (!t) return;
+    const menu = document.createElement('div');
+    menu.className = 'or-dropdown-menu';
+    menu.innerHTML = `
+      ${!t.done
+        ? `<div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openValidate('${taskId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-check"></i> Terminer</div>
+           <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.moveToInProgress('${taskId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-spinner"></i> En cours</div>`
+        : `<div class="or-dropdown-item" onclick="MX.Pages.OrgResp.unvalidate('${taskId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-rotate-left"></i> Rouvrir</div>`
+      }
+      <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openEdit('${taskId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-pen"></i> Modifier</div>
+      <div class="or-dropdown-sep"></div>
+      <div class="or-dropdown-item or-dropdown-item--warn" onclick="MX.Pages.OrgResp.openDelete('${taskId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-trash"></i> Supprimer</div>
+    `;
+    _attachDropdown(btn, menu);
+  }
 
   // ── SIDEBAR ──
   function _cpRenderSidebar(planTasks, planDone, planTotal) {
@@ -2314,5 +2370,7 @@
     _toggleDayPanel, _closeDayPanel, _panelToggleSlot, _saveDayPanel, _applyTemplateQuick,
     // V2 week actions & view control
     _doLaunchWeek, _doCloseWeek, _doResetValidations, _setCpView, _openCreateTemplate,
+    // V3 planning interactions
+    _cpToggleExpand, _cpMissionMenu,
   };
 })();
