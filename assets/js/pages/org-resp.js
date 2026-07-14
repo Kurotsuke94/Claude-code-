@@ -47,6 +47,12 @@
   let _panelDayId   = null;    // dayId whose gear panel is open, or null
   let _cpView       = 'planning'; // 'planning' | 'timeline'
 
+  // Cross-module aggregation (interventions + PMP)
+  let _interventions  = [];
+  let _pmpInts        = [];
+  let _unsubInts      = null;
+  let _unsubPmpInts   = null;
+
   // ── WEEK HELPERS ──
   function _isoWk(d) {
     const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -119,6 +125,76 @@
   }
   function _getSlotName(dayId, slot) {
     return _slotNames[dayId + '_' + slot] || SLOT_INFO[slot]?.l || slot;
+  }
+
+  // ── AGGREGATION HELPERS (cross-module, no data duplication) ──
+  function _dateToDayId(dateStr) {
+    if (!dateStr || !_weekKey) return null;
+    const weekDates = _weekKeyToDates(_weekKey);
+    const parts     = dateStr.split('-').map(Number);
+    const idx       = weekDates.findIndex(wd =>
+      wd.getFullYear() === parts[0] && wd.getMonth() === parts[1] - 1 && wd.getDate() === parts[2]
+    );
+    return idx >= 0 ? MX.DAYS[idx].id : null;
+  }
+
+  function _dayIdToDate(dayId) {
+    if (!dayId || !_weekKey) return null;
+    const dates = _weekKeyToDates(_weekKey);
+    const idx   = MX.DAYS.findIndex(d => d.id === dayId);
+    if (idx < 0) return null;
+    const d = dates[idx];
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  function _normalizeIntervention(doc) {
+    const dayId    = doc.cpDayId || _dateToDayId(doc.startDate);
+    const slot     = doc.cpSlot  || 'journee';
+    const assignee = Array.isArray(doc.assignedTo) ? doc.assignedTo[0] : (doc.assignedTo || null);
+    return {
+      id:           'int_' + doc.id,
+      _source:      'intervention',
+      _sourceId:    doc.id,
+      itemType:     'intervention',
+      title:        doc.title    || '(Sans titre)',
+      location:     doc.location || null,
+      priority:     doc.priority || 'normale',
+      status:       doc.status   || 'planifiee',
+      duration:     doc.estimatedDuration || null,
+      assignedTo:   assignee,
+      dayId:        dayId,
+      slot:         slot,
+      _unscheduled: !doc.cpSlot,
+      done:         doc.status === 'terminee',
+    };
+  }
+
+  function _normalizePmpInt(doc) {
+    const dayId = doc.cpDayId || _dateToDayId(doc.dueDate);
+    const slot  = doc.cpSlot  || 'journee';
+    return {
+      id:           'pmp_' + doc.id,
+      _source:      'pmp',
+      _sourceId:    doc.id,
+      itemType:     'pmp',
+      title:        doc.planName || doc.equipmentName || '(Sans titre)',
+      location:     doc.zone     || null,
+      priority:     doc.criticite || 'normale',
+      status:       doc.status   || 'planifiee',
+      duration:     doc.estimatedDuration || null,
+      assignedTo:   doc.technician || null,
+      dayId:        dayId,
+      slot:         slot,
+      _unscheduled: !doc.cpSlot,
+      done:         doc.status === 'terminee',
+    };
+  }
+
+  function _allPlanItems() {
+    const tasks = _tasks.filter(t => !t.archivedFromActive && t.dayId);
+    const ints  = _interventions.map(_normalizeIntervention).filter(t => t.dayId);
+    const pmps  = _pmpInts.map(_normalizePmpInt).filter(t => t.dayId);
+    return [...tasks, ...ints, ...pmps];
   }
 
   // ── USER / DISPLAY HELPERS ──
@@ -236,8 +312,12 @@
 
   // ── SUBSCRIPTIONS ──
   function _subscribe(weekKey) {
-    if (_unsub) { _unsub(); _unsub = null; }
-    if (_unsubCfg) { _unsubCfg(); _unsubCfg = null; }
+    if (_unsub)        { _unsub();        _unsub        = null; }
+    if (_unsubCfg)     { _unsubCfg();     _unsubCfg     = null; }
+    if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
+    if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
+    _interventions = [];
+    _pmpInts       = [];
 
     // Listen to tasks
     try {
@@ -267,6 +347,38 @@
           err => console.warn('[OrgResp] cfg:', err.message)
         );
     } catch(e) { console.warn('[OrgResp] cfg-setup:', e.message); }
+
+    // Listen to interventions for this week (real-time, bidirectional)
+    const weekDates = _weekKeyToDates(weekKey);
+    const _toDS     = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const weekStart = _toDS(weekDates[0]);
+    const weekEnd   = _toDS(weekDates[6]);
+
+    try {
+      _unsubInts = db.collection('interventions')
+        .where('startDate', '>=', weekStart)
+        .where('startDate', '<=', weekEnd)
+        .onSnapshot(
+          snap => {
+            _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => !d.inTrash);
+            if (!_inHistory) _doRender();
+          },
+          err => console.warn('[OrgResp] interventions:', err.message)
+        );
+    } catch(e) { console.warn('[OrgResp] interventions-setup:', e.message); }
+
+    try {
+      _unsubPmpInts = db.collection('pmp_interventions')
+        .where('dueDate', '>=', weekStart)
+        .where('dueDate', '<=', weekEnd)
+        .onSnapshot(
+          snap => {
+            _pmpInts = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => !d.inTrash);
+            if (!_inHistory) _doRender();
+          },
+          err => console.warn('[OrgResp] pmp-ints:', err.message)
+        );
+    } catch(e) { console.warn('[OrgResp] pmp-ints-setup:', e.message); }
 
     // Load templates once
     db.collection('org_templates').get()
@@ -310,7 +422,7 @@
     const isCurrentWk = _isCurrentWeek();
     const todayDayId  = _todayDayId();
 
-    const planTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId);
+    const planTasks = _allPlanItems();
     const planDone  = planTasks.filter(t => t.done).length;
     const planTotal = planTasks.length;
     const kbTasks   = _tasks.filter(t => !t.archivedFromActive && !t.dayId);
@@ -456,7 +568,7 @@
     const isToday      = isCurrentWk && dayId === todayDayId;
     const activeSlots  = _getActiveSlots(dayId);
     const defaultSlots = _getDefaultSlots(dayId);
-    const dayTasks     = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId);
+    const dayTasks     = _allPlanItems().filter(t => t.dayId === dayId);
     const dayDone      = dayTasks.filter(t => t.done).length;
     const dayTotal     = dayTasks.length;
     const dayPct       = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
@@ -499,7 +611,7 @@
         const disabled    = !activeSlots.includes(slot);
         const info        = SLOT_INFO[slot];
         const slotKey     = `${dayId}_${slot}`;
-        const slotTasks   = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
+        const slotTasks   = dayTasks.filter(t => t.slot === slot);
         const doneCnt     = slotTasks.filter(t => t.done).length;
         const total       = slotTasks.length;
         const slotDur     = slotTasks.reduce((s, t) => s + (t.duration || 0), 0);
@@ -588,12 +700,13 @@
     const durFmt    = t.duration
       ? (t.duration < 60 ? t.duration + 'min' : Math.floor(t.duration/60) + 'h' + (t.duration%60 ? String(t.duration%60).padStart(2,'0') : ''))
       : '';
-    const locHtml   = t.location ? `<span class="or-cp-mc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
-    const durHtml   = durFmt ? `<span class="or-cp-mc-dur">${durFmt}</span>` : '';
-    const avColor   = t.assignedTo ? _ucolor(t.assignedTo) : null;
-    const avHtml    = t.assignedTo ? `<span class="or-cp-mc-av" style="background:${avColor}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
-    const typeIco   = `<i class="fas ${itype.icon} or-cp-mc-icon" style="color:${itype.color}"></i>`;
-    const prioIco   = prio ? `<span style="font-size:10px;flex-shrink:0" title="${prio.label}">${prio.icon}</span>` : '';
+    const locHtml    = t.location ? `<span class="or-cp-mc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
+    const durHtml    = durFmt ? `<span class="or-cp-mc-dur">${durFmt}</span>` : '';
+    const avColor    = t.assignedTo ? _ucolor(t.assignedTo) : null;
+    const avHtml     = t.assignedTo ? `<span class="or-cp-mc-av" style="background:${avColor}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
+    const typeIco    = `<i class="fas ${itype.icon} or-cp-mc-icon" style="color:${itype.color}"></i>`;
+    const prioIco    = prio ? `<span style="font-size:10px;flex-shrink:0" title="${prio.label}">${prio.icon}</span>` : '';
+    const planBadge  = t._unscheduled ? `<span class="or-cp-mc-badge or-cp-mc-badge--plan"><i class="fas fa-clock"></i> À planifier</span>` : '';
 
     return `<div class="or-cp-mc${isDone?' or-cp-mc--done':''}"
       style="border-left-color:${borderC}"
@@ -603,6 +716,7 @@
       <span class="or-cp-mc-status ${statusCls}"></span>
       ${typeIco}
       <span class="or-cp-mc-title">${MX.esc(t.title)}</span>
+      ${planBadge}
       ${locHtml}
       ${durHtml}
       ${prioIco}
@@ -667,6 +781,23 @@
   // ── MISSION CONTEXT MENU ──
   function _cpMissionMenu(taskId, btn) {
     _closeDropdowns();
+
+    // Source items — open the origin module, no delete/validate from CP
+    if (taskId.startsWith('int_')) {
+      const menu = document.createElement('div');
+      menu.className = 'or-dropdown-menu';
+      menu.innerHTML = `<div class="or-dropdown-item" onclick="MX.navigate&&MX.navigate('interventions');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-arrow-up-right-from-square"></i> Module Interventions</div>`;
+      _attachDropdown(btn, menu);
+      return;
+    }
+    if (taskId.startsWith('pmp_')) {
+      const menu = document.createElement('div');
+      menu.className = 'or-dropdown-menu';
+      menu.innerHTML = `<div class="or-dropdown-item" onclick="MX.navigate&&MX.navigate('pmp');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-arrow-up-right-from-square"></i> Module PMP</div>`;
+      _attachDropdown(btn, menu);
+      return;
+    }
+
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
     const menu = document.createElement('div');
@@ -791,7 +922,7 @@
         const [start, end] = slotTimes[slot] || [6,22];
         const left   = (start/24*100).toFixed(2);
         const width  = ((end-start)/24*100).toFixed(2);
-        const tasks  = _tasks.filter(t => !t.archivedFromActive && t.dayId===dayId && t.slot===slot);
+        const tasks  = _allPlanItems().filter(t => t.dayId===dayId && t.slot===slot);
         const done   = tasks.filter(t => t.done).length;
         const color  = slotColors[slot] || '#6B7280';
         const allDone = tasks.length>0 && done===tasks.length;
@@ -1876,9 +2007,23 @@
 
     MX.syncStart();
     try {
-      await db.collection('org_tasks').doc(taskId).update({
-        dayId: dstDayId, slot: dstSlot,
-      });
+      if (taskId.startsWith('int_')) {
+        const srcId   = taskId.slice(4);
+        const newDate = _dayIdToDate(dstDayId);
+        const upd     = { cpDayId: dstDayId, cpSlot: dstSlot };
+        if (newDate) upd.startDate = newDate;
+        await db.collection('interventions').doc(srcId).update(upd);
+      } else if (taskId.startsWith('pmp_')) {
+        const srcId   = taskId.slice(4);
+        const newDate = _dayIdToDate(dstDayId);
+        const upd     = { cpDayId: dstDayId, cpSlot: dstSlot };
+        if (newDate) upd.dueDate = newDate;
+        await db.collection('pmp_interventions').doc(srcId).update(upd);
+      } else {
+        await db.collection('org_tasks').doc(taskId).update({
+          dayId: dstDayId, slot: dstSlot,
+        });
+      }
       MX.syncEnd();
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
