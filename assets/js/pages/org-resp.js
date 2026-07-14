@@ -32,6 +32,7 @@
   let _dragData     = null;     // { taskId, srcDayId, srcSlot }
   let _weekOffset   = 0;        // 0 = current week, -1 = last week, +1 = next week
   let _slotNames    = {};       // { 'dayId_slot': customName } — persisted in org_config
+  let _panelDayId   = null;    // dayId whose gear panel is open, or null
 
   // ── WEEK HELPERS ──
   function _isoWk(d) {
@@ -289,10 +290,10 @@
   }
 
   // ═══════════════════════════════════════════════════════
-  //  PLANNING VIEW
+  //  PLANNING VIEW — HORIZONTAL GRID (or-cp-*)
   // ═══════════════════════════════════════════════════════
   function _renderPlanning(mc) {
-    const weekDates = _weekKeyToDates(_weekKey);
+    const weekDates   = _weekKeyToDates(_weekKey);
     const isCurrentWk = _isCurrentWeek();
     const todayDayId  = _todayDayId();
 
@@ -303,214 +304,381 @@
     const pct       = planTotal ? Math.round(planDone / planTotal * 100) : 0;
     const pctC      = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
 
-    let h = `<div class="or-page or-page--planning">
-      <div class="or-header">
-        <div class="or-header-left">
-          <div class="or-title">Centre de Pilotage</div>
-          <div class="or-week-label">${_weekLabel(_weekKey)}</div>
-        </div>
-        <div class="or-header-right">
-          <button class="or-btn-secondary" onclick="MX.Pages.OrgResp.renderHistory()">
-            <i class="fas fa-clock-rotate-left"></i><span class="or-btn-lbl"> Historique</span>
-          </button>
-          <button class="or-btn-primary" onclick="MX.Pages.OrgResp.openDuplicateWeek()">
-            <i class="fas fa-calendar-week"></i><span class="or-btn-lbl"> Dupliquer semaine</span>
-          </button>
-        </div>
+    // Kanban tab counter
+    const kbTasks = _tasks.filter(t => !t.archivedFromActive && !t.dayId);
+    const kbDone  = kbTasks.filter(t => t.done).length;
+
+    // Week label parts
+    const wParts = _weekKey.split('_W');
+    const wNum   = parseInt(wParts[1]);
+    const wDates = weekDates;
+    const fmt    = x => x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    const wRange = `${fmt(wDates[0])} – ${fmt(wDates[6])}`;
+
+    let h = `<div class="or-cp-wrap">`;
+
+    // ── HEADER ──
+    const orgName = (MX.state.currentUser && MX.state.currentUser.orgName) || (MX.state.adminUser ? 'Administration' : 'Organisation');
+    h += `<div class="or-cp-header">
+      <div class="or-cp-hdr-left">
+        <div class="or-cp-title">Centre de Pilotage</div>
+        <div class="or-cp-subtitle">${MX.esc(orgName)}</div>
       </div>
-
-      <!-- Week navigation -->
-      <div class="or-week-nav">
-        <button class="or-week-nav-btn" onclick="MX.Pages.OrgResp._prevWeek()" title="Semaine précédente">
-          <i class="fas fa-chevron-left"></i>
-        </button>
-        <div class="or-week-nav-info">
-          ${isCurrentWk ? '<span class="or-week-cur-badge">Semaine en cours</span>' : ''}
-          ${!isCurrentWk ? `<button class="or-week-nav-today" onclick="MX.Pages.OrgResp._goToCurrentWeek()"><i class="fas fa-house"></i> Aujourd'hui</button>` : ''}
+      <div class="or-cp-hdr-center">
+        <button class="or-cp-nav-btn" onclick="MX.Pages.OrgResp._prevWeek()" title="Semaine précédente"><i class="fas fa-chevron-left"></i></button>
+        <div class="or-cp-week-badge">
+          <div class="or-cp-week-num">
+            Semaine ${wNum}
+            ${isCurrentWk ? '<span class="or-cp-week-cur-tag">En cours</span>' : ''}
+          </div>
+          <div class="or-cp-week-dates">${wRange}</div>
         </div>
-        <button class="or-week-nav-btn" onclick="MX.Pages.OrgResp._nextWeek()" title="Semaine suivante">
-          <i class="fas fa-chevron-right"></i>
+        <button class="or-cp-nav-btn" onclick="MX.Pages.OrgResp._nextWeek()" title="Semaine suivante"><i class="fas fa-chevron-right"></i></button>
+        ${!isCurrentWk ? `<button class="or-cp-cal-btn" onclick="MX.Pages.OrgResp._goToCurrentWeek()" title="Revenir à aujourd'hui"><i class="fas fa-house"></i></button>` : ''}
+      </div>
+      <div class="or-cp-hdr-right">
+        <button class="or-cp-hbtn or-cp-hbtn--primary" onclick="MX.Pages.OrgResp.openAdd()">
+          <i class="fas fa-plus"></i><span class="or-cp-hbtn-lbl"> Ajouter</span>
+        </button>
+        <button class="or-cp-hbtn" onclick="MX.Pages.OrgResp.openDuplicateDay('')" title="Dupliquer une journée">
+          <i class="fas fa-copy"></i><span class="or-cp-hbtn-lbl"> Copier journée</span>
+        </button>
+        <button class="or-cp-hbtn or-cp-hbtn--accent" onclick="MX.Pages.OrgResp.openDuplicateWeek()">
+          <i class="fas fa-calendar-week"></i><span class="or-cp-hbtn-lbl"> Dupliquer semaine</span>
+        </button>
+        <button class="or-cp-hbtn" onclick="MX.Pages.OrgResp.openTemplateApply('')" title="Appliquer un modèle">
+          <i class="fas fa-wand-magic-sparkles"></i><span class="or-cp-hbtn-lbl"> Modèles</span>
+        </button>
+        <button class="or-cp-hbtn-icon" onclick="MX.Pages.OrgResp.renderHistory()" title="Historique">
+          <i class="fas fa-clock-rotate-left"></i>
         </button>
       </div>
+    </div>`;
 
-      <!-- Tabs -->
-      <div class="or-tabs">
-        <button class="or-tab or-tab--active" onclick="MX.Pages.OrgResp._setTab('planning')">
-          <i class="fas fa-calendar-days"></i> Planning
-          ${planTotal > 0 ? `<span class="or-tab-cnt">${planDone}/${planTotal}</span>` : ''}
-        </button>
-        <button class="or-tab" onclick="MX.Pages.OrgResp._setTab('tasks')">
-          <i class="fas fa-list-check"></i> Tâches hebdo
-          ${(() => { const kt = _tasks.filter(t => !t.archivedFromActive && !t.dayId); const kd = kt.filter(t => t.done).length; return kt.length > 0 ? `<span class="or-tab-cnt">${kd}/${kt.length}</span>` : ''; })()}
-        </button>
-      </div>`;
+    // ── TABS ──
+    h += `<div class="or-cp-tabs">
+      <button class="or-tab or-tab--active" onclick="MX.Pages.OrgResp._setTab('planning')">
+        <i class="fas fa-calendar-days"></i> Planning
+        ${planTotal > 0 ? `<span class="or-tab-cnt">${planDone}/${planTotal}</span>` : ''}
+      </button>
+      <button class="or-tab" onclick="MX.Pages.OrgResp._setTab('tasks')">
+        <i class="fas fa-list-check"></i> Tâches hebdo
+        ${kbTasks.length > 0 ? `<span class="or-tab-cnt">${kbDone}/${kbTasks.length}</span>` : ''}
+      </button>
+    </div>`;
 
-    // Progress bar if tasks exist
+    // ── PROGRESS ──
     if (planTotal > 0) {
-      h += `<div class="or-progress-bar" style="margin-bottom:16px">
-        <div class="or-progress-track"><div class="or-progress-fill" style="width:${pct}%;background:${pctC}"></div></div>
-        <span class="or-progress-lbl" style="color:${pctC}">${pct}% — ${planDone}/${planTotal}</span>
+      h += `<div class="or-cp-progress">
+        <div class="or-cp-progress-track">
+          <div class="or-cp-progress-fill" style="width:${pct}%;background:${pctC}"></div>
+        </div>
+        <span class="or-cp-progress-lbl" style="color:${pctC}">${pct}% — ${planDone}/${planTotal}</span>
       </div>`;
     }
 
-    h += `<div class="or-planning-days">`;
+    // ── BODY WRAP ──
+    h += `<div class="or-cp-body-wrap">`;
+    h += `<div class="or-cp-grid-area"><div class="or-cp-grid">`;
 
     MX.DAYS.forEach((day, idx) => {
-      const dayId    = day.id;
-      const date     = weekDates[idx];
-      const dateStr  = _fmtDate(date);
-      const isToday  = isCurrentWk && dayId === todayDayId;
-      const expanded = _dayExpanded[dayId] !== false; // default expanded
+      const dayId       = day.id;
+      const date        = weekDates[idx];
+      const dateStr     = _fmtDate(date);
+      const isToday     = isCurrentWk && dayId === todayDayId;
       const activeSlots = _getActiveSlots(dayId);
       const defaultSlots = _getDefaultSlots(dayId);
+      const isPanelOpen = _panelDayId === dayId;
 
-      // Stats for this day
-      const dayTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId);
-      const dayDone  = dayTasks.filter(t => t.done).length;
-      const dayTotal = dayTasks.length;
-      const dayPct   = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
-      const dayPctC  = dayPct >= 80 ? '#10B981' : dayPct >= 40 ? '#F59E0B' : '#EF4444';
+      h += `<div class="or-cp-col${isToday ? ' or-cp-col--today' : ''}">`;
 
-      // Slot previews (pills)
-      const allSlots = ['matin', 'journee', 'soir'];
-      const slotPreviews = allSlots.map(s => {
-        const active = activeSlots.includes(s);
-        const info   = SLOT_INFO[s];
-        const cnt    = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === s).length;
-        return `<span class="or-slot-pill${active ? '' : ' or-slot-pill--off'}" style="${active ? `color:${info.color}` : ''}">
-          <i class="fas ${info.icon}"></i> ${info.l}${cnt > 0 ? ` <b>${cnt}</b>` : ''}
-        </span>`;
-      }).join('');
+      // Column header
+      h += `<div class="or-cp-col-hdr">
+        <div class="or-cp-col-hdr-info">
+          <div class="or-cp-col-day">
+            ${day.l.toUpperCase()}
+            ${isToday ? '<span class="or-cp-col-today-badge">Auj.</span>' : ''}
+          </div>
+          <div class="or-cp-col-date">${dateStr}</div>
+        </div>
+        <button class="or-cp-gear-btn${isPanelOpen ? ' or-cp-gear-btn--active' : ''}"
+          onclick="MX.Pages.OrgResp._toggleDayPanel('${dayId}')" title="Configurer ${day.l}">
+          <i class="fas fa-gear"></i>
+        </button>
+      </div>`;
 
-      h += `<div class="or-day-card${isToday ? ' or-day-card--today' : ''}" id="or-day-${dayId}">
-        <div class="or-day-hdr" onclick="MX.Pages.OrgResp._toggleDay('${dayId}')">
-          <div class="or-day-info">
-            <div class="or-day-name">
-              ${day.l}
-              ${isToday ? '<span class="or-day-today-badge">Aujourd\'hui</span>' : ''}
-            </div>
-            <div class="or-day-date">${dateStr}</div>
-          </div>
-          <div class="or-day-center">
-            <div class="or-day-slots-preview">${slotPreviews}</div>
-          </div>
-          <div class="or-day-right">
-            ${dayTotal > 0 ? `<span class="or-day-stat" style="color:${dayPctC}">${dayDone}/${dayTotal}</span>` : ''}
-            <div class="or-day-actions" onclick="event.stopPropagation()">
-              <button class="or-day-btn" onclick="MX.Pages.OrgResp.openDuplicateDay('${dayId}')" title="Dupliquer cette journée">
-                <i class="fas fa-copy"></i>
-              </button>
-              <button class="or-day-btn" onclick="MX.Pages.OrgResp.openDayMenu('${dayId}', this)" title="Actions">
-                <i class="fas fa-ellipsis-vertical"></i>
-              </button>
-            </div>
-            <i class="fas fa-chevron-${expanded ? 'up' : 'down'} or-day-chev" id="or-day-chev-${dayId}"></i>
-          </div>
+      // Slots
+      if (activeSlots.length === 0) {
+        h += `<div class="or-cp-col-empty"><i class="fas fa-ban"></i>Créneaux désactivés
+          <button class="or-cp-add-btn" style="margin-top:4px" onclick="MX.Pages.OrgResp.openSlotConfig('${dayId}')">Configurer</button>
         </div>`;
+      } else {
+        ['matin', 'journee', 'soir'].forEach(slot => {
+          if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
+          const disabled  = !activeSlots.includes(slot);
+          const info      = SLOT_INFO[slot];
+          const slotKey   = `${dayId}_${slot}`;
+          const slotTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
+          const doneCnt   = slotTasks.filter(t => t.done).length;
+          const total     = slotTasks.length;
 
-      if (expanded) {
-        h += `<div class="or-day-body" id="or-day-body-${dayId}">`;
+          h += `<div class="or-cp-slot or-cp-slot--${slot}${disabled ? ' or-cp-slot--disabled' : ''}">
+            <div class="or-cp-slot-hdr">
+              <i class="fas ${info.icon} or-cp-slot-ico"></i>
+              <div class="or-cp-slot-info">
+                <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
+                <span class="or-cp-slot-time">${info.time}</span>
+              </div>
+              ${total > 0 ? `<span class="or-cp-slot-cnt">${doneCnt}/${total}</span>` : ''}
+              <div class="or-cp-slot-actions">
+                ${!disabled
+                  ? `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter"><i class="fas fa-plus"></i></button>`
+                  : `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp._reactivateSlot('${dayId}','${slot}')" title="Réactiver"><i class="fas fa-eye"></i></button>`
+                }
+                <button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openSlotMenu('${dayId}','${slot}',this)" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>`;
 
-        if (activeSlots.length === 0) {
-          h += `<div class="or-day-empty"><i class="fas fa-ban"></i> Tous les créneaux sont désactivés pour cette journée.
-            <button class="or-link-btn" onclick="MX.Pages.OrgResp.openSlotConfig('${dayId}')">Configurer</button>
-          </div>`;
-        } else {
-          // Show all defined slots, mark disabled ones
-          ['matin', 'journee', 'soir'].forEach(slot => {
-            // Only show slot if it's in the default for this day OR in the active list
-            if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
-            const disabled  = !activeSlots.includes(slot);
-            const info      = SLOT_INFO[slot];
-            const slotKey   = `${dayId}_${slot}`;
-            const slotTasks = _tasks.filter(t => !t.archivedFromActive && t.dayId === dayId && t.slot === slot);
-            const doneCnt   = slotTasks.filter(t => t.done).length;
-            const total     = slotTasks.length;
+          if (disabled) {
+            h += `<div class="or-cp-slot-disabled"><i class="fas fa-eye-slash"></i> Désactivé</div>`;
+          } else {
+            h += `<div class="or-cp-slot-body" id="or-slot-body-${slotKey}"
+              ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
+              ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
+              ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
+            slotTasks.forEach(t => { h += _cpMissionCard(t, dayId, slot); });
+            h += `</div>
+            <div class="or-cp-add-row">
+              <button class="or-cp-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">
+                <i class="fas fa-plus"></i> Ajouter
+              </button>
+            </div>`;
+          }
 
-            h += `<div class="or-slot${disabled ? ' or-slot--disabled' : ''}" id="or-slot-${slotKey}">
-              <div class="or-slot-hdr">
-                <i class="fas ${info.icon} or-slot-ico${disabled ? ' or-slot-ico--disabled' : ''}" style="${!disabled ? `color:${info.color}` : ''}"></i>
-                <span class="or-slot-label${disabled ? ' or-slot-label--disabled' : ''}">${_getSlotName(dayId, slot)}</span>
-                <span class="or-slot-time">${info.time}</span>
-                ${total > 0 ? `<span class="or-slot-cnt" style="color:${doneCnt===total?'#10B981':'var(--text3)'}">${doneCnt}/${total}</span>` : ''}
-                <div class="or-slot-hdr-actions">
-                  ${!disabled ? `<button class="or-slot-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter une tâche"><i class="fas fa-plus"></i></button>` : ''}
-                  <button class="or-slot-menu-btn" onclick="MX.Pages.OrgResp.openSlotMenu('${dayId}','${slot}',this)" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
-                </div>
-              </div>`;
-
-            if (disabled) {
-              h += `<div class="or-slot-disabled-lbl"><i class="fas fa-eye-slash"></i> Créneau désactivé
-                <button class="or-link-btn" onclick="MX.Pages.OrgResp._reactivateSlot('${dayId}','${slot}')">Réactiver</button>
-              </div>`;
-            } else {
-              h += `<div class="or-slot-body" id="or-slot-body-${slotKey}"
-                ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
-                ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
-                ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
-
-              if (slotTasks.length === 0) {
-                h += `<div class="or-slot-empty"><i class="fas fa-inbox"></i> Aucune tâche — <button class="or-link-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">Ajouter</button></div>`;
-              } else {
-                slotTasks.forEach(t => { h += _planTaskCard(t, dayId, slot); });
-              }
-              h += `</div>`;
-            }
-
-            h += `</div>`; // .or-slot
-          });
-        }
-
-        h += `</div>`; // .or-day-body
+          h += `</div>`; // .or-cp-slot
+        });
       }
 
-      h += `</div>`; // .or-day-card
+      h += `</div>`; // .or-cp-col
     });
 
-    h += `</div></div>`; // .or-planning-days, .or-page
+    h += `</div></div>`; // .or-cp-grid, .or-cp-grid-area
 
+    // ── SIDE PANEL ──
+    h += _renderDayPanel();
+    h += `</div>`; // .or-cp-body-wrap
+
+    // ── LEGEND ──
+    h += `<div class="or-cp-legend">
+      <span class="or-cp-legend-item or-cp-legend-item--matin">Matin</span>
+      <span class="or-cp-legend-item or-cp-legend-item--journee">Journée</span>
+      <span class="or-cp-legend-item or-cp-legend-item--soir">Soir</span>
+      <span class="or-cp-legend-hint"><i class="fas fa-grip-vertical" style="font-size:9px"></i> Glisser pour déplacer</span>
+    </div>`;
+
+    h += `</div>`; // .or-cp-wrap
     mc.innerHTML = h;
   }
 
-  function _planTaskCard(t, dayId, slot) {
+  // ── COMPACT MISSION CARD (new grid layout) ──
+  function _cpMissionCard(t, dayId, slot) {
     const prio     = _prioConfig(t.priority);
     const cat      = _catConfig(t.category);
-    const aCol     = _ucolor(t.assignedTo || '');
     const isDone   = t.done;
     const isInProg = !isDone && t.status === 'inprogress';
 
-    const prioHtml = prio
-      ? `<span class="or-plan-task-prio" style="background:${prio.bg};color:${prio.color}">${prio.icon} ${prio.label}</span>`
-      : '';
-    const assignHtml = t.assignedTo
-      ? `<span class="or-plan-av" style="background:${aCol}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>`
-      : '';
-    const statusDot = isDone
-      ? `<span class="or-plan-status or-plan-status--done" title="Terminé"><i class="fas fa-circle-check"></i></span>`
-      : isInProg
-        ? `<span class="or-plan-status or-plan-status--prog" title="En cours"><i class="fas fa-circle-play"></i></span>`
-        : `<span class="or-plan-status or-plan-status--todo" title="À faire"><i class="fas fa-circle-dot"></i></span>`;
+    const dotCls = isDone ? 'or-cp-mission-dot--done' : isInProg ? 'or-cp-mission-dot--prog' : 'or-cp-mission-dot--todo';
 
-    return `<div class="or-plan-task${isDone ? ' or-plan-task--done' : isInProg ? ' or-plan-task--prog' : ''}"
+    const catAbbrv = (t.category || '').slice(0, 3).toUpperCase();
+    const catBadge = `<span class="or-cp-mbadge" style="background:${cat.color}22;color:${cat.color}">${catAbbrv}</span>`;
+    const prioBadge = prio
+      ? `<span class="or-cp-mbadge" style="background:${prio.bg};color:${prio.color}">${prio.icon}</span>`
+      : '';
+
+    return `<div class="or-cp-mission${isDone ? ' or-cp-mission--done' : ''}"
       data-id="${t.id}" draggable="true"
       ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
       ondragend="MX.Pages.OrgResp._onDragEnd(event)">
-      <div class="or-plan-task-grab"><i class="fas fa-grip-vertical"></i></div>
-      <div class="or-plan-task-body">
-        <div class="or-plan-task-top">
-          ${statusDot}
-          <div class="or-plan-task-title">${MX.esc(t.title)}</div>
-          ${prioHtml}
-          ${assignHtml}
-        </div>
-        ${t.description ? `<div class="or-plan-task-desc">${MX.esc(t.description)}</div>` : ''}
+      <span class="or-cp-mission-grab"><i class="fas fa-grip-vertical"></i></span>
+      <span class="or-cp-mission-dot ${dotCls}"></span>
+      <div class="or-cp-mission-body">
+        <div class="or-cp-mission-title">${MX.esc(t.title)}</div>
+        <div class="or-cp-mission-meta">${catBadge}${prioBadge}${t.assignedTo ? `<span class="or-cp-mbadge" style="background:var(--bg3);color:var(--text3)">${_initials(t.assignedTo)}</span>` : ''}</div>
       </div>
-      <div class="or-plan-task-actions">
-        ${!isDone ? `<button class="or-icon-btn or-icon-btn--ok" onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Marquer terminé"><i class="fas fa-check"></i></button>` : ''}
-        <button class="or-icon-btn or-icon-btn--edit" onclick="MX.Pages.OrgResp.openEdit('${t.id}')" title="Modifier"><i class="fas fa-pen"></i></button>
-        <button class="or-icon-btn or-icon-btn--del" onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
+      <div class="or-cp-mission-actions">
+        ${!isDone ? `<button class="or-cp-mact-btn or-cp-mact-btn--ok" onclick="MX.Pages.OrgResp.openValidate('${t.id}')" title="Terminer"><i class="fas fa-check"></i></button>` : ''}
+        <button class="or-cp-mact-btn" onclick="MX.Pages.OrgResp.openEdit('${t.id}')" title="Modifier"><i class="fas fa-pen"></i></button>
+        <button class="or-cp-mact-btn or-cp-mact-btn--del" onclick="MX.Pages.OrgResp.openDelete('${t.id}')" title="Supprimer"><i class="fas fa-trash"></i></button>
       </div>
     </div>`;
+  }
+
+  // ── SIDE PANEL RENDER ──
+  function _renderDayPanel() {
+    if (!_panelDayId) {
+      return `<div class="or-cp-panel" id="or-cp-panel"></div>`;
+    }
+    const dayId = _panelDayId;
+    const day   = MX.DAYS.find(d => d.id === dayId);
+    const activeSlots  = _getActiveSlots(dayId);
+    const defaultSlots = _getDefaultSlots(dayId);
+    const allSlots     = ['matin', 'journee', 'soir'];
+
+    // Slot checkboxes
+    let slotChecks = allSlots.map(slot => {
+      if (!defaultSlots.includes(slot)) return '';
+      const info    = SLOT_INFO[slot];
+      const isOn    = activeSlots.includes(slot);
+      return `<label class="or-cp-psc${isOn ? ' or-cp-psc--on' : ''}"
+        onclick="event.preventDefault();MX.Pages.OrgResp._panelToggleSlot(this,'${dayId}','${slot}')">
+        <input type="checkbox" ${isOn ? 'checked' : ''} readonly>
+        <i class="fas ${info.icon}" style="color:${info.color};font-size:11px"></i>
+        ${info.l}
+      </label>`;
+    }).join('');
+
+    // Active slots with times
+    let activeSlotsHtml = activeSlots.map(slot => {
+      const info = SLOT_INFO[slot];
+      const colors = { matin: '#F59E0B', journee: '#3B82F6', soir: '#F97316' };
+      return `<div class="or-cp-active-row">
+        <span class="or-cp-active-dot" style="background:${colors[slot] || info.color}"></span>
+        <span class="or-cp-active-name">${_getSlotName(dayId, slot)}</span>
+        <span class="or-cp-active-time">${info.time}</span>
+      </div>`;
+    }).join('') || `<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun créneau actif</div>`;
+
+    // Templates
+    const tplsHtml = _templates.length === 0
+      ? `<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun modèle enregistré</div>`
+      : _templates.map(tpl => {
+          const cnt = (tpl.slots || []).reduce((s, sl) => s + (sl.tasks || []).length, 0);
+          return `<div class="or-cp-tpl-row" onclick="MX.Pages.OrgResp._applyTemplateQuick('${tpl.id}','${dayId}')">
+            <i class="fas fa-bookmark"></i>
+            ${MX.esc(tpl.name)}
+            <span class="or-cp-tpl-cnt">${cnt} tâche${cnt !== 1 ? 's' : ''}</span>
+          </div>`;
+        }).join('');
+
+    return `<div class="or-cp-panel or-cp-panel--open" id="or-cp-panel">
+      <div class="or-cp-panel-inner">
+        <div class="or-cp-panel-hdr">
+          <div class="or-cp-panel-titles">
+            <div class="or-cp-panel-title">${day ? day.l : dayId}</div>
+            <div class="or-cp-panel-day">Configuration</div>
+          </div>
+          <button class="or-cp-panel-close" onclick="MX.Pages.OrgResp._closeDayPanel()"><i class="fas fa-xmark"></i></button>
+        </div>
+
+        <div class="or-cp-section">
+          <div class="or-cp-section-ttl">Créneaux actifs</div>
+          ${slotChecks}
+          <button class="or-cp-save-btn" onclick="MX.Pages.OrgResp._saveDayPanel('${dayId}')">
+            <i class="fas fa-floppy-disk"></i> Enregistrer
+          </button>
+        </div>
+
+        <div class="or-cp-section">
+          <div class="or-cp-section-ttl">Horaires</div>
+          ${activeSlotsHtml}
+        </div>
+
+        <div class="or-cp-section">
+          <div class="or-cp-section-ttl">Actions rapides</div>
+          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','matin')">
+            <i class="fas fa-plus"></i> Ajouter une tâche
+          </div>
+          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openDuplicateDay('${dayId}')">
+            <i class="fas fa-copy"></i> Dupliquer cette journée
+          </div>
+          <div class="or-cp-qact" onclick="MX.Pages.OrgResp.openTemplateSave('${dayId}')">
+            <i class="fas fa-bookmark"></i> Sauvegarder comme modèle
+          </div>
+        </div>
+
+        <div class="or-cp-section">
+          <div class="or-cp-section-ttl">Modèles disponibles</div>
+          ${tplsHtml}
+          <button class="or-cp-mgr-btn" onclick="MX.Pages.OrgResp.openTemplateApply('${dayId}')">
+            <i class="fas fa-list"></i> Gérer les modèles
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ── PANEL TOGGLE / CLOSE ──
+  function _toggleDayPanel(dayId) {
+    _panelDayId = (_panelDayId === dayId) ? null : dayId;
+    _doRender();
+  }
+  function _closeDayPanel() {
+    _panelDayId = null;
+    _doRender();
+  }
+
+  // Panel slot toggle (without re-render — just visual state)
+  function _panelToggleSlot(label, dayId, slot) {
+    const cb = label.querySelector('input[type="checkbox"]');
+    if (!cb) return;
+    cb.checked = !cb.checked;
+    label.classList.toggle('or-cp-psc--on', cb.checked);
+  }
+
+  // Save panel slot config
+  async function _saveDayPanel(dayId) {
+    const panel = document.getElementById('or-cp-panel');
+    if (!panel) return;
+    const allSlots = ['matin', 'journee', 'soir'];
+    const newActive = allSlots.filter(slot => {
+      for (const lbl of panel.querySelectorAll('label.or-cp-psc')) {
+        const onclick = lbl.getAttribute('onclick') || '';
+        if (onclick.includes(`'${slot}'`)) return lbl.querySelector('input')?.checked;
+      }
+      return false;
+    });
+    MX.syncStart();
+    try {
+      const newCfg = Object.assign({}, _slotConfig, { [dayId]: newActive });
+      await db.collection('org_config').doc(_weekKey).set({ slotConfig: newCfg }, { merge: true });
+      MX.syncEnd();
+      MX.toast('Créneaux enregistrés ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // Quick apply template to a day
+  async function _applyTemplateQuick(tplId, dayId) {
+    const tpl = _templates.find(t => t.id === tplId);
+    if (!tpl) return MX.toast('Modèle introuvable', true);
+    if (!confirm(`Appliquer le modèle "${tpl.name}" à ${dayId} ? Les tâches existantes seront conservées.`)) return;
+    MX.syncStart();
+    try {
+      const name  = _currentUserName();
+      const batch = db.batch();
+      let ops = 0;
+      (tpl.slots || []).forEach(slotEntry => {
+        (slotEntry.tasks || []).forEach((taskData, i) => {
+          if (ops >= 490) return;
+          batch.set(db.collection('org_tasks').doc(), {
+            title: taskData.title || 'Tâche modèle', description: taskData.description || '',
+            category: taskData.category || 'autre', type: taskData.type || 'unique',
+            weekKey: _weekKey, dayId, slot: slotEntry.slot,
+            done: false, status: 'todo', doneBy: null, doneAt: null, comment: null,
+            assignedTo: taskData.assignedTo || null, priority: taskData.priority || 'normale',
+            createdBy: name, createdAt: FV.serverTimestamp(), order: 900 + i, isDefault: false,
+          });
+          ops++;
+        });
+      });
+      await batch.commit();
+      MX.syncEnd();
+      MX.toast(`Modèle "${tpl.name}" appliqué ✓`);
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // Legacy task card kept for compatibility (not used in new grid but may be called externally)
+  function _planTaskCard(t, dayId, slot) {
+    return _cpMissionCard(t, dayId, slot);
   }
 
   // ── WEEK NAVIGATION ──
@@ -902,17 +1070,29 @@
   // ═══════════════════════════════════════════════════════
   function openDuplicateDay(srcDayId) {
     const srcDay    = MX.DAYS.find(d => d.id === srcDayId);
-    const otherDays = MX.DAYS.filter(d => d.id !== srcDayId);
+    const noSrc     = !srcDayId;
+    const otherDays = noSrc ? MX.DAYS : MX.DAYS.filter(d => d.id !== srcDayId);
+
+    // Source selector (shown when called from header button with no srcDayId)
+    const srcHtml = noSrc
+      ? `<div class="or-form-row">
+          <label class="or-form-lbl">Source</label>
+          <select id="or-dup-src" class="fi" onchange="MX.Pages.OrgResp._onDupSrcChange(this.value)">
+            <option value="">— Choisir la journée source —</option>
+            ${MX.DAYS.map(d => `<option value="${d.id}">${d.l}</option>`).join('')}
+          </select>
+        </div>`
+      : `<div class="or-form-row">
+          <label class="or-form-lbl">Source</label>
+          <div class="fi" style="background:var(--bg3);opacity:.8">${srcDay ? srcDay.l : srcDayId}</div>
+        </div>`;
 
     const body = `<div>
       <div class="or-form-2col" style="margin-bottom:12px">
-        <div class="or-form-row">
-          <label class="or-form-lbl">Source</label>
-          <div class="fi" style="background:var(--bg3);opacity:.8">${srcDay ? srcDay.l : srcDayId}</div>
-        </div>
+        ${srcHtml}
         <div class="or-form-row">
           <label class="or-form-lbl">Destination</label>
-          <select id="or-dup-dst" class="fi" onchange="MX.Pages.OrgResp._updateDupPreview('${srcDayId}',this.value)">
+          <select id="or-dup-dst" class="fi" onchange="MX.Pages.OrgResp._updateDupPreview(document.getElementById('or-dup-src')?.value||'${srcDayId}',this.value)">
             <option value="">— Choisir un jour —</option>
             ${otherDays.map(d => `<option value="${d.id}">${d.l}</option>`).join('')}
           </select>
@@ -935,19 +1115,34 @@
       </div>
       <div class="or-dup-preview" id="or-dup-preview">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Aperçu</div>
-        <div style="color:var(--text3);font-size:12px">Sélectionnez un jour de destination</div>
+        <div style="color:var(--text3);font-size:12px">Sélectionnez les jours source et destination</div>
       </div>
     </div>`;
 
     MX.showModal({
       title:   'Dupliquer une journée',
-      sub:     `Copie les tâches de ${srcDay ? srcDay.l : srcDayId} vers un autre jour`,
+      sub:     noSrc ? 'Copie les tâches d\'un jour vers un autre' : `Copie les tâches de ${srcDay ? srcDay.l : srcDayId} vers un autre jour`,
       body,
       actions: [
-        { label: 'Dupliquer', cls: 'primary-btn', fn: () => _doDuplicateDay(srcDayId) },
+        { label: 'Dupliquer', cls: 'primary-btn', fn: () => {
+            const sSrc = noSrc ? (document.getElementById('or-dup-src')?.value || '') : srcDayId;
+            _doDuplicateDay(sSrc);
+          }
+        },
         { label: 'Annuler', cls: 'cancel' }
       ]
     });
+  }
+
+  function _onDupSrcChange(newSrc) {
+    // When source changes, reset destination options to exclude the new source
+    const dst = document.getElementById('or-dup-dst');
+    if (!dst) return;
+    const curDst = dst.value;
+    dst.innerHTML = `<option value="">— Choisir un jour —</option>` +
+      MX.DAYS.filter(d => d.id !== newSrc).map(d => `<option value="${d.id}"${d.id===curDst?' selected':''}>${d.l}</option>`).join('');
+    // Refresh preview
+    if (curDst && curDst !== newSrc) _updateDupPreview(newSrc, curDst);
   }
 
   async function _updateDupPreview(srcDayId, dstDayId) {
@@ -1253,7 +1448,19 @@
       MX.toast('Aucun modèle disponible. Sauvegardez d\'abord une journée comme modèle.', true);
       return;
     }
-    const day = MX.DAYS.find(d => d.id === dayId);
+    const day   = MX.DAYS.find(d => d.id === dayId);
+    const noDst = !dayId;
+
+    const dstHtml = noDst
+      ? `<div class="or-form-row" style="margin-bottom:10px">
+          <label class="or-form-lbl">Appliquer sur</label>
+          <select id="or-tpl-dst-day" class="fi">
+            <option value="">— Choisir un jour —</option>
+            ${MX.DAYS.map(d => `<option value="${d.id}">${d.l}</option>`).join('')}
+          </select>
+        </div>`
+      : '';
+
     const tplList = _templates.map((tpl, i) => `
       <div class="or-tpl-item" onclick="document.querySelectorAll('.or-tpl-item').forEach(x=>x.classList.remove('or-tpl-item--sel'));this.classList.add('or-tpl-item--sel');document.getElementById('or-tpl-sel').value='${tpl.id}'">
         <div class="or-tpl-name">${MX.esc(tpl.name)}</div>
@@ -1263,15 +1470,21 @@
 
     MX.showModal({
       title: 'Appliquer un modèle',
-      sub:   `Sur ${day?.l || dayId}`,
+      sub:   noDst ? 'Choisissez un modèle et un jour cible' : `Sur ${day?.l || dayId}`,
       body:  `<input type="hidden" id="or-tpl-sel" value="">
+        ${dstHtml}
         <div class="or-tpl-list">${tplList}</div>
         <label class="or-checkbox or-checkbox--warn" style="margin-top:10px">
           <input type="checkbox" id="or-tpl-replace">
           <span>Remplacer les tâches existantes</span>
         </label>`,
       actions: [
-        { label: 'Appliquer', cls: 'primary-btn', fn: () => _doApplyTemplate(dayId) },
+        { label: 'Appliquer', cls: 'primary-btn', fn: () => {
+            const dst = noDst ? (document.getElementById('or-tpl-dst-day')?.value || '') : dayId;
+            if (!dst) { MX.toast('Sélectionnez un jour de destination', true); return; }
+            _doApplyTemplate(dst);
+          }
+        },
         { label: 'Annuler', cls: 'cancel' }
       ]
     });
@@ -1882,12 +2095,14 @@
     // Task add (planning-aware)
     openAddDayTask,
     // Day duplication
-    openDuplicateDay, _updateDupPreview,
+    openDuplicateDay, _updateDupPreview, _onDupSrcChange,
     // Week duplication
     openDuplicateWeek,
     // Templates
     openTemplateSave, openTemplateApply, _deleteTemplate,
     // Drag and drop
     _onDragStart, _onDragEnd, _onDragOver, _onDragLeave, _onDrop,
+    // Side panel (new grid layout)
+    _toggleDayPanel, _closeDayPanel, _panelToggleSlot, _saveDayPanel, _applyTemplateQuick,
   };
 })();
