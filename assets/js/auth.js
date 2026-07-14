@@ -247,10 +247,11 @@
     hidePicker();
     // 3. Destroy page-level Firestore listeners
     const P = window.MX && window.MX.Pages;
-    try { P && P.OrgResp  && P.OrgResp._destroy  && P.OrgResp._destroy();  } catch(e) {}
-    try { P && P.Bible    && P.Bible._destroy    && P.Bible._destroy();    } catch(e) {}
-    try { P && P.Planning && P.Planning._destroy && P.Planning._destroy(); } catch(e) {}
-    try { P && P.Equipe   && P.Equipe._destroy   && P.Equipe._destroy();   } catch(e) {}
+    try { P && P.OrgResp     && P.OrgResp._destroy     && P.OrgResp._destroy();     } catch(e) {}
+    try { P && P.MesMissions && P.MesMissions._destroy && P.MesMissions._destroy(); } catch(e) {}
+    try { P && P.Bible       && P.Bible._destroy       && P.Bible._destroy();       } catch(e) {}
+    try { P && P.Planning    && P.Planning._destroy    && P.Planning._destroy();    } catch(e) {}
+    try { P && P.Equipe      && P.Equipe._destroy      && P.Equipe._destroy();      } catch(e) {}
     // 4. Stop alerts engine
     try { window.MX.AlertsEngine && window.MX.AlertsEngine.stop && window.MX.AlertsEngine.stop(); } catch(e) {}
   }

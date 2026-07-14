@@ -22,6 +22,14 @@
   var _missionsUnsub       = null;
   var _pmpMissionsUnsub    = null;
 
+  // ── Multi-source state (Centre de Pilotage + modules) ──
+  var _orgTasks      = [];
+  var _intDocs       = [];
+  var _pmpDocs       = [];
+  var _orgTasksUnsub = null;
+  var _intUnsub      = null;
+  var _pmpUnsub      = null;
+
   // ── Photo state ──
   var _pendingPmpPh = null;
 
@@ -70,7 +78,7 @@
   function _markTabSeen(type) {
     _loadSeenIds();
     _allMissions.forEach(function (m) {
-      if (type === 'all') { _seenIds.add(m.id); return; }
+      if (type === 'all' || type === 'tout') { _seenIds.add(m.id); return; }
       var mt = m.isPmp ? 'pmp' : (m.missionType || 'intervention');
       if (mt === type) _seenIds.add(m.id);
     });
@@ -138,6 +146,37 @@
         _mergeAllMissions();
         _rerenderIfActive();
       }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); });
+
+    // Listener 3: org_tasks from Centre de Pilotage (current week, assigned to this tech)
+    _orgTasksUnsub = db.collection('org_tasks')
+      .where('assignedTo', '==', cu.name)
+      .where('weekKey', '==', _mmWeekKey())
+      .onSnapshot(function (snap) {
+        _orgTasks = snap.docs
+          .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+          .filter(function (t) { return !t.archivedFromActive; });
+        _rerenderIfActive();
+      }, function (err) { console.warn('[MM] org_tasks listener:', err.message); });
+
+    // Listener 4: interventions collection (array-contains for multi-tech assignments)
+    _intUnsub = db.collection('interventions')
+      .where('assignedTo', 'array-contains', cu.name)
+      .onSnapshot(function (snap) {
+        _intDocs = snap.docs
+          .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+          .filter(function (d) { return !d.inTrash; });
+        _rerenderIfActive();
+      }, function (err) { console.warn('[MM] interventions listener:', err.message); });
+
+    // Listener 5: pmp_interventions collection (single technician field)
+    _pmpUnsub = db.collection('pmp_interventions')
+      .where('technician', '==', cu.name)
+      .onSnapshot(function (snap) {
+        _pmpDocs = snap.docs
+          .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
+          .filter(function (d) { return !d.inTrash; });
+        _rerenderIfActive();
+      }, function (err) { console.warn('[MM] pmp_interventions listener:', err.message); });
   }
 
   // ══════════════════════════════════════════════
@@ -268,12 +307,103 @@
         };
       });
 
-    return checklistTasks.concat(firestoreTasks);
+    // Additional sources: Centre de Pilotage (org_tasks), interventions module, pmp module
+    var orgItems = _orgTasks.map(_normalizeOrgTask).filter(Boolean);
+    var intItems = _intDocs.map(_normalizeIntDoc).filter(Boolean);
+    var pmpItems = _pmpDocs.map(_normalizePmpDoc).filter(Boolean);
+
+    return checklistTasks.concat(firestoreTasks, orgItems, intItems, pmpItems);
   }
 
   // ══════════════════════════════════════════════
   // HELPERS
   // ══════════════════════════════════════════════
+
+  function _todayISO() {
+    var t = new Date();
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  }
+
+  function _mmWeekKey() {
+    var d   = new Date();
+    var utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+    var y1 = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+    var wn = Math.ceil((((utc - y1) / 86400000) + 1) / 7);
+    return utc.getUTCFullYear() + '_W' + String(wn).padStart(2, '0');
+  }
+
+  // Normalize org_tasks doc (Centre de Pilotage) to unified allTasks shape
+  function _normalizeOrgTask(t) {
+    var todayId = MX.todayId();
+    if (t.dayId !== todayId) return null;
+    var itype = t.itemType || 'tache';
+    var mt    = itype === 'intervention' ? 'intervention' : itype === 'pmp' ? 'pmp' : 'checklist';
+    return {
+      id: 'ot_' + t.id, text: t.title || t.text || '', desc: t.description || '',
+      priority: t.priority || 'normale', slot: t.slot || 'journee',
+      dayId: todayId, checkKey: 'ot_' + t.id, done: !!t.done,
+      note: '', mine: true, unassigned: false, fromUser: null,
+      missionType: mt, accepted: true,
+      zone: t.location || '', subZone: '', estimatedDuration: t.duration ? t.duration + ' min' : '',
+      dueDate: '', sortOrder: 10,
+      _source: 'org_tasks', _orgTaskId: t.id, itemType: itype,
+      isPmp: itype === 'pmp', pmpData: {}, pmpIntId: '', missionId: '',
+      completedChecklist: {}, takenBy: null, takenAt: null, observations: '',
+      photoAvant: null, photoPendant: null, photoApres: null, pmpComments: [],
+      usedParts: [], interventionComments: [], interventionHistory: [],
+    };
+  }
+
+  // Normalize interventions doc to unified allTasks shape
+  function _normalizeIntDoc(t) {
+    var todayISO = _todayISO();
+    if (t.startDate && t.startDate > todayISO) return null;
+    return {
+      id: 'int_' + t.id, text: t.title || '(Intervention)', desc: t.description || '',
+      priority: t.priority || 'normale', slot: t.cpSlot || 'journee',
+      dayId: t.cpDayId || MX.todayId(), checkKey: 'int_' + t.id,
+      done: t.status === 'terminee', note: '', mine: true, unassigned: false, fromUser: null,
+      missionType: 'intervention', accepted: true,
+      zone: t.location || '', subZone: '', estimatedDuration: t.estimatedDuration || '',
+      dueDate: t.startDate || todayISO, sortOrder: 10,
+      _source: 'interventions', _intId: t.id, itemType: 'intervention',
+      isPmp: false, pmpData: {}, pmpIntId: '', missionId: '',
+      completedChecklist: {}, takenBy: null, takenAt: null, observations: t.observations || '',
+      photoAvant: null, photoPendant: null, photoApres: null, pmpComments: [],
+      usedParts: t.usedParts || [], interventionComments: t.interventionComments || [],
+      interventionHistory: t.interventionHistory || [], status: t.status || 'planifiee',
+    };
+  }
+
+  // Normalize pmp_interventions doc — only those without a missionId (avoid duplication with missions listener)
+  function _normalizePmpDoc(t) {
+    if (t.missionId) return null;
+    var eqName = t.equipmentName || t.planName || '(PMP)';
+    return {
+      id: 'pmpd_' + t.id, text: eqName, desc: t.technicalNotes || '',
+      priority: t.criticite || 'normale', slot: t.cpSlot || 'journee',
+      dayId: t.cpDayId || MX.todayId(), checkKey: 'pmpd_' + t.id,
+      done: t.status === 'terminee', note: '', mine: true, unassigned: false, fromUser: null,
+      missionType: 'pmp', accepted: true,
+      zone: t.zone || '', subZone: t.subZone || '',
+      estimatedDuration: t.estimatedDuration ? String(t.estimatedDuration) + ' min' : '',
+      dueDate: t.dueDate || '', sortOrder: 10,
+      _source: 'pmp_interventions', _pmpId: t.id, itemType: 'pmp',
+      isPmp: true, pmpIntId: t.id, missionId: '',
+      pmpData: {
+        equipmentId: t.equipmentId || '', equipmentName: eqName,
+        type: t.type || '', zone: t.zone || '', subZone: t.subZone || '',
+        ref: t.ref || '', dueDate: t.dueDate || '', criticite: t.criticite || '',
+        estimatedDuration: t.estimatedDuration || '', technicalNotes: t.technicalNotes || '',
+        checklistItems: t.checklistItems || [],
+      },
+      completedChecklist: t.completedChecklist || {},
+      takenBy: t.takenBy || null, takenAt: t.takenAt || null, observations: t.observations || '',
+      photoAvant: null, photoPendant: null, photoApres: null, pmpComments: t.pmpComments || [],
+      usedParts: [], interventionComments: [], interventionHistory: [],
+    };
+  }
 
   function _addDaysMM(ds, n) {
     var d = new Date(ds + 'T00:00:00');
@@ -482,9 +612,10 @@
     var pctCol      = pct >= 80 ? TC.checklist : pct >= 40 ? '#f97316' : TC.intervention;
 
     // Tab counts
-    var clCount  = myMissions.filter(function (t) { return t.missionType === 'checklist';    }).length;
-    var intCount = myMissions.filter(function (t) { return t.missionType === 'intervention'; }).length;
-    var pmpCount = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; }).length;
+    var clCount   = myMissions.filter(function (t) { return t.missionType === 'checklist';    }).length;
+    var intCount  = myMissions.filter(function (t) { return t.missionType === 'intervention'; }).length;
+    var pmpCount  = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; }).length;
+    var toutCount = myMissions.filter(function (t) { return !t.done; }).length;
 
     // Unseen badges
     var unseenInt = _allMissions.filter(function (m) {
@@ -545,11 +676,12 @@
       + '</div>'
       + '</div>';
 
-    // ── 3-Tab navigation ──────────────────────────
+    // ── 4-Tab navigation ──────────────────────────
     var TABS = [
-      { id: 'checklist',    icon: '✅', l: 'Missions',      count: clCount,  badge: 0,         col: TC.checklist    },
-      { id: 'intervention', icon: '🔧', l: 'Interventions', count: intCount, badge: unseenInt, col: TC.intervention },
-      { id: 'pmp',          icon: '🛠️', l: 'PMP',           count: pmpCount, badge: unseenPmp, col: TC.pmp          },
+      { id: 'checklist',    icon: '✅',  l: 'Missions',      count: clCount,   badge: 0,         col: TC.checklist    },
+      { id: 'intervention', icon: '🔧',  l: 'Interventions', count: intCount,  badge: unseenInt, col: TC.intervention },
+      { id: 'pmp',          icon: '🛠️',  l: 'PMP',           count: pmpCount,  badge: unseenPmp, col: TC.pmp          },
+      { id: 'tout',         icon: '📋',  l: 'TOUT',          count: toutCount, badge: 0,         col: '#64748B'       },
     ];
     h += '<div class="mm-v3-tabs">';
     TABS.forEach(function (tab) {
@@ -906,6 +1038,55 @@
           h += '</div>';
         }
       }
+
+    } else if (_activeTab === 'tout') {
+      // ── Journée complète — tous types fusionnés, groupés par créneau ──
+      var TOUT_VALID_SLOTS = ['matin', 'journee', 'soir'];
+      var toutAll = myMissions;
+      var hasToutContent = false;
+
+      TOUT_VALID_SLOTS.forEach(function (slotKey) {
+        var si        = SLOT_INFO[slotKey];
+        var slotItems = toutAll.filter(function (t) { return t.slot === slotKey; });
+        if (slotItems.length === 0) return;
+        hasToutContent = true;
+        var slotDone  = slotItems.filter(function (t) { return t.done; }).length;
+        var barPct    = Math.round(slotDone / slotItems.length * 100);
+        var barCol    = barPct === 100 ? TC.checklist : barPct >= 50 ? '#f97316' : TC.intervention;
+        h += '<div class="mm-v3-slot-group">'
+          + '<div class="mm-v3-slot-hd">'
+          + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
+          + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
+          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>'
+          + '<div class="mm-v3-slot-prog-wrap" style="flex:1;margin:0 8px">'
+          + '<div class="mm-v3-slot-prog-fill" style="width:' + barPct + '%;background:' + barCol + '"></div>'
+          + '</div>'
+          + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + slotDone + '/' + slotItems.length + '</span>'
+          + '</div>'
+          + '<div class="mm-v3-cards">';
+        slotItems.forEach(function (t) { h += _toutCard(t); });
+        h += '</div></div>';
+      });
+
+      // Items with no valid time slot (missions from missions collection have slot = missionType)
+      var noSlotItems = toutAll.filter(function (t) { return TOUT_VALID_SLOTS.indexOf(t.slot) === -1; });
+      if (noSlotItems.length > 0) {
+        hasToutContent = true;
+        h += '<div class="mm-v3-slot-group">'
+          + '<div class="mm-v3-slot-hd">'
+          + '<span class="mm-v3-slot-icon">📌</span>'
+          + '<span class="mm-v3-slot-name">Non planifié</span>'
+          + '</div>'
+          + '<div class="mm-v3-cards">';
+        noSlotItems.forEach(function (t) { h += _toutCard(t); });
+        h += '</div></div>';
+      }
+
+      if (!hasToutContent) {
+        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
+          + '<div class="mm-v3-empty-ttl">Journée vide</div>'
+          + '<div class="mm-v3-empty-sub">Aucun élément planifié pour aujourd\'hui.</div></div>';
+      }
     }
 
     h += '</div>'; // mm-v3-content
@@ -1131,6 +1312,56 @@
       h += '<span class="mm-v3-card-taken-info"><i class="fas fa-user-gear"></i> ' + e(t.takenBy) + '</span>';
     }
     h += '</div></div></div>';
+    return h;
+  }
+
+  // ══════════════════════════════════════════════
+  // TOUT TAB — unified daily view card
+  // ══════════════════════════════════════════════
+
+  var TOUT_TYPE_INFO = {
+    tache:        { icon: 'fa-check-circle',        color: '#6B7280', l: 'Tâche'        },
+    checklist:    { icon: 'fa-clipboard-check',      color: '#22C55E', l: 'Mission'      },
+    mission:      { icon: 'fa-briefcase',            color: '#3B82F6', l: 'Mission'      },
+    intervention: { icon: 'fa-triangle-exclamation', color: '#EF4444', l: 'Intervention' },
+    pmp:          { icon: 'fa-screwdriver-wrench',   color: '#8B5CF6', l: 'PMP'          },
+    note:         { icon: 'fa-note-sticky',          color: '#F59E0B', l: 'Note'         },
+    reunion:      { icon: 'fa-users',                color: '#06B6D4', l: 'Réunion'      },
+    livraison:    { icon: 'fa-box-open',             color: '#10B981', l: 'Livraison'    },
+    controle:     { icon: 'fa-clipboard-check',      color: '#EC4899', l: 'Contrôle'     },
+  };
+
+  function _toutCard(t) {
+    var e     = MX.esc;
+    var ikey  = t.itemType || t.missionType || 'tache';
+    var ti    = TOUT_TYPE_INFO[ikey] || TOUT_TYPE_INFO.tache;
+    var pri   = t.priority;
+    var priCol = pri === 'critique' ? '#EF4444' : pri === 'urgente' ? '#F97316' : pri === 'haute' ? '#F59E0B' : null;
+
+    var h = '<div class="mm-tout-card' + (t.done ? ' mm-tout-card--done' : '') + '">'
+      + '<div class="mm-tout-card-type" style="background:' + ti.color + '18;border-left:3px solid ' + ti.color + '">'
+      + '<i class="fas ' + ti.icon + '" style="color:' + ti.color + ';font-size:14px"></i>'
+      + '</div>'
+      + '<div class="mm-tout-card-body">'
+      + '<div class="mm-tout-card-row">'
+      + '<span class="mm-tout-card-lbl" style="color:' + ti.color + '">' + e(ti.l) + '</span>';
+    if (t.done) {
+      h += '<span class="mm-tout-card-status mm-tout-card-status--done"><i class="fas fa-check"></i> Terminé</span>';
+    } else if (priCol) {
+      h += '<span class="mm-tout-card-status" style="color:' + priCol + '">'
+        + '<i class="fas fa-gauge-high"></i> ' + e(pri) + '</span>';
+    }
+    h += '</div>'
+      + '<div class="mm-tout-card-title">' + e(t.text || '(Sans titre)') + '</div>';
+    if (t.desc) h += '<div class="mm-tout-card-desc">' + e(t.desc.length > 80 ? t.desc.slice(0, 80) + '…' : t.desc) + '</div>';
+    var hasMeta = t.zone || t.estimatedDuration;
+    if (hasMeta) {
+      h += '<div class="mm-tout-card-meta">';
+      if (t.zone) h += '<span><i class="fas fa-location-dot"></i> ' + e(t.zone) + '</span>';
+      if (t.estimatedDuration) h += '<span><i class="fas fa-clock"></i> ' + e(t.estimatedDuration) + '</span>';
+      h += '</div>';
+    }
+    h += '</div></div>';
     return h;
   }
 
@@ -2095,6 +2326,21 @@
   }
 
   // ══════════════════════════════════════════════
+  // SESSION TEARDOWN
+  // ══════════════════════════════════════════════
+
+  function _destroy() {
+    if (_missionsUnsub)    { _missionsUnsub();    _missionsUnsub    = null; }
+    if (_pmpMissionsUnsub) { _pmpMissionsUnsub(); _pmpMissionsUnsub = null; }
+    if (_orgTasksUnsub)    { _orgTasksUnsub();    _orgTasksUnsub    = null; }
+    if (_intUnsub)         { _intUnsub();          _intUnsub         = null; }
+    if (_pmpUnsub)         { _pmpUnsub();          _pmpUnsub         = null; }
+    _missionsLoaded = false;
+    _allMissions = []; _assignedMissions = []; _unassignedPmpMissions = [];
+    _orgTasks = []; _intDocs = []; _pmpDocs = [];
+  }
+
+  // ══════════════════════════════════════════════
   // PUBLIC API
   // ══════════════════════════════════════════════
 
@@ -2264,6 +2510,7 @@
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,
     getMissionStatus: getMissionStatus,
+    _destroy: _destroy,
   };
   window.MX.MM = window.MX.Pages.MesMissions;
 })();
