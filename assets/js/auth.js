@@ -4,14 +4,28 @@
   let _pendingUserId = null;
 
   auth.onAuthStateChanged(user => {
+    const prevAdmin = !!window.MX.state.adminUser;
     window.MX.state.adminUser = user || null;
-    if (user) { _onLogin  && _onLogin(user); }
-    else       { _onLogout && _onLogout(); }
-    updateSidebarFooter();
     if (user) {
+      _onLogin && _onLogin(user);
       _registerFcmToken("admin");
       MX.DB && MX.DB.updatePresence && MX.DB.updatePresence(user.email ? user.email.split("@")[0] : "admin");
+    } else {
+      if (prevAdmin) {
+        // Admin logout → full session teardown: clear PIN user + destroy UI
+        _pendingUserId = null;
+        window.MX.state.currentUser = null;
+        localStorage.removeItem('mx_user');
+        _destroyUI();
+        // Reset admin login form (email/password/error)
+        const lf = document.getElementById('login-form');
+        if (lf) lf.reset();
+        const le = document.getElementById('login-error');
+        if (le) le.classList.add('hidden');
+      }
+      _onLogout && _onLogout();
     }
+    updateSidebarFooter();
   });
 
   function onLogin(cb)  { _onLogin  = cb; }
@@ -81,7 +95,8 @@
   }
 
   function clearCurrentUser() {
-    setCurrentUser(null);
+    _destroyUI();         // close modals, destroy page listeners — before state is wiped
+    setCurrentUser(null); // clear MX.state.currentUser + localStorage
     showUserPicker();
   }
 
@@ -132,6 +147,13 @@
     if (!user) return;
     hidePicker();
     _pendingUserId = userId;
+
+    // Wipe the shared modal completely — any previously open task form must not bleed through
+    MX.closeModal && MX.closeModal();
+    ['m-body', 'm-title', 'm-sub', 'm-actions'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
 
     // Show PIN entry in modal
     const nc  = MX.userColors ? MX.userColors(user.name) : { bg: MX.avatarBg(user.name), fg: MX.avatarFg(user.name) };
@@ -212,6 +234,26 @@
   }
   // Expose for helpers.js
   window.MX._contrastColor = _contrastColor;
+
+  // ── SESSION TEARDOWN ──
+  function _destroyUI() {
+    // 1. Close any open modal and wipe all modal content slots
+    MX.closeModal && MX.closeModal();
+    ['m-body', 'm-title', 'm-sub', 'm-actions'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+    // 2. Hide user picker overlay
+    hidePicker();
+    // 3. Destroy page-level Firestore listeners
+    const P = window.MX && window.MX.Pages;
+    try { P && P.OrgResp  && P.OrgResp._destroy  && P.OrgResp._destroy();  } catch(e) {}
+    try { P && P.Bible    && P.Bible._destroy    && P.Bible._destroy();    } catch(e) {}
+    try { P && P.Planning && P.Planning._destroy && P.Planning._destroy(); } catch(e) {}
+    try { P && P.Equipe   && P.Equipe._destroy   && P.Equipe._destroy();   } catch(e) {}
+    // 4. Stop alerts engine
+    try { window.MX.AlertsEngine && window.MX.AlertsEngine.stop && window.MX.AlertsEngine.stop(); } catch(e) {}
+  }
 
   // ── FIREBASE ADMIN AUTH ──
   async function login(e) {

@@ -2028,6 +2028,19 @@
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
+  // ── SESSION TEARDOWN ──
+  function _destroy() {
+    if (_unsub)        { _unsub();        _unsub        = null; }
+    if (_unsubCfg)     { _unsubCfg();     _unsubCfg     = null; }
+    if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
+    if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
+    _tasks         = [];
+    _interventions = [];
+    _pmpInts       = [];
+    _weekKey       = null;
+    _inHistory     = false;
+  }
+
   // ═══════════════════════════════════════════════════════
   //  TASK FORM (Planning-aware)
   // ═══════════════════════════════════════════════════════
@@ -2609,5 +2622,7 @@
     _cpToggleExpand, _cpMissionMenu, _cpSelectItype,
     // Header quick-add
     openAddFromHeader,
+    // Session teardown (called by auth._destroyUI on logout)
+    _destroy,
   };
 })();

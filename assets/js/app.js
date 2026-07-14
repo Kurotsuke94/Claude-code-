@@ -1585,6 +1585,10 @@
     });
     MX.Auth.onLogout(() => {
       _favsCache = null;
+      // Guarantee modal + body are clean (may already be done by _destroyUI in auth.js)
+      MX.closeModal();
+      const _mbody = document.getElementById('m-body');
+      if (_mbody) _mbody.innerHTML = '';
       buildDeskHeader();
       if (MX.state.currentPage === "admin") MX.Pages.Admin.render();
       if (MX.state.currentPage === "home")  MX.Pages.Home.render();
