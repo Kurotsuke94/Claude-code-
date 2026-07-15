@@ -17907,23 +17907,76 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .or-cp-mc-badge { display:inline-flex; align-items:center; gap:3px; padding:1px 5px; border-radius:4px; font-size:9px; font-weight:700; white-space:nowrap; flex-shrink:0; line-height:1.4; }
 .or-cp-mc-badge--plan { background:rgba(59,130,246,.15); color:#3B82F6; border:1px solid rgba(59,130,246,.30); }
 
-/* ── MES MISSIONS — TOUT tab unified day card ── */
-.mm-tout-card {
-  display:flex; align-items:stretch; border-radius:10px;
-  border:1px solid var(--border1); background:var(--bg2);
-  overflow:hidden; transition:opacity .15s;
-}
-.mm-tout-card--done { opacity:.55; }
-.mm-tout-card-type {
-  display:flex; align-items:center; justify-content:center;
-  width:38px; flex-shrink:0; padding:10px 0;
-}
-.mm-tout-card-body { flex:1; padding:8px 10px; min-width:0; }
-.mm-tout-card-row  { display:flex; align-items:center; gap:6px; margin-bottom:3px; }
-.mm-tout-card-lbl  { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; flex-shrink:0; }
-.mm-tout-card-status { font-size:9px; font-weight:600; margin-left:auto; flex-shrink:0; display:flex; align-items:center; gap:3px; }
-.mm-tout-card-status--done { color:#22C55E; }
-.mm-tout-card-title { font-size:13px; font-weight:600; color:var(--text1); line-height:1.3; margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mm-tout-card-desc  { font-size:11px; color:var(--text3); margin-bottom:3px; }
-.mm-tout-card-meta  { display:flex; gap:10px; flex-wrap:wrap; font-size:10px; color:var(--text3); }
-.mm-tout-card-meta span { display:flex; align-items:center; gap:3px; }
+/* ── MES MISSIONS — TOUT workspace card (Task 6) ── */
+.mm-tc { border-radius:10px; border:1px solid var(--border1); background:var(--bg2); overflow:hidden; transition:box-shadow .2s, opacity .3s; margin-bottom:6px; }
+.mm-tc--done { opacity:.58; }
+.mm-tc--expanded { box-shadow:0 3px 14px rgba(0,0,0,.13); border-color:var(--border2); }
+
+/* Header */
+.mm-tc-hd { display:flex; align-items:center; gap:0; cursor:pointer; user-select:none; min-height:52px; -webkit-tap-highlight-color:transparent; }
+.mm-tc-hd:active { background:var(--bg3); }
+.mm-tc-side { width:4px; flex-shrink:0; align-self:stretch; }
+.mm-tc-icon { width:38px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:15px; }
+.mm-tc-hd-main { flex:1; min-width:0; padding:8px 4px 8px 0; }
+.mm-tc-meta-row { display:flex; align-items:center; gap:5px; margin-bottom:2px; flex-wrap:wrap; }
+.mm-tc-lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; flex-shrink:0; }
+.mm-tc-badge { font-size:9px; font-weight:700; padding:1px 6px; border-radius:8px; line-height:1.5; flex-shrink:0; }
+.mm-tc-badge--crit { background:#FEE2E2; color:#EF4444; }
+.mm-tc-badge--urg  { background:#FEF3C7; color:#D97706; }
+.mm-tc-badge--done { background:#DCFCE7; color:#16A34A; display:inline-flex; align-items:center; gap:3px; }
+.mm-tc-title { font-size:13px; font-weight:600; color:var(--text1); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mm-tc-quick-v { flex-shrink:0; width:36px; height:36px; border:none; background:transparent; cursor:pointer; color:var(--text3); font-size:20px; display:flex; align-items:center; justify-content:center; border-radius:50%; transition:color .15s, background .15s; }
+.mm-tc-quick-v:active { background:var(--bg3); }
+.mm-tc-quick-v--done { color:#22C55E; }
+.mm-tc-chevron { flex-shrink:0; width:24px; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--text3); transition:transform .2s; }
+.mm-tc--expanded .mm-tc-chevron { transform:rotate(90deg); }
+
+/* Body (expanded) */
+.mm-tc-body { display:none; border-top:1px solid var(--border1); }
+.mm-tc--expanded .mm-tc-body { display:block; animation:mm-tc-body-in .15s ease; }
+@keyframes mm-tc-body-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+.mm-tc-details { padding:10px 12px 4px; }
+.mm-tc-desc { font-size:12px; color:var(--text2); line-height:1.5; margin-bottom:6px; }
+.mm-tc-detail-row { display:flex; flex-wrap:wrap; gap:12px; }
+.mm-tc-detail-it { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text3); }
+.mm-tc-detail-it i { font-size:10px; }
+
+/* Timer row */
+.mm-tc-timer-row { display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--bg3); border-top:1px solid var(--border1); }
+.mm-tc-timer-lbl { font-size:10px; color:var(--text3); font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
+.mm-tc-timer-disp { font-size:14px; font-weight:700; color:var(--text1); font-variant-numeric:tabular-nums; margin-left:auto; }
+.mm-tc-timer-btn { width:28px; height:28px; border:1px solid var(--border2); border-radius:50%; background:var(--bg2); color:var(--text2); font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.mm-tc-timer-btn:active { background:var(--border1); }
+.mm-tc-timer-btn--pause { border-color:var(--orange); color:var(--orange); }
+
+/* Action bar */
+.mm-tc-actions { display:flex; flex-wrap:wrap; gap:5px; padding:8px 10px 10px; border-top:1px solid var(--border1); }
+.mm-tc-act { flex:1; min-width:54px; max-width:80px; display:flex; flex-direction:column; align-items:center; gap:3px; padding:8px 4px; border:1px solid var(--border2); border-radius:8px; background:var(--bg3); color:var(--text2); font-size:10px; cursor:pointer; line-height:1; transition:background .1s; -webkit-tap-highlight-color:transparent; }
+.mm-tc-act i { font-size:15px; }
+.mm-tc-act:active { background:var(--border1); }
+.mm-tc-act--validate { color:#16A34A; border-color:rgba(34,197,94,.25); }
+.mm-tc-act--validate:active { background:rgba(34,197,94,.1); }
+.mm-tc-act--signal { color:#F97316; border-color:rgba(249,115,22,.25); }
+.mm-tc-act--signal:active { background:rgba(249,115,22,.1); }
+
+/* Slot stats row */
+.mm-tc-slot-stats { display:flex; align-items:center; padding:4px 0 6px; }
+.mm-tc-slot-stats-left { display:flex; align-items:center; gap:8px; flex:1; }
+.mm-tc-slot-ct { font-size:11px; font-weight:600; color:var(--text2); }
+.mm-tc-slot-rem { font-size:11px; color:var(--text3); display:flex; align-items:center; gap:3px; }
+.mm-tc-slot-rem i { font-size:9px; }
+.mm-tc-slot-pct { font-size:12px; font-weight:700; flex-shrink:0; }
+
+/* Slot completion banner */
+.mm-tc-slot-done-banner { background:linear-gradient(135deg,#16A34A,#22C55E); color:#fff; padding:10px 14px; border-radius:8px; font-size:12px; font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mm-tc-next-slot-btn { margin-left:auto; background:rgba(255,255,255,.25); border:1px solid rgba(255,255,255,.4); color:#fff; font-size:11px; font-weight:700; padding:5px 10px; border-radius:16px; cursor:pointer; white-space:nowrap; }
+.mm-tc-next-slot-btn:active { background:rgba(255,255,255,.4); }
+
+/* Postpone option buttons */
+.mm-postpone-opt { width:100%; text-align:left; padding:12px 14px; border:1px solid var(--border2); border-radius:8px; background:var(--bg3); color:var(--text1); font-size:13px; cursor:pointer; transition:background .1s; }
+.mm-postpone-opt:active { background:var(--border1); }
+
+/* Signal category chips */
+.mm-sig-cat { padding:5px 10px; border:1px solid var(--border2); border-radius:16px; background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer; transition:all .1s; }
+.mm-sig-cat:active { background:var(--border1); }

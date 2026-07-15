@@ -4,7 +4,7 @@
   var FV = firebase.firestore.FieldValue;
 
   // ── UI state ──
-  var _activeTab      = 'checklist'; // 'checklist' | 'intervention' | 'pmp'
+  var _activeTab      = 'tout'; // 'checklist' | 'intervention' | 'pmp' | 'tout'
   var _curFilter      = 'all';
   var _pendingPhKey   = null;
   var _pendingSignal  = null;
@@ -29,6 +29,13 @@
   var _orgTasksUnsub = null;
   var _intUnsub      = null;
   var _pmpUnsub      = null;
+
+  // ── TOUT workspace state ──
+  var _expandedCardId  = null;   // card currently expanded
+  var _toutCardMap     = {};     // cardId → normalized task (populated on each render)
+  var _timerState      = null;   // { cardId, startMs, elapsed }
+  var _timerInterval   = null;   // setInterval handle
+  var _pendingPhCardId = null;   // pending card for TOUT photo
 
   // ── Photo state ──
   var _pendingPmpPh = null;
@@ -304,6 +311,7 @@
           usedParts:               m.usedParts || [],
           interventionComments:    m.interventionComments || [],
           interventionHistory:     m.interventionHistory || [],
+          _source: 'missions',
         };
       });
 
@@ -1040,35 +1048,71 @@
       }
 
     } else if (_activeTab === 'tout') {
-      // ── Journée complète — tous types fusionnés, groupés par créneau ──
+      // ── Espace de travail quotidien — tous types fusionnés, groupés par créneau ──
       var TOUT_VALID_SLOTS = ['matin', 'journee', 'soir'];
-      var toutAll = myMissions;
+      var toutAll      = myMissions;
       var hasToutContent = false;
+
+      // Build card map once for all event handlers (also includes noSlot items)
+      _buildToutCardMap(toutAll);
 
       TOUT_VALID_SLOTS.forEach(function (slotKey) {
         var si        = SLOT_INFO[slotKey];
         var slotItems = toutAll.filter(function (t) { return t.slot === slotKey; });
         if (slotItems.length === 0) return;
         hasToutContent = true;
+
+        var slotTotal = slotItems.length;
         var slotDone  = slotItems.filter(function (t) { return t.done; }).length;
-        var barPct    = Math.round(slotDone / slotItems.length * 100);
+        var barPct    = Math.round(slotDone / slotTotal * 100);
         var barCol    = barPct === 100 ? TC.checklist : barPct >= 50 ? '#f97316' : TC.intervention;
-        h += '<div class="mm-v3-slot-group">'
+
+        // Time estimates from estimatedDuration fields
+        var slotTotMin = 0, slotRemMin = 0;
+        slotItems.forEach(function (t) {
+          var d = _parseDuration(t.estimatedDuration);
+          slotTotMin += d;
+          if (!t.done) slotRemMin += d;
+        });
+
+        h += '<div class="mm-v3-slot-group" id="mm-slot-' + e(slotKey) + '">'
           + '<div class="mm-v3-slot-hd">'
           + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
           + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
           + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>'
-          + '<div class="mm-v3-slot-prog-wrap" style="flex:1;margin:0 8px">'
-          + '<div class="mm-v3-slot-prog-fill" style="width:' + barPct + '%;background:' + barCol + '"></div>'
           + '</div>'
-          + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + slotDone + '/' + slotItems.length + '</span>'
+          // Stats row: tasks · remaining time · percentage
+          + '<div class="mm-tc-slot-stats">'
+          + '<div class="mm-tc-slot-stats-left">'
+          + '<span class="mm-tc-slot-ct">' + slotTotal + ' tâche' + (slotTotal > 1 ? 's' : '') + '</span>'
+          + (slotRemMin > 0 ? '<span class="mm-tc-slot-rem"><i class="fas fa-clock"></i> ' + _fmtMinutes(slotRemMin) + ' restantes</span>' : '')
           + '</div>'
-          + '<div class="mm-v3-cards">';
+          + '<span class="mm-tc-slot-pct" style="color:' + barCol + '">' + barPct + '%</span>'
+          + '</div>'
+          + '<div class="mm-v3-slot-prog-wrap" style="margin:0 0 8px">'
+          + '<div class="mm-v3-slot-prog-fill" style="width:' + barPct + '%;background:' + barCol + ';transition:width .4s"></div>'
+          + '</div>';
+
+        // Slot completion banner
+        if (barPct === 100 && slotTotal > 0) {
+          var nextSlotKey = TOUT_VALID_SLOTS[TOUT_VALID_SLOTS.indexOf(slotKey) + 1];
+          var nextSI      = nextSlotKey ? SLOT_INFO[nextSlotKey] : null;
+          var nextItems   = nextSlotKey ? toutAll.filter(function (t) { return t.slot === nextSlotKey; }) : [];
+          h += '<div class="mm-tc-slot-done-banner">'
+            + '<i class="fas fa-circle-check"></i> Créneau terminé — Excellent travail !'
+            + (nextItems.length && nextSI
+              ? ' <button class="mm-tc-next-slot-btn" onclick="var el=document.getElementById(\'mm-slot-' + nextSlotKey + '\');if(el)el.scrollIntoView({behavior:\'smooth\'})">'
+                + nextSI.icon + ' ' + nextSI.l + ' →</button>'
+              : '')
+            + '</div>';
+        }
+
+        h += '<div class="mm-v3-cards">';
         slotItems.forEach(function (t) { h += _toutCard(t); });
         h += '</div></div>';
       });
 
-      // Items with no valid time slot (missions from missions collection have slot = missionType)
+      // Non-planifié bucket (missions from Firestore have slot = missionType, e.g. 'pmp')
       var noSlotItems = toutAll.filter(function (t) { return TOUT_VALID_SLOTS.indexOf(t.slot) === -1; });
       if (noSlotItems.length > 0) {
         hasToutContent = true;
@@ -1094,6 +1138,7 @@
     // Hidden file inputs
     h += '<input type="file" id="mm-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPh(this)">';
     h += '<input type="file" id="pmp-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPmpPh(this)">';
+    h += '<input type="file" id="mm-tout-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onToutPh(this)">';
 
     h += '</div>'; // mm-v3-wrap
     return h;
@@ -1316,6 +1361,328 @@
   }
 
   // ══════════════════════════════════════════════
+  // TOUT WORKSPACE — helpers, timer, actions
+  // ══════════════════════════════════════════════
+
+  function _parseDuration(str) {
+    if (!str) return 0;
+    var s = String(str).toLowerCase().trim();
+    var mh = s.match(/(\d+)\s*h\s*(\d+)?/);
+    if (mh) return parseInt(mh[1], 10) * 60 + parseInt(mh[2] || 0, 10);
+    var mm = s.match(/(\d+)/);
+    return mm ? parseInt(mm[1], 10) : 0;
+  }
+
+  function _fmtMinutes(n) {
+    if (!n) return '';
+    var h2 = Math.floor(n / 60), m2 = n % 60;
+    return h2 ? h2 + 'h' + (m2 ? String(m2).padStart(2, '0') : '') : m2 + ' min';
+  }
+
+  function _fmtElapsed(ms) {
+    var s  = Math.floor(ms / 1000);
+    var hh = Math.floor(s / 3600);
+    var mm = Math.floor((s % 3600) / 60);
+    var ss = s % 60;
+    return (hh ? String(hh).padStart(2, '0') + ':' : '')
+         + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  }
+
+  function _buildToutCardMap(tasks) {
+    _toutCardMap = {};
+    tasks.forEach(function (t) { _toutCardMap[t.id] = t; });
+  }
+
+  function _toggleCard(cardId) {
+    var el = document.getElementById('tc-' + cardId);
+    if (!el) return;
+    var isExp = el.classList.contains('mm-tc--expanded');
+    // Collapse any previously expanded card
+    if (_expandedCardId && _expandedCardId !== cardId) {
+      var prev = document.getElementById('tc-' + _expandedCardId);
+      if (prev) prev.classList.remove('mm-tc--expanded');
+    }
+    if (isExp) {
+      el.classList.remove('mm-tc--expanded');
+      _expandedCardId = null;
+    } else {
+      el.classList.add('mm-tc--expanded');
+      _expandedCardId = cardId;
+    }
+  }
+
+  function _startTimer(cardId) {
+    if (_timerState && _timerState.cardId !== cardId) {
+      _pauseTimer();
+    }
+    if (!_timerState || _timerState.cardId !== cardId) {
+      _timerState = { cardId: cardId, startMs: Date.now(), elapsed: 0 };
+    } else {
+      _timerState.startMs = Date.now();
+    }
+    if (_timerInterval) clearInterval(_timerInterval);
+    _timerInterval = setInterval(function () {
+      if (!_timerState) return;
+      var total = _timerState.elapsed + (Date.now() - _timerState.startMs);
+      var el    = document.getElementById('tc-timer-' + _timerState.cardId);
+      if (el) el.textContent = _fmtElapsed(total);
+    }, 1000);
+    var sb = document.getElementById('tc-timer-start-' + cardId);
+    var pb = document.getElementById('tc-timer-pause-' + cardId);
+    if (sb) sb.style.display = 'none';
+    if (pb) pb.style.display = '';
+  }
+
+  function _pauseTimer() {
+    if (!_timerState) return;
+    _timerState.elapsed += Date.now() - _timerState.startMs;
+    if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    var sb = document.getElementById('tc-timer-start-' + _timerState.cardId);
+    var pb = document.getElementById('tc-timer-pause-' + _timerState.cardId);
+    if (sb) sb.style.display = '';
+    if (pb) pb.style.display = 'none';
+  }
+
+  function _animateCardDone(cardId) {
+    var el = document.getElementById('tc-' + cardId);
+    if (!el) return;
+    el.classList.add('mm-tc--done');
+    var qv = el.querySelector('.mm-tc-quick-v');
+    if (qv) qv.classList.add('mm-tc-quick-v--done');
+  }
+
+  function _quickValidate(cardId) {
+    var t = _toutCardMap[cardId];
+    if (!t) return;
+    if (t.done) { MX.toast('Déjà terminé ✓'); return; }
+    var cu  = MX.state.currentUser;
+    var src = t._source;
+    var mt  = t.missionType;
+
+    if (src === 'org_tasks') {
+      MX.syncStart && MX.syncStart();
+      db.collection('org_tasks').doc(t._orgTaskId).update({ done: true, doneBy: cu ? cu.name : '', doneAt: FV.serverTimestamp() })
+        .then(function () { MX.syncEnd && MX.syncEnd(); MX.toast('Tâche validée ✓'); _animateCardDone(cardId); })
+        .catch(function (err) { MX.syncFail && MX.syncFail(); MX.toast('Erreur: ' + err.message, true); });
+
+    } else if (src === 'interventions') {
+      MX.syncStart && MX.syncStart();
+      db.collection('interventions').doc(t._intId).update({ status: 'terminee', doneDate: _todayISO(), doneBy: cu ? cu.name : '' })
+        .then(function () { MX.syncEnd && MX.syncEnd(); MX.toast('Intervention terminée ✓'); _animateCardDone(cardId); })
+        .catch(function (err) { MX.syncFail && MX.syncFail(); MX.toast('Erreur: ' + err.message, true); });
+
+    } else if (src === 'pmp_interventions') {
+      MX.syncStart && MX.syncStart();
+      db.collection('pmp_interventions').doc(t._pmpId).update({ status: 'terminee', doneDate: _todayISO(), doneBy: cu ? cu.name : '' })
+        .then(function () { MX.syncEnd && MX.syncEnd(); MX.toast('PMP terminé ✓'); _animateCardDone(cardId); })
+        .catch(function (err) { MX.syncFail && MX.syncFail(); MX.toast('Erreur: ' + err.message, true); });
+
+    } else if (mt === 'pmp') {
+      _confirmTerminePmp(t.id);
+
+    } else if (mt === 'intervention') {
+      _validateIntMission(t.id);
+
+    } else {
+      // Checklist task (no _source) — toggle via Checklist module
+      var ck = t.checkKey || '';
+      var parts = ck.split('_');
+      if (parts.length >= 3) {
+        MX.Pages.Checklist.toggle(parts[0], parts[1], parts.slice(2).join('_'));
+      } else {
+        MX.Pages.Checklist.toggle(t.dayId, t.slot, t.id);
+      }
+      _animateCardDone(cardId);
+    }
+  }
+
+  function _quickPhoto(cardId) {
+    _pendingPhCardId = cardId;
+    var inp = document.getElementById('mm-tout-ph-in');
+    if (inp) inp.click();
+  }
+
+  function _onToutPh(input) {
+    var cardId = _pendingPhCardId;
+    if (!cardId || !input.files || !input.files[0]) return;
+    var t    = _toutCardMap[cardId];
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var img = new Image();
+      img.onload = function () {
+        var canvas = document.createElement('canvas');
+        var maxW   = 800;
+        var scale  = img.width > maxW ? maxW / img.width : 1;
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        var cu = MX.state.currentUser;
+        var docKey = t ? (t._source || 'task') + '_' + (t._orgTaskId || t._intId || t._pmpId || t.id) : cardId;
+        MX.syncStart && MX.syncStart();
+        db.collection('task_photos').doc(docKey).set(
+          { photos: FV.arrayUnion({ data: dataUrl, by: cu ? cu.name : '?', ts: FV.serverTimestamp() }) },
+          { merge: true }
+        ).then(function () { MX.syncEnd && MX.syncEnd(); MX.toast('Photo jointe ✓'); })
+         .catch(function (err) { MX.syncFail && MX.syncFail(); MX.toast('Erreur photo: ' + err.message, true); });
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+  }
+
+  function _quickComment(cardId) {
+    var t = _toutCardMap[cardId];
+    if (!t) return;
+    var e = MX.esc;
+    document.getElementById('m-title').textContent = 'Ajouter une note';
+    document.getElementById('m-sub').innerHTML =
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + e(t.text) + '</div>'
+      + '<textarea id="tc-cmt-ta" placeholder="Votre commentaire…" '
+      + 'style="width:100%;min-height:80px;padding:9px;border:1px solid var(--border2);border-radius:8px;'
+      + 'background:var(--bg3);color:var(--text);font-family:var(--ffs);font-size:13px;resize:vertical;box-sizing:border-box"></textarea>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" onclick="MX.MM._doQuickComment(\'' + e(cardId) + '\')">'
+      + '<i class="fas fa-paper-plane"></i> Envoyer</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+    setTimeout(function () { var ta = document.getElementById('tc-cmt-ta'); if (ta) ta.focus(); }, 60);
+  }
+
+  function _doQuickComment(cardId) {
+    var t   = _toutCardMap[cardId];
+    var ta  = document.getElementById('tc-cmt-ta');
+    var msg = ta ? ta.value.trim() : '';
+    if (!msg) { MX.toast('Veuillez saisir un commentaire', true); return; }
+    MX.closeModal();
+    var cu  = MX.state.currentUser;
+    var src = t ? t._source : '';
+    var entry = { text: msg, by: cu ? cu.name : '?', ts: new Date().toISOString() };
+    if (src === 'org_tasks') {
+      db.collection('org_tasks').doc(t._orgTaskId).update({ comments: FV.arrayUnion(entry) })
+        .then(function () { MX.toast('Note ajoutée ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else if (src === 'interventions') {
+      db.collection('interventions').doc(t._intId).update({ interventionComments: FV.arrayUnion(entry) })
+        .then(function () { MX.toast('Note ajoutée ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else if (src === 'pmp_interventions') {
+      db.collection('pmp_interventions').doc(t._pmpId).update({ pmpComments: FV.arrayUnion(entry) })
+        .then(function () { MX.toast('Note ajoutée ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else {
+      db.collection('task_comments').doc(t ? (t.checkKey || t.id) : cardId).set(
+        { comments: FV.arrayUnion(entry) }, { merge: true }
+      ).then(function () { MX.toast('Note ajoutée ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    }
+  }
+
+  function _quickSignal(cardId) {
+    var t = _toutCardMap[cardId];
+    if (!t) return;
+    var e = MX.esc;
+    var cats = ['Panne', 'Accès impossible', 'Matériel manquant', 'Danger', 'Autre'];
+    document.getElementById('m-title').textContent = 'Signaler un problème';
+    document.getElementById('m-sub').innerHTML =
+      '<div style="font-size:12px;color:var(--orange);font-weight:600;margin-bottom:10px">'
+      + '<i class="fas fa-triangle-exclamation"></i> ' + e(t.text) + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">'
+      + cats.map(function (c) {
+          return '<button class="mm-sig-cat" onclick="MX.MM._selectSigCat(this)">' + e(c) + '</button>';
+        }).join('')
+      + '</div>'
+      + '<textarea id="tc-sig-ta" placeholder="Décrivez le problème…" '
+      + 'style="width:100%;min-height:70px;padding:9px;border:1px solid var(--border2);border-radius:8px;'
+      + 'background:var(--bg3);color:var(--text);font-family:var(--ffs);font-size:13px;resize:vertical;box-sizing:border-box"></textarea>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.MM._doQuickSignal(\'' + e(cardId) + '\')">'
+      + '<i class="fas fa-paper-plane"></i> Envoyer</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+    setTimeout(function () { var ta = document.getElementById('tc-sig-ta'); if (ta) ta.focus(); }, 60);
+  }
+
+  function _selectSigCat(btn) {
+    var btns = document.querySelectorAll('.mm-sig-cat');
+    btns.forEach(function (b) { b.style.background = ''; b.style.color = ''; b.style.fontWeight = ''; });
+    btn.style.background = 'var(--orange)';
+    btn.style.color      = '#fff';
+    btn.style.fontWeight = '700';
+  }
+
+  function _doQuickSignal(cardId) {
+    var t   = _toutCardMap[cardId];
+    var ta  = document.getElementById('tc-sig-ta');
+    var msg = ta ? ta.value.trim() : '';
+    var activeCat = document.querySelector('.mm-sig-cat[style*="background"]');
+    var cat = activeCat ? activeCat.textContent : '';
+    if (!msg && !cat) { MX.toast('Veuillez décrire le problème', true); return; }
+    MX.closeModal();
+    var cu = MX.state.currentUser;
+    db.collection('logs').add({
+      workerName: cu ? cu.name : '?',
+      action: 'report', taskText: t ? t.text : '', cardId: cardId,
+      issue: (cat ? '[' + cat + '] ' : '') + msg,
+      ts: FV.serverTimestamp()
+    }).then(function () { MX.toast('Signalement envoyé ✓'); })
+      .catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  function _quickPostpone(cardId) {
+    var t = _toutCardMap[cardId];
+    if (!t) return;
+    var e    = MX.esc;
+    var OPTS = [
+      { slot: 'journee', l: 'Après-midi', icon: '🌤'  },
+      { slot: 'soir',    l: 'Soir',       icon: '🌙'  },
+      { slot: 'demain',  l: 'Demain',     icon: '📅'  },
+    ];
+    var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">' + e(t.text) + '</div>'
+           + '<div style="display:flex;flex-direction:column;gap:8px">'
+           + OPTS.map(function (opt) {
+               return '<button class="mm-postpone-opt" onclick="MX.MM._doPostpone(\'' + e(cardId) + '\',\'' + opt.slot + '\')">'
+                    + opt.icon + ' ' + e(opt.l) + '</button>';
+             }).join('')
+           + '</div>';
+    document.getElementById('m-title').textContent = 'Reporter cette tâche';
+    document.getElementById('m-sub').innerHTML     = h;
+    document.getElementById('m-actions').innerHTML = '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  function _doPostpone(cardId, newSlot) {
+    var t = _toutCardMap[cardId];
+    MX.closeModal();
+    if (newSlot === 'demain') { MX.toast('Reporté à demain — pensez à le replanifier'); return; }
+    if (!t) return;
+    var src = t._source;
+    if (src === 'org_tasks') {
+      db.collection('org_tasks').doc(t._orgTaskId).update({ slot: newSlot })
+        .then(function () { MX.toast('Reporté ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else if (src === 'interventions') {
+      db.collection('interventions').doc(t._intId).update({ cpSlot: newSlot })
+        .then(function () { MX.toast('Reporté ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else if (src === 'pmp_interventions') {
+      db.collection('pmp_interventions').doc(t._pmpId).update({ cpSlot: newSlot })
+        .then(function () { MX.toast('Reporté ✓'); }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+    } else {
+      MX.toast('Reporter non disponible pour ce type de tâche', true);
+    }
+  }
+
+  function _openModuleForCard(cardId) {
+    var t = _toutCardMap[cardId];
+    if (!t) return;
+    var mt = t.missionType || t.itemType || '';
+    if (mt === 'pmp') {
+      _openPmpDetail(t.id);
+    } else if (mt === 'intervention') {
+      _openInterventionDetail(t.id);
+    } else {
+      MX.toast('Ouvrir depuis l\'onglet correspondant', false);
+    }
+  }
+
+  // ══════════════════════════════════════════════
   // TOUT TAB — unified daily view card
   // ══════════════════════════════════════════════
 
@@ -1333,34 +1700,92 @@
 
   function _toutCard(t) {
     var e     = MX.esc;
+    var cid   = t.id;
     var ikey  = t.itemType || t.missionType || 'tache';
     var ti    = TOUT_TYPE_INFO[ikey] || TOUT_TYPE_INFO.tache;
     var pri   = t.priority;
-    var priCol = pri === 'critique' ? '#EF4444' : pri === 'urgente' ? '#F97316' : pri === 'haute' ? '#F59E0B' : null;
+    var isExp = (_expandedCardId === cid);
 
-    var h = '<div class="mm-tout-card' + (t.done ? ' mm-tout-card--done' : '') + '">'
-      + '<div class="mm-tout-card-type" style="background:' + ti.color + '18;border-left:3px solid ' + ti.color + '">'
-      + '<i class="fas ' + ti.icon + '" style="color:' + ti.color + ';font-size:14px"></i>'
-      + '</div>'
-      + '<div class="mm-tout-card-body">'
-      + '<div class="mm-tout-card-row">'
-      + '<span class="mm-tout-card-lbl" style="color:' + ti.color + '">' + e(ti.l) + '</span>';
+    // Timer state for this card (survives re-renders)
+    var timerRunning = _timerState && _timerState.cardId === cid && _timerInterval;
+    var timerElapsed = _timerState && _timerState.cardId === cid
+      ? (_timerState.elapsed + (timerRunning ? (Date.now() - _timerState.startMs) : 0))
+      : 0;
+
+    var h = '<div id="tc-' + e(cid) + '" class="mm-tc'
+      + (t.done ? ' mm-tc--done' : '')
+      + (isExp  ? ' mm-tc--expanded' : '') + '">';
+
+    // ── Header (always visible, click to expand) ──
+    h += '<div class="mm-tc-hd" onclick="MX.MM._toggleCard(\'' + e(cid) + '\')">'
+      + '<div class="mm-tc-side" style="background:' + ti.color + '"></div>'
+      + '<div class="mm-tc-icon" style="color:' + ti.color + '"><i class="fas ' + ti.icon + '"></i></div>'
+      + '<div class="mm-tc-hd-main">'
+      + '<div class="mm-tc-meta-row">'
+      + '<span class="mm-tc-lbl" style="color:' + ti.color + '">' + e(ti.l) + '</span>';
+
     if (t.done) {
-      h += '<span class="mm-tout-card-status mm-tout-card-status--done"><i class="fas fa-check"></i> Terminé</span>';
-    } else if (priCol) {
-      h += '<span class="mm-tout-card-status" style="color:' + priCol + '">'
-        + '<i class="fas fa-gauge-high"></i> ' + e(pri) + '</span>';
+      h += '<span class="mm-tc-badge mm-tc-badge--done"><i class="fas fa-check"></i> Terminé</span>';
+    } else if (pri === 'critique') {
+      h += '<span class="mm-tc-badge mm-tc-badge--crit">CRITIQUE</span>';
+    } else if (pri === 'urgente' || pri === 'haute') {
+      h += '<span class="mm-tc-badge mm-tc-badge--urg">URGENT</span>';
     }
+
     h += '</div>'
-      + '<div class="mm-tout-card-title">' + e(t.text || '(Sans titre)') + '</div>';
-    if (t.desc) h += '<div class="mm-tout-card-desc">' + e(t.desc.length > 80 ? t.desc.slice(0, 80) + '…' : t.desc) + '</div>';
-    var hasMeta = t.zone || t.estimatedDuration;
-    if (hasMeta) {
-      h += '<div class="mm-tout-card-meta">';
-      if (t.zone) h += '<span><i class="fas fa-location-dot"></i> ' + e(t.zone) + '</span>';
-      if (t.estimatedDuration) h += '<span><i class="fas fa-clock"></i> ' + e(t.estimatedDuration) + '</span>';
+      + '<div class="mm-tc-title">' + e(t.text || '(Sans titre)') + '</div>'
+      + '</div>'
+      + '<button class="mm-tc-quick-v' + (t.done ? ' mm-tc-quick-v--done' : '') + '"'
+      + ' onclick="event.stopPropagation();MX.MM._quickValidate(\'' + e(cid) + '\')" title="' + (t.done ? 'Validé' : 'Valider') + '">'
+      + '<i class="fas fa-circle-check"></i></button>'
+      + '<div class="mm-tc-chevron"><i class="fas fa-chevron-right"></i></div>'
+      + '</div>';
+
+    // ── Body (visible when expanded) ──
+    h += '<div class="mm-tc-body">';
+
+    // Details block
+    var hasDetail = t.desc || t.zone || t.estimatedDuration;
+    if (hasDetail) {
+      h += '<div class="mm-tc-details">';
+      if (t.desc) h += '<div class="mm-tc-desc">' + e(t.desc) + '</div>';
+      if (t.zone || t.estimatedDuration) {
+        h += '<div class="mm-tc-detail-row">';
+        if (t.zone)              h += '<span class="mm-tc-detail-it"><i class="fas fa-location-dot"></i> ' + e(t.zone) + (t.subZone ? ' · ' + e(t.subZone) : '') + '</span>';
+        if (t.estimatedDuration) h += '<span class="mm-tc-detail-it"><i class="fas fa-clock"></i> ' + e(t.estimatedDuration) + '</span>';
+        h += '</div>';
+      }
       h += '</div>';
     }
+
+    // Timer row
+    h += '<div class="mm-tc-timer-row">'
+      + '<span class="mm-tc-timer-lbl"><i class="fas fa-stopwatch"></i> Chrono</span>'
+      + '<span class="mm-tc-timer-disp" id="tc-timer-' + e(cid) + '">' + _fmtElapsed(timerElapsed) + '</span>'
+      + '<button id="tc-timer-start-' + e(cid) + '" class="mm-tc-timer-btn" title="Démarrer"'
+      + ' onclick="MX.MM._startTimer(\'' + e(cid) + '\')"' + (timerRunning ? ' style="display:none"' : '') + '>'
+      + '<i class="fas fa-play"></i></button>'
+      + '<button id="tc-timer-pause-' + e(cid) + '" class="mm-tc-timer-btn mm-tc-timer-btn--pause" title="Pause"'
+      + ' onclick="MX.MM._pauseTimer()"' + (!timerRunning ? ' style="display:none"' : '') + '>'
+      + '<i class="fas fa-pause"></i></button>'
+      + '</div>';
+
+    // Action bar
+    h += '<div class="mm-tc-actions">'
+      + '<button class="mm-tc-act mm-tc-act--validate" onclick="MX.MM._quickValidate(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-check-circle"></i><span>Valider</span></button>'
+      + '<button class="mm-tc-act" onclick="MX.MM._openModuleForCard(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-arrow-up-right-from-square"></i><span>Module</span></button>'
+      + '<button class="mm-tc-act" onclick="MX.MM._quickPhoto(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-camera"></i><span>Photo</span></button>'
+      + '<button class="mm-tc-act" onclick="MX.MM._quickComment(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-comment-dots"></i><span>Note</span></button>'
+      + '<button class="mm-tc-act mm-tc-act--signal" onclick="MX.MM._quickSignal(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-triangle-exclamation"></i><span>Signaler</span></button>'
+      + '<button class="mm-tc-act" onclick="MX.MM._quickPostpone(\'' + e(cid) + '\')">'
+      + '<i class="fas fa-clock-rotate-left"></i><span>Reporter</span></button>'
+      + '</div>';
+
     h += '</div></div>';
     return h;
   }
@@ -2335,9 +2760,11 @@
     if (_orgTasksUnsub)    { _orgTasksUnsub();    _orgTasksUnsub    = null; }
     if (_intUnsub)         { _intUnsub();          _intUnsub         = null; }
     if (_pmpUnsub)         { _pmpUnsub();          _pmpUnsub         = null; }
+    if (_timerInterval)    { clearInterval(_timerInterval); _timerInterval = null; }
     _missionsLoaded = false;
     _allMissions = []; _assignedMissions = []; _unassignedPmpMissions = [];
     _orgTasks = []; _intDocs = []; _pmpDocs = [];
+    _timerState = null; _expandedCardId = null; _toutCardMap = {};
   }
 
   // ══════════════════════════════════════════════
@@ -2510,6 +2937,15 @@
     _addPmpPart: _addPmpPart, _addIntPart: _addIntPart,
     _validatePmpMission: _validatePmpMission, _validateIntMission: _validateIntMission,
     getMissionStatus: getMissionStatus,
+    // TOUT workspace
+    _toggleCard: _toggleCard,
+    _startTimer: _startTimer, _pauseTimer: _pauseTimer,
+    _quickValidate: _quickValidate,
+    _quickPhoto: _quickPhoto, _onToutPh: _onToutPh,
+    _quickComment: _quickComment, _doQuickComment: _doQuickComment,
+    _quickSignal: _quickSignal, _selectSigCat: _selectSigCat, _doQuickSignal: _doQuickSignal,
+    _quickPostpone: _quickPostpone, _doPostpone: _doPostpone,
+    _openModuleForCard: _openModuleForCard,
     _destroy: _destroy,
   };
   window.MX.MM = window.MX.Pages.MesMissions;
