@@ -38,7 +38,11 @@
   var _pendingPhCardId = null;   // pending card for TOUT photo
 
   // ── Photo state ──
-  var _pendingPmpPh = null;
+  var _pendingPmpPh       = null;
+  var _pendingPmpDirectPh = null; // { pmpId, cat } for direct pmp_interventions photos
+
+  // ── PMP direct detail timer ──
+  var _pmpDetailTimerInterval = null;
 
   // ── PMP panel state ──
   var _pmpScrollSaved = 0;
@@ -1139,6 +1143,7 @@
     h += '<input type="file" id="mm-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPh(this)">';
     h += '<input type="file" id="pmp-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPmpPh(this)">';
     h += '<input type="file" id="mm-tout-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onToutPh(this)">';
+    h += '<input type="file" id="pmp-direct-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPmpDirectPh(this)">';
 
     h += '</div>'; // mm-v3-wrap
     return h;
@@ -1674,7 +1679,11 @@
     if (!t) return;
     var mt = t.missionType || t.itemType || '';
     if (mt === 'pmp') {
-      _openPmpDetail(t.id);
+      if (t._source === 'pmp_interventions') {
+        _openPmpDirectDetail(t._pmpId);
+      } else {
+        _openPmpDetail(t.id);
+      }
     } else if (mt === 'intervention') {
       _openInterventionDetail(t.id);
     } else {
@@ -1906,18 +1915,21 @@
         + '<span class="mm-v3-pmp-prog-lbl">' + doneC + '/' + items.length + ' tâches</span></div>';
     }
 
-    var cu      = MX.state.currentUser;
-    var curName = cu ? cu.name : '';
-    var mid     = e(t.missionId || t.id);
+    var cu       = MX.state.currentUser;
+    var curName  = cu ? cu.name : '';
+    var isDirect = t._source === 'pmp_interventions';
+    var mid      = isDirect ? e(t._pmpId) : e(t.missionId || t.id);
     h += '<div class="mm-v3-card-actions">';
     if (t.done) {
       h += '<button class="mm-v3-act-main mm-v3-act-main--done" disabled>'
         + '<i class="fas fa-circle-check"></i><span>Terminée</span></button>';
     } else if (!t.takenBy) {
-      h += '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM._takePmpMission(\'' + mid + '\')">'
+      var takeFn = isDirect ? '_takePmpDirectMission' : '_takePmpMission';
+      h += '<button class="mm-v3-act-main mm-v3-act-main--take" onclick="MX.MM.' + takeFn + '(\'' + mid + '\')">'
         + '<i class="fas fa-right-to-bracket"></i><span>Prendre</span></button>';
     } else if (t.takenBy === curName) {
-      h += '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM._openPmpDetail(\'' + mid + '\')">'
+      var openFn = isDirect ? '_openPmpDirectDetail' : '_openPmpDetail';
+      h += '<button class="mm-v3-act-main mm-v3-act-main--open" onclick="MX.MM.' + openFn + '(\'' + mid + '\')">'
         + '<i class="fas fa-folder-open"></i><span>Ouvrir</span></button>';
     } else {
       h += '<span class="mm-v3-card-taken-info"><i class="fas fa-user-gear"></i> ' + e(t.takenBy) + '</span>';
@@ -2420,6 +2432,7 @@
     _pmpHistPushed = false;
     window.MX.isPmpPanelOpen    = false;
     window.MX.currentPmpMission = null;
+    _stopPmpDetailTimer();
     var ov = document.getElementById('pmp-detail-ov');
     if (!ov) return;
     ov.classList.add('pmp-detail--closing');
@@ -2751,6 +2764,539 @@
   }
 
   // ══════════════════════════════════════════════
+  // PMP DIRECT DETAIL — pmp_interventions items
+  // ══════════════════════════════════════════════
+
+  function _takenAtMs(takenAt) {
+    if (!takenAt) return null;
+    if (typeof takenAt.toMillis === 'function') return takenAt.toMillis();
+    if (takenAt instanceof Date) return takenAt.getTime();
+    if (takenAt.seconds) return takenAt.seconds * 1000 + ((takenAt.nanoseconds || 0) / 1e6);
+    if (typeof takenAt === 'number') return takenAt;
+    return null;
+  }
+
+  function _startPmpDetailTimer(elementId, startMs) {
+    _stopPmpDetailTimer();
+    function tick() {
+      var el = document.getElementById(elementId);
+      if (!el) { _stopPmpDetailTimer(); return; }
+      el.textContent = _fmtElapsed(Date.now() - startMs);
+    }
+    tick();
+    _pmpDetailTimerInterval = setInterval(tick, 1000);
+  }
+
+  function _stopPmpDetailTimer() {
+    if (_pmpDetailTimerInterval) { clearInterval(_pmpDetailTimerInterval); _pmpDetailTimerInterval = null; }
+  }
+
+  function _openPmpDirectDetail(pmpId) {
+    var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+    if (!raw) { MX.toast('Fiche introuvable', true); return; }
+    _stopPmpDetailTimer();
+    var e       = MX.esc;
+    var cu      = MX.state.currentUser;
+    var curName = cu ? cu.name : '';
+
+    var eqName    = raw.equipmentName || raw.planName || '(PMP)';
+    var lifecycle = (raw.status === 'terminee') ? 'terminee' : (raw.takenBy ? 'en_cours' : 'disponible');
+    var lcLabel   = lifecycle === 'terminee' ? 'Terminée 🟢' : (lifecycle === 'en_cours' ? 'En cours 🟠' : 'Disponible 🟣');
+    var lcColor   = lifecycle === 'terminee' ? '#22c55e' : (lifecycle === 'en_cours' ? '#f97316' : '#a855f7');
+    var canEdit   = (lifecycle === 'en_cours') && (raw.takenBy === curName);
+
+    var items       = raw.checklistItems || [];
+    var completed   = raw.completedChecklist || {};
+    var doneCnt     = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
+    var pmpComments = raw.pmpComments || [];
+    var history     = raw.interventionHistory || [];
+    var pmpPhotos   = raw.pmpPhotos || {};
+    var dueStr      = raw.dueDate ? _fmtDate(raw.dueDate) : '';
+
+    // Panel state
+    var replacing = !!document.getElementById('pmp-detail-ov');
+    if (replacing) {
+      document.getElementById('pmp-detail-ov').remove();
+    } else {
+      var mc = document.getElementById('main-content');
+      _pmpScrollSaved = mc ? mc.scrollTop : 0;
+      try {
+        window.history.pushState({ pmpDetail: 'dir_' + pmpId }, '', location.pathname + location.search);
+        _pmpHistPushed = true;
+      } catch (err) { _pmpHistPushed = false; }
+    }
+    window.MX.currentPmpMission = pmpId;
+    window.MX.isPmpPanelOpen    = true;
+
+    var h = '<div class="pmp-detail-overlay" id="pmp-detail-ov">'
+      + '<div class="pmp-detail-modal">'
+      + '<div class="pmp-detail-header pmp-detail-header--nav">'
+      + '<button class="pmp-detail-back" onclick="MX.MM._closePmpDetail()">'
+      + '<i class="fas fa-chevron-left"></i> Retour</button>'
+      + '<div class="pmp-detail-header-info">'
+      + '<div class="pmp-detail-ttl">' + e(eqName) + '</div>'
+      + '<div class="pmp-detail-header-meta">'
+      + '<span class="pmp-hm-badge" style="background:' + lcColor + '22;color:' + lcColor + ';border:1px solid ' + lcColor + '55">' + lcLabel + '</span>'
+      + (raw.zone ? '<span><i class="fas fa-location-dot"></i> ' + e(raw.zone) + (raw.subZone ? ' · ' + e(raw.subZone) : '') + '</span>' : '')
+      + (raw.takenBy ? '<span><i class="fas fa-user-wrench"></i> ' + e(raw.takenBy) + '</span>' : '')
+      + (dueStr ? '<span><i class="fas fa-calendar-days"></i> ' + dueStr + '</span>' : '')
+      + '</div></div></div>'
+      + '<div class="pmp-detail-body">';
+
+    // ── 1. Info équipement ──
+    var lastHistory  = history.length ? history[history.length - 1] : null;
+    var lastDoneDate = lastHistory ? lastHistory.date : (raw.lastDone || null);
+    var lastDoneTech = lastHistory ? lastHistory.by : '';
+    h += '<div class="pmp-eq-info-block"><div class="pmp-eq-info-grid">'
+      + (raw.ref ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Référence</span><span>' + e(raw.ref) + '</span></div>' : '')
+      + (raw.zone ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Zone / Local</span><span>' + e(raw.zone) + (raw.subZone ? ' / ' + e(raw.subZone) : '') + '</span></div>' : '')
+      + (raw.type ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Type</span><span>' + e(raw.type) + '</span></div>' : '')
+      + (raw.criticite ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Priorité</span><span>' + e(raw.criticite) + '</span></div>' : '')
+      + (raw.estimatedDuration ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Durée estimée</span><span>' + e(String(raw.estimatedDuration)) + ' min</span></div>' : '')
+      + (lastDoneDate ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Dernière maintenance</span><span>' + e(_fmtDate(lastDoneDate)) + (lastDoneTech ? ' — ' + e(lastDoneTech) : '') + '</span></div>' : '')
+      + (raw.nextDue ? '<div class="pmp-eq-info-item"><span class="pmp-eq-info-lbl">Prochaine maintenance</span><span>' + e(_fmtDate(raw.nextDue)) + '</span></div>' : '')
+      + '</div></div>';
+
+    // ── 2. Chronomètre (si en_cours) ──
+    if (lifecycle === 'en_cours') {
+      var estMin = parseInt(raw.estimatedDuration || 0, 10);
+      h += '<div class="pmpd-chrono-block">'
+        + '<div class="pmpd-chrono-row">'
+        + '<div class="pmpd-chrono-label"><i class="fas fa-stopwatch"></i> Temps écoulé</div>'
+        + '<div class="pmpd-chrono-time" id="pmpd-chrono-elapsed-' + e(pmpId) + '">00:00</div>'
+        + '</div>'
+        + (estMin ? '<div class="pmpd-chrono-row pmpd-chrono-row--est"><span class="pmpd-chrono-est-lbl"><i class="fas fa-clock"></i> Estimé : ' + e(String(estMin)) + ' min</span></div>' : '')
+        + '</div>';
+    }
+
+    // ── 3. Consignes techniques ──
+    if (raw.technicalNotes) {
+      h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-note-sticky"></i> Consignes techniques</div>'
+        + '<div class="pmp-detail-notes pmp-detail-notes--alert">' + e(raw.technicalNotes) + '</div></div>';
+    }
+
+    // ── 4. Checklist ──
+    if (items.length) {
+      var checklistHtml = items.map(function (it, idx) {
+        var ck = completed[String(idx)] || completed[idx];
+        return '<label class="pmp-ck-item' + (ck ? ' pmp-ck-item--done' : '') + '">'
+          + '<input type="checkbox"' + (ck ? ' checked' : '') + (canEdit ? '' : ' disabled')
+          + ' onchange="MX.MM._toggleCheckDirect(\'' + e(pmpId) + '\',' + idx + ',this.checked)">'
+          + '<span>' + e(it.text || it) + '</span></label>';
+      }).join('');
+      h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl" id="pmpd-ck-ttl-' + e(pmpId) + '"><i class="fas fa-list-check"></i> Checklist (' + doneCnt + '/' + items.length + ')</div>'
+        + '<div class="pmp-ck-list">' + checklistHtml + '</div></div>';
+    }
+
+    // ── 5. Journal technique ──
+    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-book-open"></i> Journal technique</div>';
+    h += '<div class="pmp-journal-list" id="pmpd-journal-' + e(pmpId) + '">';
+    pmpComments.forEach(function (c) {
+      var initials = _avatarInitials(c.by || '?');
+      var color    = _avatarColor(c.by || '?');
+      var tsVal    = c.ts;
+      var d        = tsVal ? new Date(typeof tsVal === 'number' ? tsVal : (tsVal.toMillis ? tsVal.toMillis() : tsVal)) : null;
+      var dateStr  = d && !isNaN(d) ? d.toLocaleDateString('fr-FR') : '';
+      var timeStr  = d && !isNaN(d) ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+      h += '<div class="pmp-journal-entry">'
+        + '<div class="pmp-journal-avatar" style="background:' + color + '">' + initials + '</div>'
+        + '<div class="pmp-journal-content">'
+        + '<div class="pmp-journal-meta"><span class="pmp-journal-author">' + e(c.by || '?') + '</span>'
+        + '<span class="pmp-journal-date">' + dateStr + (timeStr ? ' · ' + timeStr : '') + '</span></div>'
+        + '<div class="pmp-journal-text">' + e(c.text || '') + '</div>'
+        + '</div></div>';
+    });
+    h += '</div>';
+    if (canEdit) {
+      h += '<div class="pmp-journal-add">'
+        + '<textarea class="fi" id="pmpd-obs-' + e(pmpId) + '" rows="2" placeholder="Observations, anomalies, travaux effectués…" style="resize:vertical;width:100%;box-sizing:border-box;margin-bottom:5px"></textarea>'
+        + '<button class="pmp-chrono-btn pmp-chrono-btn--start" style="width:100%" onclick="MX.MM._addPmpDirectComment(\'' + e(pmpId) + '\')">'
+        + '<i class="fas fa-paper-plane"></i> Ajouter au journal</button>'
+        + '</div>';
+    }
+    h += '</div>';
+
+    // ── 6. Photos ──
+    var photoCats = [
+      { key: 'avant',   label: 'Avant',   icon: 'fa-circle-arrow-right' },
+      { key: 'pendant', label: 'Pendant', icon: 'fa-spinner' },
+      { key: 'apres',   label: 'Après',   icon: 'fa-circle-check' },
+    ];
+    h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-camera"></i> Photos</div>';
+    h += '<div class="pmp-photo-cats">';
+    photoCats.forEach(function (cat) {
+      var photos = (pmpPhotos[cat.key] || []).slice();
+      h += '<div class="pmp-photo-cat">'
+        + '<div class="pmp-photo-cat-hdr"><i class="fas ' + cat.icon + '"></i> ' + cat.label + '</div>'
+        + '<div class="pmp-photo-cat-imgs" id="pmpd-phcat-' + e(pmpId) + '-' + cat.key + '">';
+      photos.forEach(function (url) {
+        h += '<img src="' + url + '" class="pmp-photo-thumb" onclick="MX.MM._viewPhoto(this.src)">';
+      });
+      h += '</div>';
+      if (canEdit) {
+        h += '<button class="pmp-photo-add-btn" onclick="MX.MM._triggerPmpDirectPhoto(\'' + e(pmpId) + '\',\'' + cat.key + '\')">'
+          + '<i class="fas fa-plus"></i> Ajouter</button>';
+      }
+      h += '</div>';
+    });
+    h += '</div></div>';
+
+    // ── 7. Historique des interventions ──
+    if (history.length) {
+      var sorted = history.slice().sort(function (a, b) {
+        var da = a.date || '', db2 = b.date || '';
+        return db2 > da ? 1 : db2 < da ? -1 : 0;
+      });
+      h += '<div class="pmp-detail-section"><div class="pmp-detail-section-ttl"><i class="fas fa-clock-rotate-left"></i> Historique des interventions</div>';
+      h += '<div class="pmpd-hist-timeline">';
+      sorted.slice(0, 5).forEach(function (hx) {
+        var ckItems = hx.completedChecklist ? Object.keys(hx.completedChecklist).filter(function (k) { return hx.completedChecklist[k]; }).length : 0;
+        var ckTotal = items.length;
+        h += '<div class="pmpd-hist-entry">'
+          + '<div class="pmpd-hist-dot"></div>'
+          + '<div class="pmpd-hist-body">'
+          + '<div class="pmpd-hist-date-tech">'
+          + '<span class="pmpd-hist-date">' + (hx.date ? _fmtDate(hx.date) : '—') + '</span>'
+          + (hx.by ? '<span class="pmpd-hist-tech"><i class="fas fa-user-wrench"></i> ' + e(hx.by) + '</span>' : '')
+          + (ckTotal ? '<span class="pmpd-hist-ck">' + ckItems + '/' + ckTotal + '</span>' : '')
+          + '</div>'
+          + (hx.observations ? '<div class="pmpd-hist-obs">' + e(hx.observations) + '</div>' : '')
+          + '</div></div>';
+      });
+      h += '</div></div>';
+    }
+
+    // ── 8. Signaler anomalie ──
+    if (lifecycle !== 'terminee') {
+      h += '<div class="pmp-detail-section">'
+        + '<button class="pmp-signal-anomaly-btn" onclick="MX.MM._signalerAnomalie(\'' + e(pmpId) + '\',\'' + e(eqName) + '\',\'' + e(raw.zone || '') + '\')">'
+        + '<i class="fas fa-triangle-exclamation"></i> Signaler une anomalie</button>'
+        + '</div>';
+    }
+
+    // ── Footer ──
+    h += '<div class="pmp-detail-footer" id="pmpd-footer-' + e(pmpId) + '">'
+      + _buildPmpDirectFooter(raw, pmpId, curName, lifecycle)
+      + '</div>';
+
+    h += '</div></div></div>'; // body, modal, overlay
+    document.body.insertAdjacentHTML('beforeend', h);
+
+    // Start live timer if en_cours
+    if (lifecycle === 'en_cours') {
+      var startMs = _takenAtMs(raw.takenAt);
+      if (startMs) _startPmpDetailTimer('pmpd-chrono-elapsed-' + pmpId, startMs);
+    }
+  }
+
+  function _buildPmpDirectFooter(raw, pmpId, curName, lifecycle) {
+    var e = MX.esc;
+    if (lifecycle === 'terminee') {
+      return '<div class="pmp-done-badge"><i class="fas fa-circle-check"></i> Maintenance terminée</div>';
+    }
+    if (lifecycle === 'en_cours' && raw.takenBy === curName) {
+      return '<button class="pmp-validate-btn" onclick="MX.MM._confirmTerminePmpDirect(\'' + e(pmpId) + '\')">'
+        + '<i class="fas fa-circle-check"></i> Terminer la maintenance</button>'
+        + '<button class="pmp-release-btn" onclick="MX.MM._releasePmpDirectMission(\'' + e(pmpId) + '\')">'
+        + '<i class="fas fa-arrow-rotate-left"></i> Rendre la maintenance</button>';
+    }
+    if (lifecycle === 'en_cours') {
+      return '<div class="pmp-taken-info"><i class="fas fa-user-gear"></i> En cours par ' + e(raw.takenBy || '?') + '</div>';
+    }
+    return '<button class="pmp-take-btn" onclick="MX.MM._takePmpDirectMission(\'' + e(pmpId) + '\')">'
+      + '<i class="fas fa-right-to-bracket"></i> Prendre cette maintenance</button>';
+  }
+
+  // ── Checklist toggle (pmp_interventions) ──
+  function _toggleCheckDirect(pmpId, idx, checked) {
+    var upd = {};
+    upd['completedChecklist.' + idx] = checked;
+    db.collection('pmp_interventions').doc(pmpId).update(upd)
+      .catch(function (err) { console.warn('[MM] toggleCheckDirect:', err.message); });
+    var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+    if (raw) {
+      if (!raw.completedChecklist) raw.completedChecklist = {};
+      raw.completedChecklist[String(idx)] = checked;
+      var items   = raw.checklistItems || [];
+      var cnt     = Object.keys(raw.completedChecklist).filter(function (k) { return raw.completedChecklist[k]; }).length;
+      var ttlEl   = document.getElementById('pmpd-ck-ttl-' + pmpId);
+      if (ttlEl) ttlEl.innerHTML = '<i class="fas fa-list-check"></i> Checklist (' + cnt + '/' + items.length + ')';
+    }
+  }
+
+  // ── Journal (pmp_interventions) ──
+  function _addPmpDirectComment(pmpId) {
+    var ta = document.getElementById('pmpd-obs-' + pmpId);
+    if (!ta) return;
+    var text = ta.value.trim();
+    if (!text) return;
+    var cu = MX.state.currentUser;
+    var comment = { text: text, by: cu ? cu.name : '?', ts: Date.now() };
+    db.collection('pmp_interventions').doc(pmpId).update({
+      pmpComments: FV.arrayUnion(comment),
+    }).then(function () {
+      ta.value = '';
+      MX.toast('Commentaire ajouté ✓');
+      var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+      if (raw) { if (!raw.pmpComments) raw.pmpComments = []; raw.pmpComments.push(comment); }
+      var listEl = document.getElementById('pmpd-journal-' + pmpId);
+      if (listEl) {
+        var e2 = MX.esc;
+        var initials = _avatarInitials(comment.by);
+        var color    = _avatarColor(comment.by);
+        var d        = new Date(comment.ts);
+        listEl.insertAdjacentHTML('beforeend',
+          '<div class="pmp-journal-entry">'
+          + '<div class="pmp-journal-avatar" style="background:' + color + '">' + initials + '</div>'
+          + '<div class="pmp-journal-content">'
+          + '<div class="pmp-journal-meta"><span class="pmp-journal-author">' + e2(comment.by) + '</span>'
+          + '<span class="pmp-journal-date">' + d.toLocaleDateString('fr-FR') + ' · ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + '</span></div>'
+          + '<div class="pmp-journal-text">' + e2(comment.text) + '</div>'
+          + '</div></div>');
+      }
+    }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  // ── Photos (pmp_interventions) ──
+  function _triggerPmpDirectPhoto(pmpId, cat) {
+    _pendingPmpDirectPh = { pmpId: pmpId, cat: cat };
+    var inp = document.getElementById('pmp-direct-ph-in');
+    if (inp) inp.click();
+  }
+
+  function _onPmpDirectPh(input) {
+    var ph = _pendingPmpDirectPh;
+    if (!ph || !input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var img = new Image();
+      img.onload = function () {
+        var canvas = document.createElement('canvas');
+        var maxW   = 800;
+        var scale  = img.width > maxW ? maxW / img.width : 1;
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        var upd = {};
+        upd['pmpPhotos.' + ph.cat] = FV.arrayUnion(dataUrl);
+        db.collection('pmp_interventions').doc(ph.pmpId).update(upd).then(function () {
+          var container = document.getElementById('pmpd-phcat-' + ph.pmpId + '-' + ph.cat);
+          if (container) {
+            var imgEl = document.createElement('img');
+            imgEl.src = dataUrl;
+            imgEl.className = 'pmp-photo-thumb';
+            imgEl.onclick = function () { MX.MM._viewPhoto(dataUrl); };
+            container.appendChild(imgEl);
+          }
+          var raw = _pmpDocs.find(function (d) { return d.id === ph.pmpId; });
+          if (raw) {
+            if (!raw.pmpPhotos) raw.pmpPhotos = {};
+            if (!raw.pmpPhotos[ph.cat]) raw.pmpPhotos[ph.cat] = [];
+            raw.pmpPhotos[ph.cat].push(dataUrl);
+          }
+          MX.toast('Photo jointe ✓');
+        }).catch(function (err) { MX.toast('Erreur photo: ' + err.message, true); });
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+  }
+
+  // ── Lifecycle direct (pmp_interventions) ──
+  function _takePmpDirectMission(pmpId) {
+    var cu = MX.state.currentUser;
+    if (!cu) { MX.toast('Non connecté', true); return; }
+    var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+    if (!raw) { MX.toast('Fiche introuvable', true); return; }
+    if (raw.takenBy) { MX.toast('Déjà prise par ' + raw.takenBy, true); return; }
+
+    var now    = new Date();
+    var tsStr  = String(now.getDate()).padStart(2, '0') + '/' + String(now.getMonth() + 1).padStart(2, '0') + '/' + now.getFullYear()
+      + ' - ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    var logEntry = { text: cu.name + ' a pris cette maintenance\n' + tsStr, by: cu.name, ts: tsStr, isSystemLog: true };
+
+    db.collection('pmp_interventions').doc(pmpId).update({
+      takenBy:     cu.name,
+      takenAt:     FV.serverTimestamp(),
+      status:      'en_cours',
+      pmpComments: FV.arrayUnion(logEntry),
+    }).then(function () {
+      raw.takenBy = cu.name;
+      raw.takenAt = { toMillis: function () { return Date.now(); } };
+      raw.status  = 'en_cours';
+      if (!raw.pmpComments) raw.pmpComments = [];
+      raw.pmpComments.push(logEntry);
+      MX.toast('Maintenance prise ✓');
+      _openPmpDirectDetail(pmpId);
+    }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  function _releasePmpDirectMission(pmpId) {
+    document.getElementById('m-title').textContent = 'Rendre la maintenance';
+    document.getElementById('m-sub').innerHTML = '<p style="margin:0;color:var(--text2)">La maintenance sera remise disponible pour un autre technicien.<br>Vos commentaires et photos sont conservés.</p>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.MM._doReleasePmpDirect(\'' + pmpId + '\')">'
+      + '<i class="fas fa-arrow-rotate-left"></i> Rendre</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  function _doReleasePmpDirect(pmpId) {
+    MX.closeModal();
+    db.collection('pmp_interventions').doc(pmpId).update({ takenBy: null, takenAt: null, status: 'planifiee' })
+      .then(function () {
+        var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+        if (raw) { raw.takenBy = null; raw.takenAt = null; raw.status = 'planifiee'; }
+        MX.toast('Maintenance rendue ✓');
+        _closePmpDetail();
+      }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  function _confirmTerminePmpDirect(pmpId) {
+    var raw       = _pmpDocs.find(function (d) { return d.id === pmpId; });
+    var items     = raw ? (raw.checklistItems || []) : [];
+    var completed = raw ? (raw.completedChecklist || {}) : {};
+    var doneCnt   = Object.keys(completed).filter(function (k) { return completed[k]; }).length;
+    var total     = items.length;
+    var incomplete = total > 0 && doneCnt < total;
+
+    document.getElementById('m-title').textContent = 'Valider cette maintenance ?';
+    document.getElementById('m-sub').innerHTML =
+      '<p style="margin:0 0 12px;color:var(--text2);font-size:13px">Cette action :</p>'
+      + '<div class="pmp-confirm-checks">'
+      + '<div class="pmp-confirm-row ok">✓ clôture le PMP</div>'
+      + '<div class="pmp-confirm-row ok">✓ programme la prochaine maintenance</div>'
+      + '<div class="pmp-confirm-row ok">✓ archive cette intervention</div>'
+      + (incomplete ? '<div class="pmp-confirm-row warn">⚠ Checklist incomplète (' + doneCnt + '/' + total + ' tâches)</div>' : '')
+      + '</div>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" onclick="MX.MM._validatePmpDirectMission(\'' + pmpId + '\');MX.closeModal()">'
+      + '<i class="fas fa-check"></i> Valider</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  async function _validatePmpDirectMission(pmpId) {
+    var raw = _pmpDocs.find(function (d) { return d.id === pmpId; });
+    if (!raw || raw.status === 'terminee') return;
+    var cu          = MX.state.currentUser;
+    var completedBy = cu ? cu.name : (raw.takenBy || '');
+    var today       = new Date().toISOString().slice(0, 10);
+    var lastObs     = (raw.pmpComments && raw.pmpComments.length)
+      ? raw.pmpComments[raw.pmpComments.length - 1].text
+      : (raw.observations || '');
+    var histEntry = {
+      date: today, by: completedBy, observations: lastObs,
+      completedChecklist: raw.completedChecklist || {},
+    };
+    var nextDue = null;
+    try {
+      await db.collection('pmp_interventions').doc(pmpId).update({
+        status:      'terminee',
+        doneDate:    today,
+        doneBy:      completedBy,
+        observations: lastObs,
+        completedChecklist: raw.completedChecklist || {},
+        interventionHistory: FV.arrayUnion(histEntry),
+        updatedAt:   FV.serverTimestamp(),
+      });
+      if (raw.equipmentId) {
+        var eqSnap = await db.collection('pmp_equipments').doc(raw.equipmentId).get();
+        var eqData = eqSnap.exists ? eqSnap.data() : null;
+        if (eqData) {
+          var freq = eqData.frequency || 30;
+          nextDue  = _addDaysMM(today, freq);
+          await db.collection('pmp_equipments').doc(raw.equipmentId).update({
+            lastDone: today, nextDue: nextDue, updatedAt: FV.serverTimestamp(),
+          });
+        }
+      }
+      raw.status   = 'terminee';
+      raw.doneDate = today;
+      raw.doneBy   = completedBy;
+      var toastMsg = '✅ Maintenance terminée' + (nextDue ? ' — Prochaine : ' + _fmtDate(nextDue) : ' ✓');
+      MX.toast(toastMsg);
+      _closePmpDetail();
+    } catch (err) {
+      MX.toast('Erreur validation : ' + err.message, true);
+    }
+  }
+
+  // ── Signaler anomalie ──
+  function _signalerAnomalie(pmpId, eqName, zone) {
+    var e = MX.esc;
+    document.getElementById('m-title').textContent = 'Signaler une anomalie';
+    document.getElementById('m-sub').innerHTML =
+      '<div style="color:var(--orange);font-weight:600;font-size:12px;margin-bottom:10px">'
+      + '<i class="fas fa-triangle-exclamation"></i> ' + e(eqName) + (zone ? ' — ' + e(zone) : '') + '</div>'
+      + '<input class="fi" id="anom-titre" placeholder="Titre de l\'anomalie…" style="width:100%;margin-bottom:8px;box-sizing:border-box">'
+      + '<textarea id="anom-desc" class="fi" rows="3" placeholder="Description…" '
+      + 'style="width:100%;resize:vertical;box-sizing:border-box;margin-bottom:8px"></textarea>'
+      + '<select id="anom-pri" class="fi" style="width:100%;box-sizing:border-box">'
+      + '<option value="normale">Priorité : Normale</option>'
+      + '<option value="haute">Priorité : Haute</option>'
+      + '<option value="critique">Priorité : Critique</option>'
+      + '</select>';
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" style="background:var(--orange);border-color:var(--orange)" onclick="MX.MM._doSignalerAnomalie(\'' + e(pmpId) + '\',\'' + e(zone) + '\',\'' + e(eqName) + '\')">'
+      + '<i class="fas fa-paper-plane"></i> Envoyer</button>'
+      + '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+    setTimeout(function () {
+      var inp = document.getElementById('anom-titre');
+      if (inp) inp.focus();
+    }, 60);
+  }
+
+  function _doSignalerAnomalie(pmpId, zone, eqName) {
+    var titreEl = document.getElementById('anom-titre');
+    var descEl  = document.getElementById('anom-desc');
+    var priEl   = document.getElementById('anom-pri');
+    var titre   = titreEl ? titreEl.value.trim() : '';
+    var desc    = descEl  ? descEl.value.trim()  : '';
+    var pri     = priEl   ? priEl.value          : 'normale';
+    if (!titre) { MX.toast('Veuillez saisir un titre', true); return; }
+    var cu = MX.state.currentUser;
+    MX.closeModal();
+    db.collection('interventions').add({
+      text:         titre,
+      description:  desc,
+      priority:     pri,
+      zone:         zone,
+      assignedTo:   cu ? [cu.name] : [],
+      status:       'ouverte',
+      source:       'pmp_anomalie',
+      sourcePmpId:  pmpId,
+      sourceEqName: eqName,
+      createdBy:    cu ? cu.name : '?',
+      createdAt:    FV.serverTimestamp(),
+    }).then(function () {
+      MX.toast('Anomalie signalée — intervention créée ✓');
+      var logEntry = { text: 'Anomalie signalée : ' + titre, by: cu ? cu.name : '?', ts: Date.now(), isSystemLog: true };
+      db.collection('pmp_interventions').doc(pmpId).update({ pmpComments: FV.arrayUnion(logEntry) })
+        .catch(function (err) { console.warn('[MM] signalerAnomalie log:', err.message); });
+      var listEl = document.getElementById('pmpd-journal-' + pmpId);
+      if (listEl) {
+        var e2 = MX.esc;
+        var initials = _avatarInitials(logEntry.by);
+        var color    = _avatarColor(logEntry.by);
+        var d2       = new Date(logEntry.ts);
+        listEl.insertAdjacentHTML('beforeend',
+          '<div class="pmp-journal-entry">'
+          + '<div class="pmp-journal-avatar" style="background:' + color + '">' + initials + '</div>'
+          + '<div class="pmp-journal-content">'
+          + '<div class="pmp-journal-meta"><span class="pmp-journal-author">' + e2(logEntry.by) + '</span>'
+          + '<span class="pmp-journal-date">' + d2.toLocaleDateString('fr-FR') + ' · ' + d2.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + '</span></div>'
+          + '<div class="pmp-journal-text">' + e2(logEntry.text) + '</div>'
+          + '</div></div>');
+      }
+    }).catch(function (err) { MX.toast('Erreur: ' + err.message, true); });
+  }
+
+  // ══════════════════════════════════════════════
   // SESSION TEARDOWN
   // ══════════════════════════════════════════════
 
@@ -2761,6 +3307,7 @@
     if (_intUnsub)         { _intUnsub();          _intUnsub         = null; }
     if (_pmpUnsub)         { _pmpUnsub();          _pmpUnsub         = null; }
     if (_timerInterval)    { clearInterval(_timerInterval); _timerInterval = null; }
+    _stopPmpDetailTimer();
     _missionsLoaded = false;
     _allMissions = []; _assignedMissions = []; _unassignedPmpMissions = [];
     _orgTasks = []; _intDocs = []; _pmpDocs = [];
@@ -2946,6 +3493,15 @@
     _quickSignal: _quickSignal, _selectSigCat: _selectSigCat, _doQuickSignal: _doQuickSignal,
     _quickPostpone: _quickPostpone, _doPostpone: _doPostpone,
     _openModuleForCard: _openModuleForCard,
+    // PMP direct (pmp_interventions)
+    _openPmpDirectDetail: _openPmpDirectDetail,
+    _takePmpDirectMission: _takePmpDirectMission,
+    _releasePmpDirectMission: _releasePmpDirectMission, _doReleasePmpDirect: _doReleasePmpDirect,
+    _confirmTerminePmpDirect: _confirmTerminePmpDirect, _validatePmpDirectMission: _validatePmpDirectMission,
+    _toggleCheckDirect: _toggleCheckDirect,
+    _addPmpDirectComment: _addPmpDirectComment,
+    _triggerPmpDirectPhoto: _triggerPmpDirectPhoto, _onPmpDirectPh: _onPmpDirectPh,
+    _signalerAnomalie: _signalerAnomalie, _doSignalerAnomalie: _doSignalerAnomalie,
     _destroy: _destroy,
   };
   window.MX.MM = window.MX.Pages.MesMissions;

@@ -17980,3 +17980,31 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* Signal category chips */
 .mm-sig-cat { padding:5px 10px; border:1px solid var(--border2); border-radius:16px; background:var(--bg3); color:var(--text2); font-size:11px; cursor:pointer; transition:all .1s; }
 .mm-sig-cat:active { background:var(--border1); }
+
+/* ── PMP DIRECT DETAIL (pmp_interventions) ────────────────────── */
+/* Chrono block */
+.pmpd-chrono-block { margin:0 0 12px; padding:12px 14px; border-radius:10px; background:rgba(249,115,22,.08); border:1px solid rgba(249,115,22,.25); }
+.pmpd-chrono-row { display:flex; align-items:center; justify-content:space-between; }
+.pmpd-chrono-row--est { margin-top:6px; padding-top:6px; border-top:1px solid rgba(249,115,22,.15); }
+.pmpd-chrono-label { font-size:12px; font-weight:600; color:var(--orange,#f97316); display:flex; align-items:center; gap:5px; }
+.pmpd-chrono-time { font-size:22px; font-weight:800; color:var(--orange,#f97316); font-variant-numeric:tabular-nums; letter-spacing:0.03em; }
+.pmpd-chrono-est-lbl { font-size:11px; color:var(--text3); display:flex; align-items:center; gap:4px; }
+
+/* Historique timeline */
+.pmpd-hist-timeline { display:flex; flex-direction:column; gap:0; position:relative; padding-left:20px; }
+.pmpd-hist-timeline::before { content:''; position:absolute; left:7px; top:8px; bottom:8px; width:2px; background:var(--border1); border-radius:1px; }
+.pmpd-hist-entry { display:flex; align-items:flex-start; gap:10px; padding:8px 0; position:relative; }
+.pmpd-hist-dot { width:14px; height:14px; border-radius:50%; background:var(--pmp,#a855f7); border:2px solid var(--bg2); flex-shrink:0; position:absolute; left:-20px; top:10px; }
+.pmpd-hist-body { flex:1; min-width:0; }
+.pmpd-hist-date-tech { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:3px; }
+.pmpd-hist-date { font-size:12px; font-weight:700; color:var(--text1); }
+.pmpd-hist-tech { font-size:11px; color:var(--text2); display:flex; align-items:center; gap:3px; }
+.pmpd-hist-ck { font-size:10px; background:var(--bg3); border:1px solid var(--border1); border-radius:4px; padding:1px 5px; color:var(--text3); }
+.pmpd-hist-obs { font-size:12px; color:var(--text3); line-height:1.45; }
+
+/* Signal anomalie button */
+.pmp-signal-anomaly-btn { width:100%; padding:11px 16px; border-radius:10px; border:1.5px solid rgba(249,115,22,.4); background:rgba(249,115,22,.07); color:var(--orange,#f97316); font-weight:600; font-size:13px; font-family:var(--ffs); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; transition:all .15s; }
+.pmp-signal-anomaly-btn:hover { background:rgba(249,115,22,.14); border-color:rgba(249,115,22,.65); }
+
+/* Done badge */
+.pmp-done-badge { display:flex; align-items:center; justify-content:center; gap:8px; padding:12px 16px; border-radius:10px; background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.3); color:var(--green,#22c55e); font-weight:700; font-size:14px; }
