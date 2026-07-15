@@ -252,6 +252,7 @@
     try { P && P.Bible       && P.Bible._destroy       && P.Bible._destroy();       } catch(e) {}
     try { P && P.Planning    && P.Planning._destroy    && P.Planning._destroy();    } catch(e) {}
     try { P && P.Equipe      && P.Equipe._destroy      && P.Equipe._destroy();      } catch(e) {}
+    try { P && P.MxDoc       && P.MxDoc._destroy       && P.MxDoc._destroy();       } catch(e) {}
     // 4. Stop alerts engine
     try { window.MX.AlertsEngine && window.MX.AlertsEngine.stop && window.MX.AlertsEngine.stop(); } catch(e) {}
   }

@@ -95,6 +95,7 @@
     if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
+    if (id === "mx-doc")       return Pages.MxDoc     ? Pages.MxDoc.render()     : _renderStub("MX Doc",    "fa-file-contract", "Chargement…");
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -119,12 +120,13 @@
   };
 
   // ── NAV ACCORDION STATE ──
-  let _plngOpen  = localStorage.getItem("mx_sx_plng")  !== "0";
-  let _maintOpen = localStorage.getItem("mx_sx_maint") !== "0";
-  let _gestOpen  = localStorage.getItem("mx_sx_gest")  === "1";
-  let _anlyOpen  = localStorage.getItem("mx_sx_anly")  === "1";
-  let _adminOpen = localStorage.getItem("mx_sx_adm")   === "1";
-  let _compact   = localStorage.getItem("mx_sx_compact") === "1";
+  let _plngOpen   = localStorage.getItem("mx_sx_plng")   !== "0";
+  let _maintOpen  = localStorage.getItem("mx_sx_maint")  !== "0";
+  let _gestOpen   = localStorage.getItem("mx_sx_gest")   === "1";
+  let _anlyOpen   = localStorage.getItem("mx_sx_anly")   === "1";
+  let _adminOpen  = localStorage.getItem("mx_sx_adm")    === "1";
+  let _mxdocOpen  = localStorage.getItem("mx_sx_mxdoc")  === "1";
+  let _compact    = localStorage.getItem("mx_sx_compact") === "1";
 
   function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
 
@@ -132,37 +134,42 @@
     const mob = window.innerWidth <= 900;
     if (mob) {
       const wasPlng = _plngOpen, wasMaint = _maintOpen, wasGest = _gestOpen,
-            wasAnly = _anlyOpen, wasAdm = _adminOpen;
+            wasAnly = _anlyOpen, wasAdm = _adminOpen, wasMxdoc = _mxdocOpen;
       _plngOpen = false; _maintOpen = false; _gestOpen = false;
-      _anlyOpen = false; _adminOpen = false;
-      if (which === "plng") _plngOpen  = !wasPlng;
+      _anlyOpen = false; _adminOpen = false; _mxdocOpen = false;
+      if (which === "plng")  _plngOpen  = !wasPlng;
       if (which === "maint") _maintOpen = !wasMaint;
-      if (which === "gest") _gestOpen  = !wasGest;
-      if (which === "anly") _anlyOpen  = !wasAnly;
-      if (which === "adm")  _adminOpen = !wasAdm;
+      if (which === "gest")  _gestOpen  = !wasGest;
+      if (which === "anly")  _anlyOpen  = !wasAnly;
+      if (which === "adm")   _adminOpen = !wasAdm;
+      if (which === "mxdoc") _mxdocOpen = !wasMxdoc;
     } else {
-      if (which === "plng") _plngOpen  = !_plngOpen;
+      if (which === "plng")  _plngOpen  = !_plngOpen;
       if (which === "maint") _maintOpen = !_maintOpen;
-      if (which === "gest") _gestOpen  = !_gestOpen;
-      if (which === "anly") _anlyOpen  = !_anlyOpen;
-      if (which === "adm")  _adminOpen = !_adminOpen;
+      if (which === "gest")  _gestOpen  = !_gestOpen;
+      if (which === "anly")  _anlyOpen  = !_anlyOpen;
+      if (which === "adm")   _adminOpen = !_adminOpen;
+      if (which === "mxdoc") _mxdocOpen = !_mxdocOpen;
     }
     _sx("mx_sx_plng",  _plngOpen);
     _sx("mx_sx_maint", _maintOpen);
     _sx("mx_sx_gest",  _gestOpen);
     _sx("mx_sx_anly",  _anlyOpen);
     _sx("mx_sx_adm",   _adminOpen);
+    _sx("mx_sx_mxdoc", _mxdocOpen);
     buildNav();
   }
 
-  window.MX.toggleNavPlng  = function() { _toggleSec("plng"); };
-  window.MX.toggleNavMaint = function() { _toggleSec("maint"); };
-  window.MX.toggleNavGest  = function() { _toggleSec("gest"); };
-  window.MX.toggleNavAnly  = function() { _toggleSec("anly"); };
-  window.MX.toggleNavAdmin = function() { _toggleSec("adm"); };
-  window.MX.showCsoTab     = function(tab) { window._csoStartTab = tab; MX.showPage('consommations'); };
-  window.MX.showIntTab     = function(tab) { window._intStartTab = tab; MX.showPage('interventions'); };
-  window.MX.showPmpTab     = function(tab) { window._pmpStartTab = tab; MX.showPage('pmp'); };
+  window.MX.toggleNavPlng   = function() { _toggleSec("plng"); };
+  window.MX.toggleNavMaint  = function() { _toggleSec("maint"); };
+  window.MX.toggleNavGest   = function() { _toggleSec("gest"); };
+  window.MX.toggleNavAnly   = function() { _toggleSec("anly"); };
+  window.MX.toggleNavAdmin  = function() { _toggleSec("adm"); };
+  window.MX.toggleNavMxDoc  = function() { _toggleSec("mxdoc"); };
+  window.MX.showCsoTab      = function(tab) { window._csoStartTab  = tab; MX.showPage('consommations'); };
+  window.MX.showIntTab      = function(tab) { window._intStartTab  = tab; MX.showPage('interventions'); };
+  window.MX.showPmpTab      = function(tab) { window._pmpStartTab  = tab; MX.showPage('pmp'); };
+  window.MX.showMxDocTab    = function(tab) { window._mxdocStartTab = tab; MX.showPage('mx-doc'); };
 
   window.MX.toggleCompact = function() {
     if (window.innerWidth <= 900) {
@@ -193,6 +200,7 @@
     'equipe':        { icon: 'fa-users-gear',      l: 'Équipe' },
     'badges':        { icon: 'fa-medal',           l: 'Badges' },
     'corbeille':     { icon: 'fa-trash-can',       l: 'Corbeille' },
+    'mx-doc':        { icon: 'fa-file-contract',   l: 'MX Doc' },
   };
 
   let _favsCache = null;
@@ -399,6 +407,15 @@
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'import\')" title="Import CSV"><i class="fas fa-file-import sx-ico"></i><span class="sx-lbl">Import CSV</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'historique\')" title="Historique PMP"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
       h += _group("fa-screwdriver-wrench", "sx-group-ico--orange", "Maintenance PMP", "maint", "toggleNavMaint", _maintOpen, pmpItems, "pmp", "PMP");
+    }
+
+    // ── 📄 MX Doc (respOnly) ──
+    if (canAll) {
+      var mxdItems = '';
+      mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'modeles\')"    title="Mes modèles MX Doc"><i class="fas fa-layer-group sx-ico"></i><span class="sx-lbl">Mes modèles</span></button>';
+      mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'historique\')" title="Historique MX Doc"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
+      mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'parametres\')" title="Paramètres MX Doc"><i class="fas fa-sliders sx-ico"></i><span class="sx-lbl">Paramètres</span></button>';
+      h += _group("fa-file-contract", "sx-group-ico--cyan", "MX Doc", "mxdoc", "toggleNavMxDoc", _mxdocOpen, mxdItems, "mx-doc", "MX Doc");
     }
 
     // ── 🎯 Centre de Pilotage (respOnly) ──
