@@ -41,6 +41,14 @@
   var _v4AddMenuSIdx  = null;
   var _v4PropsTab    = 'props';
 
+  // V5 Builder state
+  var _v5NavTab      = 'elements';
+  var _v5SelSIdx     = null;
+  var _v5SelBIdx     = null;
+  var _v5MobPanel    = 'canvas';
+  var _v5SecCollapsed = {};
+  var _v5AddMenuSIdx  = null;
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -140,7 +148,7 @@
     if (!mc) return;
     if (window._mxdocStartTab) { _curTab = window._mxdocStartTab; delete window._mxdocStartTab; }
     _load();
-    if (_builderMode) { _renderBuilderV4(mc); return; }
+    if (_builderMode) { _renderBuilderV5(mc); return; }
     if (_execMode)    { _renderExec(mc);       return; }
     mc.innerHTML = _pageShell();
     _renderTabBody();
@@ -339,6 +347,12 @@
     _v4SecCollapsed = {};
     _v4AddMenuSIdx  = null;
     _v4PropsTab    = 'props';
+    _v5NavTab      = 'elements';
+    _v5SelSIdx     = null;
+    _v5SelBIdx     = null;
+    _v5MobPanel    = 'canvas';
+    _v5SecCollapsed = {};
+    _v5AddMenuSIdx  = null;
     _builderMode  = true;
     render();
   }
@@ -362,6 +376,11 @@
     _v4SecCollapsed = {};
     _v4AddMenuSIdx  = null;
     _v4PropsTab    = 'props';
+    _v5NavTab      = 'elements';
+    _v5SelSIdx     = null;
+    _v5SelBIdx     = null;
+    _v5SecCollapsed = {};
+    _v5AddMenuSIdx  = null;
     render();
   }
 
@@ -1022,6 +1041,747 @@
       var idx    = Array.from(btn.parentNode.children).indexOf(btn);
       btn.classList.toggle('mxd2-mob-btn--on', panels[idx] === panel);
     });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // V5 BUILDER — COMPACT CONTROL-SHEET UX
+  // ─────────────────────────────────────────────────────
+
+  var V5_COMPS = [
+    { key: 'hasValeur',      icon: 'fa-hashtag',       l: 'Valeur numérique', color: '#0EA5E9', hasUnit: true },
+    { key: 'hasFaitnonfait', icon: 'fa-circle-check',  l: 'Fait / Pas fait',  color: '#22C55E' },
+    { key: 'hasOuinon',      icon: 'fa-toggle-on',     l: 'Oui / Non',        color: '#10B981' },
+    { key: 'hasCommentaire', icon: 'fa-comment-lines', l: 'Commentaire',      color: '#F59E0B' },
+    { key: 'hasPhoto',       icon: 'fa-camera',        l: 'Photo',            color: '#EC4899' },
+    { key: 'hasSignature',   icon: 'fa-pen-nib',       l: 'Signature',        color: '#A855F7' },
+    { key: 'hasDate',        icon: 'fa-calendar',      l: 'Date',             color: '#F97316' },
+    { key: 'hasHeure',       icon: 'fa-clock',         l: 'Heure',            color: '#EF4444' },
+  ];
+
+  var V5_STATIC_ELS = [
+    { type: 'titre',     icon: 'fa-heading',    l: 'Titre',        desc: 'Titre de section',  color: '#8B5CF6' },
+    { type: 'sstitre',   icon: 'fa-text-height',l: 'Sous-titre',   desc: 'Sous-titre',        color: '#6366F1' },
+    { type: 'separator', icon: 'fa-minus',      l: 'Séparateur',   desc: 'Ligne de séparation',color: '#475569' },
+    { type: 'texte',     icon: 'fa-align-left', l: 'Texte simple', desc: 'Bloc de texte libre',color: '#64748B' },
+  ];
+
+  function _v5NewRow(comp) {
+    var blk = { id: _uid(), type: 'v5row', label: 'Nouveau contrôle', required: false };
+    V5_COMPS.forEach(function (c) { blk[c.key] = (c.key === comp); });
+    if (comp === 'hasValeur') blk.unit = '';
+    if (!comp) blk.hasFaitnonfait = true; // default
+    return blk;
+  }
+
+  function _renderBuilderV5(mc) {
+    var tpl = _builderTpl || {};
+    var status  = tpl.status || 'draft';
+    var statusL = STATUS_LABELS[status] || 'Brouillon';
+    var statusCls = status === 'published' ? 'mxd5-badge--pub' : status === 'archived' ? 'mxd5-badge--arch' : 'mxd5-badge--draft';
+    mc.innerHTML =
+      '<div class="mxd5-builder" id="mxd5-root">'
+      + _v5TopBarHTML(tpl, statusL, statusCls)
+      + '<div class="mxd5-layout">'
+      + '<div class="mxd5-activity-bar" id="mxd5-nav">' + _v5NavHTML() + '</div>'
+      + '<div class="mxd5-left-panel" id="mxd5-left">' + _v5LeftPanelHTML() + '</div>'
+      + '<div class="mxd5-canvas-wrap" id="mxd5-canvas">' + _v5CanvasHTML() + '</div>'
+      + '<div class="mxd5-props-panel" id="mxd5-props">' + _v5PropsPanelHTML() + '</div>'
+      + '</div>'
+      + _v5MobNavHTML()
+      + '</div>';
+    var root = document.getElementById('mxd5-root');
+    if (root) {
+      root.addEventListener('click', function (ev) {
+        if (!ev.target.closest('.mxd5-add-menu') && !ev.target.closest('.mxd5-add-row-btn')) _v5HideAddMenu();
+      });
+    }
+    _v5UpdateUndoRedo();
+  }
+
+  function _v5TopBarHTML(tpl, statusL, statusCls) {
+    var e = _e;
+    return '<div class="mxd5-topbar">'
+      + '<div class="mxd5-topbar-left">'
+      + '<button class="mxd5-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()" title="Retour"><i class="fas fa-arrow-left"></i></button>'
+      + '<div class="mxd5-topbar-brand"><span class="mxd5-brand-name">MX Doc</span><span class="mxd5-brand-sub">Édition du modèle</span></div>'
+      + '<div class="mxd5-topbar-div"></div>'
+      + '<input class="mxd5-title-inp" id="mxd5-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      + '<span class="mxd5-badge ' + statusCls + '">' + statusL + '</span>'
+      + '</div>'
+      + '<div class="mxd5-topbar-right">'
+      + '<button class="mxd5-tb-btn" id="mxd5-undo" onclick="MX.Pages.MxDoc._v5Undo()" title="Annuler" disabled><i class="fas fa-rotate-left"></i></button>'
+      + '<button class="mxd5-tb-btn" id="mxd5-redo" onclick="MX.Pages.MxDoc._v5Redo()" title="Rétablir" disabled><i class="fas fa-rotate-right"></i></button>'
+      + '<div class="mxd5-topbar-div"></div>'
+      + '<button class="mxd5-preview-btn" onclick="MX.Pages.MxDoc._v5Preview()"><i class="fas fa-eye"></i><span> Aperçu</span></button>'
+      + '<button class="mxd5-save-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'draft\')"><i class="fas fa-floppy-disk"></i><span> Enregistrer</span></button>'
+      + '<button class="mxd5-pub-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fas fa-paper-plane"></i><span> Publier</span></button>'
+      + '</div></div>';
+  }
+
+  function _v5NavHTML() {
+    var tabs = [
+      { id: 'elements', icon: 'fa-grid-2',           l: 'Éléments'  },
+      { id: 'sections', icon: 'fa-layer-group',       l: 'Sections'  },
+      { id: 'model',    icon: 'fa-file-lines',        l: 'Modèle'    },
+    ];
+    var h = '<button class="mxd5-nav-fab" onclick="MX.Pages.MxDoc._v5NavSwitch(\'elements\')" title="Ajouter"><i class="fas fa-plus"></i><span>Ajouter</span></button>';
+    tabs.forEach(function (t) {
+      h += '<button class="mxd5-nav-btn' + (_v5NavTab === t.id ? ' mxd5-nav-btn--on' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v5NavSwitch(\'' + t.id + '\')" title="' + t.l + '">'
+        + '<i class="fas ' + t.icon + '"></i><span>' + t.l + '</span></button>';
+    });
+    return h;
+  }
+
+  function _v5LeftPanelHTML() {
+    if (_v5NavTab === 'sections') return _v5SecListHTML();
+    if (_v5NavTab === 'model')    return _v5ModelPropsHTML();
+    return _v5ElListHTML();
+  }
+
+  function _v5ElListHTML() {
+    var targetSIdx = _v5SelSIdx !== null ? _v5SelSIdx : (_builderSecs.length ? _builderSecs.length - 1 : 0);
+    var h = '<div class="mxd5-lp-hdr"><span>ÉLÉMENTS</span><span class="mxd5-lp-sub">Glissez ou cliquez pour ajouter</span></div>'
+      + '<div class="mxd5-el-list" id="mxd5-el-list">';
+    V5_COMPS.forEach(function (c) {
+      h += '<div class="mxd5-el-card" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v5ElDragStart(event,\'' + c.key + '\')"'
+        + ' onclick="MX.Pages.MxDoc._v5AddEl(' + targetSIdx + ',\'' + c.key + '\')">'
+        + '<div class="mxd5-el-card-icon" style="color:' + c.color + ';background:' + c.color + '18"><i class="fas ' + c.icon + '"></i></div>'
+        + '<div class="mxd5-el-card-body"><div class="mxd5-el-card-name">' + c.l + '</div></div>'
+        + '</div>';
+    });
+    h += '<div class="mxd5-lp-section-hdr">MISE EN FORME</div>';
+    V5_STATIC_ELS.forEach(function (s) {
+      h += '<div class="mxd5-el-card" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v5ElDragStart(event,\'static:' + s.type + '\')"'
+        + ' onclick="MX.Pages.MxDoc._v5AddStatic(' + targetSIdx + ',\'' + s.type + '\')">'
+        + '<div class="mxd5-el-card-icon" style="color:' + s.color + ';background:' + s.color + '18"><i class="fas ' + s.icon + '"></i></div>'
+        + '<div class="mxd5-el-card-body"><div class="mxd5-el-card-name">' + s.l + '</div><div class="mxd5-el-card-desc">' + s.desc + '</div></div>'
+        + '</div>';
+    });
+    h += '</div><div class="mxd5-lp-footer">'
+      + '<button class="mxd5-lp-add-sec" onclick="MX.Pages.MxDoc._v5AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v5SecListHTML() {
+    var h = '<div class="mxd5-lp-hdr"><span>SECTIONS</span></div>'
+      + '<div class="mxd5-sec-list">';
+    _builderSecs.forEach(function (sec, sIdx) {
+      var color = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+      h += '<div class="mxd5-sec-list-item' + (_v5SelSIdx === sIdx && _v5SelBIdx === null ? ' mxd5-sec-list-item--sel' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v5SelectSec(' + sIdx + ')">'
+        + '<span class="mxd5-sec-dot" style="background:' + color + '"></span>'
+        + '<span class="mxd5-sec-list-name">' + _e(sec.label || 'Section') + '</span>'
+        + '<span class="mxd5-sec-list-count">' + (sec.blocks || []).length + '</span>'
+        + '</div>';
+    });
+    h += '</div><div class="mxd5-lp-footer">'
+      + '<button class="mxd5-lp-add-sec" onclick="MX.Pages.MxDoc._v5AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v5ModelPropsHTML() {
+    var tpl = _builderTpl || {};
+    var e = _e;
+    var freqOpts = Object.keys(FREQ_LABELS).map(function (k) {
+      return '<option value="' + k + '"' + (tpl.frequency === k ? ' selected' : '') + '>' + FREQ_LABELS[k] + '</option>';
+    }).join('');
+    return '<div class="mxd5-lp-hdr"><span>MODÈLE</span></div>'
+      + '<div class="mxd5-model-props">'
+      + '<div class="mxd5-mp-group"><label>Description</label>'
+      + '<textarea class="mxd5-mp-inp" rows="3" oninput="MX.Pages.MxDoc._bldDescChange(this.value)">' + e(tpl.description || '') + '</textarea></div>'
+      + '<div class="mxd5-mp-group"><label>Fréquence</label>'
+      + '<select class="mxd5-mp-inp" onchange="MX.Pages.MxDoc._bldFreqChange(this.value)">' + freqOpts + '</select></div>'
+      + '<div class="mxd5-mp-group"><label>Couleur</label>'
+      + '<input type="color" class="mxd5-mp-color" value="' + e(tpl.color || '#8B5CF6') + '" oninput="MX.Pages.MxDoc._bldColorChange(this.value)"></div>'
+      + '</div>';
+  }
+
+  function _v5CanvasHTML() {
+    var secsH = _builderSecs.map(function (sec, sIdx) { return _v5SectionHTML(sec, sIdx); }).join('');
+    return '<div class="mxd5-canvas" id="mxd5-canvas-inner">'
+      + secsH
+      + '<div class="mxd5-canvas-add-sec">'
+      + '<button class="mxd5-add-sec-btn" onclick="MX.Pages.MxDoc._v5AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div></div>';
+  }
+
+  function _v5SectionHTML(sec, sIdx) {
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+    var coll  = !!_v5SecCollapsed[sIdx];
+    var isSel = (_v5SelSIdx === sIdx && _v5SelBIdx === null);
+    var blocksH = coll ? '' : (sec.blocks || []).map(function (blk, bIdx) { return _v5RowHTML(blk, sIdx, bIdx); }).join('');
+    var addH = coll ? '' : '<div class="mxd5-add-row-wrap" id="mxd5-addrow-' + sIdx + '" style="position:relative">'
+      + '<button class="mxd5-add-row-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v5ShowAddMenu(' + sIdx + ')"><i class="fas fa-plus"></i> Ajouter une ligne</button>'
+      + (_v5AddMenuSIdx === sIdx ? _v5AddMenuHTML(sIdx) : '')
+      + '</div>';
+    return '<div class="mxd5-section' + (isSel ? ' mxd5-section--sel' : '') + '" data-sidx="' + sIdx + '" style="--sec-color:' + color + '"'
+      + ' ondragover="MX.Pages.MxDoc._v5SecDzOver(event,' + sIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v5SecDzLeave(event,' + sIdx + ')">'
+      + '<div class="mxd5-sec-hdr" onclick="MX.Pages.MxDoc._v5SelectSec(' + sIdx + ')">'
+      + '<div class="mxd5-sec-drag" draggable="true" ondragstart="MX.Pages.MxDoc._v5SecDragStart(event,' + sIdx + ')" onclick="event.stopPropagation()"><i class="fas fa-grip-vertical"></i></div>'
+      + '<div class="mxd5-sec-icon-wrap"><i class="fas fa-building"></i></div>'
+      + '<div class="mxd5-sec-info">'
+      + '<input class="mxd5-sec-title-inp" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
+      + ' oninput="MX.Pages.MxDoc._v5SecLabel(' + sIdx + ',this.value)" onclick="event.stopPropagation()">'
+      + (sec.description ? '<div class="mxd5-sec-desc">' + e(sec.description) + '</div>' : '')
+      + '</div>'
+      + '<div class="mxd5-sec-acts">'
+      + '<button class="mxd5-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v5ToggleCollapse(' + sIdx + ')" title="' + (coll ? 'Développer' : 'Réduire') + '"><i class="fas fa-chevron-' + (coll ? 'down' : 'up') + '"></i></button>'
+      + '<button class="mxd5-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v5DupSection(' + sIdx + ')" title="Dupliquer"><i class="fas fa-copy"></i></button>'
+      + '<button class="mxd5-sec-act mxd5-sec-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v5DelSection(' + sIdx + ')" title="Supprimer"><i class="fas fa-trash"></i></button>'
+      + '</div></div>'
+      + '<div class="mxd5-sec-body" id="mxd5-sec-body-' + sIdx + '"'
+      + ' ondragover="MX.Pages.MxDoc._v5ElDzOver(event,' + sIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v5ElDzDrop(event,' + sIdx + ')">'
+      + blocksH + '</div>'
+      + addH + '</div>';
+  }
+
+  function _v5RowHTML(blk, sIdx, bIdx) {
+    if (blk.type !== 'v5row') return _v5StaticRowHTML(blk, sIdx, bIdx);
+    var e   = _e;
+    var sel = (_v5SelSIdx === sIdx && _v5SelBIdx === bIdx);
+    return '<div class="mxd5-row' + (sel ? ' mxd5-row--sel' : '') + '" data-sidx="' + sIdx + '" data-bidx="' + bIdx + '"'
+      + ' onclick="MX.Pages.MxDoc._v5SelectRow(' + sIdx + ',' + bIdx + ',event)"'
+      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v5ElRowDragStart(event,' + sIdx + ',' + bIdx + ')">'
+      + (sel ? _v5FloatBarHTML(sIdx, bIdx) : '')
+      + '<div class="mxd5-row-grip"><i class="fas fa-grip-vertical"></i></div>'
+      + '<div class="mxd5-row-body">'
+      + '<div class="mxd5-row-label">' + e(blk.label || 'Contrôle') + (blk.required ? '<span class="mxd5-req"> *</span>' : '') + '</div>'
+      + '<div class="mxd5-row-comps">' + _v5RowCompsHTML(blk) + '</div>'
+      + '</div>'
+      + '<button class="mxd5-row-opts" onclick="event.stopPropagation()"><i class="fas fa-ellipsis-v"></i></button>'
+      + '</div>';
+  }
+
+  function _v5StaticRowHTML(blk, sIdx, bIdx) {
+    var e   = _e;
+    var bt  = _btInfo(blk.type);
+    var sel = (_v5SelSIdx === sIdx && _v5SelBIdx === bIdx);
+    var content = '';
+    if (blk.type === 'titre')     content = '<div class="mxd5-static-titre">' + e(blk.value || blk.label || 'Titre') + '</div>';
+    else if (blk.type === 'sstitre')  content = '<div class="mxd5-static-sstitre">' + e(blk.value || blk.label || 'Sous-titre') + '</div>';
+    else if (blk.type === 'separator') content = '<div class="mxd5-static-sep"><hr></div>';
+    else if (blk.type === 'texte')    content = '<div class="mxd5-static-texte">' + e(blk.value || blk.label || 'Texte…') + '</div>';
+    return '<div class="mxd5-static-row' + (sel ? ' mxd5-row--sel' : '') + '" data-sidx="' + sIdx + '" data-bidx="' + bIdx + '"'
+      + ' onclick="MX.Pages.MxDoc._v5SelectRow(' + sIdx + ',' + bIdx + ',event)"'
+      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v5ElRowDragStart(event,' + sIdx + ',' + bIdx + ')">'
+      + (sel ? _v5FloatBarHTML(sIdx, bIdx) : '')
+      + '<div class="mxd5-row-grip"><i class="fas fa-grip-vertical"></i></div>'
+      + content
+      + '<button class="mxd5-row-opts" onclick="event.stopPropagation()"><i class="fas fa-ellipsis-v"></i></button>'
+      + '</div>';
+  }
+
+  function _v5RowCompsHTML(blk) {
+    var h = '';
+    if (blk.hasValeur) {
+      h += '<div class="mxd5-comp-val">'
+        + '<input class="mxd5-val-inp" type="number" placeholder="—" disabled>'
+        + (blk.unit ? '<span class="mxd5-unit">' + _e(blk.unit) + '</span>' : '')
+        + '</div>';
+    }
+    if (blk.hasFaitnonfait) {
+      var lf = blk.labelFait || 'Fait'; var lnf = blk.labelNonFait || 'Pas fait';
+      h += '<div class="mxd5-comp-fnf">'
+        + '<button class="mxd5-fnf-btn mxd5-fnf-fait"><i class="fas fa-check"></i> ' + _e(lf) + '</button>'
+        + '<button class="mxd5-fnf-btn mxd5-fnf-nonfait"><i class="fas fa-times"></i> ' + _e(lnf) + '</button>'
+        + '</div>';
+    }
+    if (blk.hasOuinon) {
+      var lo = blk.labelOui || 'Oui'; var lno = blk.labelNon || 'Non';
+      h += '<div class="mxd5-comp-yn">'
+        + '<button class="mxd5-yn-btn mxd5-yn-oui"><i class="fas fa-check"></i> ' + _e(lo) + '</button>'
+        + '<button class="mxd5-yn-btn mxd5-yn-non"><i class="fas fa-times"></i> ' + _e(lno) + '</button>'
+        + '</div>';
+    }
+    if (blk.hasDate)        h += '<div class="mxd5-comp-small"><i class="fas fa-calendar"></i></div>';
+    if (blk.hasHeure)       h += '<div class="mxd5-comp-small"><i class="fas fa-clock"></i></div>';
+    if (blk.hasCommentaire) h += '<div class="mxd5-comp-expand-ic" title="Commentaire"><i class="fas fa-comment-lines"></i></div>';
+    if (blk.hasPhoto)       h += '<div class="mxd5-comp-expand-ic" title="Photo"><i class="fas fa-camera"></i></div>';
+    if (blk.hasSignature)   h += '<div class="mxd5-comp-expand-ic" title="Signature"><i class="fas fa-pen-nib"></i></div>';
+    return h;
+  }
+
+  function _v5FloatBarHTML(sIdx, bIdx) {
+    return '<div class="mxd5-float-bar" onclick="event.stopPropagation()">'
+      + '<button title="Dupliquer" onclick="MX.Pages.MxDoc._v5DupEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-copy"></i></button>'
+      + '<button title="Monter" onclick="MX.Pages.MxDoc._v5MoveEl(' + sIdx + ',' + bIdx + ',-1)"><i class="fas fa-chevron-up"></i></button>'
+      + '<button title="Descendre" onclick="MX.Pages.MxDoc._v5MoveEl(' + sIdx + ',' + bIdx + ',1)"><i class="fas fa-chevron-down"></i></button>'
+      + '<div class="mxd5-float-sep"></div>'
+      + '<button title="Supprimer" class="mxd5-fb-del" onclick="MX.Pages.MxDoc._v5DelEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-trash"></i></button>'
+      + '</div>';
+  }
+
+  function _v5AddMenuHTML(sIdx) {
+    var h = '<div class="mxd5-add-menu" onclick="event.stopPropagation()">';
+    V5_COMPS.forEach(function (c) {
+      h += '<button class="mxd5-add-menu-item" onclick="MX.Pages.MxDoc._v5AddEl(' + sIdx + ',\'' + c.key + '\')">'
+        + '<span class="mxd5-ami-icon" style="color:' + c.color + '"><i class="fas ' + c.icon + '"></i></span>'
+        + '<span>' + c.l + '</span></button>';
+    });
+    return h + '</div>';
+  }
+
+  function _v5PropsPanelHTML() {
+    if (_v5SelSIdx !== null && _v5SelBIdx !== null) {
+      var sec = _builderSecs[_v5SelSIdx];
+      var blk = sec && sec.blocks[_v5SelBIdx];
+      if (blk) return _v5ElPropsPanelHTML(blk);
+    }
+    if (_v5SelSIdx !== null) return _v5SecPropsPanelHTML();
+    return _v5DocPropsPanelHTML();
+  }
+
+  function _v5DocPropsPanelHTML() {
+    return '<div class="mxd5-pp-hdr">PROPRIÉTÉS</div>'
+      + '<div class="mxd5-pp-empty"><i class="fas fa-mouse-pointer"></i><p>Cliquez sur une ligne ou une section pour la modifier.</p></div>';
+  }
+
+  function _v5SecPropsPanelHTML() {
+    var sec   = _builderSecs[_v5SelSIdx];
+    if (!sec) return _v5DocPropsPanelHTML();
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[_v5SelSIdx % SEC_COLORS.length];
+    var swatches = SEC_COLORS.map(function (c) {
+      return '<button class="mxd5-swatch' + (color === c ? ' mxd5-swatch--on' : '') + '"'
+        + ' style="background:' + c + '" onclick="MX.Pages.MxDoc._v5SecColor(' + _v5SelSIdx + ',\'' + c + '\')"></button>';
+    }).join('');
+    return '<div class="mxd5-pp-hdr">SECTION</div>'
+      + '<div class="mxd5-pp-body">'
+      + '<div class="mxd5-pp-group"><label>Nom</label>'
+      + '<input class="mxd5-pp-inp" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
+      + ' oninput="MX.Pages.MxDoc._v5SecLabel(' + _v5SelSIdx + ',this.value)"></div>'
+      + '<div class="mxd5-pp-group"><label>Description</label>'
+      + '<textarea class="mxd5-pp-inp" rows="2" oninput="MX.Pages.MxDoc._v5SecDesc(' + _v5SelSIdx + ',this.value)">' + e(sec.description || '') + '</textarea></div>'
+      + '<div class="mxd5-pp-group"><label>Couleur</label><div class="mxd5-swatches">' + swatches + '</div></div>'
+      + '<div class="mxd5-pp-actions"><button class="mxd5-pp-del" onclick="MX.Pages.MxDoc._v5DelSection(' + _v5SelSIdx + ')"><i class="fas fa-trash"></i> Supprimer la section</button></div>'
+      + '</div>';
+  }
+
+  function _v5ElPropsPanelHTML(blk) {
+    var e = _e;
+    if (blk.type !== 'v5row') return _v5StaticPropsPanelHTML(blk);
+    var compsH = '<div class="mxd5-pp-comps">';
+    V5_COMPS.forEach(function (c) {
+      var on = !!blk[c.key];
+      compsH += '<div class="mxd5-pp-comp-row">'
+        + '<label class="mxd5-pp-comp-label">'
+        + '<input type="checkbox"' + (on ? ' checked' : '') + ' onchange="MX.Pages.MxDoc._v5ToggleComp(\'' + c.key + '\',this.checked)">'
+        + '<span class="mxd5-pp-comp-icon" style="color:' + c.color + '"><i class="fas ' + c.icon + '"></i></span>'
+        + '<span>' + c.l + '</span>'
+        + '</label>'
+        + (c.key === 'hasValeur' && on
+          ? '<input class="mxd5-pp-unit-inp" value="' + e(blk.unit || '') + '" placeholder="Unité…" oninput="MX.Pages.MxDoc._v5SetUnit(this.value)">'
+          : '')
+        + '</div>';
+    });
+    compsH += '</div>';
+    var toggleRow = function (label, key, val) {
+      return '<div class="mxd5-pp-toggle-row"><span>' + label + '</span>'
+        + '<button class="mxd5-toggle' + (val ? ' mxd5-toggle--on' : '') + '" onclick="MX.Pages.MxDoc._v5ToggleProp(\'' + key + '\',this)"></button></div>';
+    };
+    return '<div class="mxd5-pp-hdr">NOM DU CONTRÔLE</div>'
+      + '<div class="mxd5-pp-body">'
+      + '<div class="mxd5-pp-group">'
+      + '<input class="mxd5-pp-inp mxd5-pp-label-inp" value="' + e(blk.label || '') + '" placeholder="Nom du contrôle…"'
+      + ' oninput="MX.Pages.MxDoc._v5PropChange(\'label\',this.value)"></div>'
+      + '<div class="mxd5-pp-sep"></div>'
+      + '<div class="mxd5-pp-group-hdr">COMPOSANTS</div>'
+      + compsH
+      + '<div class="mxd5-pp-sep"></div>'
+      + '<div class="mxd5-pp-toggles">'
+      + toggleRow('OBLIGATOIRE', 'required', !!blk.required)
+      + '</div>'
+      + '<div class="mxd5-pp-actions"><button class="mxd5-pp-del" onclick="MX.Pages.MxDoc._v5DelEl(' + _v5SelSIdx + ',' + _v5SelBIdx + ')"><i class="fas fa-trash"></i> Supprimer la ligne</button></div>'
+      + '</div>';
+  }
+
+  function _v5StaticPropsPanelHTML(blk) {
+    var e  = _e;
+    var bt = _btInfo(blk.type);
+    var needsVal = (blk.type === 'titre' || blk.type === 'sstitre' || blk.type === 'texte');
+    return '<div class="mxd5-pp-hdr">' + bt.l.toUpperCase() + '</div>'
+      + '<div class="mxd5-pp-body">'
+      + '<div class="mxd5-pp-group"><label>Libellé</label>'
+      + '<input class="mxd5-pp-inp" value="' + e(blk.label || '') + '" placeholder="Libellé…" oninput="MX.Pages.MxDoc._v5PropChange(\'label\',this.value)"></div>'
+      + (needsVal ? '<div class="mxd5-pp-group"><label>Contenu</label>'
+        + '<textarea class="mxd5-pp-inp" rows="3" oninput="MX.Pages.MxDoc._v5PropChange(\'value\',this.value)">' + e(blk.value || '') + '</textarea></div>' : '')
+      + '<div class="mxd5-pp-actions"><button class="mxd5-pp-del" onclick="MX.Pages.MxDoc._v5DelEl(' + _v5SelSIdx + ',' + _v5SelBIdx + ')"><i class="fas fa-trash"></i> Supprimer</button></div>'
+      + '</div>';
+  }
+
+  function _v5MobNavHTML() {
+    return '<div class="mxd5-mob-nav">'
+      + '<button class="mxd5-mob-btn' + (_v5MobPanel === 'elements' ? ' mxd5-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v5MobSwitch(\'elements\')"><i class="fas fa-grid-2"></i><span>Éléments</span></button>'
+      + '<button class="mxd5-mob-btn' + (_v5MobPanel === 'sections' ? ' mxd5-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v5MobSwitch(\'sections\')"><i class="fas fa-layer-group"></i><span>Sections</span></button>'
+      + '<button class="mxd5-mob-fab" onclick="MX.Pages.MxDoc._v5AddSection()"><i class="fas fa-plus"></i></button>'
+      + '<button class="mxd5-mob-btn' + (_v5MobPanel === 'canvas' ? ' mxd5-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v5MobSwitch(\'canvas\')"><i class="fas fa-eye"></i><span>Aperçu</span></button>'
+      + '</div>';
+  }
+
+  // ── V5 REFRESH ──
+  function _v5RefreshCanvas() {
+    var el = document.getElementById('mxd5-canvas-inner');
+    if (!el) return;
+    el.innerHTML = _builderSecs.map(function (sec, sIdx) { return _v5SectionHTML(sec, sIdx); }).join('')
+      + '<div class="mxd5-canvas-add-sec"><button class="mxd5-add-sec-btn" onclick="MX.Pages.MxDoc._v5AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button></div>';
+  }
+
+  function _v5RefreshSection(sIdx) {
+    var old = document.querySelector('.mxd5-section[data-sidx="' + sIdx + '"],.mxd5-static-row[data-sidx="' + sIdx + '"]');
+    var parent = document.getElementById('mxd5-canvas-inner');
+    var oldSec = parent && parent.querySelector('[data-sidx="' + sIdx + '"].mxd5-section');
+    if (!oldSec) { _v5RefreshCanvas(); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) { _v5RefreshCanvas(); return; }
+    var d = document.createElement('div');
+    d.innerHTML = _v5SectionHTML(sec, sIdx);
+    oldSec.parentNode.replaceChild(d.firstChild, oldSec);
+  }
+
+  function _v5RefreshRow(sIdx, bIdx) {
+    var old = document.querySelector('.mxd5-row[data-sidx="' + sIdx + '"][data-bidx="' + bIdx + '"],.mxd5-static-row[data-sidx="' + sIdx + '"][data-bidx="' + bIdx + '"]');
+    if (!old) { _v5RefreshSection(sIdx); return; }
+    var sec = _builderSecs[sIdx]; var blk = sec && sec.blocks[bIdx];
+    if (!blk) { _v5RefreshSection(sIdx); return; }
+    var d = document.createElement('div');
+    d.innerHTML = _v5RowHTML(blk, sIdx, bIdx);
+    old.parentNode.replaceChild(d.firstChild, old);
+  }
+
+  function _v5RefreshProps() {
+    var el = document.getElementById('mxd5-props');
+    if (el) el.innerHTML = _v5PropsPanelHTML();
+  }
+
+  function _v5RefreshLeftPanel() {
+    var el = document.getElementById('mxd5-left');
+    if (el) el.innerHTML = _v5LeftPanelHTML();
+  }
+
+  function _v5RefreshNav() {
+    var el = document.getElementById('mxd5-nav');
+    if (el) el.innerHTML = _v5NavHTML();
+  }
+
+  // ── V5 UNDO/REDO ──
+  function _v5Push() {
+    _v2History.push(JSON.stringify(_builderSecs));
+    if (_v2History.length > 50) _v2History.shift();
+    _v2Future = [];
+    _v5UpdateUndoRedo();
+  }
+
+  function _v5UpdateUndoRedo() {
+    var u = document.getElementById('mxd5-undo');
+    var r = document.getElementById('mxd5-redo');
+    if (u) u.disabled = !_v2History.length;
+    if (r) r.disabled = !_v2Future.length;
+  }
+
+  function _v5Undo() {
+    if (!_v2History.length) return;
+    _v2Future.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2History.pop());
+    _v5SelSIdx = null; _v5SelBIdx = null;
+    _v5RefreshCanvas(); _v5RefreshProps(); _v5RefreshLeftPanel(); _v5UpdateUndoRedo();
+  }
+
+  function _v5Redo() {
+    if (!_v2Future.length) return;
+    _v2History.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2Future.pop());
+    _v5SelSIdx = null; _v5SelBIdx = null;
+    _v5RefreshCanvas(); _v5RefreshProps(); _v5RefreshLeftPanel(); _v5UpdateUndoRedo();
+  }
+
+  function _v5Preview() {
+    if (!_builderTpl) return;
+    var copy = JSON.parse(JSON.stringify(_builderTpl));
+    copy.sections = JSON.parse(JSON.stringify(_builderSecs));
+    _execTemplate = copy; _execMode = true; _builderMode = false; render();
+  }
+
+  // ── V5 NAV ──
+  function _v5NavSwitch(tab) {
+    _v5NavTab = tab; _v5RefreshNav(); _v5RefreshLeftPanel();
+  }
+
+  function _v5MobSwitch(panel) {
+    _v5MobPanel = panel;
+    var lp = document.getElementById('mxd5-left');
+    var cw = document.getElementById('mxd5-canvas');
+    var pp = document.getElementById('mxd5-props');
+    if (lp) lp.setAttribute('data-mob', (panel === 'elements' || panel === 'sections') ? 'active' : '');
+    if (cw) cw.setAttribute('data-mob', panel === 'canvas' ? 'active' : '');
+    if (pp) pp.setAttribute('data-mob', panel === 'props' ? 'active' : '');
+  }
+
+  // ── V5 SELECTION ──
+  function _v5SelectSec(sIdx) {
+    var prevS = _v5SelSIdx; var prevB = _v5SelBIdx;
+    _v5SelSIdx = sIdx; _v5SelBIdx = null;
+    if (prevB !== null && prevS !== null) _v5RefreshRow(prevS, prevB);
+    if (prevS !== null && prevB === null && prevS !== sIdx) {
+      var ps = document.querySelector('.mxd5-section[data-sidx="' + prevS + '"]');
+      if (ps) ps.classList.remove('mxd5-section--sel');
+    }
+    var ns = document.querySelector('.mxd5-section[data-sidx="' + sIdx + '"]');
+    if (ns) ns.classList.add('mxd5-section--sel');
+    _v5RefreshProps();
+  }
+
+  function _v5SelectRow(sIdx, bIdx, ev) {
+    if (ev) ev.stopPropagation();
+    var prevS = _v5SelSIdx; var prevB = _v5SelBIdx;
+    _v5SelSIdx = sIdx; _v5SelBIdx = bIdx;
+    if (prevB !== null && (prevS !== sIdx || prevB !== bIdx)) _v5RefreshRow(prevS, prevB);
+    _v5RefreshRow(sIdx, bIdx);
+    _v5RefreshProps();
+  }
+
+  // ── V5 ADD MENU ──
+  function _v5ShowAddMenu(sIdx) {
+    var prev = _v5AddMenuSIdx; _v5AddMenuSIdx = sIdx;
+    if (prev !== null && prev !== sIdx) _v5RefreshSection(prev);
+    _v5RefreshSection(sIdx);
+  }
+
+  function _v5HideAddMenu() {
+    if (_v5AddMenuSIdx === null) return;
+    var prev = _v5AddMenuSIdx; _v5AddMenuSIdx = null; _v5RefreshSection(prev);
+  }
+
+  // ── V5 SECTION ACTIONS ──
+  function _v5AddSection() {
+    _v5Push();
+    var color = SEC_COLORS[_builderSecs.length % SEC_COLORS.length];
+    _builderSecs.push({ id: _uid(), label: 'Section ' + (_builderSecs.length + 1), color: color, blocks: [] });
+    _v5SelSIdx = _builderSecs.length - 1; _v5SelBIdx = null;
+    _v5RefreshCanvas(); _v5RefreshProps(); _v5RefreshLeftPanel();
+    var ns = document.querySelector('.mxd5-section[data-sidx="' + _v5SelSIdx + '"]');
+    if (ns) ns.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function _v5DelSection(sIdx) {
+    if (_builderSecs.length <= 1) { MX.toast('Impossible de supprimer la dernière section', true); return; }
+    _v5Push();
+    _builderSecs.splice(sIdx, 1);
+    if (_v5SelSIdx >= sIdx) { _v5SelSIdx = Math.max(0, _v5SelSIdx - 1); _v5SelBIdx = null; }
+    _v5RefreshCanvas(); _v5RefreshProps(); _v5RefreshLeftPanel();
+  }
+
+  function _v5DupSection(sIdx) {
+    _v5Push();
+    var copy = JSON.parse(JSON.stringify(_builderSecs[sIdx]));
+    copy.id = _uid(); copy.label = 'Copie — ' + copy.label;
+    copy.blocks = (copy.blocks || []).map(function (b) { var nb = JSON.parse(JSON.stringify(b)); nb.id = _uid(); return nb; });
+    _builderSecs.splice(sIdx + 1, 0, copy);
+    _v5SelSIdx = sIdx + 1; _v5SelBIdx = null;
+    _v5RefreshCanvas(); _v5RefreshProps(); _v5RefreshLeftPanel();
+  }
+
+  function _v5ToggleCollapse(sIdx) {
+    _v5SecCollapsed[sIdx] = !_v5SecCollapsed[sIdx]; _v5RefreshSection(sIdx);
+  }
+
+  function _v5SecLabel(sIdx, v) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].label = v;
+    if (_v5NavTab === 'sections') _v5RefreshLeftPanel();
+  }
+
+  function _v5SecDesc(sIdx, v) { if (_builderSecs[sIdx]) _builderSecs[sIdx].description = v; }
+
+  function _v5SecColor(sIdx, color) {
+    if (!_builderSecs[sIdx]) return;
+    _v5Push(); _builderSecs[sIdx].color = color;
+    _v5RefreshSection(sIdx); _v5RefreshProps();
+  }
+
+  // ── V5 ELEMENT ACTIONS ──
+  function _v5AddEl(sIdx, compKey) {
+    if (!_builderSecs[sIdx]) sIdx = _builderSecs.length - 1;
+    _v5Push();
+    var blk = _v5NewRow(compKey);
+    _builderSecs[sIdx].blocks.push(blk);
+    _v5SelSIdx = sIdx; _v5SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v5HideAddMenu();
+    _v5RefreshSection(sIdx); _v5RefreshProps();
+    var nr = document.querySelector('.mxd5-row[data-sidx="' + sIdx + '"][data-bidx="' + _v5SelBIdx + '"]');
+    if (nr) nr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function _v5AddStatic(sIdx, type) {
+    if (!_builderSecs[sIdx]) sIdx = _builderSecs.length - 1;
+    _v5Push();
+    var bt = _btInfo(type);
+    _builderSecs[sIdx].blocks.push({ id: _uid(), type: type, label: bt.l, value: '' });
+    _v5SelSIdx = sIdx; _v5SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v5RefreshSection(sIdx); _v5RefreshProps();
+  }
+
+  function _v5DelEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec) return;
+    _v5Push(); sec.blocks.splice(bIdx, 1);
+    if (_v5SelSIdx === sIdx && _v5SelBIdx === bIdx) _v5SelBIdx = null;
+    else if (_v5SelSIdx === sIdx && _v5SelBIdx > bIdx) _v5SelBIdx--;
+    _v5RefreshSection(sIdx); _v5RefreshProps(); _v5RefreshLeftPanel();
+  }
+
+  function _v5DupEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec) return;
+    _v5Push();
+    var copy = JSON.parse(JSON.stringify(sec.blocks[bIdx])); copy.id = _uid();
+    sec.blocks.splice(bIdx + 1, 0, copy);
+    _v5SelSIdx = sIdx; _v5SelBIdx = bIdx + 1;
+    _v5RefreshSection(sIdx); _v5RefreshProps();
+  }
+
+  function _v5MoveEl(sIdx, bIdx, dir) {
+    var sec = _builderSecs[sIdx]; if (!sec) return;
+    var ni = bIdx + dir;
+    if (ni < 0 || ni >= sec.blocks.length) return;
+    _v5Push();
+    var tmp = sec.blocks[bIdx]; sec.blocks[bIdx] = sec.blocks[ni]; sec.blocks[ni] = tmp;
+    _v5SelBIdx = ni; _v5RefreshSection(sIdx);
+  }
+
+  function _v5PropChange(key, value) {
+    if (_v5SelSIdx === null || _v5SelBIdx === null) return;
+    var blk = _builderSecs[_v5SelSIdx] && _builderSecs[_v5SelSIdx].blocks[_v5SelBIdx];
+    if (!blk) return;
+    blk[key] = value;
+    if (key === 'label') {
+      var lbl = document.querySelector('.mxd5-row[data-sidx="' + _v5SelSIdx + '"][data-bidx="' + _v5SelBIdx + '"] .mxd5-row-label');
+      if (lbl) lbl.textContent = value + (blk.required ? ' *' : '');
+    }
+  }
+
+  function _v5ToggleProp(key, el) {
+    if (_v5SelSIdx === null || _v5SelBIdx === null) return;
+    var blk = _builderSecs[_v5SelSIdx] && _builderSecs[_v5SelSIdx].blocks[_v5SelBIdx];
+    if (!blk) return;
+    blk[key] = !blk[key];
+    if (el) el.classList.toggle('mxd5-toggle--on', !!blk[key]);
+    if (key === 'required') _v5RefreshRow(_v5SelSIdx, _v5SelBIdx);
+  }
+
+  function _v5ToggleComp(compKey, checked) {
+    if (_v5SelSIdx === null || _v5SelBIdx === null) return;
+    var blk = _builderSecs[_v5SelSIdx] && _builderSecs[_v5SelSIdx].blocks[_v5SelBIdx];
+    if (!blk || blk.type !== 'v5row') return;
+    _v5Push();
+    blk[compKey] = checked;
+    _v5RefreshRow(_v5SelSIdx, _v5SelBIdx);
+    _v5RefreshProps();
+  }
+
+  function _v5SetUnit(value) {
+    if (_v5SelSIdx === null || _v5SelBIdx === null) return;
+    var blk = _builderSecs[_v5SelSIdx] && _builderSecs[_v5SelSIdx].blocks[_v5SelBIdx];
+    if (!blk) return;
+    blk.unit = value;
+    var unitEl = document.querySelector('.mxd5-row[data-sidx="' + _v5SelSIdx + '"][data-bidx="' + _v5SelBIdx + '"] .mxd5-unit');
+    if (unitEl) unitEl.textContent = value;
+  }
+
+  // ── V5 DRAG & DROP ──
+  var _v5SecDragSrcIdx  = null;
+  var _v5ElDragComp     = null;
+  var _v5ElDragFromSIdx = null;
+  var _v5ElDragFromBIdx = null;
+
+  function _v5SecDragStart(ev, sIdx) {
+    _v5SecDragSrcIdx = sIdx;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', 'v5sec:' + sIdx);
+    ev.stopPropagation();
+  }
+
+  function _v5SecDzOver(ev, sIdx) {
+    if (_v5SecDragSrcIdx === null) return;
+    ev.preventDefault(); ev.stopPropagation();
+    document.querySelectorAll('.mxd5-section').forEach(function (s) { s.classList.remove('mxd5-sec-dz--over'); });
+    var el = document.querySelector('.mxd5-section[data-sidx="' + sIdx + '"]');
+    if (el) el.classList.add('mxd5-sec-dz--over');
+  }
+
+  function _v5SecDzLeave(ev, sIdx) {
+    var el = document.querySelector('.mxd5-section[data-sidx="' + sIdx + '"]');
+    if (el) el.classList.remove('mxd5-sec-dz--over');
+  }
+
+  function _v5ElDragStart(ev, comp) {
+    _v5ElDragComp = comp; _v5ElDragFromSIdx = null; _v5ElDragFromBIdx = null;
+    ev.dataTransfer.effectAllowed = 'copy';
+    ev.dataTransfer.setData('text/plain', 'v5el:' + comp);
+    ev.stopPropagation();
+  }
+
+  function _v5ElRowDragStart(ev, sIdx, bIdx) {
+    var sec = _builderSecs[sIdx]; var blk = sec && sec.blocks[bIdx];
+    if (!blk) return;
+    _v5ElDragFromSIdx = sIdx; _v5ElDragFromBIdx = bIdx; _v5ElDragComp = null;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', 'v5row:' + sIdx + ':' + bIdx);
+    ev.stopPropagation();
+  }
+
+  function _v5ElDzOver(ev, sIdx) {
+    ev.preventDefault(); ev.stopPropagation();
+  }
+
+  function _v5ElDzDrop(ev, sIdx) {
+    ev.preventDefault(); ev.stopPropagation();
+    var raw = ev.dataTransfer.getData('text/plain') || '';
+    var parts = raw.split(':');
+    if (parts[0] === 'v5el') {
+      var comp = parts[1];
+      var isStatic = comp.startsWith('static:');
+      _v5Push();
+      var blk;
+      if (isStatic) {
+        var stype = comp.replace('static:', '');
+        var bt = _btInfo(stype);
+        blk = { id: _uid(), type: stype, label: bt.l, value: '' };
+      } else {
+        blk = _v5NewRow(comp);
+      }
+      _builderSecs[sIdx].blocks.push(blk);
+      _v5SelSIdx = sIdx; _v5SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+      _v5RefreshSection(sIdx); _v5RefreshProps(); _v5RefreshLeftPanel();
+    } else if (parts[0] === 'v5row') {
+      var fromS = parseInt(parts[1]); var fromB = parseInt(parts[2]);
+      if (!isNaN(fromS) && !isNaN(fromB)) {
+        _v5Push();
+        var moved = _builderSecs[fromS].blocks.splice(fromB, 1)[0];
+        _builderSecs[sIdx].blocks.push(moved);
+        _v5SelSIdx = sIdx; _v5SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+        if (fromS !== sIdx) _v5RefreshSection(fromS);
+        _v5RefreshSection(sIdx); _v5RefreshProps(); _v5RefreshLeftPanel();
+      }
+    } else if (parts[0] === 'v5sec') {
+      var target = parseInt(parts[1]);
+      if (!isNaN(target) && target !== _v5SecDragSrcIdx && _v5SecDragSrcIdx !== null) {
+        document.querySelectorAll('.mxd5-section').forEach(function (s) { s.classList.remove('mxd5-sec-dz--over'); });
+        _v5Push();
+        var movedSec = _builderSecs.splice(_v5SecDragSrcIdx, 1)[0];
+        var insertAt = target > _v5SecDragSrcIdx ? target - 1 : target;
+        _builderSecs.splice(insertAt, 0, movedSec);
+        _v5SecDragSrcIdx = null;
+        _v5SelSIdx = insertAt; _v5SelBIdx = null;
+        _v5RefreshCanvas(); _v5RefreshLeftPanel(); _v5RefreshProps();
+      }
+    }
+    _v5ElDragComp = null; _v5ElDragFromSIdx = null; _v5ElDragFromBIdx = null; _v5SecDragSrcIdx = null;
   }
 
   // ─────────────────────────────────────────────────────
@@ -2399,7 +3159,7 @@
 
   async function _saveBuilder(status) {
     if (!_builderTpl) return;
-    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title') || document.getElementById('mxd4-title');
+    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title') || document.getElementById('mxd4-title') || document.getElementById('mxd5-title');
     var descEl  = document.getElementById('mxd-bld-desc');
     var freqEl  = document.getElementById('mxd-bld-freq');
     var colorEl = document.getElementById('mxd-bld-color');
@@ -2482,6 +3242,7 @@
   }
 
   function _renderExecBlock(blk) {
+    if (blk.type === 'v5row') return _renderV5ExecRow(blk);
     var e   = _e;
     var val = _execResponses[blk.id];
     var bt  = _btInfo(blk.type);
@@ -2539,6 +3300,133 @@
   }
 
   function _setResponse(blkId, value) { _execResponses[blkId] = value; }
+
+  function _v5SetResponse(blkId, key, value) {
+    if (!_execResponses[blkId] || typeof _execResponses[blkId] !== 'object') _execResponses[blkId] = {};
+    _execResponses[blkId][key] = value;
+    // button visual feedback for fnf/yn
+    var row = document.getElementById('mxd-v5-' + blkId);
+    if (!row) return;
+    if (key === 'fnf') {
+      row.querySelectorAll('.mxd-v5-fnf-btn').forEach(function (b) { b.classList.remove('mxd-v5-active'); });
+      var btn = row.querySelector('.mxd-v5-fnf-btn[data-v="' + value + '"]');
+      if (btn) btn.classList.add('mxd-v5-active');
+    }
+    if (key === 'yn') {
+      row.querySelectorAll('.mxd-v5-yn-btn').forEach(function (b) { b.classList.remove('mxd-v5-active'); });
+      var btn2 = row.querySelector('.mxd-v5-yn-btn[data-v="' + value + '"]');
+      if (btn2) btn2.classList.add('mxd-v5-active');
+    }
+  }
+
+  function _v5ToggleExpand(blkId, key) {
+    var row = document.getElementById('mxd-v5-' + blkId);
+    if (!row) return;
+    var area = row.querySelector('.mxd-v5-expand-' + key);
+    var btn  = row.querySelector('.mxd-v5-expand-btn[data-k="' + key + '"]');
+    if (area) { area.style.display = area.style.display === 'none' ? '' : 'none'; }
+    if (btn)  btn.classList.toggle('mxd-v5-expand-btn--on');
+  }
+
+  function _renderV5ExecRow(blk) {
+    var e   = _e;
+    var bid = e(blk.id);
+    var r   = (_execResponses[blk.id] && typeof _execResponses[blk.id] === 'object') ? _execResponses[blk.id] : {};
+    var req = blk.required ? '<span class="mxd-req"> *</span>' : '';
+    var h   = '<div class="mxd-v5-row" id="mxd-v5-' + bid + '">'
+      + '<div class="mxd-v5-row-label">' + e(blk.label || 'Contrôle') + req + '</div>'
+      + '<div class="mxd-v5-row-comps">';
+    if (blk.hasValeur) {
+      h += '<div class="mxd-v5-val-wrap">'
+        + '<input type="number" class="mxd-v5-val-inp" value="' + (r.val !== undefined ? r.val : '') + '"'
+        + ' placeholder="—" oninput="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'val\',parseFloat(this.value))">'
+        + (blk.unit ? '<span class="mxd-v5-unit">' + e(blk.unit) + '</span>' : '')
+        + '</div>';
+    }
+    if (blk.hasFaitnonfait) {
+      var lf = e(blk.labelFait || 'Fait'); var lnf = e(blk.labelNonFait || 'Pas fait');
+      h += '<div class="mxd-v5-fnf">'
+        + '<button class="mxd-v5-fnf-btn mxd-v5-fait' + (r.fnf === 'fait' ? ' mxd-v5-active' : '') + '"'
+        + ' data-v="fait" onclick="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'fnf\',\'fait\')">'
+        + '<i class="fas fa-check"></i> ' + lf + '</button>'
+        + '<button class="mxd-v5-fnf-btn mxd-v5-nonfait' + (r.fnf === 'non_fait' ? ' mxd-v5-active' : '') + '"'
+        + ' data-v="non_fait" onclick="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'fnf\',\'non_fait\')">'
+        + '<i class="fas fa-times"></i> ' + lnf + '</button>'
+        + '</div>';
+    }
+    if (blk.hasOuinon) {
+      var lo = e(blk.labelOui || 'Oui'); var ln = e(blk.labelNon || 'Non');
+      h += '<div class="mxd-v5-yn">'
+        + '<button class="mxd-v5-yn-btn mxd-v5-oui' + (r.yn === 'oui' ? ' mxd-v5-active' : '') + '"'
+        + ' data-v="oui" onclick="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'yn\',\'oui\')">'
+        + '<i class="fas fa-check"></i> ' + lo + '</button>'
+        + '<button class="mxd-v5-yn-btn mxd-v5-non' + (r.yn === 'non' ? ' mxd-v5-active' : '') + '"'
+        + ' data-v="non" onclick="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'yn\',\'non\')">'
+        + '<i class="fas fa-times"></i> ' + ln + '</button>'
+        + '</div>';
+    }
+    if (blk.hasDate) {
+      h += '<div class="mxd-v5-date-wrap">'
+        + '<input type="date" class="mxd-v5-date-inp" value="' + (r.date || '') + '"'
+        + ' oninput="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'date\',this.value)">'
+        + '</div>';
+    }
+    if (blk.hasHeure) {
+      h += '<div class="mxd-v5-heure-wrap">'
+        + '<input type="time" class="mxd-v5-heure-inp" value="' + (r.heure || '') + '"'
+        + ' oninput="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'heure\',this.value)">'
+        + '</div>';
+    }
+    if (blk.hasCommentaire) {
+      h += '<div class="mxd-v5-expand-row">'
+        + '<button class="mxd-v5-expand-btn' + (r.comment ? ' mxd-v5-expand-btn--on' : '') + '" data-k="comment"'
+        + ' onclick="MX.Pages.MxDoc._v5ToggleExpand(\'' + bid + '\',\'comment\')">'
+        + '<i class="fas fa-comment-lines"></i> Commentaire</button>'
+        + '<div class="mxd-v5-expand-comment" style="display:' + (r.comment ? '' : 'none') + '">'
+        + '<textarea class="mxd-v5-comment-ta" rows="2" placeholder="Votre commentaire…"'
+        + ' oninput="MX.Pages.MxDoc._v5SetResponse(\'' + bid + '\',\'comment\',this.value)">' + e(r.comment || '') + '</textarea>'
+        + '</div></div>';
+    }
+    if (blk.hasPhoto) {
+      h += '<div class="mxd-v5-expand-row">'
+        + '<button class="mxd-v5-expand-btn' + (r.photo ? ' mxd-v5-expand-btn--on' : '') + '" data-k="photo"'
+        + ' onclick="MX.Pages.MxDoc._v5ToggleExpand(\'' + bid + '\',\'photo\')">'
+        + '<i class="fas fa-camera"></i> Photo</button>'
+        + '<div class="mxd-v5-expand-photo" style="display:' + (r.photo ? '' : 'none') + '">'
+        + '<input type="file" accept="image/*" capture="environment" class="mxd-v5-photo-inp" id="mxd-v5-ph-' + bid + '"'
+        + ' onchange="MX.Pages.MxDoc._v5OnPhoto(\'' + bid + '\',this)">'
+        + '<label for="mxd-v5-ph-' + bid + '" class="mxd-v5-photo-lbl">'
+        + (r.photo ? '<img src="' + r.photo + '" class="mxd-v5-photo-prev">' : '<i class="fas fa-camera"></i><span>Ajouter une photo</span>')
+        + '</label></div></div>';
+    }
+    if (blk.hasSignature) {
+      h += '<div class="mxd-v5-sig-ph"><i class="fas fa-pen-nib"></i><span>Zone signature</span></div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  function _v5OnPhoto(blkId, input) {
+    var file = input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var img = new Image();
+      img.onload = function () {
+        var MAX = 800; var w = img.width; var h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        var dataUrl = cv.toDataURL('image/jpeg', 0.75);
+        _v5SetResponse(blkId, 'photo', dataUrl);
+        var lbl = document.querySelector('#mxd-v5-ph-' + blkId + ' + label');
+        if (lbl) lbl.innerHTML = '<img src="' + dataUrl + '" class="mxd-v5-photo-prev">';
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
 
   function _onExecPhoto(blkId, input) {
     var file = input.files[0];
@@ -2650,6 +3538,12 @@
     _v4SecCollapsed = {};
     _v4AddMenuSIdx  = null;
     _v4PropsTab     = 'props';
+    _v5NavTab       = 'elements';
+    _v5SelSIdx      = null;
+    _v5SelBIdx      = null;
+    _v5MobPanel     = 'canvas';
+    _v5SecCollapsed = {};
+    _v5AddMenuSIdx  = null;
   }
 
   // ── EXPOSE ──
@@ -2760,6 +3654,42 @@
     _v4ElDragStart,
     _v4ElDzOver,
     _v4ElDzDrop,
+    // V5
+    _v5Undo,
+    _v5Redo,
+    _v5Preview,
+    _v5NavSwitch,
+    _v5MobSwitch,
+    _v5SelectSec,
+    _v5SelectRow,
+    _v5ShowAddMenu,
+    _v5HideAddMenu,
+    _v5AddSection,
+    _v5DelSection,
+    _v5DupSection,
+    _v5ToggleCollapse,
+    _v5SecLabel,
+    _v5SecDesc,
+    _v5SecColor,
+    _v5AddEl,
+    _v5AddStatic,
+    _v5DelEl,
+    _v5DupEl,
+    _v5MoveEl,
+    _v5PropChange,
+    _v5ToggleProp,
+    _v5ToggleComp,
+    _v5SetUnit,
+    _v5SecDragStart,
+    _v5SecDzOver,
+    _v5SecDzLeave,
+    _v5ElDragStart,
+    _v5ElRowDragStart,
+    _v5ElDzOver,
+    _v5ElDzDrop,
+    _v5SetResponse,
+    _v5ToggleExpand,
+    _v5OnPhoto,
     // Exec
     _startExec,
     _closeExec,
