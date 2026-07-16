@@ -25,6 +25,13 @@
   var _v2ElDragSrc   = null;
   var _v2SecDragSrc  = null;
 
+  // V3 Builder state
+  var _v3SelSIdx     = null;
+  var _v3SelBIdx     = null;
+  var _v3MobPanel    = 'canvas';
+  var _v3SecCollapsed = {};
+  var _v3AddMenuSIdx  = null;
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -123,7 +130,7 @@
     if (!mc) return;
     if (window._mxdocStartTab) { _curTab = window._mxdocStartTab; delete window._mxdocStartTab; }
     _load();
-    if (_builderMode) { _renderBuilderV2(mc); return; }
+    if (_builderMode) { _renderBuilderV3(mc); return; }
     if (_execMode)    { _renderExec(mc);       return; }
     mc.innerHTML = _pageShell();
     _renderTabBody();
@@ -310,6 +317,11 @@
     _v2PalDragType = null;
     _v2ElDragSrc   = null;
     _v2SecDragSrc  = null;
+    _v3SelSIdx     = null;
+    _v3SelBIdx     = null;
+    _v3MobPanel    = 'canvas';
+    _v3SecCollapsed = {};
+    _v3AddMenuSIdx  = null;
     _builderMode  = true;
     render();
   }
@@ -323,6 +335,10 @@
     _v2Future     = [];
     _v2SelSIdx    = null;
     _v2SelEIdx    = null;
+    _v3SelSIdx    = null;
+    _v3SelBIdx    = null;
+    _v3SecCollapsed = {};
+    _v3AddMenuSIdx  = null;
     render();
   }
 
@@ -985,6 +1001,589 @@
     });
   }
 
+  // ─────────────────────────────────────────────────────
+  // V3 BUILDER — NOTION+CANVA STYLE
+  // ─────────────────────────────────────────────────────
+
+  function _renderBuilderV3(mc) {
+    var tpl = _builderTpl || {};
+    var status  = tpl.status || 'draft';
+    var statusL = STATUS_LABELS[status] || 'Brouillon';
+    var statusCls = status === 'published' ? 'mxd3-badge--pub' : status === 'archived' ? 'mxd3-badge--arch' : 'mxd3-badge--draft';
+    mc.innerHTML =
+      '<div class="mxd3-builder" onclick="MX.Pages.MxDoc._v3HideAddMenu()">'
+      + _v3TopBarHTML(tpl, statusL, statusCls)
+      + '<div class="mxd3-layout">'
+      + '<div class="mxd3-canvas-wrap" id="mxd3-canvas"' + (_v3MobPanel === 'canvas' ? ' data-mob="active"' : '') + '>'
+      + _v3CanvasHTML()
+      + '</div>'
+      + '<div class="mxd3-props-panel" id="mxd3-props"' + (_v3MobPanel === 'props' ? ' data-mob="active"' : '') + '>'
+      + _v3PropsPanelHTML()
+      + '</div>'
+      + '</div>'
+      + _v3MobNavHTML()
+      + '</div>';
+  }
+
+  function _v3TopBarHTML(tpl, statusL, statusCls) {
+    var e = _e;
+    return '<div class="mxd3-topbar">'
+      + '<div class="mxd3-topbar-left">'
+      + '<button class="mxd3-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()"><i class="fas fa-arrow-left"></i><span> Retour</span></button>'
+      + '<div class="mxd3-topbar-div"></div>'
+      + '<input class="mxd3-title-inp" id="mxd3-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      + '<span class="mxd3-badge ' + statusCls + '">' + statusL + '</span>'
+      + '</div>'
+      + '<div class="mxd3-topbar-right">'
+      + '<button class="mxd3-icon-btn" id="mxd3-undo" onclick="MX.Pages.MxDoc._v3Undo()" title="Annuler" disabled><i class="fas fa-rotate-left"></i></button>'
+      + '<button class="mxd3-icon-btn" id="mxd3-redo" onclick="MX.Pages.MxDoc._v3Redo()" title="Rétablir" disabled><i class="fas fa-rotate-right"></i></button>'
+      + '<button class="mxd3-icon-btn" onclick="MX.Pages.MxDoc._v3Preview()" title="Aperçu"><i class="fas fa-play"></i></button>'
+      + '<button class="mxd3-save-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'draft\')"><i class="fas fa-floppy-disk"></i><span> Enregistrer</span></button>'
+      + '<button class="mxd3-pub-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fas fa-globe"></i><span> Publier</span></button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v3CanvasHTML() {
+    var tpl    = _builderTpl || {};
+    var e      = _e;
+    var accent = e(tpl.color || '#8B5CF6');
+    var h = '<div class="mxd3-canvas">'
+      + '<div class="mxd3-doc-card" style="--doc-accent:' + accent + '">'
+      + '<div class="mxd3-doc-icon" style="color:' + accent + '"><i class="fas ' + e(tpl.icon || 'fa-file-lines') + '"></i></div>'
+      + '<div class="mxd3-doc-info">'
+      + '<input class="mxd3-doc-title-inp" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      + '<div class="mxd3-doc-desc" id="mxd3-doc-desc">' + e(tpl.description || 'Cliquez sur l\'icône → pour les propriétés') + '</div>'
+      + '</div>'
+      + '<button class="mxd3-doc-props-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v3SelectDoc()" title="Propriétés du document"><i class="fas fa-sliders"></i></button>'
+      + '</div>'
+      + '<div class="mxd3-sections" id="mxd3-secs">';
+    _builderSecs.forEach(function (sec, sIdx) { h += _v3SectionHTML(sec, sIdx); });
+    h += '</div>'
+      + '<button class="mxd3-add-sec-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v3AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v3SectionHTML(sec, sIdx) {
+    var collapsed = !!_v3SecCollapsed[sIdx];
+    var color     = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+    var e         = _e;
+    var selSec    = _v3SelSIdx === sIdx && _v3SelBIdx === null;
+    var blks      = sec.blocks || [];
+    var h = '<div class="mxd3-section' + (collapsed ? ' mxd3-section--collapsed' : '') + (selSec ? ' mxd3-section--sel' : '') + '" data-sidx="' + sIdx + '" style="--sec-color:' + color + '">';
+    h += '<div class="mxd3-sec-hdr" onclick="event.stopPropagation();MX.Pages.MxDoc._v3SelectSec(' + sIdx + ')">'
+      + '<div class="mxd3-sec-hdr-left">'
+      + '<button class="mxd3-collapse-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v3ToggleCollapse(' + sIdx + ')" title="' + (collapsed ? 'Développer' : 'Réduire') + '"><i class="fas fa-chevron-' + (collapsed ? 'right' : 'down') + '"></i></button>'
+      + '<span class="mxd3-sec-dot" style="background:' + color + '"></span>'
+      + '<input class="mxd3-sec-name-inp" value="' + e(sec.label || 'Section') + '" onclick="event.stopPropagation()" oninput="MX.Pages.MxDoc._v3SecLabel(' + sIdx + ',this.value)">'
+      + '<span class="mxd3-sec-count">' + blks.length + ' élément' + (blks.length !== 1 ? 's' : '') + '</span>'
+      + '</div>'
+      + '<div class="mxd3-sec-hdr-acts">'
+      + '<button class="mxd3-sec-act" title="Dupliquer" onclick="event.stopPropagation();MX.Pages.MxDoc._v3DupSection(' + sIdx + ')"><i class="fas fa-copy"></i></button>'
+      + '<button class="mxd3-sec-act mxd3-sec-act--del" title="Supprimer" onclick="event.stopPropagation();MX.Pages.MxDoc._v3DelSection(' + sIdx + ')"><i class="fas fa-trash"></i></button>'
+      + '</div>'
+      + '</div>';
+    if (!collapsed) {
+      h += '<div class="mxd3-sec-body">';
+      if (blks.length === 0) {
+        h += '<div class="mxd3-sec-empty">Aucun élément — cliquez <strong>+ Ajouter une ligne</strong> ci-dessous</div>';
+      } else {
+        blks.forEach(function (blk, bIdx) { h += _v3ElWysiwygHTML(blk, sIdx, bIdx); });
+      }
+      h += '<div class="mxd3-add-row" onclick="event.stopPropagation()">'
+        + '<button class="mxd3-add-el-btn" onclick="MX.Pages.MxDoc._v3ShowAddMenu(' + sIdx + ')"><i class="fas fa-plus"></i> Ajouter une ligne</button>'
+        + (_v3AddMenuSIdx === sIdx ? _v3AddMenuHTML(sIdx) : '')
+        + '</div>'
+        + '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _v3ElWysiwygHTML(blk, sIdx, bIdx) {
+    var sel = _v3SelSIdx === sIdx && _v3SelBIdx === bIdx;
+    var e   = _e;
+    var bt  = _btInfo(blk.type);
+    var lbl = e(blk.label || bt.l);
+    var req = blk.required ? '<span class="mxd3-el-req">*</span>' : '';
+    var floatBar = '';
+    if (sel) {
+      floatBar = '<div class="mxd3-float-bar" onclick="event.stopPropagation()">'
+        + '<span class="mxd3-float-type"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i> ' + bt.l + '</span>'
+        + '<div class="mxd3-float-sep"></div>'
+        + '<button class="mxd3-fb-btn" title="Dupliquer" onclick="MX.Pages.MxDoc._v3DupEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-copy"></i></button>'
+        + '<button class="mxd3-fb-btn" title="Monter" onclick="MX.Pages.MxDoc._v3MoveEl(' + sIdx + ',' + bIdx + ',-1)"><i class="fas fa-chevron-up"></i></button>'
+        + '<button class="mxd3-fb-btn" title="Descendre" onclick="MX.Pages.MxDoc._v3MoveEl(' + sIdx + ',' + bIdx + ',1)"><i class="fas fa-chevron-down"></i></button>'
+        + '<button class="mxd3-fb-btn mxd3-fb-del" title="Supprimer" onclick="MX.Pages.MxDoc._v3DelEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-trash"></i></button>'
+        + '</div>';
+    }
+    var bodyH = '';
+    if (blk.type === 'titre') {
+      bodyH = '<div class="mxd3-wy-titre">' + lbl + '</div>';
+    } else if (blk.type === 'sstitre') {
+      bodyH = '<div class="mxd3-wy-sstitre">' + lbl + '</div>';
+    } else if (blk.type === 'separator') {
+      bodyH = '<hr class="mxd3-wy-sep">';
+    } else if (blk.type === 'texte') {
+      bodyH = '<div class="mxd3-wy-texte">' + (blk.value ? e(blk.value) : '<span class="mxd3-wy-ph">Texte libre…</span>') + '</div>';
+    } else if (blk.type === 'faitnonfait') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<div class="mxd3-wy-fnf">'
+        + '<button class="mxd3-fnf-btn mxd3-fnf-fait" tabindex="-1"><i class="fas fa-check"></i> Fait</button>'
+        + '<button class="mxd3-fnf-btn mxd3-fnf-nonfait" tabindex="-1"><i class="fas fa-times"></i> Non fait</button>'
+        + '</div>';
+    } else if (blk.type === 'ouinon') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<div class="mxd3-wy-yn">'
+        + '<button class="mxd3-yn-btn mxd3-yn-oui" tabindex="-1"><i class="fas fa-check"></i> Oui</button>'
+        + '<button class="mxd3-yn-btn mxd3-yn-non" tabindex="-1"><i class="fas fa-times"></i> Non</button>'
+        + '</div>';
+    } else if (blk.type === 'numerique') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<div class="mxd3-wy-num-row">'
+        + '<input class="mxd3-wy-inp" type="number" placeholder="' + e(blk.placeholder || '0') + '" disabled>'
+        + (blk.unit ? '<span class="mxd3-wy-unit">' + e(blk.unit) + '</span>' : '')
+        + '</div>';
+    } else if (blk.type === 'commentaire') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<textarea class="mxd3-wy-ta" placeholder="' + e(blk.placeholder || 'Votre commentaire…') + '" disabled rows="2"></textarea>';
+    } else if (blk.type === 'date') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<input class="mxd3-wy-inp mxd3-wy-date" type="date" disabled>';
+    } else if (blk.type === 'heure') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<input class="mxd3-wy-inp" type="time" disabled>';
+    } else if (blk.type === 'photo') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<div class="mxd3-wy-media"><i class="fas fa-camera"></i><span>Ajouter une photo</span></div>';
+    } else if (blk.type === 'signature') {
+      bodyH = '<div class="mxd3-wy-lbl">' + lbl + req + '</div>'
+        + '<div class="mxd3-wy-media"><i class="fas fa-pen-nib"></i><span>Zone de signature</span></div>';
+    }
+    return '<div class="mxd3-el' + (sel ? ' mxd3-el--sel' : '') + '" data-sidx="' + sIdx + '" data-bidx="' + bIdx + '"'
+      + ' onclick="event.stopPropagation();MX.Pages.MxDoc._v3SelectEl(' + sIdx + ',' + bIdx + ')">'
+      + floatBar
+      + '<div class="mxd3-el-body">' + bodyH + '</div>'
+      + '</div>';
+  }
+
+  function _v3AddMenuHTML(sIdx) {
+    var h = '<div class="mxd3-add-menu" onclick="event.stopPropagation()">';
+    BLOCK_TYPES.forEach(function (bt) {
+      h += '<button class="mxd3-add-type" style="--bt-color:' + bt.color + '" onclick="MX.Pages.MxDoc._v3AddEl(' + sIdx + ',\'' + bt.type + '\')">'
+        + '<i class="fas ' + bt.icon + '"></i><span>' + bt.l + '</span></button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function _v3PropsPanelHTML() {
+    if (_v3SelSIdx === null) return _v3DocPropsHTML();
+    if (_v3SelBIdx === null) return _v3SecPropsHTML();
+    return _v3ElPropsHTML();
+  }
+
+  function _v3DocPropsHTML() {
+    var tpl  = _builderTpl || {};
+    var e    = _e;
+    var ICONS = ['fa-file-lines','fa-clipboard-list','fa-wrench','fa-shield-check','fa-fire','fa-bolt','fa-star','fa-building','fa-truck','fa-gear'];
+    var FREQS = Object.keys(FREQ_LABELS);
+    return '<div class="mxd3-props-body">'
+      + '<div class="mxd3-props-hdr"><i class="fas fa-sliders"></i> Propriétés du document</div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Description</label>'
+      + '<textarea class="mxd3-prop-ta" id="mxd-bld-desc" rows="3" placeholder="Description…" oninput="MX.Pages.MxDoc._bldDescChange(this.value)">' + e(tpl.description || '') + '</textarea></div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Fréquence</label>'
+      + '<select class="mxd3-prop-select" id="mxd-bld-freq" onchange="MX.Pages.MxDoc._bldFreqChange(this.value)">'
+      + FREQS.map(function (k) { return '<option value="' + k + '"' + (tpl.frequency === k ? ' selected' : '') + '>' + FREQ_LABELS[k] + '</option>'; }).join('')
+      + '</select></div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Couleur</label>'
+      + '<input type="color" class="mxd3-prop-color" id="mxd-bld-color" value="' + e(tpl.color || '#8B5CF6') + '" oninput="MX.Pages.MxDoc._bldColorChange(this.value)"></div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Icône</label>'
+      + '<div class="mxd3-icon-grid">'
+      + ICONS.map(function (ic) { return '<button class="mxd3-icon-pick' + (tpl.icon === ic ? ' mxd3-icon-pick--on' : '') + '" onclick="MX.Pages.MxDoc._setBuilderIcon(\'' + ic + '\')" title="' + ic + '"><i class="fas ' + ic + '" style="color:' + e(tpl.color || '#8B5CF6') + '"></i></button>'; }).join('')
+      + '</div></div>'
+      + '</div>';
+  }
+
+  function _v3SecPropsHTML() {
+    var sec = _builderSecs[_v3SelSIdx];
+    if (!sec) return _v3DocPropsHTML();
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[_v3SelSIdx % SEC_COLORS.length];
+    return '<div class="mxd3-props-body">'
+      + '<div class="mxd3-props-hdr"><i class="fas fa-layer-group"></i> Propriétés de la section</div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Nom</label>'
+      + '<input class="mxd3-prop-inp" value="' + e(sec.label || '') + '" oninput="MX.Pages.MxDoc._v3SecLabelSync(' + _v3SelSIdx + ',this.value)"></div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Description</label>'
+      + '<textarea class="mxd3-prop-ta" rows="2" placeholder="Description de la section…" oninput="MX.Pages.MxDoc._v3SecDesc(' + _v3SelSIdx + ',this.value)">' + e(sec.description || '') + '</textarea></div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Couleur</label>'
+      + '<div class="mxd3-color-swatches">'
+      + SEC_COLORS.map(function (c) { return '<button class="mxd3-color-sw' + (c === color ? ' mxd3-color-sw--on' : '') + '" style="background:' + c + '" onclick="MX.Pages.MxDoc._v3SecColor(' + _v3SelSIdx + ',\'' + c + '\')"></button>'; }).join('')
+      + '</div></div>'
+      + '<button class="mxd3-del-btn" onclick="MX.Pages.MxDoc._v3DelSection(' + _v3SelSIdx + ')"><i class="fas fa-trash"></i> Supprimer la section</button>'
+      + '</div>';
+  }
+
+  function _v3ElPropsHTML() {
+    var sec = _builderSecs[_v3SelSIdx];
+    if (!sec) return _v3DocPropsHTML();
+    var blk = (sec.blocks || [])[_v3SelBIdx];
+    if (!blk) return _v3DocPropsHTML();
+    var e        = _e;
+    var bt       = _btInfo(blk.type);
+    var isStatic = STATIC_TYPES.indexOf(blk.type) !== -1;
+    var INTERACTIVE = ['numerique','ouinon','faitnonfait','commentaire','date','heure','photo','signature'];
+    var h = '<div class="mxd3-props-body">'
+      + '<div class="mxd3-props-hdr"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i> ' + bt.l + '</div>'
+      + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Libellé</label>'
+      + '<input class="mxd3-prop-inp" value="' + e(blk.label || '') + '" oninput="MX.Pages.MxDoc._v3PropChange(\'label\',this.value)"></div>';
+    if (isStatic) {
+      h += '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Contenu</label>'
+        + '<textarea class="mxd3-prop-ta" rows="3" oninput="MX.Pages.MxDoc._v3PropChange(\'value\',this.value)">' + e(blk.value || '') + '</textarea></div>';
+    } else {
+      h += '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Type</label>'
+        + '<div class="mxd3-type-grid">'
+        + INTERACTIVE.map(function (t) { var rbt = _btInfo(t); return '<button class="mxd3-type-btn' + (blk.type === t ? ' mxd3-type-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v3ChangeType(\'' + t + '\')" title="' + rbt.l + '" style="--bt-color:' + rbt.color + '"><i class="fas ' + rbt.icon + '"></i></button>'; }).join('')
+        + '</div></div>'
+        + '<div class="mxd3-prop-group">' + _v3ToggleRowHTML('Champ obligatoire', 'required', !!blk.required) + '</div>'
+        + '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Description</label>'
+        + '<textarea class="mxd3-prop-ta" rows="2" placeholder="Description du champ…" oninput="MX.Pages.MxDoc._v3PropChange(\'description\',this.value)">' + e(blk.description || '') + '</textarea></div>';
+      if (blk.type === 'numerique') {
+        h += '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Unité</label>'
+          + '<input class="mxd3-prop-inp" value="' + e(blk.unit || '') + '" placeholder="ex: kg, °C" oninput="MX.Pages.MxDoc._v3PropChange(\'unit\',this.value)"></div>'
+          + '<div class="mxd3-prop-group mxd3-prop-row">'
+          + '<div><label class="mxd3-prop-lbl">Min</label><input class="mxd3-prop-inp" type="number" value="' + (blk.min !== undefined ? blk.min : '') + '" oninput="MX.Pages.MxDoc._v3PropChangeNum(\'min\',this.value)"></div>'
+          + '<div><label class="mxd3-prop-lbl">Max</label><input class="mxd3-prop-inp" type="number" value="' + (blk.max !== undefined ? blk.max : '') + '" oninput="MX.Pages.MxDoc._v3PropChangeNum(\'max\',this.value)"></div>'
+          + '</div>';
+      }
+      if (blk.type === 'commentaire') {
+        h += '<div class="mxd3-prop-group"><label class="mxd3-prop-lbl">Texte d\'aide</label>'
+          + '<input class="mxd3-prop-inp" value="' + e(blk.placeholder || '') + '" placeholder="Votre commentaire…" oninput="MX.Pages.MxDoc._v3PropChange(\'placeholder\',this.value)"></div>';
+      }
+    }
+    h += '<button class="mxd3-del-btn" onclick="MX.Pages.MxDoc._v3DelEl(' + _v3SelSIdx + ',' + _v3SelBIdx + ')"><i class="fas fa-trash"></i> Supprimer cet élément</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v3ToggleRowHTML(label, key, checked) {
+    return '<div class="mxd3-toggle-row">'
+      + '<span class="mxd3-toggle-lbl">' + label + '</span>'
+      + '<button class="mxd3-toggle' + (checked ? ' mxd3-toggle--on' : '') + '" onclick="MX.Pages.MxDoc._v3ToggleProp(\'' + key + '\',this)">'
+      + '<span class="mxd3-toggle-knob"></span></button>'
+      + '</div>';
+  }
+
+  function _v3MobNavHTML() {
+    var p = _v3MobPanel;
+    return '<div class="mxd3-mob-nav">'
+      + '<button class="mxd3-mob-btn' + (p === 'canvas' ? ' mxd3-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v3MobSwitch(\'canvas\')"><i class="fas fa-pen-ruler"></i><span>Éditeur</span></button>'
+      + '<button class="mxd3-mob-btn' + (p === 'props'  ? ' mxd3-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v3MobSwitch(\'props\')"><i class="fas fa-sliders"></i><span>Propriétés</span></button>'
+      + '</div>';
+  }
+
+  // ── V3 REFRESH HELPERS ──
+  function _v3RefreshCanvas() {
+    var c = document.getElementById('mxd3-canvas');
+    if (c) c.innerHTML = _v3CanvasHTML();
+  }
+
+  function _v3RefreshSection(sIdx) {
+    var existing = document.querySelector('.mxd3-section[data-sidx="' + sIdx + '"]');
+    if (!existing) { _v3RefreshCanvas(); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v3SectionHTML(sec, sIdx);
+    existing.replaceWith(tmp.firstChild);
+  }
+
+  function _v3RefreshEl(sIdx, bIdx) {
+    var existing = document.querySelector('.mxd3-el[data-sidx="' + sIdx + '"][data-bidx="' + bIdx + '"]');
+    if (!existing) { _v3RefreshSection(sIdx); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var blk = (sec.blocks || [])[bIdx];
+    if (!blk) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v3ElWysiwygHTML(blk, sIdx, bIdx);
+    existing.replaceWith(tmp.firstChild);
+  }
+
+  function _v3RefreshProps() {
+    var p = document.getElementById('mxd3-props');
+    if (p) p.innerHTML = _v3PropsPanelHTML();
+  }
+
+  function _v3UpdateUndoRedo() {
+    var undo = document.getElementById('mxd3-undo');
+    var redo = document.getElementById('mxd3-redo');
+    if (undo) undo.disabled = _v2History.length === 0;
+    if (redo) redo.disabled = _v2Future.length  === 0;
+  }
+
+  // ── V3 UNDO/REDO ──
+  function _v3Push() {
+    _v2History.push(JSON.stringify(_builderSecs));
+    if (_v2History.length > 50) _v2History.shift();
+    _v2Future = [];
+    _v3UpdateUndoRedo();
+  }
+
+  function _v3Undo() {
+    if (!_v2History.length) return;
+    _v2Future.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2History.pop());
+    _v3SelSIdx = null; _v3SelBIdx = null;
+    _v3RefreshCanvas(); _v3RefreshProps(); _v3UpdateUndoRedo();
+  }
+
+  function _v3Redo() {
+    if (!_v2Future.length) return;
+    _v2History.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2Future.pop());
+    _v3SelSIdx = null; _v3SelBIdx = null;
+    _v3RefreshCanvas(); _v3RefreshProps(); _v3UpdateUndoRedo();
+  }
+
+  // ── V3 PREVIEW ──
+  function _v3Preview() {
+    if (!_builderTpl) return;
+    var previewTpl = JSON.parse(JSON.stringify(_builderTpl));
+    previewTpl.sections = JSON.parse(JSON.stringify(_builderSecs));
+    _execTemplate  = previewTpl;
+    _execInstance  = null;
+    _execResponses = {};
+    _execMode      = true;
+    var mc = document.getElementById('main-content');
+    if (!mc) return;
+    _renderExec(mc);
+    var backBtn = mc.querySelector('.mxd-exec-back');
+    if (backBtn) {
+      backBtn.onclick = function () {
+        _execMode = false; _execTemplate = null;
+        var mc2 = document.getElementById('main-content');
+        if (mc2) _renderBuilderV3(mc2);
+      };
+    }
+  }
+
+  // ── V3 SELECTION ──
+  function _v3SelectDoc() {
+    _v3SelSIdx = null; _v3SelBIdx = null;
+    document.querySelectorAll('.mxd3-section--sel').forEach(function (el) { el.classList.remove('mxd3-section--sel'); });
+    document.querySelectorAll('.mxd3-el--sel').forEach(function (el) { el.classList.remove('mxd3-el--sel'); });
+    _v3RefreshProps();
+    if (window.innerWidth < 768) _v3MobSwitch('props');
+  }
+
+  function _v3SelectSec(sIdx) {
+    var prevSIdx = _v3SelSIdx, prevBIdx = _v3SelBIdx;
+    _v3SelSIdx = sIdx; _v3SelBIdx = null;
+    if (prevBIdx !== null && prevSIdx !== null) _v3RefreshEl(prevSIdx, prevBIdx);
+    document.querySelectorAll('.mxd3-section').forEach(function (el) {
+      el.classList.toggle('mxd3-section--sel', parseInt(el.getAttribute('data-sidx')) === sIdx);
+    });
+    _v3RefreshProps();
+    if (window.innerWidth < 768) _v3MobSwitch('props');
+  }
+
+  function _v3SelectEl(sIdx, bIdx) {
+    var prevSIdx = _v3SelSIdx, prevBIdx = _v3SelBIdx;
+    _v3SelSIdx = sIdx; _v3SelBIdx = bIdx;
+    if (prevSIdx !== null && prevBIdx !== null && !(prevSIdx === sIdx && prevBIdx === bIdx)) {
+      _v3RefreshEl(prevSIdx, prevBIdx);
+    }
+    _v3RefreshEl(sIdx, bIdx);
+    document.querySelectorAll('.mxd3-section--sel').forEach(function (el) { el.classList.remove('mxd3-section--sel'); });
+    _v3RefreshProps();
+    if (window.innerWidth < 768) _v3MobSwitch('props');
+  }
+
+  // ── V3 ADD MENU ──
+  function _v3ShowAddMenu(sIdx) {
+    var old = _v3AddMenuSIdx;
+    _v3AddMenuSIdx = (_v3AddMenuSIdx === sIdx) ? null : sIdx;
+    if (old !== null && old !== sIdx) _v3RefreshSection(old);
+    if (_v3AddMenuSIdx !== null) _v3RefreshSection(sIdx);
+    else if (old === sIdx) _v3RefreshSection(sIdx);
+  }
+
+  function _v3HideAddMenu() {
+    if (_v3AddMenuSIdx !== null) {
+      var old = _v3AddMenuSIdx;
+      _v3AddMenuSIdx = null;
+      _v3RefreshSection(old);
+    }
+  }
+
+  // ── V3 SECTION MUTATIONS ──
+  function _v3AddSection() {
+    _v3Push();
+    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', color: SEC_COLORS[_builderSecs.length % SEC_COLORS.length], blocks: [] });
+    var newIdx = _builderSecs.length - 1;
+    _v3SelSIdx = newIdx; _v3SelBIdx = null;
+    _v3RefreshCanvas(); _v3RefreshProps();
+    setTimeout(function () {
+      var s = document.querySelector('.mxd3-section[data-sidx="' + newIdx + '"]');
+      if (s) s.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+
+  function _v3DelSection(sIdx) {
+    if (_builderSecs.length <= 1) { MX.toast('Au moins une section est requise'); return; }
+    _v3Push();
+    _builderSecs.splice(sIdx, 1);
+    _v3SelSIdx = null; _v3SelBIdx = null;
+    _v3RefreshCanvas(); _v3RefreshProps();
+  }
+
+  function _v3DupSection(sIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v3Push();
+    var copy = JSON.parse(JSON.stringify(sec));
+    copy.id    = _uid();
+    copy.label = 'Copie — ' + copy.label;
+    copy.blocks = (copy.blocks || []).map(function (b) { var bc = JSON.parse(JSON.stringify(b)); bc.id = _uid(); return bc; });
+    _builderSecs.splice(sIdx + 1, 0, copy);
+    _v3SelSIdx = sIdx + 1; _v3SelBIdx = null;
+    _v3RefreshCanvas(); _v3RefreshProps();
+  }
+
+  function _v3ToggleCollapse(sIdx) {
+    _v3SecCollapsed[sIdx] = !_v3SecCollapsed[sIdx];
+    _v3RefreshSection(sIdx);
+  }
+
+  function _v3SecLabel(sIdx, v) {
+    if (_builderSecs[sIdx]) _builderSecs[sIdx].label = v;
+  }
+
+  function _v3SecLabelSync(sIdx, v) {
+    _v3SecLabel(sIdx, v);
+    var inp = document.querySelector('.mxd3-section[data-sidx="' + sIdx + '"] .mxd3-sec-name-inp');
+    if (inp && inp !== document.activeElement) inp.value = v;
+  }
+
+  function _v3SecDesc(sIdx, v) {
+    if (_builderSecs[sIdx]) _builderSecs[sIdx].description = v;
+  }
+
+  function _v3SecColor(sIdx, color) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].color = color;
+    var sec = document.querySelector('.mxd3-section[data-sidx="' + sIdx + '"]');
+    if (sec) {
+      sec.style.setProperty('--sec-color', color);
+      var dot = sec.querySelector('.mxd3-sec-dot');
+      if (dot) dot.style.background = color;
+    }
+    _v3RefreshProps();
+  }
+
+  // ── V3 ELEMENT MUTATIONS ──
+  function _v3AddEl(sIdx, type) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v3Push();
+    var bt  = _btInfo(type);
+    sec.blocks.push({ id: _uid(), type: type, label: bt.l });
+    var newBIdx = sec.blocks.length - 1;
+    _v3AddMenuSIdx = null;
+    _v3SelSIdx = sIdx; _v3SelBIdx = newBIdx;
+    _v3RefreshSection(sIdx); _v3RefreshProps();
+    setTimeout(function () {
+      var el = document.querySelector('.mxd3-el[data-sidx="' + sIdx + '"][data-bidx="' + newBIdx + '"]');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 60);
+  }
+
+  function _v3DelEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v3Push();
+    sec.blocks.splice(bIdx, 1);
+    if (_v3SelSIdx === sIdx && _v3SelBIdx === bIdx) { _v3SelBIdx = null; }
+    _v3RefreshSection(sIdx); _v3RefreshProps();
+  }
+
+  function _v3DupEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v3Push();
+    var copy = JSON.parse(JSON.stringify(sec.blocks[bIdx]));
+    copy.id = _uid();
+    sec.blocks.splice(bIdx + 1, 0, copy);
+    _v3SelSIdx = sIdx; _v3SelBIdx = bIdx + 1;
+    _v3RefreshSection(sIdx); _v3RefreshProps();
+  }
+
+  function _v3MoveEl(sIdx, bIdx, dir) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var newIdx = bIdx + dir;
+    if (newIdx < 0 || newIdx >= sec.blocks.length) return;
+    _v3Push();
+    var tmp = sec.blocks[bIdx];
+    sec.blocks[bIdx] = sec.blocks[newIdx];
+    sec.blocks[newIdx] = tmp;
+    _v3SelSIdx = sIdx; _v3SelBIdx = newIdx;
+    _v3RefreshSection(sIdx); _v3RefreshProps();
+  }
+
+  // ── V3 PROP MUTATIONS ──
+  function _v3PropChange(key, value) {
+    if (_v3SelSIdx === null || _v3SelBIdx === null) return;
+    var sec = _builderSecs[_v3SelSIdx];
+    if (!sec) return;
+    var blk = (sec.blocks || [])[_v3SelBIdx];
+    if (!blk) return;
+    blk[key] = value;
+    if (key === 'label' || key === 'required') _v3RefreshEl(_v3SelSIdx, _v3SelBIdx);
+  }
+
+  function _v3PropChangeNum(key, strVal) {
+    var n = parseFloat(strVal);
+    _v3PropChange(key, isNaN(n) ? undefined : n);
+  }
+
+  function _v3ChangeType(newType) {
+    if (_v3SelSIdx === null || _v3SelBIdx === null) return;
+    var sec = _builderSecs[_v3SelSIdx];
+    if (!sec) return;
+    var blk = (sec.blocks || [])[_v3SelBIdx];
+    if (!blk) return;
+    _v3Push();
+    var oldBt = _btInfo(blk.type);
+    blk.type  = newType;
+    var newBt = _btInfo(newType);
+    if (!blk.label || blk.label === oldBt.l) blk.label = newBt.l;
+    _v3RefreshEl(_v3SelSIdx, _v3SelBIdx);
+    _v3RefreshProps();
+  }
+
+  function _v3ToggleProp(key, el) {
+    var isOn = el.classList.toggle('mxd3-toggle--on');
+    _v3PropChange(key, isOn);
+  }
+
+  // ── V3 MOBILE ──
+  function _v3MobSwitch(panel) {
+    _v3MobPanel = panel;
+    var ids = { canvas: 'mxd3-canvas', props: 'mxd3-props' };
+    Object.keys(ids).forEach(function (k) {
+      var el = document.getElementById(ids[k]);
+      if (el) el.setAttribute('data-mob', k === panel ? 'active' : '');
+    });
+    document.querySelectorAll('.mxd3-mob-btn').forEach(function (btn) {
+      var panels = ['canvas','props'];
+      var idx    = Array.from(btn.parentNode.children).indexOf(btn);
+      btn.classList.toggle('mxd3-mob-btn--on', panels[idx] === panel);
+    });
+  }
+
   // ── BUILDER LEGACY HELPERS (kept for _saveBuilder compatibility) ──
   function _bldTitleChange(v) {
     if (_builderTpl) {
@@ -994,7 +1593,14 @@
       var badge = document.querySelector('.mxd2-topbar .mxd2-badge');
     }
   }
-  function _bldDescChange(v)  { if (_builderTpl) { _builderTpl.description = v; var hdr = document.querySelector('.mxd2-doc-hdr-desc'); if (hdr) hdr.textContent = v || 'Cliquez sur Propriétés du document →'; } }
+  function _bldDescChange(v)  {
+    if (!_builderTpl) return;
+    _builderTpl.description = v;
+    var hdr = document.querySelector('.mxd2-doc-hdr-desc');
+    if (hdr) hdr.textContent = v || 'Cliquez sur Propriétés du document →';
+    var hdr3 = document.getElementById('mxd3-doc-desc');
+    if (hdr3) hdr3.textContent = v || 'Cliquez sur l\'icône → pour les propriétés';
+  }
   function _bldFreqChange(v)  { if (_builderTpl) _builderTpl.frequency = v; }
   function _bldColorChange(v) {
     if (!_builderTpl) return;
@@ -1017,7 +1623,7 @@
 
   async function _saveBuilder(status) {
     if (!_builderTpl) return;
-    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title');
+    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title');
     var descEl  = document.getElementById('mxd-bld-desc');
     var freqEl  = document.getElementById('mxd-bld-freq');
     var colorEl = document.getElementById('mxd-bld-color');
@@ -1247,9 +1853,14 @@
     _v2SelSIdx     = null;
     _v2SelEIdx     = null;
     _v2MobPanel    = 'canvas';
-    _v2PalDragType = null;
-    _v2ElDragSrc   = null;
-    _v2SecDragSrc  = null;
+    _v2PalDragType  = null;
+    _v2ElDragSrc    = null;
+    _v2SecDragSrc   = null;
+    _v3SelSIdx      = null;
+    _v3SelBIdx      = null;
+    _v3MobPanel     = 'canvas';
+    _v3SecCollapsed = {};
+    _v3AddMenuSIdx  = null;
   }
 
   // ── EXPOSE ──
@@ -1299,6 +1910,32 @@
     _v2ChangeType,
     _v2ToggleProp,
     _v2MobSwitch,
+    // V3
+    _v3Undo,
+    _v3Redo,
+    _v3Preview,
+    _v3SelectDoc,
+    _v3SelectSec,
+    _v3SelectEl,
+    _v3ShowAddMenu,
+    _v3HideAddMenu,
+    _v3AddSection,
+    _v3DelSection,
+    _v3DupSection,
+    _v3ToggleCollapse,
+    _v3SecLabel,
+    _v3SecLabelSync,
+    _v3SecDesc,
+    _v3SecColor,
+    _v3AddEl,
+    _v3DelEl,
+    _v3DupEl,
+    _v3MoveEl,
+    _v3PropChange,
+    _v3PropChangeNum,
+    _v3ChangeType,
+    _v3ToggleProp,
+    _v3MobSwitch,
     // Exec
     _startExec,
     _closeExec,
