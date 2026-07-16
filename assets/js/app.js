@@ -1488,7 +1488,9 @@
     DB.listenUsers(list => {
       state.users = list;
       // Auto-restore session from localStorage after PC restart
-      if (!state.currentUser && !state.adminUser) {
+      // Note: on restore même si adminUser est défini — currentUser est utilisé pour
+      // l'affichage du nom/avatar dans la home et les pages métier, indépendamment des droits.
+      if (!state.currentUser) {
         try {
           const saved = localStorage.getItem("mx_user");
           if (saved) {

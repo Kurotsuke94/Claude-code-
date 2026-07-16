@@ -123,10 +123,13 @@
 
     // ── User ──
     var currentUser = state.currentUser;
-    var displayName = currentUser ? (currentUser.name || 'Utilisateur') : 'Utilisateur';
-    var firstName   = displayName.split(/[\s@]/)[0];
+    var adminUser   = state.adminUser;
     var isAdmin = MX.Auth && MX.Auth.isAdmin && MX.Auth.isAdmin();
     var isResp  = MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll();
+    var displayName = currentUser
+      ? (currentUser.name || 'Utilisateur')
+      : (adminUser ? (adminUser.email || '').split('@')[0] || 'Admin' : 'Utilisateur');
+    var firstName   = displayName.split(/[\s@]/)[0];
     var weekLabel = state.weekLabel || (MX.mkWeekLabel ? MX.mkWeekLabel() : '');
 
     // ── KPI: Tasks (week) ──
