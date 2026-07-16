@@ -286,23 +286,38 @@
     const cur    = state.currentPage || "";
     const canAll = MX.Auth.canSeeAll();
 
-    // ── DEBUG NAV (temporaire) ──
-    const _navAdmin = MX.state.adminUser;
-    const _navCu    = MX.state.currentUser;
+    // ── SIDEBAR MODE (indépendant de currentUser pour les admins) ──
+    const _isAdminFb    = MX.Auth.isAdmin();
+    const _cuNav        = state.currentUser;
+    const _isResponsable = !_isAdminFb && !!_cuNav && (_cuNav.role === 'responsable' || _cuNav.rank === 'responsable');
+
+    let _sidebarMode;
+    if (_isAdminFb) {
+      _sidebarMode = 'ADMIN FIREBASE';
+    } else if (_isResponsable) {
+      _sidebarMode = 'RESPONSABLE';
+    } else if (_cuNav) {
+      _sidebarMode = 'TECHNICIEN';
+    } else {
+      _sidebarMode = 'AUCUN';
+    }
+
     console.log(
-      '%c[Maintix] 🧭 buildNav()',
+      '%c[Maintix] 🧭 Sidebar Mode : ' + _sidebarMode,
       'color:#A78BFA;font-weight:700',
       '| canAll:', canAll,
-      '| adminUser:', _navAdmin ? _navAdmin.email : 'null',
-      '| currentUser:', _navCu ? _navCu.name + ' (' + _navCu.role + ')' : 'null',
-      '| Menus affichés:', canAll ? 'COMPLETS (PMP + MX Doc + Pilotage)' : 'limités'
+      '| adminUser:', MX.state.adminUser ? MX.state.adminUser.email : 'null',
+      '| currentUser:', _cuNav ? _cuNav.name + ' (' + _cuNav.role + ')' : 'null',
+      '| Modules:', canAll ? 'TOUS' : (_cuNav && _cuNav.roleId ? 'filtrés par rôle' : 'défaut')
     );
 
-    // Role-based nav filter: only apply when a PIN user has a roleId assigned
-    const _cu  = state.currentUser;
-    const _see = (!MX.Auth.isAdmin() && _cu && _cu.roleId)
-      ? (mod) => MX.Auth.can(mod, 'view')
-      : () => true;
+    // La visibilité des modules NE dépend PAS de currentUser quand canSeeAll() est vrai.
+    // _see n'utilise currentUser que pour les techniciens avec un rôle personnalisé.
+    const _see = canAll
+      ? () => true
+      : (_cuNav && _cuNav.roleId)
+        ? (mod) => MX.Auth.can(mod, 'view')
+        : () => true;
 
     function _item(id, icon, label, opts) {
       const o   = opts || {};
