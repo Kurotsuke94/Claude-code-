@@ -32,6 +32,15 @@
   var _v3SecCollapsed = {};
   var _v3AddMenuSIdx  = null;
 
+  // V4 Builder state
+  var _v4NavTab      = 'elements';
+  var _v4SelSIdx     = null;
+  var _v4SelBIdx     = null;
+  var _v4MobPanel    = 'canvas';
+  var _v4SecCollapsed = {};
+  var _v4AddMenuSIdx  = null;
+  var _v4PropsTab    = 'props';
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -54,6 +63,7 @@
     { type: 'ouinon',      icon: 'fa-toggle-on',     l: 'Oui / Non',       color: '#10B981' },
     { type: 'faitnonfait', icon: 'fa-circle-check',  l: 'Fait / Non fait', color: '#22C55E' },
     { type: 'commentaire', icon: 'fa-comment-lines', l: 'Commentaire',     color: '#F59E0B' },
+    { type: 'liste',       icon: 'fa-list',          l: 'Liste',           color: '#6366F1' },
     { type: 'date',        icon: 'fa-calendar',      l: 'Date',            color: '#F97316' },
     { type: 'heure',       icon: 'fa-clock',         l: 'Heure',           color: '#EF4444' },
     { type: 'photo',       icon: 'fa-camera',        l: 'Photo',           color: '#EC4899' },
@@ -130,7 +140,7 @@
     if (!mc) return;
     if (window._mxdocStartTab) { _curTab = window._mxdocStartTab; delete window._mxdocStartTab; }
     _load();
-    if (_builderMode) { _renderBuilderV3(mc); return; }
+    if (_builderMode) { _renderBuilderV4(mc); return; }
     if (_execMode)    { _renderExec(mc);       return; }
     mc.innerHTML = _pageShell();
     _renderTabBody();
@@ -322,6 +332,13 @@
     _v3MobPanel    = 'canvas';
     _v3SecCollapsed = {};
     _v3AddMenuSIdx  = null;
+    _v4NavTab      = 'elements';
+    _v4SelSIdx     = null;
+    _v4SelBIdx     = null;
+    _v4MobPanel    = 'canvas';
+    _v4SecCollapsed = {};
+    _v4AddMenuSIdx  = null;
+    _v4PropsTab    = 'props';
     _builderMode  = true;
     render();
   }
@@ -339,6 +356,12 @@
     _v3SelBIdx    = null;
     _v3SecCollapsed = {};
     _v3AddMenuSIdx  = null;
+    _v4NavTab      = 'elements';
+    _v4SelSIdx     = null;
+    _v4SelBIdx     = null;
+    _v4SecCollapsed = {};
+    _v4AddMenuSIdx  = null;
+    _v4PropsTab    = 'props';
     render();
   }
 
@@ -1002,6 +1025,759 @@
   }
 
   // ─────────────────────────────────────────────────────
+  // V4 BUILDER — CANVAS UX (PREMIUM)
+  // ─────────────────────────────────────────────────────
+
+  function _renderBuilderV4(mc) {
+    var tpl = _builderTpl || {};
+    var status = tpl.status || 'draft';
+    var statusL = STATUS_LABELS[status] || 'Brouillon';
+    var statusCls = status === 'published' ? 'mxd4-badge--pub' : status === 'archived' ? 'mxd4-badge--arch' : 'mxd4-badge--draft';
+    mc.innerHTML =
+      '<div class="mxd4-builder" id="mxd4-root">'
+      + _v4TopBarHTML(tpl, statusL, statusCls)
+      + '<div class="mxd4-layout">'
+      + '<div class="mxd4-activity-bar" id="mxd4-nav">' + _v4NavHTML() + '</div>'
+      + '<div class="mxd4-left-panel" id="mxd4-left">' + _v4LeftPanelHTML() + '</div>'
+      + '<div class="mxd4-canvas-wrap" id="mxd4-canvas">' + _v4CanvasHTML() + '</div>'
+      + '<div class="mxd4-props-panel" id="mxd4-props">' + _v4PropsPanelHTML() + '</div>'
+      + '</div>'
+      + _v4MobNavHTML()
+      + '</div>';
+    var root = document.getElementById('mxd4-root');
+    if (root) {
+      root.addEventListener('click', function (ev) {
+        if (!ev.target.closest('.mxd4-add-menu') && !ev.target.closest('.mxd4-add-row-btn')) {
+          _v4HideAddMenu();
+        }
+      });
+    }
+    _v4UpdateUndoRedo();
+  }
+
+  function _v4TopBarHTML(tpl, statusL, statusCls) {
+    var e = _e;
+    return '<div class="mxd4-topbar">'
+      + '<div class="mxd4-topbar-left">'
+      + '<button class="mxd4-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()" title="Retour"><i class="fas fa-arrow-left"></i></button>'
+      + '<div class="mxd4-topbar-brand"><span class="mxd4-brand-name">MX Doc</span><span class="mxd4-brand-sub">Édition du modèle</span></div>'
+      + '<div class="mxd4-topbar-divider"></div>'
+      + '<input class="mxd4-title-inp" id="mxd4-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      + '<span class="mxd4-badge ' + statusCls + '">' + statusL + '</span>'
+      + '</div>'
+      + '<div class="mxd4-topbar-right">'
+      + '<button class="mxd4-tb-btn" id="mxd4-undo" onclick="MX.Pages.MxDoc._v4Undo()" title="Annuler" disabled><i class="fas fa-rotate-left"></i></button>'
+      + '<button class="mxd4-tb-btn" id="mxd4-redo" onclick="MX.Pages.MxDoc._v4Redo()" title="Rétablir" disabled><i class="fas fa-rotate-right"></i></button>'
+      + '<div class="mxd4-topbar-divider"></div>'
+      + '<button class="mxd4-preview-btn" onclick="MX.Pages.MxDoc._v4Preview()"><i class="fas fa-eye"></i><span> Aperçu</span></button>'
+      + '<button class="mxd4-save-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'draft\')"><i class="fas fa-floppy-disk"></i><span> Enregistrer</span></button>'
+      + '<button class="mxd4-pub-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fas fa-paper-plane"></i><span> Publier</span></button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v4NavHTML() {
+    var tabs = [
+      { id: 'elements', icon: 'fa-grid-2',           l: 'Éléments'  },
+      { id: 'sections', icon: 'fa-layer-group',       l: 'Sections'  },
+      { id: 'model',    icon: 'fa-file-lines',        l: 'Modèle'    },
+      { id: 'history',  icon: 'fa-clock-rotate-left', l: 'Historique'},
+    ];
+    var h = '<button class="mxd4-nav-fab" onclick="MX.Pages.MxDoc._v4NavSwitch(\'elements\')" title="Ajouter"><i class="fas fa-plus"></i><span>Ajouter</span></button>';
+    tabs.forEach(function (t) {
+      h += '<button class="mxd4-nav-btn' + (_v4NavTab === t.id ? ' mxd4-nav-btn--on' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v4NavSwitch(\'' + t.id + '\')" title="' + t.l + '">'
+        + '<i class="fas ' + t.icon + '"></i><span>' + t.l + '</span></button>';
+    });
+    return h;
+  }
+
+  function _v4LeftPanelHTML() {
+    if (_v4NavTab === 'sections') return _v4SecListHTML();
+    if (_v4NavTab === 'model')    return _v4ModelPropsHTML();
+    if (_v4NavTab === 'history')  return _v4HistoryHTML();
+    return _v4ElListHTML();
+  }
+
+  var _V4_EL_TYPES = [
+    { type: 'titre',       icon: 'fa-heading',       l: 'Titre',           desc: 'Titre de section',       color: '#8B5CF6' },
+    { type: 'sstitre',     icon: 'fa-text-height',   l: 'Sous-titre',      desc: 'Sous-titre de section',  color: '#6366F1' },
+    { type: 'numerique',   icon: 'fa-hashtag',       l: 'Valeur',          desc: 'Champ numérique',        color: '#0EA5E9' },
+    { type: 'faitnonfait', icon: 'fa-circle-check',  l: 'Fait / Pas fait', desc: 'Choix fait ou pas fait', color: '#22C55E' },
+    { type: 'ouinon',      icon: 'fa-toggle-on',     l: 'Oui / Non',       desc: 'Choix oui ou non',       color: '#10B981' },
+    { type: 'liste',       icon: 'fa-list',          l: 'Liste',           desc: 'Liste déroulante',        color: '#6366F1' },
+    { type: 'commentaire', icon: 'fa-comment-lines', l: 'Commentaire',     desc: 'Zone de texte longue',   color: '#F59E0B' },
+    { type: 'date',        icon: 'fa-calendar',      l: 'Date',            desc: 'Sélection de date',      color: '#F97316' },
+    { type: 'heure',       icon: 'fa-clock',         l: 'Heure',           desc: "Sélection de l'heure",   color: '#EF4444' },
+    { type: 'photo',       icon: 'fa-camera',        l: 'Photo',           desc: 'Ajouter une photo',      color: '#EC4899' },
+    { type: 'signature',   icon: 'fa-pen-nib',       l: 'Signature',       desc: 'Zone de signature',      color: '#A855F7' },
+    { type: 'texte',       icon: 'fa-align-left',    l: 'Texte libre',     desc: 'Bloc de texte libre',    color: '#64748B' },
+  ];
+
+  function _v4ElListHTML() {
+    var targetSIdx = _v4SelSIdx !== null ? _v4SelSIdx : (_builderSecs.length ? _builderSecs.length - 1 : 0);
+    var h = '<div class="mxd4-lp-hdr"><span>ÉLÉMENTS</span></div>'
+      + '<div class="mxd4-lp-search"><i class="fas fa-search"></i>'
+      + '<input id="mxd4-el-search" placeholder="Rechercher un élément…" oninput="MX.Pages.MxDoc._v4FilterEls(this.value)"></div>'
+      + '<div class="mxd4-el-list" id="mxd4-el-list">';
+    _V4_EL_TYPES.forEach(function (et) {
+      h += '<div class="mxd4-el-card" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v4ElDragStart(event,\'' + et.type + '\')"'
+        + ' onclick="MX.Pages.MxDoc._v4AddEl(' + targetSIdx + ',\'' + et.type + '\')">'
+        + '<div class="mxd4-el-card-icon" style="color:' + et.color + ';background:' + et.color + '18"><i class="fas ' + et.icon + '"></i></div>'
+        + '<div class="mxd4-el-card-body">'
+        + '<div class="mxd4-el-card-name">' + et.l + '</div>'
+        + '<div class="mxd4-el-card-desc">' + et.desc + '</div>'
+        + '</div></div>';
+    });
+    h += '</div><div class="mxd4-lp-footer">'
+      + '<button class="mxd4-lp-add-sec" onclick="MX.Pages.MxDoc._v4AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v4SecListHTML() {
+    var h = '<div class="mxd4-lp-hdr"><span>SECTIONS</span></div>'
+      + '<div class="mxd4-sec-list" id="mxd4-sec-list">';
+    _builderSecs.forEach(function (sec, sIdx) {
+      var color = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+      var isSel = (_v4SelSIdx === sIdx && _v4SelBIdx === null);
+      h += '<div class="mxd4-sec-list-item' + (isSel ? ' mxd4-sec-list-item--sel' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v4SelectSec(' + sIdx + ')">'
+        + '<span class="mxd4-sec-dot" style="background:' + color + '"></span>'
+        + '<span class="mxd4-sec-list-name">' + _e(sec.label || 'Section') + '</span>'
+        + '<span class="mxd4-sec-list-count">' + (sec.blocks || []).length + '</span>'
+        + '</div>';
+    });
+    h += '</div><div class="mxd4-lp-footer">'
+      + '<button class="mxd4-lp-add-sec" onclick="MX.Pages.MxDoc._v4AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div>';
+    return h;
+  }
+
+  function _v4ModelPropsHTML() {
+    var tpl = _builderTpl || {};
+    var e = _e;
+    var freqOpts = Object.keys(FREQ_LABELS).map(function (k) {
+      return '<option value="' + k + '"' + (tpl.frequency === k ? ' selected' : '') + '>' + FREQ_LABELS[k] + '</option>';
+    }).join('');
+    return '<div class="mxd4-lp-hdr"><span>MODÈLE</span></div>'
+      + '<div class="mxd4-model-props">'
+      + '<div class="mxd4-mp-group"><label>Description</label>'
+      + '<textarea class="mxd4-mp-inp" rows="3" oninput="MX.Pages.MxDoc._bldDescChange(this.value)">' + e(tpl.description || '') + '</textarea></div>'
+      + '<div class="mxd4-mp-group"><label>Fréquence</label>'
+      + '<select class="mxd4-mp-inp" onchange="MX.Pages.MxDoc._bldFreqChange(this.value)">' + freqOpts + '</select></div>'
+      + '<div class="mxd4-mp-group"><label>Couleur du document</label>'
+      + '<input type="color" class="mxd4-mp-color" value="' + e(tpl.color || '#8B5CF6') + '" oninput="MX.Pages.MxDoc._bldColorChange(this.value)"></div>'
+      + '</div>';
+  }
+
+  function _v4HistoryHTML() {
+    return '<div class="mxd4-lp-hdr"><span>HISTORIQUE</span></div>'
+      + '<div class="mxd4-hist-wrap">'
+      + (_v2History.length
+        ? '<div class="mxd4-hist-info">' + _v2History.length + ' action(s) enregistrée(s)</div>'
+        : '<div class="mxd4-hist-empty">Aucune action à annuler</div>')
+      + '</div>';
+  }
+
+  function _v4CanvasHTML() {
+    var secsH = _builderSecs.map(function (sec, sIdx) { return _v4SectionHTML(sec, sIdx); }).join('');
+    return '<div class="mxd4-canvas" id="mxd4-canvas-inner"'
+      + ' ondragover="event.preventDefault()" ondrop="MX.Pages.MxDoc._v4SecDzDrop(event)">'
+      + secsH
+      + '<div class="mxd4-canvas-add-sec">'
+      + '<button class="mxd4-add-sec-btn" onclick="MX.Pages.MxDoc._v4AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button>'
+      + '</div></div>';
+  }
+
+  function _v4SectionHTML(sec, sIdx) {
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+    var coll  = !!_v4SecCollapsed[sIdx];
+    var isSel = (_v4SelSIdx === sIdx && _v4SelBIdx === null);
+    var blocksH = coll ? '' : (sec.blocks || []).map(function (blk, bIdx) { return _v4RowHTML(blk, sIdx, bIdx); }).join('');
+    var addH = coll ? '' : '<div class="mxd4-add-row" id="mxd4-addrow-' + sIdx + '" style="position:relative">'
+      + '<button class="mxd4-add-row-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v4ShowAddMenu(' + sIdx + ')"><i class="fas fa-plus"></i> Ajouter une ligne</button>'
+      + (_v4AddMenuSIdx === sIdx ? _v4AddMenuHTML(sIdx) : '')
+      + '</div>';
+    return '<div class="mxd4-section' + (isSel ? ' mxd4-section--sel' : '') + '" data-sidx="' + sIdx + '" style="--sec-color:' + color + '"'
+      + ' ondragover="MX.Pages.MxDoc._v4SecDzOver(event,' + sIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v4SecDzLeave(event,' + sIdx + ')">'
+      + '<div class="mxd4-sec-hdr" onclick="MX.Pages.MxDoc._v4SelectSec(' + sIdx + ')">'
+      + '<div class="mxd4-sec-drag" draggable="true" ondragstart="MX.Pages.MxDoc._v4SecDragStart(event,' + sIdx + ')" onclick="event.stopPropagation()"><i class="fas fa-grip-vertical"></i></div>'
+      + '<div class="mxd4-sec-icon-wrap"><i class="fas fa-building"></i></div>'
+      + '<div class="mxd4-sec-info">'
+      + '<input class="mxd4-sec-title-inp" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
+      + ' oninput="MX.Pages.MxDoc._v4SecLabel(' + sIdx + ',this.value)" onclick="event.stopPropagation()">'
+      + (sec.description ? '<div class="mxd4-sec-desc">' + e(sec.description) + '</div>' : '')
+      + '</div>'
+      + '<div class="mxd4-sec-acts">'
+      + '<button class="mxd4-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v4ToggleCollapse(' + sIdx + ')" title="' + (coll ? 'Développer' : 'Réduire') + '"><i class="fas fa-chevron-' + (coll ? 'down' : 'up') + '"></i></button>'
+      + '<button class="mxd4-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v4DupSection(' + sIdx + ')" title="Dupliquer"><i class="fas fa-copy"></i></button>'
+      + '<button class="mxd4-sec-act mxd4-sec-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v4DelSection(' + sIdx + ')" title="Supprimer"><i class="fas fa-trash"></i></button>'
+      + '</div></div>'
+      + '<div class="mxd4-sec-body" id="mxd4-sec-body-' + sIdx + '"'
+      + ' ondragover="MX.Pages.MxDoc._v4ElDzOver(event,' + sIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v4ElDzDrop(event,' + sIdx + ')">'
+      + blocksH + '</div>'
+      + addH
+      + '</div>';
+  }
+
+  function _v4RowHTML(blk, sIdx, bIdx) {
+    var e   = _e;
+    var bt  = _btInfo(blk.type);
+    var sel = (_v4SelSIdx === sIdx && _v4SelBIdx === bIdx);
+    return '<div class="mxd4-row' + (sel ? ' mxd4-row--sel' : '') + '" data-sidx="' + sIdx + '" data-bidx="' + bIdx + '"'
+      + ' onclick="MX.Pages.MxDoc._v4SelectRow(' + sIdx + ',' + bIdx + ',event)"'
+      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v4ElDragStart(event,\'' + blk.type + '\',' + sIdx + ',' + bIdx + ')">'
+      + (sel ? _v4FloatBarHTML(sIdx, bIdx) : '')
+      + '<div class="mxd4-row-grip"><i class="fas fa-grip-vertical"></i></div>'
+      + '<div class="mxd4-row-icon" style="color:' + bt.color + ';background:' + bt.color + '18"><i class="fas ' + bt.icon + '"></i></div>'
+      + '<div class="mxd4-row-label">' + e(blk.label || bt.l) + (blk.required ? '<span class="mxd4-req"> *</span>' : '') + '</div>'
+      + _v4RowValHTML(blk)
+      + '<button class="mxd4-row-opts" onclick="event.stopPropagation()" title="Options"><i class="fas fa-ellipsis-v"></i></button>'
+      + '</div>';
+  }
+
+  function _v4RowValHTML(blk) {
+    var e = _e;
+    if (blk.type === 'titre')     return '<div class="mxd4-row-val mxd4-rv-titre">' + e(blk.value || blk.label || 'Titre') + '</div>';
+    if (blk.type === 'sstitre')   return '<div class="mxd4-row-val mxd4-rv-sstitre">' + e(blk.value || blk.label || 'Sous-titre') + '</div>';
+    if (blk.type === 'separator') return '<div class="mxd4-row-val mxd4-rv-sep"><hr></div>';
+    if (blk.type === 'texte')     return '<div class="mxd4-row-val mxd4-rv-texte">' + e(blk.value || blk.placeholder || 'Texte libre…') + '</div>';
+    if (blk.type === 'faitnonfait') return '<div class="mxd4-row-val mxd4-rv-fnf">'
+      + '<button class="mxd4-fnf-btn mxd4-fnf-fait"><i class="fas fa-check"></i> Fait</button>'
+      + '<button class="mxd4-fnf-btn mxd4-fnf-nonfait"><i class="fas fa-times"></i> Pas fait</button>'
+      + '</div>';
+    if (blk.type === 'ouinon') return '<div class="mxd4-row-val mxd4-rv-yn">'
+      + '<button class="mxd4-yn-btn mxd4-yn-oui"><i class="fas fa-check"></i> Oui</button>'
+      + '<button class="mxd4-yn-btn mxd4-yn-non"><i class="fas fa-times"></i> Non</button>'
+      + '</div>';
+    if (blk.type === 'numerique') return '<div class="mxd4-row-val mxd4-rv-num">'
+      + '<input class="mxd4-val-inp" type="number" placeholder="' + e(String(blk.value !== undefined ? blk.value : '0')) + '" disabled>'
+      + (blk.unit ? '<span class="mxd4-val-unit">' + e(blk.unit) + '</span>' : '')
+      + '</div>';
+    if (blk.type === 'commentaire') return '<div class="mxd4-row-val mxd4-rv-comment"><span class="mxd4-val-ph">' + e(blk.placeholder || 'Commentaire…') + '</span></div>';
+    if (blk.type === 'liste') {
+      var def = (blk.options && blk.options[0]) ? blk.options[0] : '-- Choisir --';
+      return '<div class="mxd4-row-val mxd4-rv-liste"><span>' + e(blk.value || def) + '</span><i class="fas fa-chevron-down"></i></div>';
+    }
+    if (blk.type === 'date')      return '<div class="mxd4-row-val mxd4-rv-date"><i class="fas fa-calendar"></i><span>' + e(blk.value || 'JJ/MM/AAAA') + '</span></div>';
+    if (blk.type === 'heure')     return '<div class="mxd4-row-val mxd4-rv-heure"><i class="fas fa-clock"></i><span>' + e(blk.value || '--:--') + '</span></div>';
+    if (blk.type === 'photo')     return '<div class="mxd4-row-val mxd4-rv-photo"><i class="fas fa-camera"></i><span>Photo</span></div>';
+    if (blk.type === 'signature') return '<div class="mxd4-row-val mxd4-rv-sig"><i class="fas fa-pen-nib"></i><span>Signature</span></div>';
+    return '<div class="mxd4-row-val"></div>';
+  }
+
+  function _v4FloatBarHTML(sIdx, bIdx) {
+    return '<div class="mxd4-float-bar" onclick="event.stopPropagation()">'
+      + '<button title="Dupliquer" onclick="MX.Pages.MxDoc._v4DupEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-copy"></i></button>'
+      + '<button title="Monter" onclick="MX.Pages.MxDoc._v4MoveEl(' + sIdx + ',' + bIdx + ',-1)"><i class="fas fa-chevron-up"></i></button>'
+      + '<button title="Descendre" onclick="MX.Pages.MxDoc._v4MoveEl(' + sIdx + ',' + bIdx + ',1)"><i class="fas fa-chevron-down"></i></button>'
+      + '<button title="Obligatoire" onclick="MX.Pages.MxDoc._v4ToggleProp(\'required\',this)"><i class="fas fa-thumbtack"></i></button>'
+      + '<div class="mxd4-float-sep"></div>'
+      + '<button title="Supprimer" class="mxd4-fb-del" onclick="MX.Pages.MxDoc._v4DelEl(' + sIdx + ',' + bIdx + ')"><i class="fas fa-trash"></i></button>'
+      + '</div>';
+  }
+
+  function _v4AddMenuHTML(sIdx) {
+    var types = [
+      { type: 'numerique',   icon: 'fa-hashtag',       l: 'Valeur',          color: '#0EA5E9' },
+      { type: 'faitnonfait', icon: 'fa-circle-check',  l: 'Fait / Pas fait', color: '#22C55E' },
+      { type: 'ouinon',      icon: 'fa-toggle-on',     l: 'Oui / Non',       color: '#10B981' },
+      { type: 'liste',       icon: 'fa-list',          l: 'Liste',           color: '#6366F1' },
+      { type: 'commentaire', icon: 'fa-comment-lines', l: 'Commentaire',     color: '#F59E0B' },
+      { type: 'date',        icon: 'fa-calendar',      l: 'Date',            color: '#F97316' },
+      { type: 'heure',       icon: 'fa-clock',         l: 'Heure',           color: '#EF4444' },
+      { type: 'photo',       icon: 'fa-camera',        l: 'Photo',           color: '#EC4899' },
+      { type: 'signature',   icon: 'fa-pen-nib',       l: 'Signature',       color: '#A855F7' },
+    ];
+    var h = '<div class="mxd4-add-menu" onclick="event.stopPropagation()">';
+    types.forEach(function (t) {
+      h += '<button class="mxd4-add-menu-item" onclick="MX.Pages.MxDoc._v4AddEl(' + sIdx + ',\'' + t.type + '\')">'
+        + '<span class="mxd4-ami-icon" style="color:' + t.color + '"><i class="fas ' + t.icon + '"></i></span>'
+        + '<span>' + t.l + '</span></button>';
+    });
+    return h + '</div>';
+  }
+
+  function _v4PropsPanelHTML() {
+    if (_v4SelSIdx !== null && _v4SelBIdx !== null) {
+      var sec = _builderSecs[_v4SelSIdx];
+      var blk = sec && sec.blocks[_v4SelBIdx];
+      if (blk) return _v4ElPropsPanelHTML(blk);
+    }
+    if (_v4SelSIdx !== null) return _v4SecPropsPanelHTML();
+    return _v4DocPropsPanelHTML();
+  }
+
+  function _v4DocPropsPanelHTML() {
+    return '<div class="mxd4-pp-hdr">PROPRIÉTÉS</div>'
+      + '<div class="mxd4-pp-empty"><i class="fas fa-cursor"></i><p>Sélectionnez un élément ou une section pour modifier ses propriétés.</p></div>';
+  }
+
+  function _v4SecPropsPanelHTML() {
+    var sec   = _builderSecs[_v4SelSIdx];
+    if (!sec) return _v4DocPropsPanelHTML();
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[_v4SelSIdx % SEC_COLORS.length];
+    var swatches = SEC_COLORS.map(function (c) {
+      return '<button class="mxd4-swatch' + (color === c ? ' mxd4-swatch--on' : '') + '"'
+        + ' style="background:' + c + '" onclick="MX.Pages.MxDoc._v4SecColor(' + _v4SelSIdx + ',\'' + c + '\')"></button>';
+    }).join('');
+    return '<div class="mxd4-pp-hdr">SECTION</div>'
+      + '<div class="mxd4-pp-body">'
+      + '<div class="mxd4-pp-group"><label>Nom</label>'
+      + '<input class="mxd4-pp-inp" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
+      + ' oninput="MX.Pages.MxDoc._v4SecLabel(' + _v4SelSIdx + ',this.value)"></div>'
+      + '<div class="mxd4-pp-group"><label>Description</label>'
+      + '<textarea class="mxd4-pp-inp" rows="2" oninput="MX.Pages.MxDoc._v4SecDesc(' + _v4SelSIdx + ',this.value)">' + e(sec.description || '') + '</textarea></div>'
+      + '<div class="mxd4-pp-group"><label>Couleur</label><div class="mxd4-swatches">' + swatches + '</div></div>'
+      + '<div class="mxd4-pp-actions"><button class="mxd4-pp-del" onclick="MX.Pages.MxDoc._v4DelSection(' + _v4SelSIdx + ')"><i class="fas fa-trash"></i> Supprimer la section</button></div>'
+      + '</div>';
+  }
+
+  function _v4ElPropsPanelHTML(blk) {
+    var e  = _e;
+    var bt = _btInfo(blk.type);
+    var isStatic = STATIC_TYPES.indexOf(blk.type) >= 0;
+    var RESP_TYPES = ['numerique','faitnonfait','ouinon','liste','commentaire','date','heure','photo','signature'];
+    var typeOpts = RESP_TYPES.map(function (t) {
+      var rbt = _btInfo(t);
+      return '<option value="' + t + '"' + (blk.type === t ? ' selected' : '') + '>' + rbt.l + '</option>';
+    }).join('');
+    var h = '<div class="mxd4-pp-tabs">'
+      + '<button class="mxd4-pp-tab' + (_v4PropsTab === 'props' ? ' mxd4-pp-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v4SwitchPropsTab(\'props\')">PROPRIÉTÉS</button>'
+      + '<button class="mxd4-pp-tab' + (_v4PropsTab === 'style' ? ' mxd4-pp-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v4SwitchPropsTab(\'style\')">STYLE</button>'
+      + '</div>';
+    if (_v4PropsTab === 'style') {
+      var swatches = SEC_COLORS.map(function (c) {
+        return '<button class="mxd4-swatch' + (bt.color === c ? ' mxd4-swatch--on' : '') + '" style="background:' + c + '"></button>';
+      }).join('');
+      return h + '<div class="mxd4-pp-body">'
+        + '<div class="mxd4-pp-group"><label>COULEUR</label><div class="mxd4-swatches">' + swatches + '</div></div>'
+        + '</div>';
+    }
+    var selPreview = '<div class="mxd4-pp-sel-item">'
+      + '<div class="mxd4-pp-sel-icon" style="color:' + bt.color + ';background:' + bt.color + '18"><i class="fas ' + bt.icon + '"></i></div>'
+      + '<div><div class="mxd4-pp-sel-name">' + e(blk.label || bt.l) + '</div><div class="mxd4-pp-sel-type">' + bt.l + '</div></div>'
+      + '</div>';
+    h += '<div class="mxd4-pp-body">' + selPreview
+      + '<div class="mxd4-pp-group"><label>LIBELLÉ</label>'
+      + '<input class="mxd4-pp-inp" value="' + e(blk.label || '') + '" placeholder="Libellé…" oninput="MX.Pages.MxDoc._v4PropChange(\'label\',this.value)"></div>'
+      + '<div class="mxd4-pp-group"><label>DESCRIPTION (OPTIONNELLE)</label>'
+      + '<textarea class="mxd4-pp-inp" rows="3" placeholder="Description de la vérification…" oninput="MX.Pages.MxDoc._v4PropChange(\'description\',this.value)">' + e(blk.description || '') + '</textarea></div>';
+    if (!isStatic) {
+      h += '<div class="mxd4-pp-group"><label>TYPE DE RÉPONSE</label>'
+        + '<select class="mxd4-pp-inp" onchange="MX.Pages.MxDoc._v4ChangeType(this.value)">' + typeOpts + '</select></div>';
+    }
+    if (blk.type === 'numerique') {
+      h += '<div class="mxd4-pp-group"><label>UNITÉ</label>'
+        + '<input class="mxd4-pp-inp" value="' + e(blk.unit || '') + '" placeholder="kWh, m³, °C…" oninput="MX.Pages.MxDoc._v4PropChange(\'unit\',this.value)"></div>'
+        + '<div class="mxd4-pp-group"><label>VALEUR PAR DÉFAUT</label>'
+        + '<input type="number" class="mxd4-pp-inp" value="' + (blk.value !== undefined ? blk.value : '') + '" oninput="MX.Pages.MxDoc._v4PropChangeNum(\'value\',this.value)"></div>';
+    }
+    if (!isStatic) {
+      h += '<div class="mxd4-pp-toggles">'
+        + _v4ToggleRowHTML('OBLIGATOIRE',         'required',       !!blk.required)
+        + _v4ToggleRowHTML('VISIBLE',              'visible',        blk.visible !== false)
+        + _v4ToggleRowHTML('LECTURE SEULE',        'readonly',       !!blk.readonly)
+        + _v4ToggleRowHTML('COMMENTAIRE AUTORISÉ', 'commentAllowed', !!blk.commentAllowed)
+        + '</div>';
+    }
+    h += '<div class="mxd4-pp-actions"><button class="mxd4-pp-del" onclick="MX.Pages.MxDoc._v4DelEl(' + _v4SelSIdx + ',' + _v4SelBIdx + ')"><i class="fas fa-trash"></i> Supprimer l\'élément</button></div>'
+      + '</div>';
+    return h;
+  }
+
+  function _v4ToggleRowHTML(label, key, val) {
+    return '<div class="mxd4-pp-toggle-row"><span>' + label + '</span>'
+      + '<button class="mxd4-toggle' + (val ? ' mxd4-toggle--on' : '') + '"'
+      + ' onclick="MX.Pages.MxDoc._v4ToggleProp(\'' + key + '\',this)"></button></div>';
+  }
+
+  function _v4MobNavHTML() {
+    return '<div class="mxd4-mob-nav">'
+      + '<button class="mxd4-mob-btn' + (_v4MobPanel === 'elements' ? ' mxd4-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v4MobSwitch(\'elements\')"><i class="fas fa-grid-2"></i><span>Éléments</span></button>'
+      + '<button class="mxd4-mob-btn' + (_v4MobPanel === 'sections' ? ' mxd4-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v4MobSwitch(\'sections\')"><i class="fas fa-layer-group"></i><span>Sections</span></button>'
+      + '<button class="mxd4-mob-fab" onclick="MX.Pages.MxDoc._v4AddSection()"><i class="fas fa-plus"></i></button>'
+      + '<button class="mxd4-mob-btn' + (_v4MobPanel === 'canvas' ? ' mxd4-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v4MobSwitch(\'canvas\')"><i class="fas fa-eye"></i><span>Aperçu</span></button>'
+      + '</div>';
+  }
+
+  function _v4RefreshCanvas() {
+    var el = document.getElementById('mxd4-canvas-inner');
+    if (!el) return;
+    el.innerHTML = _builderSecs.map(function (sec, sIdx) { return _v4SectionHTML(sec, sIdx); }).join('')
+      + '<div class="mxd4-canvas-add-sec"><button class="mxd4-add-sec-btn" onclick="MX.Pages.MxDoc._v4AddSection()"><i class="fas fa-plus"></i> Ajouter une section</button></div>';
+  }
+
+  function _v4RefreshSection(sIdx) {
+    var old = document.querySelector('.mxd4-section[data-sidx="' + sIdx + '"]');
+    if (!old) { _v4RefreshCanvas(); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) { _v4RefreshCanvas(); return; }
+    var d = document.createElement('div');
+    d.innerHTML = _v4SectionHTML(sec, sIdx);
+    old.parentNode.replaceChild(d.firstChild, old);
+  }
+
+  function _v4RefreshRow(sIdx, bIdx) {
+    var old = document.querySelector('.mxd4-row[data-sidx="' + sIdx + '"][data-bidx="' + bIdx + '"]');
+    if (!old) { _v4RefreshSection(sIdx); return; }
+    var sec = _builderSecs[sIdx];
+    var blk = sec && sec.blocks[bIdx];
+    if (!blk) { _v4RefreshSection(sIdx); return; }
+    var d = document.createElement('div');
+    d.innerHTML = _v4RowHTML(blk, sIdx, bIdx);
+    old.parentNode.replaceChild(d.firstChild, old);
+  }
+
+  function _v4RefreshProps() {
+    var el = document.getElementById('mxd4-props');
+    if (el) el.innerHTML = _v4PropsPanelHTML();
+  }
+
+  function _v4RefreshLeftPanel() {
+    var el = document.getElementById('mxd4-left');
+    if (el) el.innerHTML = _v4LeftPanelHTML();
+  }
+
+  function _v4RefreshNav() {
+    var el = document.getElementById('mxd4-nav');
+    if (el) el.innerHTML = _v4NavHTML();
+  }
+
+  function _v4Push() {
+    _v2History.push(JSON.stringify(_builderSecs));
+    if (_v2History.length > 50) _v2History.shift();
+    _v2Future = [];
+    _v4UpdateUndoRedo();
+  }
+
+  function _v4UpdateUndoRedo() {
+    var u = document.getElementById('mxd4-undo');
+    var r = document.getElementById('mxd4-redo');
+    if (u) u.disabled = !_v2History.length;
+    if (r) r.disabled = !_v2Future.length;
+  }
+
+  function _v4Undo() {
+    if (!_v2History.length) return;
+    _v2Future.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2History.pop());
+    _v4SelSIdx = null; _v4SelBIdx = null;
+    _v4RefreshCanvas(); _v4RefreshProps(); _v4RefreshLeftPanel(); _v4UpdateUndoRedo();
+  }
+
+  function _v4Redo() {
+    if (!_v2Future.length) return;
+    _v2History.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2Future.pop());
+    _v4SelSIdx = null; _v4SelBIdx = null;
+    _v4RefreshCanvas(); _v4RefreshProps(); _v4RefreshLeftPanel(); _v4UpdateUndoRedo();
+  }
+
+  function _v4Preview() {
+    if (!_builderTpl) return;
+    var copy = JSON.parse(JSON.stringify(_builderTpl));
+    copy.sections = JSON.parse(JSON.stringify(_builderSecs));
+    _execTemplate  = copy;
+    _execMode      = true;
+    _builderMode   = false;
+    render();
+  }
+
+  function _v4NavSwitch(tab) {
+    _v4NavTab = tab;
+    _v4RefreshNav();
+    _v4RefreshLeftPanel();
+  }
+
+  function _v4MobSwitch(panel) {
+    _v4MobPanel = panel;
+    var lp = document.getElementById('mxd4-left');
+    var cw = document.getElementById('mxd4-canvas');
+    var pp = document.getElementById('mxd4-props');
+    if (lp) lp.setAttribute('data-mob', (panel === 'elements' || panel === 'sections') ? 'active' : '');
+    if (cw) cw.setAttribute('data-mob', panel === 'canvas' ? 'active' : '');
+    if (pp) pp.setAttribute('data-mob', panel === 'props' ? 'active' : '');
+  }
+
+  function _v4SwitchPropsTab(tab) { _v4PropsTab = tab; _v4RefreshProps(); }
+
+  function _v4SelectDoc() { _v4SelSIdx = null; _v4SelBIdx = null; _v4RefreshProps(); }
+
+  function _v4SelectSec(sIdx) {
+    var prevS = _v4SelSIdx; var prevB = _v4SelBIdx;
+    _v4SelSIdx = sIdx; _v4SelBIdx = null;
+    if (prevB !== null && prevS !== null) _v4RefreshRow(prevS, prevB);
+    if (prevS !== null && prevB === null && prevS !== sIdx) {
+      var ps = document.querySelector('.mxd4-section[data-sidx="' + prevS + '"]');
+      if (ps) ps.classList.remove('mxd4-section--sel');
+    }
+    var ns = document.querySelector('.mxd4-section[data-sidx="' + sIdx + '"]');
+    if (ns) ns.classList.add('mxd4-section--sel');
+    _v4RefreshProps();
+  }
+
+  function _v4SelectRow(sIdx, bIdx, ev) {
+    if (ev) ev.stopPropagation();
+    var prevS = _v4SelSIdx; var prevB = _v4SelBIdx;
+    _v4SelSIdx = sIdx; _v4SelBIdx = bIdx;
+    if (prevB !== null && (prevS !== sIdx || prevB !== bIdx)) _v4RefreshRow(prevS, prevB);
+    _v4RefreshRow(sIdx, bIdx);
+    _v4RefreshProps();
+  }
+
+  function _v4ShowAddMenu(sIdx) {
+    var prev = _v4AddMenuSIdx;
+    _v4AddMenuSIdx = sIdx;
+    if (prev !== null && prev !== sIdx) _v4RefreshSection(prev);
+    _v4RefreshSection(sIdx);
+  }
+
+  function _v4HideAddMenu() {
+    if (_v4AddMenuSIdx === null) return;
+    var prev = _v4AddMenuSIdx;
+    _v4AddMenuSIdx = null;
+    _v4RefreshSection(prev);
+  }
+
+  function _v4FilterEls(query) {
+    var q = (query || '').toLowerCase();
+    document.querySelectorAll('#mxd4-el-list .mxd4-el-card').forEach(function (card) {
+      var txt = card.textContent.toLowerCase();
+      card.style.display = (!q || txt.includes(q)) ? '' : 'none';
+    });
+  }
+
+  function _v4AddSection() {
+    _v4Push();
+    var color = SEC_COLORS[_builderSecs.length % SEC_COLORS.length];
+    _builderSecs.push({ id: _uid(), label: 'Section ' + (_builderSecs.length + 1), color: color, blocks: [] });
+    _v4SelSIdx = _builderSecs.length - 1; _v4SelBIdx = null;
+    _v4RefreshCanvas(); _v4RefreshProps(); _v4RefreshLeftPanel();
+    var ns = document.querySelector('.mxd4-section[data-sidx="' + _v4SelSIdx + '"]');
+    if (ns) ns.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function _v4DelSection(sIdx) {
+    if (_builderSecs.length <= 1) { MX.toast('Impossible de supprimer la dernière section', true); return; }
+    _v4Push();
+    _builderSecs.splice(sIdx, 1);
+    if (_v4SelSIdx >= sIdx) { _v4SelSIdx = Math.max(0, _v4SelSIdx - 1); _v4SelBIdx = null; }
+    _v4RefreshCanvas(); _v4RefreshProps(); _v4RefreshLeftPanel();
+  }
+
+  function _v4DupSection(sIdx) {
+    _v4Push();
+    var copy = JSON.parse(JSON.stringify(_builderSecs[sIdx]));
+    copy.id = _uid(); copy.label = 'Copie — ' + copy.label;
+    copy.blocks = (copy.blocks || []).map(function (b) { var nb = JSON.parse(JSON.stringify(b)); nb.id = _uid(); return nb; });
+    _builderSecs.splice(sIdx + 1, 0, copy);
+    _v4SelSIdx = sIdx + 1; _v4SelBIdx = null;
+    _v4RefreshCanvas(); _v4RefreshProps(); _v4RefreshLeftPanel();
+  }
+
+  function _v4ToggleCollapse(sIdx) {
+    _v4SecCollapsed[sIdx] = !_v4SecCollapsed[sIdx];
+    _v4RefreshSection(sIdx);
+  }
+
+  function _v4SecLabel(sIdx, v) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].label = v;
+    if (_v4NavTab === 'sections') _v4RefreshLeftPanel();
+  }
+
+  function _v4SecDesc(sIdx, v) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].description = v;
+  }
+
+  function _v4SecColor(sIdx, color) {
+    if (!_builderSecs[sIdx]) return;
+    _v4Push();
+    _builderSecs[sIdx].color = color;
+    _v4RefreshSection(sIdx); _v4RefreshProps();
+  }
+
+  function _v4AddEl(sIdx, type) {
+    if (!_builderSecs[sIdx]) sIdx = _builderSecs.length - 1;
+    _v4Push();
+    var bt = _btInfo(type);
+    var blk = { id: _uid(), type: type, label: bt.l };
+    if (type === 'numerique') blk.unit = '';
+    if (type === 'liste') blk.options = [];
+    _builderSecs[sIdx].blocks.push(blk);
+    _v4SelSIdx = sIdx; _v4SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v4HideAddMenu();
+    _v4RefreshSection(sIdx); _v4RefreshProps();
+    var nr = document.querySelector('.mxd4-row[data-sidx="' + sIdx + '"][data-bidx="' + _v4SelBIdx + '"]');
+    if (nr) nr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function _v4DelEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v4Push();
+    sec.blocks.splice(bIdx, 1);
+    if (_v4SelSIdx === sIdx && _v4SelBIdx === bIdx) _v4SelBIdx = null;
+    else if (_v4SelSIdx === sIdx && _v4SelBIdx > bIdx) _v4SelBIdx--;
+    _v4RefreshSection(sIdx); _v4RefreshProps(); _v4RefreshLeftPanel();
+  }
+
+  function _v4DupEl(sIdx, bIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v4Push();
+    var copy = JSON.parse(JSON.stringify(sec.blocks[bIdx]));
+    copy.id = _uid();
+    sec.blocks.splice(bIdx + 1, 0, copy);
+    _v4SelSIdx = sIdx; _v4SelBIdx = bIdx + 1;
+    _v4RefreshSection(sIdx); _v4RefreshProps();
+  }
+
+  function _v4MoveEl(sIdx, bIdx, dir) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var ni = bIdx + dir;
+    if (ni < 0 || ni >= sec.blocks.length) return;
+    _v4Push();
+    var tmp = sec.blocks[bIdx]; sec.blocks[bIdx] = sec.blocks[ni]; sec.blocks[ni] = tmp;
+    _v4SelBIdx = ni;
+    _v4RefreshSection(sIdx);
+  }
+
+  function _v4PropChange(key, value) {
+    if (_v4SelSIdx === null || _v4SelBIdx === null) return;
+    var blk = _builderSecs[_v4SelSIdx] && _builderSecs[_v4SelSIdx].blocks[_v4SelBIdx];
+    if (!blk) return;
+    blk[key] = value;
+    if (key === 'label') {
+      var lbl = document.querySelector('.mxd4-row[data-sidx="' + _v4SelSIdx + '"][data-bidx="' + _v4SelBIdx + '"] .mxd4-row-label');
+      if (lbl) lbl.textContent = value + (blk.required ? ' *' : '');
+    }
+  }
+
+  function _v4PropChangeNum(key, strVal) {
+    if (_v4SelSIdx === null || _v4SelBIdx === null) return;
+    var blk = _builderSecs[_v4SelSIdx] && _builderSecs[_v4SelSIdx].blocks[_v4SelBIdx];
+    if (!blk) return;
+    var n = parseFloat(strVal);
+    blk[key] = isNaN(n) ? undefined : n;
+  }
+
+  function _v4ChangeType(newType) {
+    if (_v4SelSIdx === null || _v4SelBIdx === null) return;
+    var sec = _builderSecs[_v4SelSIdx];
+    if (!sec) return;
+    _v4Push();
+    var blk = sec.blocks[_v4SelBIdx];
+    var nblk = { id: blk.id, type: newType, label: blk.label, required: blk.required };
+    if (newType === 'numerique') nblk.unit = blk.unit || '';
+    if (newType === 'liste') nblk.options = blk.options || [];
+    sec.blocks[_v4SelBIdx] = nblk;
+    _v4RefreshRow(_v4SelSIdx, _v4SelBIdx); _v4RefreshProps();
+  }
+
+  function _v4ToggleProp(key, el) {
+    if (_v4SelSIdx === null || _v4SelBIdx === null) return;
+    var blk = _builderSecs[_v4SelSIdx] && _builderSecs[_v4SelSIdx].blocks[_v4SelBIdx];
+    if (!blk) return;
+    blk[key] = !blk[key];
+    if (el) el.classList.toggle('mxd4-toggle--on', !!blk[key]);
+    if (key === 'required') _v4RefreshRow(_v4SelSIdx, _v4SelBIdx);
+  }
+
+  var _v4SecDragSrcIdx = null;
+  var _v4ElDragSrcSIdx = null;
+  var _v4ElDragSrcBIdx = null;
+  var _v4ElDragType    = null;
+
+  function _v4SecDragStart(ev, sIdx) {
+    _v4SecDragSrcIdx = sIdx;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', 'sec:' + sIdx);
+    ev.stopPropagation();
+  }
+
+  function _v4SecDzOver(ev, sIdx) {
+    if (_v4SecDragSrcIdx === null || _v4ElDragType !== null) return;
+    ev.preventDefault(); ev.stopPropagation();
+    document.querySelectorAll('.mxd4-section').forEach(function (s) { s.classList.remove('mxd4-sec-dz--over'); });
+    var el = document.querySelector('.mxd4-section[data-sidx="' + sIdx + '"]');
+    if (el) el.classList.add('mxd4-sec-dz--over');
+  }
+
+  function _v4SecDzLeave(ev, sIdx) {
+    var el = document.querySelector('.mxd4-section[data-sidx="' + sIdx + '"]');
+    if (el) el.classList.remove('mxd4-sec-dz--over');
+  }
+
+  function _v4SecDzDrop(ev) {
+    ev.preventDefault();
+    document.querySelectorAll('.mxd4-section').forEach(function (s) { s.classList.remove('mxd4-sec-dz--over'); });
+    if (_v4SecDragSrcIdx === null) return;
+    var raw   = ev.dataTransfer.getData('text/plain') || '';
+    var parts = raw.split(':');
+    if (parts[0] !== 'sec') { _v4SecDragSrcIdx = null; return; }
+    var target = parseInt(parts[1]);
+    if (isNaN(target) || target === _v4SecDragSrcIdx) { _v4SecDragSrcIdx = null; return; }
+    _v4Push();
+    var moved = _builderSecs.splice(_v4SecDragSrcIdx, 1)[0];
+    var insertAt = target > _v4SecDragSrcIdx ? target - 1 : target;
+    _builderSecs.splice(insertAt, 0, moved);
+    _v4SecDragSrcIdx = null;
+    _v4SelSIdx = insertAt; _v4SelBIdx = null;
+    _v4RefreshCanvas(); _v4RefreshLeftPanel(); _v4RefreshProps();
+  }
+
+  function _v4ElDragStart(ev, type, sIdx, bIdx) {
+    _v4ElDragType    = type;
+    _v4ElDragSrcSIdx = (sIdx !== undefined) ? sIdx : null;
+    _v4ElDragSrcBIdx = (bIdx !== undefined) ? bIdx : null;
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', 'el:' + type + ':' + (sIdx !== undefined ? sIdx : -1) + ':' + (bIdx !== undefined ? bIdx : -1));
+    ev.stopPropagation();
+  }
+
+  function _v4ElDzOver(ev, sIdx) {
+    if (_v4ElDragType === null) return;
+    ev.preventDefault(); ev.stopPropagation();
+  }
+
+  function _v4ElDzDrop(ev, sIdx) {
+    ev.preventDefault(); ev.stopPropagation();
+    if (_v4ElDragType === null) return;
+    var raw   = ev.dataTransfer.getData('text/plain') || '';
+    var parts = raw.split(':');
+    if (parts[0] !== 'el') { _v4ElDragType = null; return; }
+    var fromS = parseInt(parts[2]);
+    var fromB = parseInt(parts[3]);
+    if (fromS >= 0 && fromB >= 0) {
+      _v4Push();
+      var blk = _builderSecs[fromS].blocks.splice(fromB, 1)[0];
+      _builderSecs[sIdx].blocks.push(blk);
+      _v4SelSIdx = sIdx; _v4SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+      if (fromS !== sIdx) _v4RefreshSection(fromS);
+    } else {
+      _v4Push();
+      var bt  = _btInfo(_v4ElDragType);
+      var nbl = { id: _uid(), type: _v4ElDragType, label: bt.l };
+      if (_v4ElDragType === 'numerique') nbl.unit = '';
+      if (_v4ElDragType === 'liste') nbl.options = [];
+      _builderSecs[sIdx].blocks.push(nbl);
+      _v4SelSIdx = sIdx; _v4SelBIdx = _builderSecs[sIdx].blocks.length - 1;
+    }
+    _v4ElDragType = null; _v4ElDragSrcSIdx = null; _v4ElDragSrcBIdx = null;
+    _v4RefreshSection(sIdx); _v4RefreshProps(); _v4RefreshLeftPanel();
+  }
+
+  // ─────────────────────────────────────────────────────
   // V3 BUILDER — NOTION+CANVA STYLE
   // ─────────────────────────────────────────────────────
 
@@ -1623,7 +2399,7 @@
 
   async function _saveBuilder(status) {
     if (!_builderTpl) return;
-    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title');
+    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title') || document.getElementById('mxd4-title');
     var descEl  = document.getElementById('mxd-bld-desc');
     var freqEl  = document.getElementById('mxd-bld-freq');
     var colorEl = document.getElementById('mxd-bld-color');
@@ -1737,6 +2513,12 @@
     } else if (blk.type === 'commentaire') {
       inputH = '<textarea class="fi" rows="3" placeholder="' + e(blk.placeholder || 'Votre commentaire…') + '"'
         + ' oninput="MX.Pages.MxDoc._setResponse(\'' + bid + '\',this.value)">' + (val || '') + '</textarea>';
+    } else if (blk.type === 'liste') {
+      var listeOpts = (blk.options || []).map(function (opt) {
+        return '<option value="' + e(opt) + '"' + (val === opt ? ' selected' : '') + '>' + e(opt) + '</option>';
+      }).join('');
+      inputH = '<select class="fi" onchange="MX.Pages.MxDoc._setResponse(\'' + bid + '\',this.value)">'
+        + '<option value="">-- Choisir --</option>' + listeOpts + '</select>';
     } else if (blk.type === 'date') {
       inputH = '<input type="date" class="fi" value="' + (val || '') + '" oninput="MX.Pages.MxDoc._setResponse(\'' + bid + '\',this.value)">';
     } else if (blk.type === 'heure') {
@@ -1861,6 +2643,13 @@
     _v3MobPanel     = 'canvas';
     _v3SecCollapsed = {};
     _v3AddMenuSIdx  = null;
+    _v4NavTab       = 'elements';
+    _v4SelSIdx      = null;
+    _v4SelBIdx      = null;
+    _v4MobPanel     = 'canvas';
+    _v4SecCollapsed = {};
+    _v4AddMenuSIdx  = null;
+    _v4PropsTab     = 'props';
   }
 
   // ── EXPOSE ──
@@ -1936,6 +2725,41 @@
     _v3ChangeType,
     _v3ToggleProp,
     _v3MobSwitch,
+    // V4
+    _v4Undo,
+    _v4Redo,
+    _v4Preview,
+    _v4NavSwitch,
+    _v4MobSwitch,
+    _v4SwitchPropsTab,
+    _v4SelectDoc,
+    _v4SelectSec,
+    _v4SelectRow,
+    _v4ShowAddMenu,
+    _v4HideAddMenu,
+    _v4FilterEls,
+    _v4AddSection,
+    _v4DelSection,
+    _v4DupSection,
+    _v4ToggleCollapse,
+    _v4SecLabel,
+    _v4SecDesc,
+    _v4SecColor,
+    _v4AddEl,
+    _v4DelEl,
+    _v4DupEl,
+    _v4MoveEl,
+    _v4PropChange,
+    _v4PropChangeNum,
+    _v4ChangeType,
+    _v4ToggleProp,
+    _v4SecDragStart,
+    _v4SecDzOver,
+    _v4SecDzLeave,
+    _v4SecDzDrop,
+    _v4ElDragStart,
+    _v4ElDzOver,
+    _v4ElDzDrop,
     // Exec
     _startExec,
     _closeExec,
