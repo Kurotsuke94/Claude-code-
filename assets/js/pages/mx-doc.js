@@ -49,6 +49,13 @@
   var _v5SecCollapsed = {};
   var _v5AddMenuSIdx  = null;
 
+  // V6 Builder state
+  var _v6SelSIdx     = null;
+  var _v6SelBIdx     = null;
+  var _v6SecCollapsed = {};
+  var _v6MobPanel    = 'canvas';
+  var _v6DragData    = null;
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -148,7 +155,7 @@
     if (!mc) return;
     if (window._mxdocStartTab) { _curTab = window._mxdocStartTab; delete window._mxdocStartTab; }
     _load();
-    if (_builderMode) { _renderBuilderV5(mc); return; }
+    if (_builderMode) { _renderBuilderV6(mc); return; }
     if (_execMode)    { _renderExec(mc);       return; }
     mc.innerHTML = _pageShell();
     _renderTabBody();
@@ -381,6 +388,11 @@
     _v5SelBIdx     = null;
     _v5SecCollapsed = {};
     _v5AddMenuSIdx  = null;
+    _v6SelSIdx     = null;
+    _v6SelBIdx     = null;
+    _v6SecCollapsed = {};
+    _v6MobPanel    = 'canvas';
+    _v6DragData    = null;
     render();
   }
 
@@ -1041,6 +1053,735 @@
       var idx    = Array.from(btn.parentNode.children).indexOf(btn);
       btn.classList.toggle('mxd2-mob-btn--on', panels[idx] === panel);
     });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // V6 BUILDER — HYBRIDE MAINTIX (WYSIWYG DOCUMENT UX)
+  // ─────────────────────────────────────────────────────
+
+  var V6_SECTION_COLORS = ['#6366F1','#8B5CF6','#EC4899','#EF4444','#F97316','#F59E0B','#22C55E','#0EA5E9','#14B8A6','#64748B'];
+
+  function _renderBuilderV6(mc) {
+    var tpl = _builderTpl || {};
+    mc.innerHTML = '<div class="mxd6-wrap" id="mxd6-root">'
+      + _v6TopBarHTML(tpl)
+      + '<div class="mxd6-layout" id="mxd6-layout">'
+      +   '<aside class="mxd6-palette" id="mxd6-palette">' + _v6PaletteHTML() + '</aside>'
+      +   '<main class="mxd6-canvas" id="mxd6-canvas"'
+      +     ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6CanvasDzOver(event)"'
+      +     ' ondrop="MX.Pages.MxDoc._v6CanvasDzDrop(event)">'
+      +     _v6CanvasInnerHTML()
+      +   '</main>'
+      +   '<aside class="mxd6-props" id="mxd6-props">' + _v6PropsPanelHTML() + '</aside>'
+      + '</div>'
+      + _v6MobBarHTML()
+      + '</div>';
+    _v6UpdateUndoRedo();
+  }
+
+  function _v6TopBarHTML(tpl) {
+    var e = _e;
+    var status = tpl.status || 'draft';
+    var badgeLabel = STATUS_LABELS[status] || 'Brouillon';
+    var badgeCls = status === 'published' ? 'mxd6-badge--pub' : status === 'archived' ? 'mxd6-badge--arch' : 'mxd6-badge--draft';
+    return '<header class="mxd6-topbar">'
+      + '<div class="mxd6-topbar-l">'
+      +   '<button class="mxd6-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()" title="Retour"><i class="fa-solid fa-arrow-left"></i></button>'
+      +   '<input class="mxd6-title-inp" id="mxd6-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      +   '<span class="mxd6-status-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+      + '</div>'
+      + '<div class="mxd6-topbar-c">'
+      +   '<button class="mxd6-ud-btn" id="mxd6-undo" onclick="MX.Pages.MxDoc._v6Undo()" disabled title="Annuler"><i class="fa-solid fa-rotate-left"></i></button>'
+      +   '<button class="mxd6-ud-btn" id="mxd6-redo" onclick="MX.Pages.MxDoc._v6Redo()" disabled title="Rétablir"><i class="fa-solid fa-rotate-right"></i></button>'
+      + '</div>'
+      + '<div class="mxd6-topbar-r">'
+      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--ghost" onclick="MX.Pages.MxDoc._v6Preview()"><i class="fa-regular fa-eye"></i><span> Aperçu</span></button>'
+      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--save" onclick="MX.Pages.MxDoc._saveBuilder()"><i class="fa-solid fa-floppy-disk"></i><span> Enregistrer</span></button>'
+      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--pub" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fa-solid fa-rocket"></i><span> Publier</span></button>'
+      + '</div>'
+      + '</header>';
+  }
+
+  function _v6PaletteHTML() {
+    var e = _e;
+    var h = '<div class="mxd6-pal-inner">';
+    h += '<p class="mxd6-pal-label">COMPOSANTS</p>';
+    V5_COMPS.forEach(function(c) {
+      h += '<div class="mxd6-pal-card" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v6PalDragStart(event,' + JSON.stringify(c.key) + ',null)"'
+        + ' onclick="MX.Pages.MxDoc._v6PalClick(' + JSON.stringify(c.key) + ',null)">'
+        + '<span class="mxd6-pal-ic" style="background:' + c.color + '22;color:' + c.color + '"><i class="fa-solid ' + c.icon + '"></i></span>'
+        + '<span class="mxd6-pal-lbl">' + e(c.l) + '</span>'
+        + '</div>';
+    });
+    h += '<p class="mxd6-pal-label mxd6-pal-label--mt">MISE EN FORME</p>';
+    V5_STATIC_ELS.forEach(function(el) {
+      h += '<div class="mxd6-pal-card" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v6PalDragStart(event,null,' + JSON.stringify(el.type) + ')"'
+        + ' onclick="MX.Pages.MxDoc._v6PalClick(null,' + JSON.stringify(el.type) + ')">'
+        + '<span class="mxd6-pal-ic" style="background:' + el.color + '22;color:' + el.color + '"><i class="fa-solid ' + el.icon + '"></i></span>'
+        + '<span class="mxd6-pal-lbl">' + e(el.l) + '</span>'
+        + '</div>';
+    });
+    h += '</div>';
+    h += '<button class="mxd6-add-sec-pal" onclick="MX.Pages.MxDoc._v6AddSection()"><i class="fa-solid fa-plus"></i> Nouvelle section</button>';
+    return h;
+  }
+
+  function _v6CanvasInnerHTML() {
+    if (!_builderSecs.length) {
+      return '<div class="mxd6-canvas-empty">'
+        + '<i class="fa-regular fa-file-lines fa-2x"></i>'
+        + '<p>Ajoutez une première section pour commencer</p>'
+        + '<button class="mxd6-cta-sec" onclick="MX.Pages.MxDoc._v6AddSection()"><i class="fa-solid fa-plus"></i> Nouvelle section</button>'
+        + '</div>';
+    }
+    var h = '<div class="mxd6-canvas-inner">';
+    _builderSecs.forEach(function(sec, sIdx) { h += _v6SectionHTML(sec, sIdx); });
+    h += '<button class="mxd6-add-sec-row" onclick="MX.Pages.MxDoc._v6AddSection()"><i class="fa-solid fa-plus"></i> Ajouter une section</button>';
+    h += '</div>';
+    return h;
+  }
+
+  function _v6SectionHTML(sec, sIdx) {
+    var e = _e;
+    var color = sec.color || '#6366F1';
+    var collapsed = !!_v6SecCollapsed[sIdx];
+    var selected = (_v6SelSIdx === sIdx && _v6SelBIdx === null);
+    var blks = sec.blocks || [];
+    var h = '<div class="mxd6-sec' + (selected ? ' mxd6-sec--sel' : '') + '" id="mxd6-sec-' + sIdx + '"'
+      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6SecDzOver(event,' + sIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v6SecDzLeave(event,' + sIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v6SecDzDrop(event,' + sIdx + ')">'
+      + '<div class="mxd6-sec-hd" style="border-left:4px solid ' + color + '" onclick="MX.Pages.MxDoc._v6SelectSec(' + sIdx + ')">'
+      +   '<i class="mxd6-sec-dh fa-solid fa-grip-vertical" draggable="true"'
+      +     ' ondragstart="event.stopPropagation();MX.Pages.MxDoc._v6SecDragStart(event,' + sIdx + ')"'
+      +     ' onmousedown="event.stopPropagation()"></i>'
+      +   '<span class="mxd6-sec-name" contenteditable="true"'
+      +     ' onclick="event.stopPropagation()"'
+      +     ' onblur="MX.Pages.MxDoc._v6SecLabelChange(' + sIdx + ',this)"'
+      +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
+      +     '>' + e(sec.label || 'Section') + '</span>'
+      +   '<span class="mxd6-sec-cnt">' + blks.length + '</span>'
+      +   '<div class="mxd6-sec-hd-acts">'
+      +     '<button class="mxd6-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupSection(' + sIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
+      +     '<button class="mxd6-sec-act mxd6-sec-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DelSection(' + sIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+      +   '</div>'
+      +   '<button class="mxd6-sec-toggle" onclick="event.stopPropagation();MX.Pages.MxDoc._v6ToggleCollapse(' + sIdx + ')">'
+      +     '<i class="fa-solid fa-chevron-' + (collapsed ? 'down' : 'up') + '"></i>'
+      +   '</button>'
+      + '</div>';
+    if (!collapsed) {
+      h += '<div class="mxd6-sec-bd">';
+      if (!blks.length) {
+        h += '<div class="mxd6-sec-empty"'
+          + ' ondragover="event.preventDefault()"'
+          + ' ondrop="MX.Pages.MxDoc._v6RowDzDrop(event,' + sIdx + ',0)">'
+          + '<i class="fa-regular fa-plus-circle"></i> Glissez un composant ici ou cliquez <strong>Ajouter une ligne</strong>'
+          + '</div>';
+      } else {
+        blks.forEach(function(blk, bIdx) { h += _v6RowHTML(blk, sIdx, bIdx); });
+      }
+      h += '<div class="mxd6-sec-drop-tail"'
+        + ' ondragover="event.preventDefault();this.classList.add(\'mxd6-dz-over\')"'
+        + ' ondragleave="this.classList.remove(\'mxd6-dz-over\')"'
+        + ' ondrop="MX.Pages.MxDoc._v6RowDzDrop(event,' + sIdx + ',' + blks.length + ');this.classList.remove(\'mxd6-dz-over\')"></div>';
+      h += '<button class="mxd6-add-line" onclick="MX.Pages.MxDoc._v6AddQuick(' + sIdx + ')">'
+        + '<i class="fa-solid fa-plus"></i> Ajouter une ligne</button>';
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _v6RowHTML(blk, sIdx, bIdx) {
+    var selected = (_v6SelSIdx === sIdx && _v6SelBIdx === bIdx);
+    if (blk.type !== 'v5row') return _v6StaticRowHTML(blk, sIdx, bIdx, selected);
+    var e = _e;
+    return '<div class="mxd6-row' + (selected ? ' mxd6-row--sel' : '') + '" id="mxd6-row-' + sIdx + '-' + bIdx + '"'
+      + ' draggable="true"'
+      + ' ondragstart="MX.Pages.MxDoc._v6RowDragStart(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6RowDzOver(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v6RowDzLeave(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v6RowDzDrop(event,' + sIdx + ',' + bIdx + ')"'
+      + ' onclick="MX.Pages.MxDoc._v6SelectRow(' + sIdx + ',' + bIdx + ')">'
+      + '<i class="mxd6-row-dh fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i>'
+      + '<div class="mxd6-row-body">'
+      +   '<div class="mxd6-row-name-row">'
+      +     '<span class="mxd6-row-lbl' + (blk.required ? ' mxd6-row-lbl--req' : '') + '"'
+      +       ' contenteditable="true" onclick="event.stopPropagation()"'
+      +       ' onblur="MX.Pages.MxDoc._v6RowLabelChange(' + sIdx + ',' + bIdx + ',this)"'
+      +       ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
+      +       '>' + e(blk.label || '') + '</span>'
+      +   '</div>'
+      +   '<div class="mxd6-row-ctrls">' + _v6RowControlsHTML(blk) + '</div>'
+      + '</div>'
+      + '<div class="mxd6-row-acts">'
+      +   '<button class="mxd6-row-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupEl(' + sIdx + ',' + bIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
+      +   '<button class="mxd6-row-act' + (blk.required ? ' mxd6-row-act--on' : '') + '" onclick="event.stopPropagation();MX.Pages.MxDoc._v6ToggleProp(' + sIdx + ',' + bIdx + ',\'required\')" title="Obligatoire"><i class="fa-solid fa-asterisk"></i></button>'
+      +   '<button class="mxd6-row-act mxd6-row-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DelEl(' + sIdx + ',' + bIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v6StaticRowHTML(blk, sIdx, bIdx, selected) {
+    var e = _e;
+    var cls = { titre: 'mxd6-static-titre', sstitre: 'mxd6-static-sstitre', separator: 'mxd6-static-sep', texte: 'mxd6-static-texte' }[blk.type] || '';
+    var h = '<div class="mxd6-row mxd6-row--static ' + cls + (selected ? ' mxd6-row--sel' : '') + '"'
+      + ' id="mxd6-row-' + sIdx + '-' + bIdx + '"'
+      + ' draggable="true"'
+      + ' ondragstart="MX.Pages.MxDoc._v6RowDragStart(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6RowDzOver(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v6RowDzLeave(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v6RowDzDrop(event,' + sIdx + ',' + bIdx + ')"'
+      + ' onclick="MX.Pages.MxDoc._v6SelectRow(' + sIdx + ',' + bIdx + ')">';
+    if (blk.type === 'separator') {
+      h += '<div class="mxd6-row-body"><div class="mxd6-sep-line"></div></div>';
+    } else {
+      h += '<i class="mxd6-row-dh fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i>'
+        + '<div class="mxd6-row-body">'
+        + '<span class="mxd6-row-lbl" contenteditable="true" onclick="event.stopPropagation()"'
+        +   ' onblur="MX.Pages.MxDoc._v6RowLabelChange(' + sIdx + ',' + bIdx + ',this)"'
+        +   ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
+        +   '>' + e(blk.label || '') + '</span>'
+        + '</div>';
+    }
+    h += '<div class="mxd6-row-acts">'
+      + '<button class="mxd6-row-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupEl(' + sIdx + ',' + bIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
+      + '<button class="mxd6-row-act mxd6-row-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DelEl(' + sIdx + ',' + bIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+      + '</div>'
+      + '</div>';
+    return h;
+  }
+
+  function _v6RowControlsHTML(blk) {
+    var e = _e;
+    var h = '';
+    if (blk.hasValeur) {
+      h += '<div class="mxd6-ctrl-val-wrap">'
+        + '<input type="number" class="mxd6-ctrl-val-inp" placeholder="—" tabindex="-1" onclick="event.stopPropagation()">'
+        + (blk.unit ? '<span class="mxd6-ctrl-unit">' + e(blk.unit) + '</span>' : '')
+        + '</div>';
+    }
+    if (blk.hasFaitnonfait) {
+      h += '<div class="mxd6-ctrl-fnf">'
+        + '<button class="mxd6-fnf-fait" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-check"></i> Fait</button>'
+        + '<button class="mxd6-fnf-pas" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-xmark"></i> Pas fait</button>'
+        + '</div>';
+    }
+    if (blk.hasOuinon) {
+      h += '<div class="mxd6-ctrl-yn">'
+        + '<button class="mxd6-yn-oui" tabindex="-1" onclick="event.stopPropagation()">Oui</button>'
+        + '<button class="mxd6-yn-non" tabindex="-1" onclick="event.stopPropagation()">Non</button>'
+        + '</div>';
+    }
+    if (blk.hasDate) {
+      h += '<input type="date" class="mxd6-ctrl-date" tabindex="-1" onclick="event.stopPropagation()">';
+    }
+    if (blk.hasHeure) {
+      h += '<input type="time" class="mxd6-ctrl-heure" tabindex="-1" onclick="event.stopPropagation()">';
+    }
+    if (blk.hasCommentaire) {
+      h += '<button class="mxd6-ctrl-ic" tabindex="-1" onclick="event.stopPropagation()" title="Commentaire"><i class="fa-regular fa-comment"></i></button>';
+    }
+    if (blk.hasPhoto) {
+      h += '<button class="mxd6-ctrl-ic" tabindex="-1" onclick="event.stopPropagation()" title="Photo"><i class="fa-solid fa-camera"></i></button>';
+    }
+    if (blk.hasSignature) {
+      h += '<button class="mxd6-ctrl-ic" tabindex="-1" onclick="event.stopPropagation()" title="Signature"><i class="fa-solid fa-pen-nib"></i></button>';
+    }
+    return h;
+  }
+
+  function _v6PropsPanelHTML() {
+    if (_v6SelSIdx === null) return _v6DocPropsHTML();
+    var sec = _builderSecs[_v6SelSIdx];
+    if (!sec) return _v6DocPropsHTML();
+    if (_v6SelBIdx === null) return _v6SecPropsHTML(sec, _v6SelSIdx);
+    var blk = sec.blocks[_v6SelBIdx];
+    if (!blk) return _v6SecPropsHTML(sec, _v6SelSIdx);
+    return blk.type === 'v5row' ? _v6ElPropsHTML(blk, _v6SelSIdx, _v6SelBIdx) : _v6StaticPropsHTML(blk, _v6SelSIdx, _v6SelBIdx);
+  }
+
+  function _v6DocPropsHTML() {
+    var e = _e; var tpl = _builderTpl || {};
+    return '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-file-lines"></i> Document</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Titre</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(tpl.title || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._bldTitleChange(this.value);var t=document.getElementById(\'mxd6-title\');if(t)t.value=this.value">'
+      + '</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Description</label>'
+      +   '<textarea class="mxd6-prop-ta" rows="3" oninput="MX.Pages.MxDoc._bldDescChange(this.value)">' + e(tpl.description || '') + '</textarea>'
+      + '</div>'
+      + '<div class="mxd6-props-tip"><i class="fa-regular fa-lightbulb"></i> Cliquez sur une section ou une ligne pour éditer ses propriétés.</div>'
+      + '</div>';
+  }
+
+  function _v6SecPropsHTML(sec, sIdx) {
+    var e = _e; var color = sec.color || '#6366F1';
+    return '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-folder-open"></i> Section</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(sec.label || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v6SecLabelProp(' + sIdx + ',this.value)">'
+      + '</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Description</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(sec.description || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v6SecDesc(' + sIdx + ',this.value)">'
+      + '</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Couleur</label>'
+      +   '<div class="mxd6-color-pal">'
+      +   V6_SECTION_COLORS.map(function(c) {
+            return '<button class="mxd6-color-dot' + (color === c ? ' mxd6-color-dot--on' : '') + '"'
+              + ' style="background:' + c + '" title="' + c + '"'
+              + ' onclick="MX.Pages.MxDoc._v6SecColor(' + sIdx + ',\'' + c + '\')"></button>';
+          }).join('')
+      +   '</div>'
+      + '</div>'
+      + '<hr class="mxd6-sep">'
+      + '<div class="mxd6-prop-actions">'
+      +   '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v6DupSection(' + sIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      +   '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v6DelSection(' + sIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v6ElPropsHTML(blk, sIdx, bIdx) {
+    var e = _e;
+    var h = '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-sliders"></i> Contrôle</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(blk.label || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v6PropChange(' + sIdx + ',' + bIdx + ',\'label\',this.value)">'
+      + '</div>';
+    if (blk.hasValeur) {
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Unité</label>'
+        + '<input class="mxd6-prop-inp" type="text" value="' + e(blk.unit || '') + '" placeholder="Ex: pH, °C, %…"'
+        +   ' oninput="MX.Pages.MxDoc._v6SetUnit(' + sIdx + ',' + bIdx + ',this.value)">'
+        + '</div>';
+    }
+    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Composants</label>'
+      + '<div class="mxd6-comp-grid">';
+    V5_COMPS.forEach(function(c) {
+      var on = !!blk[c.key];
+      h += '<button class="mxd6-comp-tog' + (on ? ' mxd6-comp-tog--on' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v6ToggleComp(' + sIdx + ',' + bIdx + ',' + JSON.stringify(c.key) + ')">'
+        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i>'
+        + '<span>' + e(c.l) + '</span>'
+        + '</button>';
+    });
+    h += '</div></div>';
+    h += '<div class="mxd6-prop-toggle-row">'
+      + '<span class="mxd6-prop-toggle-lbl">Obligatoire</span>'
+      + '<button class="mxd6-toggle' + (blk.required ? ' mxd6-toggle--on' : '') + '"'
+      +   ' onclick="MX.Pages.MxDoc._v6ToggleProp(' + sIdx + ',' + bIdx + ',\'required\')"></button>'
+      + '</div>';
+    h += '<hr class="mxd6-sep"><div class="mxd6-prop-actions">'
+      + '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v6DupEl(' + sIdx + ',' + bIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v6DelEl(' + sIdx + ',' + bIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div></div>';
+    return h;
+  }
+
+  function _v6StaticPropsHTML(blk, sIdx, bIdx) {
+    var e = _e;
+    return '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-text-size"></i> Mise en forme</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Texte</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(blk.label || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v6PropChange(' + sIdx + ',' + bIdx + ',\'label\',this.value)">'
+      + '</div>'
+      + '<hr class="mxd6-sep"><div class="mxd6-prop-actions">'
+      + '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v6DupEl(' + sIdx + ',' + bIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v6DelEl(' + sIdx + ',' + bIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div></div>';
+  }
+
+  function _v6MobBarHTML() {
+    var tabs = [
+      { key: 'palette', icon: 'fa-layer-group', l: 'Palette' },
+      { key: 'canvas',  icon: 'fa-file-lines',  l: 'Document' },
+      { key: 'props',   icon: 'fa-sliders',     l: 'Propriétés' },
+    ];
+    return '<nav class="mxd6-mob-bar">'
+      + tabs.map(function(t) {
+          return '<button class="mxd6-mob-btn' + (t.key === _v6MobPanel ? ' mxd6-mob-btn--on' : '') + '"'
+            + ' onclick="MX.Pages.MxDoc._v6MobSwitch(\'' + t.key + '\')">'
+            + '<i class="fa-solid ' + t.icon + '"></i><span>' + t.l + '</span></button>';
+        }).join('')
+      + '</nav>';
+  }
+
+  // ── V6 REFRESH ──
+  function _v6RefreshCanvas() {
+    var el = document.getElementById('mxd6-canvas');
+    if (el) el.innerHTML = _v6CanvasInnerHTML();
+    _v6UpdateUndoRedo();
+  }
+
+  function _v6RefreshSection(sIdx) {
+    var el = document.getElementById('mxd6-sec-' + sIdx);
+    if (!el || !_builderSecs[sIdx]) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v6SectionHTML(_builderSecs[sIdx], sIdx);
+    el.replaceWith(tmp.firstChild);
+  }
+
+  function _v6RefreshRow(sIdx, bIdx) {
+    var el = document.getElementById('mxd6-row-' + sIdx + '-' + bIdx);
+    if (!el) return;
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v6RowHTML(blk, sIdx, bIdx);
+    el.replaceWith(tmp.firstChild);
+  }
+
+  function _v6RefreshProps() {
+    var el = document.getElementById('mxd6-props');
+    if (el) el.innerHTML = _v6PropsPanelHTML();
+  }
+
+  // ── V6 UNDO / REDO ──
+  function _v6Push() {
+    _v2History.push(JSON.stringify(_builderSecs));
+    _v2Future = [];
+    _v6UpdateUndoRedo();
+  }
+
+  function _v6Undo() {
+    if (!_v2History.length) return;
+    _v2Future.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2History.pop());
+    _v6SelSIdx = null; _v6SelBIdx = null;
+    _v6RefreshCanvas(); _v6RefreshProps(); _v6UpdateUndoRedo();
+  }
+
+  function _v6Redo() {
+    if (!_v2Future.length) return;
+    _v2History.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2Future.pop());
+    _v6SelSIdx = null; _v6SelBIdx = null;
+    _v6RefreshCanvas(); _v6RefreshProps(); _v6UpdateUndoRedo();
+  }
+
+  function _v6UpdateUndoRedo() {
+    var u = document.getElementById('mxd6-undo');
+    var r = document.getElementById('mxd6-redo');
+    if (u) u.disabled = !_v2History.length;
+    if (r) r.disabled = !_v2Future.length;
+  }
+
+  function _v6Preview() {
+    if (!_builderTpl) return;
+    var copy = JSON.parse(JSON.stringify(_builderTpl));
+    copy.sections = JSON.parse(JSON.stringify(_builderSecs));
+    _execTemplate = copy; _execMode = true; _builderMode = false; render();
+  }
+
+  function _v6MobSwitch(panel) {
+    _v6MobPanel = panel;
+    var pal = document.getElementById('mxd6-palette');
+    var cvs = document.getElementById('mxd6-canvas');
+    var prp = document.getElementById('mxd6-props');
+    if (pal) pal.setAttribute('data-mob', panel === 'palette' ? 'show' : '');
+    if (cvs) cvs.setAttribute('data-mob', panel === 'canvas' ? 'show' : '');
+    if (prp) prp.setAttribute('data-mob', panel === 'props' ? 'show' : '');
+    document.querySelectorAll('.mxd6-mob-btn').forEach(function(btn, i) {
+      btn.classList.toggle('mxd6-mob-btn--on', ['palette','canvas','props'][i] === panel);
+    });
+  }
+
+  // ── V6 SELECTION ──
+  function _v6SelectSec(sIdx) {
+    var prevS = _v6SelSIdx; var prevB = _v6SelBIdx;
+    _v6SelSIdx = sIdx; _v6SelBIdx = null;
+    if (prevB !== null && prevS !== null) { var pr = document.getElementById('mxd6-row-' + prevS + '-' + prevB); if (pr) pr.classList.remove('mxd6-row--sel'); }
+    if (prevS !== null) { var ps = document.getElementById('mxd6-sec-' + prevS); if (ps) ps.classList.remove('mxd6-sec--sel'); }
+    var ns = document.getElementById('mxd6-sec-' + sIdx);
+    if (ns) ns.classList.add('mxd6-sec--sel');
+    _v6RefreshProps();
+  }
+
+  function _v6SelectRow(sIdx, bIdx) {
+    var prevS = _v6SelSIdx; var prevB = _v6SelBIdx;
+    _v6SelSIdx = sIdx; _v6SelBIdx = bIdx;
+    if (prevB !== null && prevS !== null) { var pr = document.getElementById('mxd6-row-' + prevS + '-' + prevB); if (pr) pr.classList.remove('mxd6-row--sel'); }
+    if (prevS !== null && prevB === null) { var ps = document.getElementById('mxd6-sec-' + prevS); if (ps) ps.classList.remove('mxd6-sec--sel'); }
+    var nr = document.getElementById('mxd6-row-' + sIdx + '-' + bIdx);
+    if (nr) nr.classList.add('mxd6-row--sel');
+    _v6RefreshProps();
+  }
+
+  // ── V6 SECTIONS ──
+  function _v6AddSection() {
+    _v6Push();
+    var color = V6_SECTION_COLORS[_builderSecs.length % V6_SECTION_COLORS.length];
+    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', color: color, blocks: [] });
+    _v6RefreshCanvas();
+    _v6SelectSec(_builderSecs.length - 1);
+  }
+
+  function _v6DelSection(sIdx) {
+    if (!confirm('Supprimer cette section et tous ses éléments ?')) return;
+    _v6Push();
+    _builderSecs.splice(sIdx, 1);
+    _v6SelSIdx = null; _v6SelBIdx = null;
+    _v6RefreshCanvas(); _v6RefreshProps();
+  }
+
+  function _v6DupSection(sIdx) {
+    _v6Push();
+    var copy = JSON.parse(JSON.stringify(_builderSecs[sIdx]));
+    copy.id = _uid(); copy.label += ' (copie)';
+    copy.blocks.forEach(function(b) { b.id = _uid(); });
+    _builderSecs.splice(sIdx + 1, 0, copy);
+    _v6RefreshCanvas(); _v6SelectSec(sIdx + 1);
+  }
+
+  function _v6ToggleCollapse(sIdx) {
+    _v6SecCollapsed[sIdx] = !_v6SecCollapsed[sIdx];
+    _v6RefreshSection(sIdx);
+  }
+
+  function _v6SecLabelChange(sIdx, el) {
+    var val = (el.textContent || '').trim();
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].label = val || 'Section';
+    if (_v6SelSIdx === sIdx && _v6SelBIdx === null) _v6RefreshProps();
+  }
+
+  function _v6SecLabelProp(sIdx, val) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].label = val;
+    var el = document.querySelector('#mxd6-sec-' + sIdx + ' .mxd6-sec-name');
+    if (el && el !== document.activeElement) el.textContent = val;
+  }
+
+  function _v6SecDesc(sIdx, val) {
+    if (_builderSecs[sIdx]) _builderSecs[sIdx].description = val;
+  }
+
+  function _v6SecColor(sIdx, color) {
+    if (!_builderSecs[sIdx]) return;
+    _v6Push();
+    _builderSecs[sIdx].color = color;
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  // ── V6 ELEMENTS ──
+  function _v6AddQuick(sIdx) {
+    _v6Push();
+    var blk = _v5NewRow(null);
+    _builderSecs[sIdx].blocks.push(blk);
+    var newBIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v6RefreshSection(sIdx);
+    _v6SelectRow(sIdx, newBIdx);
+    setTimeout(function() {
+      var lbl = document.querySelector('#mxd6-row-' + sIdx + '-' + newBIdx + ' .mxd6-row-lbl');
+      if (lbl) { lbl.focus(); var r = document.createRange(); r.selectNodeContents(lbl); r.collapse(false); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+    }, 50);
+  }
+
+  function _v6AddEl(sIdx, compKey) {
+    _v6Push();
+    _builderSecs[sIdx].blocks.push(_v5NewRow(compKey));
+    var nIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v6RefreshSection(sIdx); _v6SelectRow(sIdx, nIdx);
+  }
+
+  function _v6AddStatic(sIdx, type) {
+    _v6Push();
+    var lbls = { titre: 'Titre', sstitre: 'Sous-titre', separator: '', texte: 'Texte libre' };
+    _builderSecs[sIdx].blocks.push({ id: _uid(), type: type, label: lbls[type] || type });
+    var nIdx = _builderSecs[sIdx].blocks.length - 1;
+    _v6RefreshSection(sIdx); _v6SelectRow(sIdx, nIdx);
+  }
+
+  function _v6DelEl(sIdx, bIdx) {
+    _v6Push();
+    _builderSecs[sIdx].blocks.splice(bIdx, 1);
+    if (_v6SelBIdx === bIdx && _v6SelSIdx === sIdx) _v6SelBIdx = null;
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  function _v6DupEl(sIdx, bIdx) {
+    _v6Push();
+    var copy = JSON.parse(JSON.stringify(_builderSecs[sIdx].blocks[bIdx]));
+    copy.id = _uid();
+    _builderSecs[sIdx].blocks.splice(bIdx + 1, 0, copy);
+    _v6RefreshSection(sIdx); _v6SelectRow(sIdx, bIdx + 1);
+  }
+
+  function _v6MoveEl(sIdx, bIdx, dir) {
+    var blks = _builderSecs[sIdx].blocks;
+    var nIdx = bIdx + dir;
+    if (nIdx < 0 || nIdx >= blks.length) return;
+    _v6Push();
+    var tmp = blks[bIdx]; blks[bIdx] = blks[nIdx]; blks[nIdx] = tmp;
+    _v6RefreshSection(sIdx); _v6SelectRow(sIdx, nIdx);
+  }
+
+  function _v6RowLabelChange(sIdx, bIdx, el) {
+    var val = (el.textContent || '').trim();
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    blk.label = val || 'Contrôle';
+    if (_v6SelSIdx === sIdx && _v6SelBIdx === bIdx) _v6RefreshProps();
+  }
+
+  function _v6PropChange(sIdx, bIdx, key, val) {
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    blk[key] = val;
+    if (key === 'label') {
+      var lbl = document.querySelector('#mxd6-row-' + sIdx + '-' + bIdx + ' .mxd6-row-lbl');
+      if (lbl && lbl !== document.activeElement) lbl.textContent = val;
+    }
+  }
+
+  function _v6ToggleProp(sIdx, bIdx, prop) {
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    _v6Push();
+    blk[prop] = !blk[prop];
+    _v6RefreshRow(sIdx, bIdx);
+    if (_v6SelSIdx === sIdx && _v6SelBIdx === bIdx) _v6RefreshProps();
+  }
+
+  function _v6ToggleComp(sIdx, bIdx, compKey) {
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    _v6Push();
+    blk[compKey] = !blk[compKey];
+    if (compKey === 'hasValeur' && blk[compKey] && blk.unit === undefined) blk.unit = '';
+    _v6RefreshRow(sIdx, bIdx); _v6RefreshProps();
+  }
+
+  function _v6SetUnit(sIdx, bIdx, val) {
+    var blk = (_builderSecs[sIdx] || { blocks: [] }).blocks[bIdx];
+    if (!blk) return;
+    blk.unit = val;
+    var u = document.querySelector('#mxd6-row-' + sIdx + '-' + bIdx + ' .mxd6-ctrl-unit');
+    if (u) u.textContent = val;
+    else if (val) {
+      var wrap = document.querySelector('#mxd6-row-' + sIdx + '-' + bIdx + ' .mxd6-ctrl-val-wrap');
+      if (wrap) { var sp = document.createElement('span'); sp.className = 'mxd6-ctrl-unit'; sp.textContent = val; wrap.appendChild(sp); }
+    }
+  }
+
+  // ── V6 PALETTE ACTIONS ──
+  function _v6PalClick(compKey, staticType) {
+    var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
+    if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
+    if (compKey) _v6AddEl(sIdx, compKey);
+    else if (staticType) _v6AddStatic(sIdx, staticType);
+  }
+
+  function _v6PalDragStart(e, compKey, staticType) {
+    _v6DragData = { type: 'pal', compKey: compKey, staticType: staticType };
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', compKey || staticType || '');
+  }
+
+  // ── V6 DRAG & DROP ──
+  function _v6SecDragStart(e, sIdx) {
+    _v6DragData = { type: 'sec', sIdx: sIdx };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'sec-' + sIdx);
+  }
+
+  function _v6SecDzOver(e, sIdx) {
+    e.preventDefault();
+    var el = document.getElementById('mxd6-sec-' + sIdx);
+    if (el) el.classList.add('mxd6-sec--dz');
+  }
+
+  function _v6SecDzLeave(e, sIdx) {
+    var el = document.getElementById('mxd6-sec-' + sIdx);
+    if (el) el.classList.remove('mxd6-sec--dz');
+  }
+
+  function _v6SecDzDrop(e, sIdx) {
+    e.preventDefault(); e.stopPropagation();
+    var el = document.getElementById('mxd6-sec-' + sIdx);
+    if (el) el.classList.remove('mxd6-sec--dz');
+    var dd = _v6DragData; _v6DragData = null;
+    if (!dd) return;
+    if (dd.type === 'sec' && dd.sIdx !== sIdx) {
+      _v6Push();
+      var moved = _builderSecs.splice(dd.sIdx, 1)[0];
+      var newIdx = sIdx > dd.sIdx ? sIdx - 1 : sIdx;
+      _builderSecs.splice(newIdx, 0, moved);
+      _v6SelSIdx = null; _v6SelBIdx = null;
+      _v6RefreshCanvas(); _v6RefreshProps();
+    } else if (dd.type === 'pal') {
+      if (dd.compKey) _v6AddEl(sIdx, dd.compKey);
+      else if (dd.staticType) _v6AddStatic(sIdx, dd.staticType);
+    }
+  }
+
+  function _v6RowDragStart(e, sIdx, bIdx) {
+    _v6DragData = { type: 'row', sIdx: sIdx, bIdx: bIdx };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'row-' + sIdx + '-' + bIdx);
+    e.stopPropagation();
+  }
+
+  function _v6RowDzOver(e, sIdx, bIdx) {
+    e.preventDefault(); e.stopPropagation();
+    var el = document.getElementById('mxd6-row-' + sIdx + '-' + bIdx);
+    if (el) el.classList.add('mxd6-row--dz');
+  }
+
+  function _v6RowDzLeave(e, sIdx, bIdx) {
+    var el = document.getElementById('mxd6-row-' + sIdx + '-' + bIdx);
+    if (el) el.classList.remove('mxd6-row--dz');
+  }
+
+  function _v6RowDzDrop(e, sIdx, bIdx) {
+    e.preventDefault(); e.stopPropagation();
+    var el = document.getElementById('mxd6-row-' + sIdx + '-' + bIdx);
+    if (el) el.classList.remove('mxd6-row--dz');
+    var dd = _v6DragData; _v6DragData = null;
+    if (!dd) return;
+    if (dd.type === 'row') {
+      var fromS = dd.sIdx; var fromB = dd.bIdx;
+      if (fromS === sIdx && fromB === bIdx) return;
+      _v6Push();
+      var movedBlk = _builderSecs[fromS].blocks.splice(fromB, 1)[0];
+      var targetB = (fromS === sIdx && fromB < bIdx) ? bIdx - 1 : bIdx;
+      _builderSecs[sIdx].blocks.splice(targetB, 0, movedBlk);
+      _v6SelSIdx = sIdx; _v6SelBIdx = targetB;
+      if (fromS === sIdx) { _v6RefreshSection(sIdx); }
+      else { _v6RefreshSection(fromS); _v6RefreshSection(sIdx); }
+      _v6RefreshProps();
+    } else if (dd.type === 'pal') {
+      if (dd.compKey) {
+        _v6Push();
+        _builderSecs[sIdx].blocks.splice(bIdx, 0, _v5NewRow(dd.compKey));
+        _v6SelectRow(sIdx, bIdx); _v6RefreshSection(sIdx);
+      } else if (dd.staticType) {
+        _v6Push();
+        var lbls2 = { titre:'Titre', sstitre:'Sous-titre', separator:'', texte:'Texte libre' };
+        _builderSecs[sIdx].blocks.splice(bIdx, 0, { id: _uid(), type: dd.staticType, label: lbls2[dd.staticType] || dd.staticType });
+        _v6SelectRow(sIdx, bIdx); _v6RefreshSection(sIdx);
+      }
+    }
+  }
+
+  function _v6CanvasDzOver(e) { e.preventDefault(); }
+
+  function _v6CanvasDzDrop(e) {
+    e.preventDefault();
+    var dd = _v6DragData; _v6DragData = null;
+    if (!dd || dd.type !== 'sec') return;
+    _v6Push();
+    var moved = _builderSecs.splice(dd.sIdx, 1)[0];
+    _builderSecs.push(moved);
+    _v6SelSIdx = _builderSecs.length - 1; _v6SelBIdx = null;
+    _v6RefreshCanvas(); _v6RefreshProps();
   }
 
   // ─────────────────────────────────────────────────────
@@ -3159,7 +3900,7 @@
 
   async function _saveBuilder(status) {
     if (!_builderTpl) return;
-    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title') || document.getElementById('mxd4-title') || document.getElementById('mxd5-title');
+    var titleEl = document.getElementById('mxd6-title') || document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title') || document.getElementById('mxd3-title') || document.getElementById('mxd4-title') || document.getElementById('mxd5-title');
     var descEl  = document.getElementById('mxd-bld-desc');
     var freqEl  = document.getElementById('mxd-bld-freq');
     var colorEl = document.getElementById('mxd-bld-color');
@@ -3654,6 +4395,44 @@
     _v4ElDragStart,
     _v4ElDzOver,
     _v4ElDzDrop,
+    // V6
+    _v6Undo,
+    _v6Redo,
+    _v6Preview,
+    _v6MobSwitch,
+    _v6SelectSec,
+    _v6SelectRow,
+    _v6AddSection,
+    _v6DelSection,
+    _v6DupSection,
+    _v6ToggleCollapse,
+    _v6SecLabelChange,
+    _v6SecLabelProp,
+    _v6SecDesc,
+    _v6SecColor,
+    _v6AddQuick,
+    _v6AddEl,
+    _v6AddStatic,
+    _v6DelEl,
+    _v6DupEl,
+    _v6MoveEl,
+    _v6RowLabelChange,
+    _v6PropChange,
+    _v6ToggleProp,
+    _v6ToggleComp,
+    _v6SetUnit,
+    _v6PalClick,
+    _v6PalDragStart,
+    _v6SecDragStart,
+    _v6SecDzOver,
+    _v6SecDzLeave,
+    _v6SecDzDrop,
+    _v6RowDragStart,
+    _v6RowDzOver,
+    _v6RowDzLeave,
+    _v6RowDzDrop,
+    _v6CanvasDzOver,
+    _v6CanvasDzDrop,
     // V5
     _v5Undo,
     _v5Redo,
