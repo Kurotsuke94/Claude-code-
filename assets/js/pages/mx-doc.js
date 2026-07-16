@@ -2,27 +2,33 @@
   'use strict';
 
   // ── STATE ──
-  var _curTab      = 'modeles';
-  var _loaded      = false;
-  var _templates   = [];
-  var _instances   = [];
-  var _unsub       = {};
+  var _curTab       = 'modeles';
+  var _loaded       = false;
+  var _templates    = [];
+  var _instances    = [];
+  var _unsub        = {};
   var _filterStatus = 'all';
 
   // Builder state
   var _builderMode  = false;
-  var _builderTpl   = null;   // template being edited (working copy)
-  var _builderSecs  = [];     // working copy of sections
-  var _selBlock     = null;   // { sIdx, bIdx } | null
+  var _builderTpl   = null;
+  var _builderSecs  = [];
+  var _selBlock     = null;
 
-  // Drag state
-  var _palDragType  = null;   // type being dragged from palette
-  var _blkDragSrc   = null;   // { sIdx, bIdx } being moved within canvas
+  // V2 Builder state
+  var _v2History     = [];
+  var _v2Future      = [];
+  var _v2SelSIdx     = null;
+  var _v2SelEIdx     = null;
+  var _v2MobPanel    = 'canvas';
+  var _v2PalDragType = null;
+  var _v2ElDragSrc   = null;
+  var _v2SecDragSrc  = null;
 
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
-  var _execInstance  = null;  // existing instance doc or null
+  var _execInstance  = null;
   var _execResponses = {};
 
   var DB = {
@@ -33,34 +39,32 @@
 
   // ── CONSTANTS ──
   var BLOCK_TYPES = [
-    { type: 'titre',       icon: 'fa-heading',          l: 'Titre',           color: '#8B5CF6' },
-    { type: 'sstitre',     icon: 'fa-text-height',      l: 'Sous-titre',      color: '#6366F1' },
-    { type: 'separator',   icon: 'fa-minus',            l: 'Séparateur',      color: '#475569' },
-    { type: 'texte',       icon: 'fa-align-left',       l: 'Texte libre',     color: '#64748B' },
-    { type: 'numerique',   icon: 'fa-hashtag',          l: 'Numérique',       color: '#0EA5E9' },
-    { type: 'ouinon',      icon: 'fa-toggle-on',        l: 'Oui / Non',       color: '#10B981' },
-    { type: 'faitnonfait', icon: 'fa-circle-check',     l: 'Fait / Non fait', color: '#22C55E' },
-    { type: 'commentaire', icon: 'fa-comment-lines',    l: 'Commentaire',     color: '#F59E0B' },
-    { type: 'date',        icon: 'fa-calendar',         l: 'Date',            color: '#F97316' },
-    { type: 'heure',       icon: 'fa-clock',            l: 'Heure',           color: '#EF4444' },
-    { type: 'photo',       icon: 'fa-camera',           l: 'Photo',           color: '#EC4899' },
-    { type: 'signature',   icon: 'fa-pen-nib',          l: 'Signature',       color: '#A855F7' },
+    { type: 'titre',       icon: 'fa-heading',       l: 'Titre',           color: '#8B5CF6' },
+    { type: 'sstitre',     icon: 'fa-text-height',   l: 'Sous-titre',      color: '#6366F1' },
+    { type: 'separator',   icon: 'fa-minus',         l: 'Séparateur',      color: '#475569' },
+    { type: 'texte',       icon: 'fa-align-left',    l: 'Texte libre',     color: '#64748B' },
+    { type: 'numerique',   icon: 'fa-hashtag',       l: 'Numérique',       color: '#0EA5E9' },
+    { type: 'ouinon',      icon: 'fa-toggle-on',     l: 'Oui / Non',       color: '#10B981' },
+    { type: 'faitnonfait', icon: 'fa-circle-check',  l: 'Fait / Non fait', color: '#22C55E' },
+    { type: 'commentaire', icon: 'fa-comment-lines', l: 'Commentaire',     color: '#F59E0B' },
+    { type: 'date',        icon: 'fa-calendar',      l: 'Date',            color: '#F97316' },
+    { type: 'heure',       icon: 'fa-clock',         l: 'Heure',           color: '#EF4444' },
+    { type: 'photo',       icon: 'fa-camera',        l: 'Photo',           color: '#EC4899' },
+    { type: 'signature',   icon: 'fa-pen-nib',       l: 'Signature',       color: '#A855F7' },
   ];
 
+  var SEC_COLORS = ['#6366F1','#10B981','#F59E0B','#EF4444','#8B5CF6','#0EA5E9','#EC4899','#14B8A6','#F97316','#84CC16'];
+
   var FREQ_LABELS = {
-    on_demand:  'À la demande',
-    daily:      'Quotidien',
-    weekly:     'Hebdomadaire',
-    biweekly:   'Bihebdomadaire',
-    monthly:    'Mensuel',
-    quarterly:  'Trimestriel',
+    on_demand: 'À la demande',
+    daily:     'Quotidien',
+    weekly:    'Hebdomadaire',
+    biweekly:  'Bihebdomadaire',
+    monthly:   'Mensuel',
+    quarterly: 'Trimestriel',
   };
 
-  var STATUS_LABELS = {
-    draft:     'Brouillon',
-    published: 'Publié',
-    archived:  'Archivé',
-  };
+  var STATUS_LABELS = { draft: 'Brouillon', published: 'Publié', archived: 'Archivé' };
 
   var STATIC_TYPES = ['titre', 'sstitre', 'separator', 'texte'];
 
@@ -103,21 +107,14 @@
   function _load() {
     if (_loaded) return;
     _loaded = true;
-
-    _unsub.templates = DB.templates()
-      .orderBy('createdAt', 'desc')
-      .onSnapshot(function (snap) {
-        _templates = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        _rerender();
-      }, _fsErr('mx_doc_templates'));
-
-    _unsub.instances = DB.instances()
-      .orderBy('startedAt', 'desc')
-      .limit(200)
-      .onSnapshot(function (snap) {
-        _instances = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        if (_curTab === 'historique') _rerender();
-      }, _fsErr('mx_doc_instances'));
+    _unsub.templates = DB.templates().orderBy('createdAt', 'desc').onSnapshot(function (snap) {
+      _templates = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      _rerender();
+    }, _fsErr('mx_doc_templates'));
+    _unsub.instances = DB.instances().orderBy('startedAt', 'desc').limit(200).onSnapshot(function (snap) {
+      _instances = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      if (_curTab === 'historique') _rerender();
+    }, _fsErr('mx_doc_instances'));
   }
 
   // ── ENTRY POINT ──
@@ -126,8 +123,8 @@
     if (!mc) return;
     if (window._mxdocStartTab) { _curTab = window._mxdocStartTab; delete window._mxdocStartTab; }
     _load();
-    if (_builderMode) { _renderBuilder(mc); return; }
-    if (_execMode)    { _renderExec(mc);    return; }
+    if (_builderMode) { _renderBuilderV2(mc); return; }
+    if (_execMode)    { _renderExec(mc);       return; }
     mc.innerHTML = _pageShell();
     _renderTabBody();
   }
@@ -140,7 +137,7 @@
 
   function _pageShell() {
     var tabs = [
-      { id: 'modeles',    icon: 'fa-layer-group',      l: 'Mes modèles'  },
+      { id: 'modeles',    icon: 'fa-layer-group',       l: 'Mes modèles' },
       { id: 'historique', icon: 'fa-clock-rotate-left', l: 'Historique'  },
       { id: 'parametres', icon: 'fa-sliders',           l: 'Paramètres'  },
     ];
@@ -149,94 +146,70 @@
         + ' onclick="MX.Pages.MxDoc._tab(\'' + t.id + '\')">'
         + '<i class="fas ' + t.icon + '"></i><span>' + t.l + '</span></button>';
     }).join('');
-    return '<div class="mxd-page">'
-      + '<div class="mxd-tabs">' + th + '</div>'
-      + '<div id="mxd-body" class="mxd-body"></div>'
-      + '</div>';
+    return '<div class="mxd-page"><div class="mxd-tabs">' + th + '</div>'
+      + '<div id="mxd-body" class="mxd-body"></div></div>';
   }
 
-  function _renderTabBody() {
-    var bd = document.getElementById('mxd-body');
-    if (bd) bd.innerHTML = _tabBody();
-  }
-
+  function _renderTabBody() { var bd = document.getElementById('mxd-body'); if (bd) bd.innerHTML = _tabBody(); }
   function _tabBody() {
     if (_curTab === 'modeles')    return _tModeles();
     if (_curTab === 'historique') return _tHistorique();
     if (_curTab === 'parametres') return _tParametres();
     return '';
   }
-
   function _tab(id) { _curTab = id; _renderTabBody(); }
 
-  // ─────────────────────────────────────────────────────
-  // TAB: MES MODÈLES
-  // ─────────────────────────────────────────────────────
+  // ── TAB: MES MODÈLES ──
   function _tModeles() {
     var canEdit = _canEdit();
     var filters = [
-      { id: 'all',       l: 'Tous' },
-      { id: 'published', l: 'Publiés' },
-      { id: 'draft',     l: 'Brouillons' },
-      { id: 'archived',  l: 'Archivés'  },
+      { id: 'all', l: 'Tous' }, { id: 'published', l: 'Publiés' },
+      { id: 'draft', l: 'Brouillons' }, { id: 'archived', l: 'Archivés' },
     ];
     var fH = filters.map(function (f) {
       return '<button class="mxd-filter-btn' + (_filterStatus === f.id ? ' mxd-filter-btn--active' : '') + '"'
         + ' onclick="MX.Pages.MxDoc._setFilter(\'' + f.id + '\')">' + f.l + '</button>';
     }).join('');
-
     var visible = _templates.filter(function (t) {
       if (_filterStatus === 'all')      return t.status !== 'archived';
       if (_filterStatus === 'archived') return t.status === 'archived';
       return t.status === _filterStatus;
     });
-
     var cardsH = visible.length === 0
-      ? _emptyState('Aucun modèle', 'fa-file-circle-plus',
-          canEdit ? 'Créez votre premier modèle de document.' : 'Aucun modèle disponible.')
+      ? _emptyState('Aucun modèle', 'fa-file-circle-plus', canEdit ? 'Créez votre premier modèle de document.' : 'Aucun modèle disponible.')
       : visible.map(_templateCard).join('');
-
     return '<div class="mxd-modeles">'
-      + '<div class="mxd-mod-head">'
-      + '<div class="mxd-filters">' + fH + '</div>'
+      + '<div class="mxd-mod-head"><div class="mxd-filters">' + fH + '</div>'
       + (canEdit ? '<button class="mxd-new-btn" onclick="MX.Pages.MxDoc._newTemplate()"><i class="fas fa-plus"></i> Nouveau modèle</button>' : '')
-      + '</div>'
-      + '<div class="mxd-cards">' + cardsH + '</div>'
-      + '</div>';
+      + '</div><div class="mxd-cards">' + cardsH + '</div></div>';
   }
 
   function _templateCard(t) {
-    var e       = _e;
-    var status  = t.status || 'draft';
+    var e = _e;
+    var status    = t.status || 'draft';
     var statusCls = { draft: 'mxd-status--draft', published: 'mxd-status--pub', archived: 'mxd-status--arch' }[status] || 'mxd-status--draft';
-    var statusL = STATUS_LABELS[status] || status;
-    var freqL   = FREQ_LABELS[t.frequency] || t.frequency || 'À la demande';
-    var secCnt  = (t.sections || []).length;
-    var blkCnt  = (t.sections || []).reduce(function (acc, s) { return acc + (s.blocks || []).length; }, 0);
-    var canEdit = _canEdit();
-    var accent  = e(t.color || 'var(--cyan)');
-    var tid     = e(t.id);
-
+    var statusL   = STATUS_LABELS[status] || status;
+    var freqL     = FREQ_LABELS[t.frequency] || t.frequency || 'À la demande';
+    var secCnt    = (t.sections || []).length;
+    var blkCnt    = (t.sections || []).reduce(function (acc, s) { return acc + (s.blocks || []).length; }, 0);
+    var canEdit   = _canEdit();
+    var accent    = e(t.color || 'var(--cyan)');
+    var tid       = e(t.id);
     var actH = '';
     if (canEdit) {
       var pubArchBtn = status !== 'published'
         ? '<button class="mxd-act-btn mxd-act-btn--pub" onclick="event.stopPropagation();MX.Pages.MxDoc._publishTemplate(\'' + tid + '\')" title="Publier"><i class="fas fa-globe"></i></button>'
         : '<button class="mxd-act-btn mxd-act-btn--arch" onclick="event.stopPropagation();MX.Pages.MxDoc._archiveTemplate(\'' + tid + '\')" title="Archiver"><i class="fas fa-box-archive"></i></button>';
-      actH = '<div class="mxd-card-acts">'
-        + pubArchBtn
+      actH = '<div class="mxd-card-acts">' + pubArchBtn
         + '<button class="mxd-act-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._duplicateTemplate(\'' + tid + '\')" title="Dupliquer"><i class="fas fa-copy"></i></button>'
         + '<button class="mxd-act-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._openBuilder(\'' + tid + '\')" title="Modifier"><i class="fas fa-pen"></i></button>'
         + '<button class="mxd-act-btn mxd-act-btn--del" onclick="event.stopPropagation();MX.Pages.MxDoc._deleteTemplate(\'' + tid + '\')" title="Supprimer"><i class="fas fa-trash"></i></button>'
         + '</div>';
     }
-
     var launchH = status === 'published'
-      ? '<button class="mxd-launch-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._startExec(\'' + tid + '\')">'
-        + '<i class="fas fa-play"></i> Remplir</button>'
+      ? '<button class="mxd-launch-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._startExec(\'' + tid + '\')"><i class="fas fa-play"></i> Remplir</button>'
       : '';
-
     var clickFn = canEdit ? 'MX.Pages.MxDoc._openBuilder(\'' + tid + '\')' : (status === 'published' ? 'MX.Pages.MxDoc._startExec(\'' + tid + '\')' : '');
-
     return '<div class="mxd-card" onclick="' + clickFn + '">'
       + '<div class="mxd-card-accent" style="background:' + accent + '"></div>'
       + '<div class="mxd-card-body">'
@@ -248,10 +221,7 @@
       + '<span><i class="fas fa-rotate"></i> ' + freqL + '</span>'
       + '<span><i class="fas fa-layer-group"></i> ' + secCnt + ' section' + (secCnt > 1 ? 's' : '') + '</span>'
       + '<span><i class="fas fa-list-check"></i> ' + blkCnt + ' champ' + (blkCnt > 1 ? 's' : '') + '</span>'
-      + '</div>'
-      + launchH
-      + '</div>'
-      + '</div>';
+      + '</div>' + launchH + '</div></div>';
   }
 
   function _setFilter(f) { _filterStatus = f; _rerender(); }
@@ -262,47 +232,37 @@
       + '<div class="mxd-empty-msg">' + msg + '</div></div>';
   }
 
-  // ─────────────────────────────────────────────────────
-  // TAB: HISTORIQUE
-  // ─────────────────────────────────────────────────────
+  // ── TAB: HISTORIQUE ──
   function _tHistorique() {
     var rows = _instances.length === 0
       ? _emptyState('Aucun document', 'fa-clock-rotate-left', 'Les documents remplis apparaîtront ici.')
       : _instances.map(_instanceRow).join('');
-
     var expH = _instances.length > 0
       ? '<div class="mxd-hist-acts">'
         + '<button class="mxd-export-btn" onclick="MX.Pages.MxDoc._exportExcel()"><i class="fas fa-file-excel"></i> Excel</button>'
         + '<button class="mxd-export-btn" onclick="MX.Pages.MxDoc._exportPdf()"><i class="fas fa-print"></i> Imprimer</button>'
-        + '</div>'
-      : '';
-
+        + '</div>' : '';
     return '<div class="mxd-historique">'
       + '<div class="mxd-hist-head"><div class="mxd-hist-title"><i class="fas fa-clock-rotate-left"></i> Historique des documents</div>' + expH + '</div>'
-      + '<div class="mxd-hist-list">' + rows + '</div>'
-      + '</div>';
+      + '<div class="mxd-hist-list">' + rows + '</div></div>';
   }
 
   function _instanceRow(inst) {
-    var e       = _e;
-    var done    = inst.status === 'termine';
+    var e    = _e;
+    var done = inst.status === 'termine';
     var dateStr = _fmtTs(inst.completedAt || inst.startedAt);
     return '<div class="mxd-inst-row">'
       + '<div class="mxd-inst-icon ' + (done ? 'mxd-inst-icon--done' : '') + '"><i class="fas ' + (done ? 'fa-circle-check' : 'fa-circle-half-stroke') + '"></i></div>'
       + '<div class="mxd-inst-info">'
       + '<div class="mxd-inst-name">' + e(inst.templateTitle || 'Document') + '</div>'
-      + '<div class="mxd-inst-meta">'
-      + '<span><i class="fas fa-user"></i> ' + e(inst.assignedTo || '—') + '</span>'
-      + '<span><i class="fas fa-calendar"></i> ' + dateStr + '</span>'
-      + '</div>'
+      + '<div class="mxd-inst-meta"><span><i class="fas fa-user"></i> ' + e(inst.assignedTo || '—') + '</span>'
+      + '<span><i class="fas fa-calendar"></i> ' + dateStr + '</span></div>'
       + '</div>'
       + '<span class="mxd-inst-badge ' + (done ? 'mxd-inst-badge--done' : 'mxd-inst-badge--prog') + '">' + (done ? 'Terminé' : 'En cours') + '</span>'
       + '</div>';
   }
 
-  // ─────────────────────────────────────────────────────
-  // TAB: PARAMÈTRES
-  // ─────────────────────────────────────────────────────
+  // ── TAB: PARAMÈTRES ──
   function _tParametres() {
     var pubCnt = _templates.filter(function (t) { return t.status === 'published'; }).length;
     var dftCnt = _templates.filter(function (t) { return t.status === 'draft'; }).length;
@@ -318,22 +278,15 @@
       + '<div class="mxd-stat"><div class="mxd-stat-val">' + pubCnt + '</div><div class="mxd-stat-lbl">Modèles publiés</div></div>'
       + '<div class="mxd-stat"><div class="mxd-stat-val">' + dftCnt + '</div><div class="mxd-stat-lbl">Brouillons</div></div>'
       + '<div class="mxd-stat"><div class="mxd-stat-val">' + _instances.length + '</div><div class="mxd-stat-lbl">Documents enregistrés</div></div>'
-      + '</div>'
-      + '</div>'
+      + '</div></div>'
       + '<div class="mxd-params-card">'
       + '<div class="mxd-params-hdr"><i class="fas fa-cube"></i> Blocs disponibles</div>'
       + '<div class="mxd-params-types">'
-      + BLOCK_TYPES.map(function (bt) {
-          return '<div class="mxd-params-type"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i><span>' + bt.l + '</span></div>';
-        }).join('')
-      + '</div>'
-      + '</div>'
-      + '</div>';
+      + BLOCK_TYPES.map(function (bt) { return '<div class="mxd-params-type"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i><span>' + bt.l + '</span></div>'; }).join('')
+      + '</div></div></div>';
   }
 
-  // ─────────────────────────────────────────────────────
-  // CRUD TEMPLATES
-  // ─────────────────────────────────────────────────────
+  // ── CRUD TEMPLATES ──
   function _newTemplate() { _openBuilder(null); }
 
   function _openBuilder(id) {
@@ -343,17 +296,33 @@
       ? JSON.parse(JSON.stringify(tpl))
       : { id: null, title: '', description: '', icon: 'fa-file-lines', color: '#8B5CF6', status: 'draft', frequency: 'on_demand', sections: [] };
     _builderSecs = JSON.parse(JSON.stringify(_builderTpl.sections || []));
-    if (!_builderSecs.length) _builderSecs.push({ id: _uid(), label: 'Section 1', blocks: [] });
-    _selBlock    = null;
-    _builderMode = true;
+    if (!_builderSecs.length) {
+      _builderSecs.push({ id: _uid(), label: 'Section 1', color: SEC_COLORS[0], blocks: [] });
+    } else {
+      _builderSecs.forEach(function(s, i) { if (!s.color) s.color = SEC_COLORS[i % SEC_COLORS.length]; });
+    }
+    _selBlock     = null;
+    _v2History    = [];
+    _v2Future     = [];
+    _v2SelSIdx    = null;
+    _v2SelEIdx    = null;
+    _v2MobPanel   = 'canvas';
+    _v2PalDragType = null;
+    _v2ElDragSrc   = null;
+    _v2SecDragSrc  = null;
+    _builderMode  = true;
     render();
   }
 
   function _closeBuilder() {
-    _builderMode = false;
-    _builderTpl  = null;
-    _builderSecs = [];
-    _selBlock    = null;
+    _builderMode  = false;
+    _builderTpl   = null;
+    _builderSecs  = [];
+    _selBlock     = null;
+    _v2History    = [];
+    _v2Future     = [];
+    _v2SelSIdx    = null;
+    _v2SelEIdx    = null;
     render();
   }
 
@@ -378,13 +347,12 @@
     if (!tpl) return;
     var copy = JSON.parse(JSON.stringify(tpl));
     delete copy.id;
-    copy.title      = 'Copie — ' + tpl.title;
-    copy.status     = 'draft';
-    copy.createdBy  = _author();
-    copy.createdAt  = FV.serverTimestamp();
-    copy.updatedAt  = FV.serverTimestamp();
-    copy.publishedAt = null;
-    copy.archivedAt  = null;
+    copy.title = 'Copie — ' + tpl.title;
+    copy.status = 'draft';
+    copy.createdBy = _author();
+    copy.createdAt = FV.serverTimestamp();
+    copy.updatedAt = FV.serverTimestamp();
+    copy.publishedAt = null; copy.archivedAt = null;
     MX.syncStart();
     try {
       await DB.templates().add(copy);
@@ -396,12 +364,11 @@
     var tpl = _templates.find(function (t) { return t.id === id; });
     if (!tpl) return;
     MX.showModal({
-      title: 'Supprimer ce modèle ?',
-      sub:   _e(tpl.title || 'Sans titre'),
-      body:  '<p style="color:var(--text2);font-size:13px">Cette action est irréversible. Les documents déjà remplis resteront dans l\'historique.</p>',
+      title: 'Supprimer ce modèle ?', sub: _e(tpl.title || 'Sans titre'),
+      body: '<p style="color:var(--text2);font-size:13px">Cette action est irréversible. Les documents déjà remplis resteront dans l\'historique.</p>',
       actions: [
-        { label: '<i class="fas fa-trash"></i> Supprimer', cls: 'danger',  fn: function () { _doDeleteTemplate(id); } },
-        { label: 'Annuler',                                cls: 'cancel',   fn: function () {} },
+        { label: '<i class="fas fa-trash"></i> Supprimer', cls: 'danger', fn: function () { _doDeleteTemplate(id); } },
+        { label: 'Annuler', cls: 'cancel', fn: function () {} },
       ],
     });
   }
@@ -415,319 +382,642 @@
   }
 
   // ─────────────────────────────────────────────────────
-  // BUILDER RENDER
+  // V2 BUILDER — RENDER
   // ─────────────────────────────────────────────────────
-  function _renderBuilder(mc) {
-    var tpl = _builderTpl || {};
-    var e   = _e;
+  function _renderBuilderV2(mc) {
+    var tpl     = _builderTpl || {};
+    var status  = tpl.status || 'draft';
+    var statusL = STATUS_LABELS[status] || 'Brouillon';
+    var statusCls = status === 'published' ? 'mxd2-badge--pub' : status === 'archived' ? 'mxd2-badge--arch' : 'mxd2-badge--draft';
 
-    var freqOpts = Object.keys(FREQ_LABELS).map(function (k) {
-      return '<option value="' + k + '"' + (tpl.frequency === k ? ' selected' : '') + '>' + FREQ_LABELS[k] + '</option>';
-    }).join('');
+    mc.innerHTML =
+      '<div class="mxd2-builder">'
+      + _v2TopBarHTML(tpl, statusL, statusCls)
+      + '<div class="mxd2-layout">'
+      + '<div class="mxd2-palette" id="mxd2-pal"' + (_v2MobPanel === 'pal' ? ' data-mob="active"' : '') + '>' + _v2PaletteHTML() + '</div>'
+      + '<div class="mxd2-canvas-wrap" id="mxd2-canvas"' + (_v2MobPanel === 'canvas' ? ' data-mob="active"' : '') + '>' + _v2CanvasHTML() + '</div>'
+      + '<div class="mxd2-props-panel" id="mxd2-props"' + (_v2MobPanel === 'props' ? ' data-mob="active"' : '') + '>' + _v2PropsPanelHTML() + '</div>'
+      + '</div>'
+      + _v2MobNavHTML()
+      + '</div>';
+  }
 
-    var ICONS = ['fa-file-lines','fa-file-contract','fa-clipboard-list','fa-file-check',
-                 'fa-clipboard-check','fa-file-shield','fa-note-sticky','fa-scroll',
-                 'fa-file-alt','fa-book-open','fa-tasks','fa-tools'];
-    var iconPickH = ICONS.map(function (ic) {
-      return '<button class="mxd-icon-pick' + (tpl.icon === ic ? ' mxd-icon-pick--on' : '') + '"'
-        + ' onclick="MX.Pages.MxDoc._setBuilderIcon(\'' + ic + '\')" title="' + ic + '">'
-        + '<i class="fas ' + ic + '"></i></button>';
-    }).join('');
-
-    var palH = BLOCK_TYPES.map(function (bt) {
-      return '<div class="mxd-pal-item" draggable="true"'
-        + ' ondragstart="MX.Pages.MxDoc._palDragStart(event,\'' + bt.type + '\')"'
-        + ' ondragend="MX.Pages.MxDoc._palDragEnd(event)"'
-        + ' style="--mxd-bt:' + bt.color + '" title="' + bt.l + '">'
-        + '<i class="fas ' + bt.icon + '"></i><span>' + bt.l + '</span>'
-        + '</div>';
-    }).join('');
-
-    var canvasH = _builderSecs.map(_renderBuilderSection).join('')
-      + '<button class="mxd-add-sec-btn" onclick="MX.Pages.MxDoc._addSection()"><i class="fas fa-plus"></i> Ajouter une section</button>';
-
-    mc.innerHTML = '<div class="mxd-builder">'
-
-      + '<div class="mxd-bld-hdr">'
-      + '<button class="mxd-bld-back" onclick="MX.Pages.MxDoc._closeBuilder()"><i class="fas fa-arrow-left"></i><span>Retour</span></button>'
-      + '<input class="mxd-bld-name" id="mxd-bld-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…"'
+  function _v2TopBarHTML(tpl, statusL, statusCls) {
+    var e = _e;
+    return '<div class="mxd2-topbar">'
+      + '<div class="mxd2-topbar-left">'
+      + '<button class="mxd2-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()">'
+      + '<i class="fas fa-arrow-left"></i><span>MX Doc</span></button>'
+      + '<span class="mxd2-topbar-div"></span>'
+      + '<input class="mxd2-title-inp" id="mxd2-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…"'
       + ' oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
-      + '<div class="mxd-bld-acts">'
-      + '<button class="mxd-bld-draft-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'draft\')"><i class="fas fa-save"></i><span>Brouillon</span></button>'
-      + '<button class="mxd-bld-pub-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fas fa-globe"></i><span>Publier</span></button>'
+      + '<span class="mxd2-badge ' + statusCls + '">' + statusL + '</span>'
       + '</div>'
-      + '</div>'
-
-      + '<div class="mxd-bld-meta">'
-      + '<div class="mxd-bld-meta-g"><label>Description</label><input class="fi fi-sm" id="mxd-bld-desc" value="' + e(tpl.description || '') + '" placeholder="Description du document…" oninput="MX.Pages.MxDoc._bldDescChange(this.value)"></div>'
-      + '<div class="mxd-bld-meta-g"><label>Fréquence</label><select class="fi fi-sm" id="mxd-bld-freq" onchange="MX.Pages.MxDoc._bldFreqChange(this.value)">' + freqOpts + '</select></div>'
-      + '<div class="mxd-bld-meta-g"><label>Icône</label><div class="mxd-icon-row">' + iconPickH + '</div></div>'
-      + '<div class="mxd-bld-meta-g"><label>Couleur</label><input type="color" class="mxd-color-inp" id="mxd-bld-color" value="' + e(tpl.color || '#8B5CF6') + '" oninput="MX.Pages.MxDoc._bldColorChange(this.value)"></div>'
-      + '</div>'
-
-      + '<div class="mxd-bld-body">'
-      + '<div class="mxd-bld-pal"><div class="mxd-pal-hdr"><i class="fas fa-grip-vertical"></i> Blocs disponibles</div>' + palH + '</div>'
-      + '<div class="mxd-bld-canvas" id="mxd-canvas">' + canvasH + '</div>'
-      + '<div class="mxd-bld-props" id="mxd-props">' + _renderPropsPanel() + '</div>'
-      + '</div>'
-
-      + '</div>';
-  }
-
-  function _renderBuilderSection(sec, sIdx) {
-    var e      = _e;
-    var blocks = sec.blocks || [];
-    var blksH  = blocks.map(function (blk, bIdx) { return _renderBuilderBlock(blk, sIdx, bIdx); }).join('');
-    var dzH    = _dropZone(sIdx, blocks.length);
-    return '<div class="mxd-sec" data-sidx="' + sIdx + '">'
-      + '<div class="mxd-sec-hdr">'
-      + '<i class="fas fa-grip-lines mxd-sec-grip"></i>'
-      + '<input class="mxd-sec-name" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
-      + ' oninput="MX.Pages.MxDoc._secNameChange(' + sIdx + ',this.value)">'
-      + '<button class="mxd-sec-del" onclick="MX.Pages.MxDoc._deleteSection(' + sIdx + ')" title="Supprimer"><i class="fas fa-times"></i></button>'
-      + '</div>'
-      + '<div class="mxd-sec-blocks">' + blksH + dzH + '</div>'
-      + '</div>';
-  }
-
-  function _dropZone(sIdx, bIdx) {
-    return '<div class="mxd-dz" data-sidx="' + sIdx + '" data-bidx="' + bIdx + '"'
-      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._dzOver(event,' + sIdx + ',' + bIdx + ')"'
-      + ' ondragleave="MX.Pages.MxDoc._dzLeave(event)"'
-      + ' ondrop="MX.Pages.MxDoc._dzDrop(event,' + sIdx + ',' + bIdx + ')">'
-      + '<span><i class="fas fa-plus-circle"></i> Glisser un bloc ici</span>'
-      + '</div>';
-  }
-
-  function _renderBuilderBlock(blk, sIdx, bIdx) {
-    var e   = _e;
-    var bt  = _btInfo(blk.type);
-    var sel = _selBlock && _selBlock.sIdx === sIdx && _selBlock.bIdx === bIdx;
-    return '<div class="mxd-blk' + (sel ? ' mxd-blk--sel' : '') + '" draggable="true"'
-      + ' ondragstart="MX.Pages.MxDoc._blkDragStart(event,' + sIdx + ',' + bIdx + ')"'
-      + ' ondragend="MX.Pages.MxDoc._palDragEnd(event)"'
-      + ' onclick="MX.Pages.MxDoc._selectBlock(' + sIdx + ',' + bIdx + ')">'
-      + '<span class="mxd-blk-ico" style="color:' + bt.color + '"><i class="fas ' + bt.icon + '"></i></span>'
-      + '<span class="mxd-blk-lbl">' + e(blk.label || bt.l) + '</span>'
-      + (blk.required ? '<span class="mxd-blk-req" title="Obligatoire">*</span>' : '')
-      + '<div class="mxd-blk-btns">'
-      + '<button onclick="event.stopPropagation();MX.Pages.MxDoc._moveBlock(' + sIdx + ',' + bIdx + ',-1)" title="Monter"><i class="fas fa-chevron-up"></i></button>'
-      + '<button onclick="event.stopPropagation();MX.Pages.MxDoc._moveBlock(' + sIdx + ',' + bIdx + ',1)" title="Descendre"><i class="fas fa-chevron-down"></i></button>'
-      + '<button onclick="event.stopPropagation();MX.Pages.MxDoc._deleteBlock(' + sIdx + ',' + bIdx + ')" title="Supprimer"><i class="fas fa-trash"></i></button>'
+      + '<div class="mxd2-topbar-right">'
+      + '<button class="mxd2-icon-btn" id="mxd2-undo" onclick="MX.Pages.MxDoc._v2Undo()" title="Annuler" disabled><i class="fas fa-rotate-left"></i></button>'
+      + '<button class="mxd2-icon-btn" id="mxd2-redo" onclick="MX.Pages.MxDoc._v2Redo()" title="Rétablir" disabled><i class="fas fa-rotate-right"></i></button>'
+      + '<button class="mxd2-icon-btn" onclick="MX.Pages.MxDoc._v2Preview()" title="Aperçu"><i class="fas fa-play"></i></button>'
+      + '<button class="mxd2-save-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'draft\')"><i class="fas fa-floppy-disk"></i><span> Enregistrer</span></button>'
+      + '<button class="mxd2-pub-btn" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fas fa-globe"></i><span> Publier</span></button>'
       + '</div>'
       + '</div>';
   }
 
-  function _renderPropsPanel() {
-    if (!_selBlock) {
-      return '<div class="mxd-props-hint"><i class="fas fa-hand-pointer"></i><span>Cliquez sur un bloc pour modifier ses propriétés</span></div>';
-    }
-    var sec = _builderSecs[_selBlock.sIdx];
-    if (!sec) return '';
-    var blk = sec.blocks[_selBlock.bIdx];
-    if (!blk) return '';
-    var e  = _e;
-    var bt = _btInfo(blk.type);
-
-    var h = '<div class="mxd-props-wrap">'
-      + '<div class="mxd-props-type"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i> ' + bt.l + '</div>';
-
-    // Label (all except separator)
-    if (blk.type !== 'separator') {
-      h += '<div class="form-group"><label>Libellé</label>'
-        + '<input class="fi fi-sm" value="' + e(blk.label || '') + '" placeholder="Libellé du champ…"'
-        + ' oninput="MX.Pages.MxDoc._propChange(\'label\',this.value)"></div>';
-    }
-
-    // Static content (titre, sstitre, texte)
-    if (blk.type === 'titre' || blk.type === 'sstitre' || blk.type === 'texte') {
-      h += '<div class="form-group"><label>Contenu</label>'
-        + '<textarea class="fi fi-sm" rows="3" oninput="MX.Pages.MxDoc._propChange(\'value\',this.value)">' + e(blk.value || '') + '</textarea></div>';
-    }
-
-    // Required checkbox (interactive fields only)
-    if (!STATIC_TYPES.includes(blk.type)) {
-      h += '<label class="mxd-prop-check">'
-        + '<input type="checkbox"' + (blk.required ? ' checked' : '') + ' onchange="MX.Pages.MxDoc._propChange(\'required\',this.checked)">'
-        + '<span>Champ obligatoire</span></label>';
-    }
-
-    // Numérique extras
-    if (blk.type === 'numerique') {
-      h += '<div class="form-group"><label>Unité</label>'
-        + '<input class="fi fi-sm" value="' + e(blk.unit || '') + '" placeholder="kWh, m³, °C…"'
-        + ' oninput="MX.Pages.MxDoc._propChange(\'unit\',this.value)"></div>'
-        + '<div style="display:flex;gap:8px">'
-        + '<div class="form-group" style="flex:1"><label>Min</label><input type="number" class="fi fi-sm" value="' + (blk.min !== undefined ? blk.min : '') + '" oninput="MX.Pages.MxDoc._propChangeNum(\'min\',this.value)"></div>'
-        + '<div class="form-group" style="flex:1"><label>Max</label><input type="number" class="fi fi-sm" value="' + (blk.max !== undefined ? blk.max : '') + '" oninput="MX.Pages.MxDoc._propChangeNum(\'max\',this.value)"></div>'
+  function _v2PaletteHTML() {
+    var h = '<div class="mxd2-pal-hdr"><i class="fas fa-shapes"></i> Éléments</div><div class="mxd2-pal-list">';
+    BLOCK_TYPES.forEach(function (bt) {
+      h += '<div class="mxd2-pal-item" draggable="true"'
+        + ' ondragstart="MX.Pages.MxDoc._v2PalDragStart(event,\'' + bt.type + '\')"'
+        + ' ondragend="MX.Pages.MxDoc._v2DragEnd(event)"'
+        + ' onclick="MX.Pages.MxDoc._v2PalClick(\'' + bt.type + '\')"'
+        + ' title="' + bt.l + '" style="--bt-color:' + bt.color + '">'
+        + '<span class="mxd2-pal-icon"><i class="fas ' + bt.icon + '"></i></span>'
+        + '<span class="mxd2-pal-label">' + bt.l + '</span>'
         + '</div>';
-    }
-
-    // Commentaire placeholder
-    if (blk.type === 'commentaire') {
-      h += '<div class="form-group"><label>Texte d\'aide</label>'
-        + '<input class="fi fi-sm" value="' + e(blk.placeholder || '') + '" placeholder="Ex: Décrivez l\'état observé…"'
-        + ' oninput="MX.Pages.MxDoc._propChange(\'placeholder\',this.value)"></div>';
-    }
-
+    });
     h += '</div>';
     return h;
   }
 
-  // ─────────────────────────────────────────────────────
-  // BUILDER STATE MUTATIONS
-  // ─────────────────────────────────────────────────────
-  function _bldTitleChange(v) { if (_builderTpl) _builderTpl.title = v; }
-  function _bldDescChange(v)  { if (_builderTpl) _builderTpl.description = v; }
-  function _bldFreqChange(v)  { if (_builderTpl) _builderTpl.frequency = v; }
-  function _bldColorChange(v) { if (_builderTpl) _builderTpl.color = v; }
+  function _v2CanvasHTML() {
+    var tpl    = _builderTpl || {};
+    var e      = _e;
+    var accent = e(tpl.color || '#8B5CF6');
+    var icon   = e(tpl.icon  || 'fa-file-lines');
+    var h = '<div class="mxd2-doc-hdr-card" style="--doc-accent:' + accent + '">'
+      + '<div class="mxd2-doc-hdr-icon" style="color:' + accent + '"><i class="fas ' + icon + '"></i></div>'
+      + '<div class="mxd2-doc-hdr-info">'
+      + '<div class="mxd2-doc-hdr-title">' + e(tpl.title || 'Nouveau modèle') + '</div>'
+      + '<div class="mxd2-doc-hdr-desc">' + e(tpl.description || 'Cliquez sur Propriétés du document →') + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="mxd2-sections" id="mxd2-sections">';
+    _builderSecs.forEach(function (sec, sIdx) { h += _v2SectionHTML(sec, sIdx); });
+    h += '</div>'
+      + '<button class="mxd2-add-sec-btn" onclick="MX.Pages.MxDoc._v2AddSection()">'
+      + '<i class="fas fa-plus"></i> Ajouter une section</button>';
+    return h;
+  }
 
-  function _setBuilderIcon(icon) {
+  function _v2SectionHTML(sec, sIdx) {
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[sIdx % SEC_COLORS.length];
+    var selSec = _v2SelSIdx === sIdx && _v2SelEIdx === null;
+    var blocks = sec.blocks || [];
+    var h = '<div class="mxd2-section' + (selSec ? ' mxd2-section--sel' : '') + '"'
+      + ' data-sidx="' + sIdx + '" style="--sec-color:' + color + '">'
+      + '<div class="mxd2-sec-hdr">'
+      + '<span class="mxd2-sec-grip" draggable="true"'
+      + ' ondragstart="MX.Pages.MxDoc._v2SecDragStart(event,' + sIdx + ')"'
+      + ' ondragend="MX.Pages.MxDoc._v2DragEnd(event)"'
+      + ' onclick="event.stopPropagation()"><i class="fas fa-grip-lines"></i></span>'
+      + '<span class="mxd2-sec-dot" style="background:' + color + '"></span>'
+      + '<input class="mxd2-sec-name-inp" value="' + e(sec.label || '') + '" placeholder="Nom de la section…"'
+      + ' oninput="MX.Pages.MxDoc._v2SecLabel(' + sIdx + ',this.value)"'
+      + ' onclick="event.stopPropagation();MX.Pages.MxDoc._v2SelectSec(' + sIdx + ')">'
+      + '<div class="mxd2-sec-hdr-acts">'
+      + '<button class="mxd2-sec-act-btn" title="Propriétés" onclick="event.stopPropagation();MX.Pages.MxDoc._v2SelectSec(' + sIdx + ')"><i class="fas fa-sliders"></i></button>'
+      + '<button class="mxd2-sec-act-btn mxd2-sec-act-btn--del" title="Supprimer" onclick="event.stopPropagation();MX.Pages.MxDoc._v2DelSection(' + sIdx + ')"><i class="fas fa-trash"></i></button>'
+      + '</div>'
+      + '</div>'
+      + '<div class="mxd2-sec-body"'
+      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v2SecDzOver(event,' + sIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v2SecDzLeave(event)"'
+      + ' ondrop="MX.Pages.MxDoc._v2SecDzDrop(event,' + sIdx + ')">';
+    blocks.forEach(function (blk, bIdx) { h += _v2ElementRowHTML(blk, sIdx, bIdx); });
+    h += '<div class="mxd2-el-dz" data-sidx="' + sIdx + '"'
+      + ' ondragover="event.preventDefault();event.stopPropagation();event.currentTarget.classList.add(\'mxd2-el-dz--over\')"'
+      + ' ondragleave="event.currentTarget.classList.remove(\'mxd2-el-dz--over\')"'
+      + ' ondrop="event.stopPropagation();MX.Pages.MxDoc._v2ElDzDrop(event,' + sIdx + ',' + blocks.length + ')">'
+      + '<i class="fas fa-plus-circle"></i> Déposer un élément ici'
+      + '</div>'
+      + '</div></div>';
+    return h;
+  }
+
+  function _v2ElementRowHTML(blk, sIdx, bIdx) {
+    var e   = _e;
+    var bt  = _btInfo(blk.type);
+    var sel = _v2SelSIdx === sIdx && _v2SelEIdx === bIdx;
+    var previewH = _v2ElPreviewHTML(blk);
+    return '<div class="mxd2-el-row' + (sel ? ' mxd2-el-row--sel' : '') + '"'
+      + ' data-sidx="' + sIdx + '" data-bidx="' + bIdx + '" draggable="true"'
+      + ' ondragstart="MX.Pages.MxDoc._v2ElDragStart(event,' + sIdx + ',' + bIdx + ')"'
+      + ' ondragend="MX.Pages.MxDoc._v2DragEnd(event)"'
+      + ' onclick="MX.Pages.MxDoc._v2SelectEl(' + sIdx + ',' + bIdx + ')">'
+      + '<span class="mxd2-el-drag"><i class="fas fa-grip-vertical"></i></span>'
+      + '<span class="mxd2-el-icon" style="color:' + bt.color + '"><i class="fas ' + bt.icon + '"></i></span>'
+      + '<span class="mxd2-el-label">' + e(blk.label || bt.l) + (blk.required ? '<span class="mxd2-el-req">*</span>' : '') + '</span>'
+      + '<div class="mxd2-el-preview">' + previewH + '</div>'
+      + '<div class="mxd2-el-acts">'
+      + '<button class="mxd2-el-act-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v2MoveEl(' + sIdx + ',' + bIdx + ',-1)" title="Monter"><i class="fas fa-chevron-up"></i></button>'
+      + '<button class="mxd2-el-act-btn" onclick="event.stopPropagation();MX.Pages.MxDoc._v2MoveEl(' + sIdx + ',' + bIdx + ',1)" title="Descendre"><i class="fas fa-chevron-down"></i></button>'
+      + '<button class="mxd2-el-act-btn mxd2-el-act-btn--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v2DelEl(' + sIdx + ',' + bIdx + ')" title="Supprimer"><i class="fas fa-times"></i></button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v2ElPreviewHTML(blk) {
+    if (blk.type === 'faitnonfait') return '<span class="mxd2-prev-fait"><i class="fas fa-check"></i> Fait</span><span class="mxd2-prev-nonfait"><i class="fas fa-times"></i> Pas fait</span>';
+    if (blk.type === 'ouinon')      return '<span class="mxd2-prev-oui">Oui</span><span class="mxd2-prev-non">Non</span>';
+    if (blk.type === 'numerique')   return '<span class="mxd2-prev-num">0' + (blk.unit ? ' ' + _e(blk.unit) : '') + '</span>';
+    if (blk.type === 'commentaire') return '<span class="mxd2-prev-text">' + _e(blk.placeholder || 'Commentaire…') + '</span>';
+    if (blk.type === 'date')        return '<span class="mxd2-prev-text">jj/mm/aaaa</span>';
+    if (blk.type === 'heure')       return '<span class="mxd2-prev-text">hh:mm</span>';
+    if (blk.type === 'photo')       return '<span class="mxd2-prev-icon"><i class="fas fa-camera"></i></span>';
+    if (blk.type === 'signature')   return '<span class="mxd2-prev-icon"><i class="fas fa-pen-nib"></i></span>';
+    if (blk.type === 'titre')       return '<span class="mxd2-prev-titre">' + _e(blk.value || blk.label || 'Titre') + '</span>';
+    if (blk.type === 'sstitre')     return '<span class="mxd2-prev-sstitre">' + _e(blk.value || blk.label || 'Sous-titre') + '</span>';
+    if (blk.type === 'separator')   return '<span class="mxd2-prev-sep"></span>';
+    if (blk.type === 'texte')       return '<span class="mxd2-prev-text">' + _e(blk.value || blk.label || 'Texte…') + '</span>';
+    return '';
+  }
+
+  // ── V2 PROPS PANEL ──
+  function _v2PropsPanelHTML() {
+    if (_v2SelSIdx === null) return _v2DocPropsHTML();
+    if (_v2SelEIdx === null) return _v2SecPropsHTML();
+    return _v2ElPropsHTML();
+  }
+
+  function _v2DocPropsHTML() {
+    var tpl = _builderTpl || {};
+    var e   = _e;
+    var freqOpts = Object.keys(FREQ_LABELS).map(function (k) {
+      return '<option value="' + k + '"' + (tpl.frequency === k ? ' selected' : '') + '>' + FREQ_LABELS[k] + '</option>';
+    }).join('');
+    var ICONS = ['fa-file-lines','fa-file-contract','fa-clipboard-list','fa-file-check',
+                 'fa-clipboard-check','fa-file-shield','fa-note-sticky','fa-scroll',
+                 'fa-file-alt','fa-book-open','fa-tasks','fa-tools'];
+    var iconBtns = ICONS.map(function (ic) {
+      return '<button class="mxd2-icon-pick' + (tpl.icon === ic ? ' mxd2-icon-pick--on' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._setBuilderIcon(\'' + ic + '\')" title="' + ic + '">'
+        + '<i class="fas ' + ic + '"></i></button>';
+    }).join('');
+    return '<div class="mxd2-props-type-hdr"><i class="fas fa-file-lines"></i> Propriétés du document</div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Description</div>'
+      + '<input class="mxd2-prop-inp" id="mxd-bld-desc" value="' + e(tpl.description || '') + '" placeholder="Description du modèle…"'
+      + ' oninput="MX.Pages.MxDoc._bldDescChange(this.value)"></div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Fréquence</div>'
+      + '<select class="mxd2-prop-inp" id="mxd-bld-freq" onchange="MX.Pages.MxDoc._bldFreqChange(this.value)">' + freqOpts + '</select></div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Icône</div>'
+      + '<div class="mxd2-icon-pick-grid">' + iconBtns + '</div></div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Couleur du document</div>'
+      + '<input type="color" class="mxd2-color-inp" id="mxd-bld-color" value="' + e(tpl.color || '#8B5CF6') + '"'
+      + ' oninput="MX.Pages.MxDoc._bldColorChange(this.value)"></div>';
+  }
+
+  function _v2SecPropsHTML() {
+    var sec = _builderSecs[_v2SelSIdx];
+    if (!sec) return '';
+    var e     = _e;
+    var color = sec.color || SEC_COLORS[_v2SelSIdx % SEC_COLORS.length];
+    var colorBtns = SEC_COLORS.map(function (c) {
+      return '<button class="mxd2-color-btn' + (color === c ? ' mxd2-color-btn--on' : '') + '"'
+        + ' style="background:' + c + '" onclick="MX.Pages.MxDoc._v2SecColor(' + _v2SelSIdx + ',\'' + c + '\')">'
+        + (color === c ? '<i class="fas fa-check"></i>' : '') + '</button>';
+    }).join('');
+    return '<div class="mxd2-props-type-hdr" style="--bt-color:#6366F1"><i class="fas fa-layer-group"></i> Section</div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Nom de la section</div>'
+      + '<input class="mxd2-prop-inp" value="' + e(sec.label || '') + '" placeholder="Nom…"'
+      + ' oninput="MX.Pages.MxDoc._v2SecLabelSync(' + _v2SelSIdx + ',this.value)"></div>'
+      + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Couleur</div>'
+      + '<div class="mxd2-color-grid">' + colorBtns + '</div></div>'
+      + '<div class="mxd2-props-actions">'
+      + '<button class="mxd2-del-btn" onclick="MX.Pages.MxDoc._v2DelSection(' + _v2SelSIdx + ')">'
+      + '<i class="fas fa-trash"></i> Supprimer la section</button></div>';
+  }
+
+  function _v2ElPropsHTML() {
+    var sec = _builderSecs[_v2SelSIdx];
+    if (!sec) return '';
+    var blk = sec.blocks[_v2SelEIdx];
+    if (!blk) return '';
+    var e        = _e;
+    var bt       = _btInfo(blk.type);
+    var isStatic = STATIC_TYPES.indexOf(blk.type) >= 0;
+
+    var h = '<div class="mxd2-props-type-hdr" style="--bt-color:' + bt.color + '">'
+      + '<i class="fas ' + bt.icon + '"></i> ' + bt.l + '</div>';
+
+    if (blk.type !== 'separator') {
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Libellé</div>'
+        + '<input class="mxd2-prop-inp" value="' + e(blk.label || '') + '" placeholder="Libellé du champ…"'
+        + ' oninput="MX.Pages.MxDoc._v2PropChange(\'label\',this.value)"></div>';
+    }
+
+    if (blk.type === 'titre' || blk.type === 'sstitre' || blk.type === 'texte') {
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Contenu</div>'
+        + '<textarea class="mxd2-prop-textarea" rows="3" oninput="MX.Pages.MxDoc._v2PropChange(\'value\',this.value)">' + e(blk.value || '') + '</textarea></div>';
+    }
+
+    if (!isStatic) {
+      var RESP_TYPES = ['faitnonfait','ouinon','numerique','commentaire','date','heure','photo','signature'];
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Type de réponse</div><div class="mxd2-resp-types">';
+      RESP_TYPES.forEach(function (t) {
+        var rbt = _btInfo(t);
+        h += '<button class="mxd2-resp-type-btn' + (blk.type === t ? ' mxd2-resp-type-btn--on' : '') + '"'
+          + ' style="--bt-color:' + rbt.color + '"'
+          + ' onclick="MX.Pages.MxDoc._v2ChangeType(\'' + t + '\')" title="' + rbt.l + '">'
+          + '<i class="fas ' + rbt.icon + '"></i><span>' + rbt.l + '</span></button>';
+      });
+      h += '</div></div>';
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Comportement</div>'
+        + '<div class="mxd2-toggle-list">'
+        + _v2ToggleRowHTML('Champ obligatoire', 'required', !!blk.required)
+        + '</div></div>';
+    }
+
+    if (blk.type === 'numerique') {
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Unité</div>'
+        + '<input class="mxd2-prop-inp" value="' + e(blk.unit || '') + '" placeholder="kWh, m³, °C…"'
+        + ' oninput="MX.Pages.MxDoc._v2PropChange(\'unit\',this.value)"></div>'
+        + '<div class="mxd2-prop-row2">'
+        + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Min</div>'
+        + '<input type="number" class="mxd2-prop-inp" value="' + (blk.min !== undefined ? blk.min : '') + '"'
+        + ' oninput="MX.Pages.MxDoc._v2PropChangeNum(\'min\',this.value)"></div>'
+        + '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Max</div>'
+        + '<input type="number" class="mxd2-prop-inp" value="' + (blk.max !== undefined ? blk.max : '') + '"'
+        + ' oninput="MX.Pages.MxDoc._v2PropChangeNum(\'max\',this.value)"></div>'
+        + '</div>';
+    }
+
+    if (blk.type === 'commentaire') {
+      h += '<div class="mxd2-prop-group"><div class="mxd2-prop-label">Texte d\'aide</div>'
+        + '<input class="mxd2-prop-inp" value="' + e(blk.placeholder || '') + '" placeholder="Ex: Décrivez l\'état observé…"'
+        + ' oninput="MX.Pages.MxDoc._v2PropChange(\'placeholder\',this.value)"></div>';
+    }
+
+    h += '<div class="mxd2-props-actions">'
+      + '<button class="mxd2-del-btn" onclick="MX.Pages.MxDoc._v2DelEl(' + _v2SelSIdx + ',' + _v2SelEIdx + ')">'
+      + '<i class="fas fa-trash"></i> Supprimer l\'élément</button></div>';
+    return h;
+  }
+
+  function _v2ToggleRowHTML(label, key, checked) {
+    return '<label class="mxd2-toggle-row">'
+      + '<span class="mxd2-toggle-row-label">' + label + '</span>'
+      + '<span class="mxd2-toggle' + (checked ? ' mxd2-toggle--on' : '') + '"'
+      + ' onclick="MX.Pages.MxDoc._v2ToggleProp(\'' + key + '\',this)">'
+      + '<span class="mxd2-toggle-knob"></span></span></label>';
+  }
+
+  function _v2MobNavHTML() {
+    var p = _v2MobPanel;
+    return '<div class="mxd2-mob-nav">'
+      + '<button class="mxd2-mob-btn' + (p === 'pal'    ? ' mxd2-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v2MobSwitch(\'pal\')">'
+      + '<i class="fas fa-shapes"></i><span>Éléments</span></button>'
+      + '<button class="mxd2-mob-btn' + (p === 'canvas' ? ' mxd2-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v2MobSwitch(\'canvas\')">'
+      + '<i class="fas fa-file-lines"></i><span>Document</span></button>'
+      + '<button class="mxd2-mob-btn' + (p === 'props'  ? ' mxd2-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v2MobSwitch(\'props\')">'
+      + '<i class="fas fa-sliders"></i><span>Propriétés</span></button>'
+      + '</div>';
+  }
+
+  // ── V2 REFRESH HELPERS ──
+  function _v2RefreshCanvas() {
+    var c = document.getElementById('mxd2-canvas');
+    if (c) c.innerHTML = _v2CanvasHTML();
+  }
+
+  function _v2RefreshProps() {
+    var p = document.getElementById('mxd2-props');
+    if (p) p.innerHTML = _v2PropsPanelHTML();
+  }
+
+  function _v2RefreshSection(sIdx) {
+    var existing = document.querySelector('.mxd2-section[data-sidx="' + sIdx + '"]');
+    if (!existing) { _v2RefreshCanvas(); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v2SectionHTML(sec, sIdx);
+    existing.replaceWith(tmp.firstChild);
+  }
+
+  function _v2RefreshEl(sIdx, bIdx) {
+    var existing = document.querySelector('.mxd2-el-row[data-sidx="' + sIdx + '"][data-bidx="' + bIdx + '"]');
+    if (!existing) { _v2RefreshSection(sIdx); return; }
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    var blk = sec.blocks[bIdx];
+    if (!blk) return;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = _v2ElementRowHTML(blk, sIdx, bIdx);
+    existing.replaceWith(tmp.firstChild);
+  }
+
+  function _v2UpdateUndoRedo() {
+    var undo = document.getElementById('mxd2-undo');
+    var redo = document.getElementById('mxd2-redo');
+    if (undo) undo.disabled = _v2History.length === 0;
+    if (redo) redo.disabled = _v2Future.length  === 0;
+  }
+
+  // ── V2 UNDO/REDO ──
+  function _v2Push() {
+    _v2History.push(JSON.stringify(_builderSecs));
+    if (_v2History.length > 50) _v2History.shift();
+    _v2Future = [];
+    _v2UpdateUndoRedo();
+  }
+
+  function _v2Undo() {
+    if (!_v2History.length) return;
+    _v2Future.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2History.pop());
+    _v2SelSIdx = null; _v2SelEIdx = null;
+    _v2RefreshCanvas(); _v2RefreshProps(); _v2UpdateUndoRedo();
+  }
+
+  function _v2Redo() {
+    if (!_v2Future.length) return;
+    _v2History.push(JSON.stringify(_builderSecs));
+    _builderSecs = JSON.parse(_v2Future.pop());
+    _v2SelSIdx = null; _v2SelEIdx = null;
+    _v2RefreshCanvas(); _v2RefreshProps(); _v2UpdateUndoRedo();
+  }
+
+  function _v2Preview() {
     if (!_builderTpl) return;
-    _builderTpl.icon = icon;
-    document.querySelectorAll('.mxd-icon-pick').forEach(function (b) {
-      b.classList.toggle('mxd-icon-pick--on', b.title === icon);
+    var previewTpl = JSON.parse(JSON.stringify(_builderTpl));
+    previewTpl.sections = JSON.parse(JSON.stringify(_builderSecs));
+    _execTemplate  = previewTpl;
+    _execInstance  = null;
+    _execResponses = {};
+    _execMode      = true;
+    var mc = document.getElementById('main-content');
+    if (!mc) return;
+    _renderExec(mc);
+    var backBtn = mc.querySelector('.mxd-exec-back');
+    if (backBtn) {
+      backBtn.onclick = function () {
+        _execMode     = false;
+        _execTemplate = null;
+        var mc2 = document.getElementById('main-content');
+        if (mc2) _renderBuilderV2(mc2);
+      };
+    }
+  }
+
+  // ── V2 SELECTION ──
+  function _v2SelectSec(sIdx) {
+    _v2SelSIdx = sIdx; _v2SelEIdx = null;
+    document.querySelectorAll('.mxd2-section').forEach(function (el) {
+      el.classList.toggle('mxd2-section--sel', parseInt(el.getAttribute('data-sidx')) === sIdx);
     });
+    document.querySelectorAll('.mxd2-el-row--sel').forEach(function (el) { el.classList.remove('mxd2-el-row--sel'); });
+    _v2RefreshProps();
+    if (window.innerWidth < 768) _v2MobSwitch('props');
   }
 
-  function _addSection() {
-    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', blocks: [] });
-    _refreshCanvas();
+  function _v2SelectEl(sIdx, bIdx) {
+    _v2SelSIdx = sIdx; _v2SelEIdx = bIdx;
+    document.querySelectorAll('.mxd2-section--sel').forEach(function (el) { el.classList.remove('mxd2-section--sel'); });
+    document.querySelectorAll('.mxd2-el-row').forEach(function (el) {
+      el.classList.toggle('mxd2-el-row--sel',
+        parseInt(el.getAttribute('data-sidx')) === sIdx && parseInt(el.getAttribute('data-bidx')) === bIdx);
+    });
+    _v2RefreshProps();
+    if (window.innerWidth < 768) _v2MobSwitch('props');
   }
 
-  function _deleteSection(sIdx) {
-    if (_builderSecs.length <= 1) { MX.toast('Au moins une section est requise', false); return; }
+  // ── V2 SECTION MUTATIONS ──
+  function _v2AddSection() {
+    _v2Push();
+    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', color: SEC_COLORS[_builderSecs.length % SEC_COLORS.length], blocks: [] });
+    _v2SelSIdx = _builderSecs.length - 1; _v2SelEIdx = null;
+    _v2RefreshCanvas(); _v2RefreshProps();
+    setTimeout(function () {
+      var lastSec = document.querySelector('.mxd2-section[data-sidx="' + (_builderSecs.length - 1) + '"]');
+      if (lastSec) lastSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+
+  function _v2DelSection(sIdx) {
+    if (_builderSecs.length <= 1) { MX.toast('Au moins une section est requise'); return; }
+    _v2Push();
     _builderSecs.splice(sIdx, 1);
-    _selBlock = null;
-    _refreshCanvas();
-    _refreshProps();
+    _v2SelSIdx = null; _v2SelEIdx = null;
+    _v2RefreshCanvas(); _v2RefreshProps();
   }
 
-  function _secNameChange(sIdx, v) {
+  function _v2SecLabel(sIdx, v) {
     if (_builderSecs[sIdx]) _builderSecs[sIdx].label = v;
   }
 
-  function _selectBlock(sIdx, bIdx) {
-    _selBlock = { sIdx: sIdx, bIdx: bIdx };
-    _refreshCanvas();
-    _refreshProps();
+  function _v2SecLabelSync(sIdx, v) {
+    _v2SecLabel(sIdx, v);
+    var inp = document.querySelector('.mxd2-section[data-sidx="' + sIdx + '"] .mxd2-sec-name-inp');
+    if (inp && inp !== document.activeElement) inp.value = v;
   }
 
-  function _deleteBlock(sIdx, bIdx) {
+  function _v2SecColor(sIdx, color) {
+    if (!_builderSecs[sIdx]) return;
+    _builderSecs[sIdx].color = color;
+    var sec = document.querySelector('.mxd2-section[data-sidx="' + sIdx + '"]');
+    if (sec) {
+      sec.style.setProperty('--sec-color', color);
+      var dot = sec.querySelector('.mxd2-sec-dot');
+      if (dot) dot.style.background = color;
+    }
+    _v2RefreshProps();
+  }
+
+  // ── V2 ELEMENT MUTATIONS ──
+  function _v2PalClick(type) {
+    var targetSIdx = (_v2SelSIdx !== null) ? _v2SelSIdx : 0;
+    var sec = _builderSecs[targetSIdx];
+    if (!sec) return;
+    _v2Push();
+    var bt  = _btInfo(type);
+    var blk = { id: _uid(), type: type, label: bt.l };
+    sec.blocks.push(blk);
+    _v2SelSIdx = targetSIdx; _v2SelEIdx = sec.blocks.length - 1;
+    _v2RefreshSection(targetSIdx); _v2RefreshProps();
+    setTimeout(function () {
+      var el = document.querySelector('.mxd2-el-row--sel');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+
+  function _v2DelEl(sIdx, bIdx) {
     var sec = _builderSecs[sIdx];
     if (!sec) return;
+    _v2Push();
     sec.blocks.splice(bIdx, 1);
-    if (_selBlock && _selBlock.sIdx === sIdx && _selBlock.bIdx === bIdx) _selBlock = null;
-    _refreshCanvas();
-    _refreshProps();
+    if (_v2SelSIdx === sIdx && _v2SelEIdx === bIdx) { _v2SelSIdx = sIdx; _v2SelEIdx = null; }
+    _v2RefreshSection(sIdx); _v2RefreshProps();
   }
 
-  function _moveBlock(sIdx, bIdx, dir) {
+  function _v2MoveEl(sIdx, bIdx, dir) {
     var sec    = _builderSecs[sIdx];
     if (!sec) return;
     var newIdx = bIdx + dir;
     if (newIdx < 0 || newIdx >= sec.blocks.length) return;
+    _v2Push();
     var tmp = sec.blocks[bIdx];
-    sec.blocks[bIdx]    = sec.blocks[newIdx];
-    sec.blocks[newIdx]  = tmp;
-    _selBlock = { sIdx: sIdx, bIdx: newIdx };
-    _refreshCanvas();
-    _refreshProps();
+    sec.blocks[bIdx] = sec.blocks[newIdx];
+    sec.blocks[newIdx] = tmp;
+    _v2SelSIdx = sIdx; _v2SelEIdx = newIdx;
+    _v2RefreshSection(sIdx); _v2RefreshProps();
   }
 
-  function _propChange(key, value) {
-    if (!_selBlock) return;
-    var blk = (_builderSecs[_selBlock.sIdx] || {}).blocks;
-    if (!blk) return;
-    blk = blk[_selBlock.bIdx];
+  // ── V2 PROP MUTATIONS ──
+  function _v2PropChange(key, value) {
+    if (_v2SelSIdx === null || _v2SelEIdx === null) return;
+    var sec = _builderSecs[_v2SelSIdx];
+    if (!sec) return;
+    var blk = sec.blocks[_v2SelEIdx];
     if (!blk) return;
     blk[key] = value;
     if (key === 'label') {
-      var el = document.querySelector('.mxd-blk--sel .mxd-blk-lbl');
-      if (el) el.textContent = value;
-    }
-    if (key === 'required') {
-      _refreshCanvas(); // need to show/hide the * marker
+      var el = document.querySelector('.mxd2-el-row[data-sidx="' + _v2SelSIdx + '"][data-bidx="' + _v2SelEIdx + '"] .mxd2-el-label');
+      if (el) el.innerHTML = _e(value) + (blk.required ? '<span class="mxd2-el-req">*</span>' : '');
+    } else if (key === 'required') {
+      _v2RefreshEl(_v2SelSIdx, _v2SelEIdx);
     }
   }
 
-  function _propChangeNum(key, strVal) {
+  function _v2PropChangeNum(key, strVal) {
     var n = parseFloat(strVal);
-    _propChange(key, isNaN(n) ? undefined : n);
+    _v2PropChange(key, isNaN(n) ? undefined : n);
   }
 
-  // ─────────────────────────────────────────────────────
-  // DRAG & DROP — Builder
-  // ─────────────────────────────────────────────────────
-  function _palDragStart(event, blockType) {
-    _palDragType = blockType;
-    _blkDragSrc  = null;
+  function _v2ChangeType(newType) {
+    if (_v2SelSIdx === null || _v2SelEIdx === null) return;
+    var sec = _builderSecs[_v2SelSIdx];
+    if (!sec) return;
+    var blk = sec.blocks[_v2SelEIdx];
+    if (!blk) return;
+    _v2Push();
+    var oldBt = _btInfo(blk.type);
+    blk.type  = newType;
+    var newBt = _btInfo(newType);
+    if (!blk.label || blk.label === oldBt.l) blk.label = newBt.l;
+    _v2RefreshEl(_v2SelSIdx, _v2SelEIdx);
+    _v2RefreshProps();
+  }
+
+  function _v2ToggleProp(key, el) {
+    var isOn = el.classList.toggle('mxd2-toggle--on');
+    _v2PropChange(key, isOn);
+  }
+
+  // ── V2 DRAG & DROP ──
+  function _v2PalDragStart(event, type) {
+    _v2PalDragType = type; _v2ElDragSrc = null; _v2SecDragSrc = null;
     event.dataTransfer.effectAllowed = 'copy';
   }
 
-  function _blkDragStart(event, sIdx, bIdx) {
-    _blkDragSrc  = { sIdx: sIdx, bIdx: bIdx };
-    _palDragType = null;
+  function _v2ElDragStart(event, sIdx, bIdx) {
+    _v2ElDragSrc = { sIdx: sIdx, bIdx: bIdx }; _v2PalDragType = null; _v2SecDragSrc = null;
+    event.dataTransfer.effectAllowed = 'move';
+    event.stopPropagation();
+  }
+
+  function _v2SecDragStart(event, sIdx) {
+    _v2SecDragSrc = sIdx; _v2ElDragSrc = null; _v2PalDragType = null;
     event.dataTransfer.effectAllowed = 'move';
   }
 
-  function _palDragEnd(event) {
-    _palDragType = null;
-    _blkDragSrc  = null;
-    document.querySelectorAll('.mxd-dz').forEach(function (z) { z.classList.remove('mxd-dz--over'); });
+  function _v2DragEnd(event) {
+    _v2PalDragType = null; _v2ElDragSrc = null; _v2SecDragSrc = null;
+    document.querySelectorAll('.mxd2-el-dz--over,.mxd2-sec-body--dz-over').forEach(function (el) {
+      el.classList.remove('mxd2-el-dz--over'); el.classList.remove('mxd2-sec-body--dz-over');
+    });
   }
 
-  function _dzOver(event, sIdx, bIdx) {
-    event.preventDefault();
-    event.currentTarget.classList.add('mxd-dz--over');
-  }
-
-  function _dzLeave(event) {
-    event.currentTarget.classList.remove('mxd-dz--over');
-  }
-
-  function _dzDrop(event, sIdx, bIdx) {
-    event.preventDefault();
-    event.currentTarget.classList.remove('mxd-dz--over');
-
-    if (_palDragType) {
-      var bt  = _btInfo(_palDragType);
-      var blk = { id: _uid(), type: _palDragType, label: bt.l };
+  function _v2ElDzDrop(event, sIdx, bIdx) {
+    event.preventDefault(); event.stopPropagation();
+    event.currentTarget.classList.remove('mxd2-el-dz--over');
+    if (_v2PalDragType) {
+      _v2Push();
+      var bt  = _btInfo(_v2PalDragType);
+      var blk = { id: _uid(), type: _v2PalDragType, label: bt.l };
       var sec = _builderSecs[sIdx];
       if (!sec) return;
       sec.blocks.splice(bIdx, 0, blk);
-      _selBlock = { sIdx: sIdx, bIdx: bIdx };
-      _refreshCanvas();
-      _refreshProps();
-    } else if (_blkDragSrc) {
-      var srcSec = _builderSecs[_blkDragSrc.sIdx];
+      _v2SelSIdx = sIdx; _v2SelEIdx = bIdx;
+      _v2RefreshSection(sIdx); _v2RefreshProps();
+    } else if (_v2ElDragSrc) {
+      _v2Push();
+      var srcSec = _builderSecs[_v2ElDragSrc.sIdx];
       var dstSec = _builderSecs[sIdx];
       if (!srcSec || !dstSec) return;
-      var blk2 = srcSec.blocks.splice(_blkDragSrc.bIdx, 1)[0];
+      var blk2 = srcSec.blocks.splice(_v2ElDragSrc.bIdx, 1)[0];
       var ins  = bIdx;
-      if (_blkDragSrc.sIdx === sIdx && _blkDragSrc.bIdx < bIdx) ins--;
+      if (_v2ElDragSrc.sIdx === sIdx && _v2ElDragSrc.bIdx < bIdx) ins--;
       dstSec.blocks.splice(Math.max(0, ins), 0, blk2);
-      _selBlock = { sIdx: sIdx, bIdx: Math.max(0, ins) };
-      _refreshCanvas();
-      _refreshProps();
+      _v2SelSIdx = sIdx; _v2SelEIdx = Math.max(0, ins);
+      _v2RefreshCanvas(); _v2RefreshProps();
     }
   }
 
-  function _refreshCanvas() {
-    var canvas = document.getElementById('mxd-canvas');
-    if (!canvas) return;
-    canvas.innerHTML = _builderSecs.map(_renderBuilderSection).join('')
-      + '<button class="mxd-add-sec-btn" onclick="MX.Pages.MxDoc._addSection()"><i class="fas fa-plus"></i> Ajouter une section</button>';
+  function _v2SecDzOver(event, sIdx) {
+    if (!_v2PalDragType && !_v2ElDragSrc) return;
+    event.preventDefault();
+    event.currentTarget.classList.add('mxd2-sec-body--dz-over');
   }
 
-  function _refreshProps() {
-    var props = document.getElementById('mxd-props');
-    if (props) props.innerHTML = _renderPropsPanel();
+  function _v2SecDzLeave(event) {
+    event.currentTarget.classList.remove('mxd2-sec-body--dz-over');
+  }
+
+  function _v2SecDzDrop(event, sIdx) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('mxd2-sec-body--dz-over');
+    // Only handle if not caught by the inner drop zone
+  }
+
+  // ── V2 MOBILE ──
+  function _v2MobSwitch(panel) {
+    _v2MobPanel = panel;
+    var ids = { pal: 'mxd2-pal', canvas: 'mxd2-canvas', props: 'mxd2-props' };
+    Object.keys(ids).forEach(function (k) {
+      var el = document.getElementById(ids[k]);
+      if (el) el.setAttribute('data-mob', k === panel ? 'active' : '');
+    });
+    document.querySelectorAll('.mxd2-mob-btn').forEach(function (btn) {
+      var panels = ['pal','canvas','props'];
+      var idx    = Array.from(btn.parentNode.children).indexOf(btn);
+      btn.classList.toggle('mxd2-mob-btn--on', panels[idx] === panel);
+    });
+  }
+
+  // ── BUILDER LEGACY HELPERS (kept for _saveBuilder compatibility) ──
+  function _bldTitleChange(v) {
+    if (_builderTpl) {
+      _builderTpl.title = v;
+      var hdr = document.querySelector('.mxd2-doc-hdr-title');
+      if (hdr) hdr.textContent = v || 'Nouveau modèle';
+      var badge = document.querySelector('.mxd2-topbar .mxd2-badge');
+    }
+  }
+  function _bldDescChange(v)  { if (_builderTpl) { _builderTpl.description = v; var hdr = document.querySelector('.mxd2-doc-hdr-desc'); if (hdr) hdr.textContent = v || 'Cliquez sur Propriétés du document →'; } }
+  function _bldFreqChange(v)  { if (_builderTpl) _builderTpl.frequency = v; }
+  function _bldColorChange(v) {
+    if (!_builderTpl) return;
+    _builderTpl.color = v;
+    var card = document.querySelector('.mxd2-doc-hdr-card');
+    if (card) card.style.setProperty('--doc-accent', v);
+    var ico = document.querySelector('.mxd2-doc-hdr-icon');
+    if (ico) ico.style.color = v;
+  }
+
+  function _setBuilderIcon(icon) {
+    if (!_builderTpl) return;
+    _builderTpl.icon = icon;
+    document.querySelectorAll('.mxd2-icon-pick').forEach(function (b) {
+      b.classList.toggle('mxd2-icon-pick--on', b.title === icon);
+    });
+    var ico = document.querySelector('.mxd2-doc-hdr-icon i');
+    if (ico) { ico.className = 'fas ' + icon; }
   }
 
   async function _saveBuilder(status) {
     if (!_builderTpl) return;
-    var titleEl = document.getElementById('mxd-bld-title');
+    var titleEl = document.getElementById('mxd-bld-title') || document.getElementById('mxd2-title');
     var descEl  = document.getElementById('mxd-bld-desc');
     var freqEl  = document.getElementById('mxd-bld-freq');
     var colorEl = document.getElementById('mxd-bld-color');
@@ -735,9 +1025,7 @@
     if (descEl)  _builderTpl.description = descEl.value.trim();
     if (freqEl)  _builderTpl.frequency   = freqEl.value;
     if (colorEl) _builderTpl.color       = colorEl.value;
-
     if (!_builderTpl.title) { MX.toast('Le nom du modèle est requis', false); return; }
-
     var payload = {
       title:       _builderTpl.title,
       description: _builderTpl.description || '',
@@ -750,29 +1038,23 @@
       updatedBy:   _author(),
     };
     if (status === 'published' && _builderTpl.status !== 'published') payload.publishedAt = FV.serverTimestamp();
-
     MX.syncStart();
     try {
       if (_builderTpl.id) {
         await DB.templates().doc(_builderTpl.id).update(payload);
       } else {
-        payload.createdAt  = FV.serverTimestamp();
-        payload.createdBy  = _author();
+        payload.createdAt = FV.serverTimestamp();
+        payload.createdBy = _author();
         payload.archivedAt = null;
         await DB.templates().add(payload);
       }
       MX.syncEnd();
       MX.toast(status === 'published' ? 'Modèle publié !' : 'Brouillon enregistré');
       _closeBuilder();
-    } catch (err) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + err.message, true);
-    }
+    } catch (err) { MX.syncFail(); MX.toast('Erreur: ' + err.message, true); }
   }
 
-  // ─────────────────────────────────────────────────────
-  // EXECUTION VIEW
-  // ─────────────────────────────────────────────────────
+  // ── EXECUTION VIEW ──
   function _startExec(templateId) {
     var tpl = _templates.find(function (t) { return t.id === templateId; });
     if (!tpl) return;
@@ -796,14 +1078,12 @@
     if (!tpl) { _closeExec(); return; }
     var e      = _e;
     var accent = e(tpl.color || '#8B5CF6');
-
-    var sectH = (tpl.sections || []).map(function (sec) {
+    var sectH  = (tpl.sections || []).map(function (sec) {
       return '<div class="mxd-exec-sec">'
         + '<div class="mxd-exec-sec-hdr">' + e(sec.label || 'Section') + '</div>'
         + (sec.blocks || []).map(_renderExecBlock).join('')
         + '</div>';
     }).join('');
-
     mc.innerHTML = '<div class="mxd-exec">'
       + '<div class="mxd-exec-hdr" style="--exec-accent:' + accent + '">'
       + '<button class="mxd-exec-back" onclick="MX.Pages.MxDoc._closeExec()"><i class="fas fa-arrow-left"></i></button>'
@@ -811,16 +1091,12 @@
       + '<div class="mxd-exec-hdr-txt">'
       + '<div class="mxd-exec-hdr-title">' + e(tpl.title) + '</div>'
       + (tpl.description ? '<div class="mxd-exec-hdr-desc">' + e(tpl.description) + '</div>' : '')
-      + '</div>'
-      + '</div>'
-      + '<div class="mxd-exec-body">'
-      + sectH
+      + '</div></div>'
+      + '<div class="mxd-exec-body">' + sectH
       + '<div class="mxd-exec-footer">'
       + '<button class="secondary-btn" onclick="MX.Pages.MxDoc._saveExec(\'en_cours\')"><i class="fas fa-save"></i> Sauvegarder</button>'
       + '<button class="primary-btn" onclick="MX.Pages.MxDoc._saveExec(\'termine\')"><i class="fas fa-check"></i> Valider et terminer</button>'
-      + '</div>'
-      + '</div>'
-      + '</div>';
+      + '</div></div></div>';
   }
 
   function _renderExecBlock(blk) {
@@ -829,12 +1105,10 @@
     var bt  = _btInfo(blk.type);
     var bid = e(blk.id);
     var req = blk.required ? '<span class="mxd-req" title="Obligatoire"> *</span>' : '';
-
     if (blk.type === 'titre')     return '<h2 class="mxd-exec-titre">' + e(blk.value || blk.label || '') + '</h2>';
     if (blk.type === 'sstitre')   return '<h3 class="mxd-exec-sstitre">' + e(blk.value || blk.label || '') + '</h3>';
     if (blk.type === 'separator') return '<hr class="mxd-exec-sep">';
     if (blk.type === 'texte')     return '<div class="mxd-exec-texte">' + e(blk.value || blk.label || '') + '</div>';
-
     var inputH = '';
     if (blk.type === 'numerique') {
       inputH = '<div class="mxd-num-wrap">'
@@ -843,8 +1117,7 @@
         + (blk.max !== undefined ? ' max="' + blk.max + '"' : '')
         + ' value="' + (val !== undefined ? val : '') + '"'
         + ' oninput="MX.Pages.MxDoc._setResponse(\'' + bid + '\',parseFloat(this.value))">'
-        + (blk.unit ? '<span class="mxd-unit">' + e(blk.unit) + '</span>' : '')
-        + '</div>';
+        + (blk.unit ? '<span class="mxd-unit">' + e(blk.unit) + '</span>' : '') + '</div>';
     } else if (blk.type === 'ouinon') {
       inputH = '<div class="mxd-yn">'
         + '<label class="mxd-yn-lbl"><input type="radio" name="blk_' + bid + '" value="oui"' + (val === 'oui' ? ' checked' : '') + ' onchange="MX.Pages.MxDoc._setResponse(\'' + bid + '\',\'oui\')"><span>Oui</span></label>'
@@ -867,21 +1140,17 @@
         + '<input type="file" accept="image/*" capture="environment" class="mxd-photo-inp" id="mxd-ph-' + bid + '" onchange="MX.Pages.MxDoc._onExecPhoto(\'' + bid + '\',this)">'
         + '<label for="mxd-ph-' + bid + '" class="mxd-photo-lbl">'
         + (val ? '<img src="' + val + '" class="mxd-photo-prev">' : '<i class="fas fa-camera"></i><span>Ajouter une photo</span>')
-        + '</label>'
-        + '</div>';
+        + '</label></div>';
     } else if (blk.type === 'signature') {
       inputH = '<div class="mxd-sig-wrap"><div class="mxd-sig-ph"><i class="fas fa-pen-nib"></i><span>Zone signature</span></div></div>';
     }
-
     return '<div class="mxd-exec-blk">'
       + '<div class="mxd-exec-blk-lbl"><i class="fas ' + bt.icon + '" style="color:' + bt.color + '"></i> ' + e(blk.label || bt.l) + req + '</div>'
       + '<div class="mxd-exec-blk-inp">' + inputH + '</div>'
       + '</div>';
   }
 
-  function _setResponse(blkId, value) {
-    _execResponses[blkId] = value;
-  }
+  function _setResponse(blkId, value) { _execResponses[blkId] = value; }
 
   function _onExecPhoto(blkId, input) {
     var file = input.files[0];
@@ -890,8 +1159,7 @@
     reader.onload = function (ev) {
       var img = new Image();
       img.onload = function () {
-        var MAX = 800;
-        var w = img.width, h = img.height;
+        var MAX = 800; var w = img.width; var h = img.height;
         if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
         if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
         var cv = document.createElement('canvas');
@@ -917,12 +1185,8 @@
           if (blk.required && (v === undefined || v === null || v === '')) missing.push(blk.label || blk.type);
         });
       });
-      if (missing.length) {
-        MX.toast('Champs obligatoires manquants : ' + missing.slice(0, 3).join(', '), false);
-        return;
-      }
+      if (missing.length) { MX.toast('Champs obligatoires manquants : ' + missing.slice(0, 3).join(', '), false); return; }
     }
-
     var payload = {
       templateId:    _execTemplate.id,
       templateTitle: _execTemplate.title,
@@ -932,7 +1196,6 @@
       updatedAt:     FV.serverTimestamp(),
     };
     if (status === 'termine') payload.completedAt = FV.serverTimestamp();
-
     MX.syncStart();
     try {
       if (_execInstance && _execInstance.id) {
@@ -944,28 +1207,19 @@
       MX.syncEnd();
       if (status === 'termine') { MX.toast('Document validé et enregistré !'); _closeExec(); }
       else MX.toast('Document sauvegardé');
-    } catch (err) {
-      MX.syncFail();
-      MX.toast('Erreur: ' + err.message, true);
-    }
+    } catch (err) { MX.syncFail(); MX.toast('Erreur: ' + err.message, true); }
   }
 
-  // ─────────────────────────────────────────────────────
-  // EXPORTS
-  // ─────────────────────────────────────────────────────
+  // ── EXPORTS ──
   function _exportPdf() { window.print(); }
 
   function _exportExcel() {
     if (!window.XLSX) { MX.toast('Export XLSX indisponible', false); return; }
     var rows = [['Document', 'Technicien', 'Statut', 'Date début', 'Date fin']];
     _instances.forEach(function (inst) {
-      rows.push([
-        inst.templateTitle || '',
-        inst.assignedTo    || '',
+      rows.push([inst.templateTitle || '', inst.assignedTo || '',
         inst.status === 'termine' ? 'Terminé' : 'En cours',
-        _fmtTs(inst.startedAt),
-        inst.status === 'termine' ? _fmtTs(inst.completedAt) : '',
-      ]);
+        _fmtTs(inst.startedAt), inst.status === 'termine' ? _fmtTs(inst.completedAt) : '']);
     });
     var ws = window.XLSX.utils.aoa_to_sheet(rows);
     var wb = window.XLSX.utils.book_new();
@@ -973,11 +1227,9 @@
     window.XLSX.writeFile(wb, 'mxdoc-historique.xlsx');
   }
 
-  // ─────────────────────────────────────────────────────
-  // DESTROY
-  // ─────────────────────────────────────────────────────
+  // ── DESTROY ──
   function _destroy() {
-    Object.keys(_unsub).forEach(function (k) { try { if (_unsub[k]) _unsub[k](); } catch(e) {} });
+    Object.keys(_unsub).forEach(function (k) { try { if (_unsub[k]) _unsub[k](); } catch (e) {} });
     _unsub         = {};
     _loaded        = false;
     _templates     = [];
@@ -990,11 +1242,17 @@
     _execTemplate  = null;
     _execInstance  = null;
     _execResponses = {};
+    _v2History     = [];
+    _v2Future      = [];
+    _v2SelSIdx     = null;
+    _v2SelEIdx     = null;
+    _v2MobPanel    = 'canvas';
+    _v2PalDragType = null;
+    _v2ElDragSrc   = null;
+    _v2SecDragSrc  = null;
   }
 
-  // ─────────────────────────────────────────────────────
-  // EXPOSE
-  // ─────────────────────────────────────────────────────
+  // ── EXPOSE ──
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.MxDoc = {
@@ -1013,21 +1271,35 @@
     _bldFreqChange,
     _bldColorChange,
     _setBuilderIcon,
-    _addSection,
-    _deleteSection,
-    _secNameChange,
-    _selectBlock,
-    _deleteBlock,
-    _moveBlock,
-    _propChange,
-    _propChangeNum,
-    _palDragStart,
-    _blkDragStart,
-    _palDragEnd,
-    _dzOver,
-    _dzLeave,
-    _dzDrop,
     _saveBuilder,
+    // V2
+    _v2Undo,
+    _v2Redo,
+    _v2Preview,
+    _v2PalDragStart,
+    _v2ElDragStart,
+    _v2SecDragStart,
+    _v2DragEnd,
+    _v2ElDzDrop,
+    _v2SecDzOver,
+    _v2SecDzLeave,
+    _v2SecDzDrop,
+    _v2SelectSec,
+    _v2SelectEl,
+    _v2AddSection,
+    _v2DelSection,
+    _v2SecLabel,
+    _v2SecLabelSync,
+    _v2SecColor,
+    _v2PalClick,
+    _v2DelEl,
+    _v2MoveEl,
+    _v2PropChange,
+    _v2PropChangeNum,
+    _v2ChangeType,
+    _v2ToggleProp,
+    _v2MobSwitch,
+    // Exec
     _startExec,
     _closeExec,
     _setResponse,
