@@ -319,6 +319,10 @@
         ? (mod) => MX.Auth.can(mod, 'view')
         : () => true;
 
+    // ── DEBUG TRACKER ──
+    const _dbg = [];
+    const _dbgAdd = function(label) { _dbg.push(label); };
+
     function _item(id, icon, label, opts) {
       const o   = opts || {};
       const act = cur === id || (o.matchPages && o.matchPages.includes(cur));
@@ -388,10 +392,10 @@
     const clPages = ["today-cl", "mes-missions", ...DAYS.map(d => d.id)];
     h += `<div class="sx-modules">`;
     h += `<div class="sx-mod-sep"><span class="sx-lbl">Modules</span></div>`;
-    if (_see('checklist'))    h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages });
-    if (_see('counters'))     h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" });
-    if (_see('interventions'))h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" });
-    if (_see('planning'))     h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true });
+    if (_see('checklist'))    { h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages }); _dbgAdd("Missions"); }
+    if (_see('counters'))     { h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" }); _dbgAdd("Compteurs"); }
+    if (_see('interventions')){ h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" }); _dbgAdd("Interventions"); }
+    if (_see('planning'))     { h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true }); _dbgAdd("Planning"); }
     h += `</div>`;
 
     // ── DIVIDER ──
@@ -399,11 +403,13 @@
 
     // ── 📦 Gestion ──
     let gestItems = "";
-    if (_see('stock'))     gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true });
-    if (_see('resources')) gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true });
-    if (_see('messages'))  gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true });
-    if (gestItems)
+    if (_see('stock'))     { gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true }); _dbgAdd("Gestion > Stock"); }
+    if (_see('resources')) { gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true }); _dbgAdd("Gestion > Ressources"); }
+    if (_see('messages'))  { gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true }); _dbgAdd("Gestion > Journal"); }
+    if (gestItems) {
       h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
+      _dbgAdd("[Groupe] Gestion");
+    }
 
     // ── 📊 Analyses ──
     if (_see('counters') || _see('consumption')) {
@@ -419,6 +425,7 @@
         anlyItems += `<button class="sx-item sx-sub" onclick="MX.showCsoTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
       });
       h += _group("fa-chart-bar", "sx-group-ico--green", "Analyses", "anly", "toggleNavAnly", _anlyOpen, anlyItems, "consommations", "Analyses");
+      _dbgAdd("[Groupe] Analyses");
     }
 
     // ── 🛠️ Maintenance PMP (respOnly) ──
@@ -434,6 +441,7 @@
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'import\')" title="Import CSV"><i class="fas fa-file-import sx-ico"></i><span class="sx-lbl">Import CSV</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'historique\')" title="Historique PMP"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
       h += _group("fa-screwdriver-wrench", "sx-group-ico--orange", "Maintenance PMP", "maint", "toggleNavMaint", _maintOpen, pmpItems, "pmp", "PMP");
+      _dbgAdd("[Groupe] Maintenance PMP");
     }
 
     // ── 📄 MX Doc (respOnly) ──
@@ -443,6 +451,7 @@
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'historique\')" title="Historique MX Doc"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'parametres\')" title="Paramètres MX Doc"><i class="fas fa-sliders sx-ico"></i><span class="sx-lbl">Paramètres</span></button>';
       h += _group("fa-file-contract", "sx-group-ico--cyan", "MX Doc", "mxdoc", "toggleNavMxDoc", _mxdocOpen, mxdItems, "mx-doc", "MX Doc");
+      _dbgAdd("[Groupe] MX Doc");
     }
 
     // ── 🎯 Centre de Pilotage (respOnly) ──
@@ -492,14 +501,59 @@
       const _alertCnt = (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
       h += _group("fa-crosshairs", "sx-group-ico--cyan", "Centre de Pilotage" + _alertBadge, "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Centre de Pilotage");
+      _dbgAdd("[Groupe] Centre de Pilotage");
     }
 
     // ── Paramètres (standalone) ──
     h += `<div class="sx-params">`;
     h += _item("parametres", "fa-gear", "Paramètres");
+    _dbgAdd("Paramètres");
     h += `</div>`;
 
+    console.group('%c[Maintix] 📋 Modules générés par buildNav()', 'color:#4ADE80;font-weight:700');
+    console.log('Total :', _dbg.length, 'entrées');
+    _dbg.forEach(function(l, i) { console.log('  ' + (i + 1) + '.', l); });
+    console.groupEnd();
+
     sideNav.innerHTML = h;
+
+    // ── DOM AUDIT (post-render) ──
+    setTimeout(function() {
+      var _postGroups  = sideNav.querySelectorAll('.sx-group');
+      var _postItems   = sideNav.querySelectorAll('.sx-item');
+      var _postVisible = Array.from(_postGroups).filter(function(el) {
+        var s = window.getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0;
+      });
+      var groupLabels = Array.from(_postGroups).map(function(el) {
+        var lbl = el.querySelector('.sx-group-lbl');
+        return lbl ? lbl.textContent.trim() : '?';
+      });
+      var _sb = document.getElementById('sidebar');
+      var _sbStyle = _sb ? window.getComputedStyle(_sb) : null;
+      var _navStyle = window.getComputedStyle(sideNav);
+      // Cherche les classes CSS suspectes
+      var _suspClasses = ['hidden', 'collapsed', 'mx-hidden', 'd-none'];
+      var _sbSusp = _sb ? _suspClasses.filter(function(c) { return _sb.classList.contains(c); }) : [];
+      var _navSusp = _suspClasses.filter(function(c) { return sideNav.classList.contains(c); });
+      console.group('%c[Maintix] 🔍 Sidebar finale — DOM Audit (300ms)', 'color:#F59E0B;font-weight:700');
+      console.log('Sections (.sx-group) :', _postGroups.length);
+      console.log('Modules  (.sx-item)  :', _postItems.length);
+      console.log('Groupes visibles     :', _postVisible.length);
+      console.log('Groupes présents     :', groupLabels.join(', ') || '(aucun)');
+      console.log('innerHTML vide       :', !sideNav.innerHTML.trim());
+      console.log('sidebar display      :', _sbStyle ? _sbStyle.display : 'N/A');
+      console.log('sidebar visibility   :', _sbStyle ? _sbStyle.visibility : 'N/A');
+      console.log('sidebar opacity      :', _sbStyle ? _sbStyle.opacity : 'N/A');
+      console.log('sidebar-nav display  :', _navStyle.display);
+      console.log('sidebar-nav visibility:', _navStyle.visibility);
+      if (_sbSusp.length)  console.warn('⚠️ Classes suspectes sur #sidebar    :', _sbSusp);
+      if (_navSusp.length) console.warn('⚠️ Classes suspectes sur #sidebar-nav:', _navSusp);
+      if (_postGroups.length === 0 && _dbg.length > 0) {
+        console.error('❌ DOM vide mais modules générés — probable innerHTML overwrite après buildNav()');
+      }
+      console.groupEnd();
+    }, 300);
 
     // Apply compact class — never on mobile (no compact mode on mobile)
     const sidebar = document.getElementById("sidebar");
