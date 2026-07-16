@@ -510,6 +510,16 @@
     _dbgAdd("Paramètres");
     h += `</div>`;
 
+    // ── ÉTAT ACCORDÉONS (pré-render) ──
+    console.group('%c[Maintix] 🗂️ État accordéons (pré-render)', 'color:#60A5FA;font-weight:700');
+    console.log('Gestion          (_gestOpen)  :', _gestOpen,  '| localStorage "mx_sx_gest"  :', localStorage.getItem("mx_sx_gest"));
+    console.log('Analyses         (_anlyOpen)  :', _anlyOpen,  '| localStorage "mx_sx_anly"  :', localStorage.getItem("mx_sx_anly"));
+    console.log('Maintenance PMP  (_maintOpen) :', _maintOpen, '| localStorage "mx_sx_maint" :', localStorage.getItem("mx_sx_maint"));
+    console.log('MX Doc           (_mxdocOpen) :', _mxdocOpen, '| localStorage "mx_sx_mxdoc" :', localStorage.getItem("mx_sx_mxdoc"));
+    console.log('Centre Pilotage  (_adminOpen) :', _adminOpen, '| localStorage "mx_sx_adm"   :', localStorage.getItem("mx_sx_adm"));
+    console.warn('⚠️ _group() n\'injecte les enfants QUE si open === true. Groupes fermés = 0 enfants dans le DOM.');
+    console.groupEnd();
+
     console.group('%c[Maintix] 📋 Modules générés par buildNav()', 'color:#4ADE80;font-weight:700');
     console.log('Total :', _dbg.length, 'entrées');
     _dbg.forEach(function(l, i) { console.log('  ' + (i + 1) + '.', l); });
@@ -532,10 +542,10 @@
       var _sb = document.getElementById('sidebar');
       var _sbStyle = _sb ? window.getComputedStyle(_sb) : null;
       var _navStyle = window.getComputedStyle(sideNav);
-      // Cherche les classes CSS suspectes
       var _suspClasses = ['hidden', 'collapsed', 'mx-hidden', 'd-none'];
       var _sbSusp = _sb ? _suspClasses.filter(function(c) { return _sb.classList.contains(c); }) : [];
       var _navSusp = _suspClasses.filter(function(c) { return sideNav.classList.contains(c); });
+
       console.group('%c[Maintix] 🔍 Sidebar finale — DOM Audit (300ms)', 'color:#F59E0B;font-weight:700');
       console.log('Sections (.sx-group) :', _postGroups.length);
       console.log('Modules  (.sx-item)  :', _postItems.length);
@@ -552,6 +562,31 @@
       if (_postGroups.length === 0 && _dbg.length > 0) {
         console.error('❌ DOM vide mais modules générés — probable innerHTML overwrite après buildNav()');
       }
+
+      // ── AUDIT ENFANTS PAR GROUPE ──
+      console.group('%c[Maintix] 👶 Audit enfants par groupe', 'color:#C084FC;font-weight:700');
+      _postGroups.forEach(function(grp) {
+        var lblEl   = grp.querySelector('.sx-group-lbl');
+        var bodyEl  = grp.querySelector('.sx-group-body');
+        var hdrEl   = grp.querySelector('.sx-group-hdr');
+        var nomGroupe = lblEl ? lblEl.textContent.replace(/\d+$/, '').trim() : '(inconnu)';
+        var isOpen  = hdrEl ? hdrEl.classList.contains('sx-group-hdr--open') : false;
+        var children = bodyEl ? bodyEl.querySelectorAll('.sx-item') : [];
+        var childNames = Array.from(children).map(function(c) {
+          var lbl = c.querySelector('.sx-lbl');
+          return lbl ? lbl.textContent.trim() : '?';
+        });
+        if (children.length === 0) {
+          console.error('❌ ERREUR : Le groupe "' + nomGroupe + '" est vide.',
+            isOpen ? '(ouvert mais sans enfants — bug HTML)' : '(fermé — enfants non rendus car open === false)');
+        } else {
+          console.group(nomGroupe + ' — ' + children.length + ' enfant(s) | ouvert : ' + isOpen);
+          childNames.forEach(function(n, i) { console.log('  ' + (i + 1) + '.', n); });
+          console.groupEnd();
+        }
+      });
+      console.groupEnd();
+
       console.groupEnd();
     }, 300);
 
