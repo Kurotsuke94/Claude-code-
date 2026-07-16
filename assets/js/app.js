@@ -130,6 +130,28 @@
 
   function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
 
+  function _applyGroupStates() {
+    var nav = document.getElementById('sidebar-nav');
+    if (!nav) return;
+    var _map = {
+      plng:  _plngOpen,
+      maint: _maintOpen,
+      gest:  _gestOpen,
+      anly:  _anlyOpen,
+      adm:   _adminOpen,
+      mxdoc: _mxdocOpen,
+    };
+    Object.keys(_map).forEach(function(key) {
+      var grp  = nav.querySelector('[data-group="' + key + '"]');
+      if (!grp) return;
+      var hdr  = grp.querySelector('.sx-group-hdr');
+      var body = grp.querySelector('.sx-group-body');
+      var open = _map[key];
+      if (hdr)  hdr.classList.toggle('sx-group-hdr--open', open);
+      if (body) body.classList.toggle('collapsed', !open);
+    });
+  }
+
   function _toggleSec(which) {
     const mob = window.innerWidth <= 900;
     if (mob) {
@@ -157,7 +179,7 @@
     _sx("mx_sx_anly",  _anlyOpen);
     _sx("mx_sx_adm",   _adminOpen);
     _sx("mx_sx_mxdoc", _mxdocOpen);
-    buildNav();
+    _applyGroupStates();
   }
 
   window.MX.toggleNavPlng   = function() { _toggleSec("plng"); };
@@ -286,6 +308,15 @@
     const cur    = state.currentPage || "";
     const canAll = MX.Auth.canSeeAll();
 
+    // Admin / Responsable : tous les groupes ouverts par défaut
+    // (conserver l'état localStorage uniquement si l'utilisateur a explicitement fermé = "0")
+    if (canAll) {
+      if (localStorage.getItem("mx_sx_gest")  !== "0") _gestOpen  = true;
+      if (localStorage.getItem("mx_sx_anly")  !== "0") _anlyOpen  = true;
+      if (localStorage.getItem("mx_sx_adm")   !== "0") _adminOpen = true;
+      if (localStorage.getItem("mx_sx_mxdoc") !== "0") _mxdocOpen = true;
+    }
+
     // ── SIDEBAR MODE (indépendant de currentUser pour les admins) ──
     const _isAdminFb    = MX.Auth.isAdmin();
     const _cuNav        = state.currentUser;
@@ -344,14 +375,14 @@
         const isFav = _getFavs().some(f => f.id === favId);
         star = `<span class="sx-fav-star${isFav ? ' sx-fav-star--on' : ''}" onclick="event.stopPropagation();MX.toggleFav('${favId}','${favLabel || favId}')" title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}"><i class="fas fa-star"></i></span>`;
       }
-      return `<div class="sx-group">
+      return `<div class="sx-group" data-group="${key}">
     <button class="sx-group-hdr${open ? ' sx-group-hdr--open' : ''}" onclick="MX.${toggleFn}()" title="${label}">
       <i class="fas fa-chevron-right sx-group-chev"></i>
       <span class="sx-group-ico ${icoCls}"><i class="fas ${icon}"></i></span>
       <span class="sx-group-lbl">${label}</span>
       ${star}
     </button>
-    ${open ? `<div class="sx-group-body">${items}</div>` : ''}
+    <div class="sx-group-body${open ? '' : ' collapsed'}">${items}</div>
   </div>`;
     }
 
