@@ -3,13 +3,40 @@
   let _onLogout = null;
   let _pendingUserId = null;
 
+  // ── DEV BYPASS (temporaire — supprimer avant production) ──
+  var DEV_ADMIN_EMAIL = 'keyzeur94460@hotmail.fr';
+  function _isDevAdmin() {
+    try { var u = auth.currentUser; return !!(u && u.email === DEV_ADMIN_EMAIL); } catch(e) { return false; }
+  }
+
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
     window.MX.state.adminUser = user || null;
+
+    // ── DEBUG AUTH (temporaire) ──
+    var _cu  = window.MX.state.currentUser;
+    var _roles = window.MX.state.roles || [];
+    var _roleDef = _cu && _cu.roleId ? _roles.find(function(r){ return r.id === _cu.roleId; }) : null;
+    console.group('%c[Maintix] 🔐 Auth State Changed', 'color:#60A5FA;font-weight:700');
+    console.log('Utilisateur connecté :', user ? 'Oui (Firebase Admin)' : 'Non');
+    console.log('Email :', user ? user.email : '—');
+    console.log('UID :', user ? user.uid : '—');
+    console.log('DEV BYPASS actif :', _isDevAdmin());
+    console.log('adminUser :', !!window.MX.state.adminUser);
+    console.log('currentUser (PIN) :', _cu ? _cu.name : '—');
+    console.log('Role détecté :', user ? 'Administrateur Firebase' : (_cu ? (_roleDef ? _roleDef.name : _cu.role) : 'Non connecté'));
+    console.log('isAdmin() :', !!(window.MX.state.adminUser || _isDevAdmin()));
+    console.log('canSeeAll() :', !!(window.MX.state.adminUser || _isDevAdmin() || (_cu && _cu.role === 'responsable')));
+    console.groupEnd();
+
     if (user) {
       _onLogin && _onLogin(user);
       _registerFcmToken("admin");
       MX.DB && MX.DB.updatePresence && MX.DB.updatePresence(user.email ? user.email.split("@")[0] : "admin");
+      // Rebuild nav with admin sections now that auth is confirmed
+      if (window.MX && window.MX.buildNav) {
+        try { window.MX.buildNav(); } catch(e) {}
+      }
     } else {
       if (prevAdmin) {
         // Admin logout → full session teardown: clear PIN user + destroy UI
@@ -30,7 +57,7 @@
 
   function onLogin(cb)  { _onLogin  = cb; }
   function onLogout(cb) { _onLogout = cb; }
-  function isAdmin()    { return !!window.MX.state.adminUser; }
+  function isAdmin()    { return !!window.MX.state.adminUser || _isDevAdmin(); }
   function canSeeAll()  { return isAdmin() || (window.MX.state.currentUser && window.MX.state.currentUser.role === "responsable"); }
 
   // ── FCM TOKEN REGISTRATION ──
@@ -83,6 +110,21 @@
     if (user) localStorage.setItem("mx_user", JSON.stringify(window.MX.state.currentUser));
     else      localStorage.removeItem("mx_user");
     localStorage.removeItem("mx_worker"); // clean up old key
+
+    // ── DEBUG PIN USER (temporaire) ──
+    var _cu = window.MX.state.currentUser;
+    var _roles = window.MX.state.roles || [];
+    var _roleDef = _cu && _cu.roleId ? _roles.find(function(r){ return r.id === _cu.roleId; }) : null;
+    console.group('%c[Maintix] 👤 Utilisateur PIN Changed', 'color:#4ADE80;font-weight:700');
+    console.log('Utilisateur connecté :', _cu ? _cu.name : 'Déconnecté');
+    console.log('Role :', _cu ? (_roleDef ? _roleDef.name : _cu.role) : '—');
+    console.log('RoleId :', _cu ? (_cu.roleId || 'aucun') : '—');
+    console.log('isAdmin() :', isAdmin());
+    console.log('canSeeAll() :', canSeeAll());
+    console.log('Permissions :', _roleDef ? JSON.stringify(_roleDef.permissions || {}) : (_cu && _cu.role === 'responsable' ? 'tout (responsable)' : 'standard technicien'));
+    console.log('Menus affichés :', canSeeAll() ? 'TOUS (admin/responsable)' : 'Filtrés par rôle');
+    console.groupEnd();
+
     updateSidebarFooter();
     MX.buildNav && MX.buildNav();
     const page = MX.state.currentPage;

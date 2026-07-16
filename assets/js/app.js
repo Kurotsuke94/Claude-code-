@@ -286,6 +286,18 @@
     const cur    = state.currentPage || "";
     const canAll = MX.Auth.canSeeAll();
 
+    // ── DEBUG NAV (temporaire) ──
+    const _navAdmin = MX.state.adminUser;
+    const _navCu    = MX.state.currentUser;
+    console.log(
+      '%c[Maintix] 🧭 buildNav()',
+      'color:#A78BFA;font-weight:700',
+      '| canAll:', canAll,
+      '| adminUser:', _navAdmin ? _navAdmin.email : 'null',
+      '| currentUser:', _navCu ? _navCu.name + ' (' + _navCu.role + ')' : 'null',
+      '| Menus affichés:', canAll ? 'COMPLETS (PMP + MX Doc + Pilotage)' : 'limités'
+    );
+
     // Role-based nav filter: only apply when a PIN user has a roleId assigned
     const _cu  = state.currentUser;
     const _see = (!MX.Auth.isAdmin() && _cu && _cu.roleId)
