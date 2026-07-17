@@ -56,6 +56,14 @@
   var _v6MobPanel    = 'canvas';
   var _v6DragData    = null;
 
+  // V7 Column Library state
+  var _colLibrary    = [];
+  var _colLibUnsub   = null;
+  var _v7PalTab      = 'types';
+  var _v7ModalDef    = null;
+  var _v7ModalIsNew  = true;
+  var _v7ModalTab    = 'info';
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -361,10 +369,12 @@
     _v5SecCollapsed = {};
     _v5AddMenuSIdx  = null;
     _builderMode  = true;
+    _v7LoadLibrary();
     render();
   }
 
   function _closeBuilder() {
+    _v7UnloadLibrary();
     _builderMode  = false;
     _builderTpl   = null;
     _builderSecs  = [];
@@ -393,6 +403,9 @@
     _v6SecCollapsed = {};
     _v6MobPanel    = 'canvas';
     _v6DragData    = null;
+    _v7PalTab      = 'types';
+    _v7ModalDef    = null;
+    _v7ModalIsNew  = true;
     render();
   }
 
@@ -1072,6 +1085,63 @@
     { key: 'heure',       icon: 'fa-clock',         l: 'Heure',        color: '#EF4444' },
   ];
 
+  // V7 intelligent column types
+  var V7_COL_TYPES = [
+    { key:'texte',       icon:'fa-font',         l:'Texte',                   color:'#64748B' },
+    { key:'int',         icon:'fa-hashtag',       l:'Valeur numérique',        color:'#0EA5E9', hasUnit:true, hasMinMax:true },
+    { key:'decimal',     icon:'fa-decimal',       l:'Valeur décimale',         color:'#38BDF8', hasUnit:true, hasMinMax:true, hasDecimals:true },
+    { key:'ouinon',      icon:'fa-toggle-on',     l:'Oui / Non',               color:'#10B981' },
+    { key:'etatcheck',   icon:'fa-check',         l:'✔ / ❌',                 color:'#22C55E' },
+    { key:'conforme',    icon:'fa-circle-check',  l:'Conforme / Non conforme', color:'#16A34A' },
+    { key:'marchearret', icon:'fa-power-off',     l:'Marche / Arrêt',          color:'#F97316' },
+    { key:'liste',       icon:'fa-list',          l:'Liste déroulante',        color:'#8B5CF6' },
+    { key:'date',        icon:'fa-calendar',      l:'Date',                    color:'#F59E0B' },
+    { key:'heure',       icon:'fa-clock',         l:'Heure',                   color:'#EF4444' },
+    { key:'photo',       icon:'fa-camera',        l:'Photo',                   color:'#EC4899' },
+    { key:'signature',   icon:'fa-pen-nib',       l:'Signature',               color:'#A855F7' },
+    { key:'commentaire', icon:'fa-comment-lines', l:'Commentaire',             color:'#F59E0B' },
+    { key:'barcode',     icon:'fa-barcode',       l:'Code-barres',             color:'#475569' },
+    { key:'qrcode',      icon:'fa-qrcode',        l:'QR Code',                color:'#0D9488' },
+    { key:'compteur',    icon:'fa-calculator',    l:'Compteur',                color:'#0EA5E9' },
+    { key:'temps',       icon:'fa-stopwatch',     l:'Temps',                   color:'#6366F1' },
+    { key:'pourcent',    icon:'fa-percent',       l:'Pourcentage',             color:'#F97316' },
+    { key:'monnaie',     icon:'fa-euro-sign',     l:'Monnaie',                 color:'#22C55E' },
+  ];
+
+  // AI keyword → column type suggestions
+  var V7_AI_KW = {
+    'ph':          { type:'decimal', unit:'pH', min:0, max:14, decimals:1 },
+    'température': { type:'decimal', unit:'°C' },
+    'temp':        { type:'decimal', unit:'°C' },
+    'pression':    { type:'decimal', unit:'bar' },
+    'niveau':      { type:'decimal', unit:'m' },
+    'débit':       { type:'decimal', unit:'m³/h' },
+    'intensité':   { type:'decimal', unit:'A' },
+    'tension':     { type:'decimal', unit:'V' },
+    'chlore':      { type:'decimal', unit:'mg/L' },
+    'sel':         { type:'decimal', unit:'g/L' },
+    'ppm':         { type:'decimal', unit:'ppm' },
+    'photo':       { type:'photo' },
+    'état':        { type:'etatcheck' },
+    'etat':        { type:'etatcheck' },
+    'conforme':    { type:'conforme' },
+    'marche':      { type:'marchearret' },
+    'signature':   { type:'signature' },
+    'commentaire': { type:'commentaire' },
+    'remarque':    { type:'commentaire' },
+    'date':        { type:'date' },
+    'heure':       { type:'heure' },
+    'oui':         { type:'ouinon' },
+    'non':         { type:'ouinon' },
+    'pompe':       { type:'marchearret' },
+    'vanne':       { type:'marchearret' },
+    'bac':         { type:'etatcheck' },
+    'fuite':       { type:'etatcheck' },
+    'chasse':      { type:'etatcheck' },
+    'ballon':      { type:'etatcheck' },
+    'filtre':      { type:'etatcheck' },
+  };
+
   function _renderBuilderV6(mc) {
     var tpl = _builderTpl || {};
     mc.innerHTML = '<div class="mxd6-wrap" id="mxd6-root">'
@@ -1115,16 +1185,52 @@
 
   function _v6PaletteHTML() {
     var e = _e;
+    var tab = _v7PalTab;
     var h = '<div class="mxd6-pal-inner">';
-    h += '<p class="mxd6-pal-label">COLONNES</p>';
-    V6_COLS.forEach(function(c) {
-      h += '<div class="mxd6-pal-card" draggable="true"'
-        + ' ondragstart="MX.Pages.MxDoc._v6PalDragStart(event,' + JSON.stringify(c.key) + ')"'
-        + ' onclick="MX.Pages.MxDoc._v6PalClick(' + JSON.stringify(c.key) + ')">'
-        + '<span class="mxd6-pal-ic" style="background:' + c.color + '22;color:' + c.color + '"><i class="fa-solid ' + c.icon + '"></i></span>'
-        + '<span class="mxd6-pal-lbl">' + e(c.l) + '</span>'
-        + '</div>';
-    });
+    // Tab bar
+    h += '<div class="mxd7-pal-tabs">'
+      + '<button class="mxd7-pal-tab' + (tab === 'types' ? ' mxd7-pal-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7SetPalTab(\'types\')"><i class="fa-solid fa-table-columns"></i> Types</button>'
+      + '<button class="mxd7-pal-tab' + (tab === 'library' ? ' mxd7-pal-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7SetPalTab(\'library\')"><i class="fa-solid fa-book"></i> Bibliothèque</button>'
+      + '</div>';
+
+    if (tab === 'types') {
+      h += '<p class="mxd6-pal-label">TYPES DE COLONNES</p>';
+      V7_COL_TYPES.forEach(function(c) {
+        h += '<div class="mxd6-pal-card" draggable="true"'
+          + ' ondragstart="MX.Pages.MxDoc._v7TypeDragStart(event,' + JSON.stringify(c.key) + ')"'
+          + ' onclick="MX.Pages.MxDoc._v7TypeClick(' + JSON.stringify(c.key) + ')">'
+          + '<span class="mxd6-pal-ic" style="background:' + c.color + '22;color:' + c.color + '"><i class="fa-solid ' + c.icon + '"></i></span>'
+          + '<span class="mxd6-pal-lbl">' + e(c.l) + '</span>'
+          + '</div>';
+      });
+    } else {
+      // Library tab
+      h += '<button class="mxd7-newcol-btn" onclick="MX.Pages.MxDoc._v7OpenColModal(null)">'
+        + '<i class="fa-solid fa-plus"></i> Nouvelle colonne</button>';
+      h += '<button class="mxd7-ai-btn" onclick="MX.Pages.MxDoc._v7OpenAIModal()">'
+        + '<i class="fa-solid fa-wand-magic-sparkles"></i> Générer les colonnes</button>';
+      if (!_colLibrary.length) {
+        h += '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Aucune colonne sauvegardée.<br>Cliquez <strong>Nouvelle colonne</strong> pour commencer.</p></div>';
+      } else {
+        h += '<p class="mxd6-pal-label">MES COLONNES</p>';
+        _colLibrary.forEach(function(col) {
+          var ct = _v7TypeDef(col.type);
+          var ic = ct ? ct.icon : 'fa-columns';
+          var color = col.color || (ct ? ct.color : '#64748B');
+          var emoji = col.icon || '';
+          h += '<div class="mxd6-pal-card mxd7-lib-card" draggable="true"'
+            + ' ondragstart="MX.Pages.MxDoc._v7LibDragStart(event,' + JSON.stringify(col.id) + ')"'
+            + ' onclick="MX.Pages.MxDoc._v7LibClick(' + JSON.stringify(col.id) + ')">'
+            + '<span class="mxd6-pal-ic mxd7-lib-ic" style="background:' + color + '22;color:' + color + '">'
+            + (emoji ? '<span class="mxd7-col-emoji">' + e(emoji) + '</span>' : '<i class="fa-solid ' + ic + '"></i>')
+            + '</span>'
+            + '<span class="mxd6-pal-lbl">' + e(col.name || '—') + '</span>'
+            + '<button class="mxd7-lib-edit" onclick="event.stopPropagation();MX.Pages.MxDoc._v7OpenColModal(' + JSON.stringify(col.id) + ')" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>'
+            + '</div>';
+        });
+      }
+    }
+
     h += '</div>';
     h += '<button class="mxd6-add-sec-pal" onclick="MX.Pages.MxDoc._v6AddSection()"><i class="fa-solid fa-plus"></i> Nouvelle section</button>';
     return h;
@@ -1200,31 +1306,44 @@
     return h;
   }
 
-  // ── V6 TABLE RENDERING ──
+  // ── V6/V7 TABLE RENDERING ──
   function _v6TableHTML(sec, sIdx) {
     var e = _e;
     var cols = sec.columns || [];
     var rows = sec.rows || [];
+    var resolved = cols.map(_v7ResolveCol).filter(Boolean);
     var h = '<div class="mxd6-tbl-wrap">';
     if (!cols.length) {
-      h += '<div class="mxd6-tbl-nocols"><i class="fa-solid fa-table-columns"></i> Aucune colonne — cliquez sur un type dans la palette pour l\'ajouter.</div>';
+      h += '<div class="mxd6-tbl-nocols"><i class="fa-solid fa-table-columns"></i> Aucune colonne — glissez un type depuis la palette ou cliquez dessus.</div>';
     } else {
       h += '<table class="mxd6-tbl"><thead><tr><th class="mxd6-th-label">Contrôle</th>';
-      cols.forEach(function(ck) {
-        var col = null;
-        for (var i = 0; i < V6_COLS.length; i++) { if (V6_COLS[i].key === ck) { col = V6_COLS[i]; break; } }
-        if (!col) return;
-        h += '<th class="mxd6-th-col" style="color:' + col.color + '">'
-          + '<i class="fa-solid ' + col.icon + '"></i>'
-          + '<span class="mxd6-th-txt"> ' + e(col.l) + '</span></th>';
+      resolved.forEach(function(r, ci) {
+        var col = r.def;
+        var color = col.color || '#64748B';
+        var emoji = col.icon || '';
+        var ct = _v7TypeDef(col.type || col.key);
+        var faIcon = ct ? ct.icon : (col.icon_fa || 'fa-columns');
+        h += '<th class="mxd6-th-col mxd7-th-draggable" style="color:' + color + '"'
+          + ' draggable="true"'
+          + ' ondragstart="MX.Pages.MxDoc._v7ColHdrDragStart(event,' + sIdx + ',' + ci + ')"'
+          + ' ondragover="event.preventDefault();this.classList.add(\'mxd7-th-dz\')"'
+          + ' ondragleave="this.classList.remove(\'mxd7-th-dz\')"'
+          + ' ondrop="MX.Pages.MxDoc._v7ColHdrDrop(event,' + sIdx + ',' + ci + ');this.classList.remove(\'mxd7-th-dz\')">'
+          + '<div class="mxd6-th-txt">'
+          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
+          + '<span> ' + e(col.name || col.l || col.key) + '</span>'
+          + (r.src === 'v7' && col.unit ? '<span class="mxd7-th-unit"> (' + e(col.unit) + ')</span>' : '')
+          + '</div>'
+          + '<button class="mxd7-th-rm" onclick="event.stopPropagation();MX.Pages.MxDoc._v7RemoveCol(' + sIdx + ',' + ci + ')" title="Retirer cette colonne"><i class="fa-solid fa-xmark"></i></button>'
+          + '</th>';
       });
       h += '<th class="mxd6-th-acts"></th></tr></thead><tbody>';
       if (!rows.length) {
-        h += '<tr><td colspan="' + (cols.length + 2) + '" class="mxd6-tbl-empty">'
+        h += '<tr><td colspan="' + (resolved.length + 2) + '" class="mxd6-tbl-empty">'
           + '<i class="fa-regular fa-plus-circle"></i> Cliquez <strong>Ajouter une ligne</strong> pour commencer'
           + '</td></tr>';
       } else {
-        rows.forEach(function(row, rIdx) { h += _v6TableRowHTML(row, sIdx, rIdx, cols); });
+        rows.forEach(function(row, rIdx) { h += _v6TableRowHTML(row, sIdx, rIdx, cols, resolved); });
       }
       h += '</tbody></table>';
     }
@@ -1234,8 +1353,9 @@
     return h;
   }
 
-  function _v6TableRowHTML(row, sIdx, rIdx, cols) {
+  function _v6TableRowHTML(row, sIdx, rIdx, cols, resolved) {
     var e = _e;
+    resolved = resolved || cols.map(_v7ResolveCol).filter(Boolean);
     var selected = (_v6SelSIdx === sIdx && _v6SelBIdx === rIdx);
     var h = '<tr class="mxd6-tbl-row' + (selected ? ' mxd6-tbl-row--sel' : '') + '"'
       + ' id="mxd6-row-' + sIdx + '-' + rIdx + '"'
@@ -1253,8 +1373,8 @@
       +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
       +     '>' + e(row.label || '') + '</span>'
       + '</td>';
-    cols.forEach(function(ck) {
-      h += '<td class="mxd6-td-cell">' + _v6CellHTML(ck, row) + '</td>';
+    resolved.forEach(function(r) {
+      h += '<td class="mxd6-td-cell">' + _v7CellBuilderHTML(r.def, row) + '</td>';
     });
     h += '<td class="mxd6-td-acts">'
       + '<button class="mxd6-row-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupEl(' + sIdx + ',' + rIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
@@ -1264,37 +1384,528 @@
     return h;
   }
 
+  // Unified builder preview cell — handles both V6 keys and V7 column defs
   function _v6CellHTML(colKey, row) {
+    var r = _v7ResolveCol(colKey);
+    return r ? _v7CellBuilderHTML(r.def, row) : '';
+  }
+
+  function _v7CellBuilderHTML(col, row) {
     var e = _e;
-    switch (colKey) {
+    var type = col.type || col.key || 'texte';
+    switch (type) {
       case 'valeur':
+      case 'int':
+      case 'decimal':
+      case 'compteur':
+      case 'pourcent':
+      case 'monnaie':
         return '<div class="mxd6-cell-val-wrap">'
-          + '<input type="number" class="mxd6-cell-val" placeholder="—" tabindex="-1" onclick="event.stopPropagation()">'
-          + (row.unit ? '<span class="mxd6-cell-unit">' + e(row.unit) + '</span>' : '')
+          + '<input type="number" class="mxd6-cell-val" placeholder="' + (col.defaultVal !== undefined ? String(col.defaultVal) : '—') + '" tabindex="-1" onclick="event.stopPropagation()">'
+          + (col.unit ? '<span class="mxd6-cell-unit">' + e(col.unit) + '</span>' : (row && row.unit ? '<span class="mxd6-cell-unit">' + e(row.unit) + '</span>' : ''))
           + '</div>';
       case 'etat':
+      case 'etatcheck':
         return '<div class="mxd6-cell-etat">'
           + '<button class="mxd6-etat-ok" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-check"></i></button>'
           + '<button class="mxd6-etat-ko" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-xmark"></i></button>'
           + '</div>';
+      case 'conforme':
+        return '<div class="mxd6-cell-etat">'
+          + '<button class="mxd6-etat-ok" tabindex="-1" onclick="event.stopPropagation()">' + e(col.libelleOk || 'Conforme') + '</button>'
+          + '<button class="mxd6-etat-ko" tabindex="-1" onclick="event.stopPropagation()">' + e(col.libelleKo || 'Non conforme') + '</button>'
+          + '</div>';
       case 'ouinon':
         return '<div class="mxd6-cell-yn">'
-          + '<button class="mxd6-yn-oui" tabindex="-1" onclick="event.stopPropagation()">Oui</button>'
-          + '<button class="mxd6-yn-non" tabindex="-1" onclick="event.stopPropagation()">Non</button>'
+          + '<button class="mxd6-yn-oui" tabindex="-1" onclick="event.stopPropagation()">' + e(col.labelOui || 'Oui') + '</button>'
+          + '<button class="mxd6-yn-non" tabindex="-1" onclick="event.stopPropagation()">' + e(col.labelNon || 'Non') + '</button>'
           + '</div>';
+      case 'marchearret':
+        return '<div class="mxd6-cell-yn">'
+          + '<button class="mxd6-yn-oui" tabindex="-1" onclick="event.stopPropagation()">M</button>'
+          + '<button class="mxd6-yn-non" tabindex="-1" onclick="event.stopPropagation()">A</button>'
+          + '</div>';
+      case 'liste':
+        var opts = (col.listeValues || []).map(function(v) { return '<option>' + e(v) + '</option>'; }).join('');
+        return '<select class="mxd6-cell-select" tabindex="-1" onclick="event.stopPropagation()"><option value="">—</option>' + opts + '</select>';
       case 'commentaire':
+      case 'texte':
         return '<button class="mxd6-cell-ic" tabindex="-1" onclick="event.stopPropagation()" title="Commentaire"><i class="fa-regular fa-comment"></i></button>';
       case 'photo':
-        return '<button class="mxd6-cell-ic" tabindex="-1" onclick="event.stopPropagation()" title="Photo"><i class="fa-solid fa-camera"></i></button>';
+        return '<button class="mxd6-cell-ic mxd7-cell-photo" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-camera"></i>' + (col.photoMax > 1 ? '<span class="mxd7-cell-badge">' + col.photoMax + '</span>' : '') + '</button>';
       case 'signature':
         return '<button class="mxd6-cell-ic" tabindex="-1" onclick="event.stopPropagation()" title="Signature"><i class="fa-solid fa-pen-nib"></i></button>';
+      case 'barcode':
+        return '<button class="mxd6-cell-ic" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-barcode"></i></button>';
+      case 'qrcode':
+        return '<button class="mxd6-cell-ic" tabindex="-1" onclick="event.stopPropagation()"><i class="fa-solid fa-qrcode"></i></button>';
+      case 'temps':
+        return '<input type="text" class="mxd6-cell-date" placeholder="00:00" tabindex="-1" onclick="event.stopPropagation()">';
       case 'date':
         return '<input type="date" class="mxd6-cell-date" tabindex="-1" onclick="event.stopPropagation()">';
       case 'heure':
         return '<input type="time" class="mxd6-cell-heure" tabindex="-1" onclick="event.stopPropagation()">';
       default:
-        return '';
+        return '<span class="mxd6-cell-unit">—</span>';
     }
+  }
+
+  // ── V7 COLUMN LIBRARY & HELPERS ──────────────────────────────────────────────
+
+  // Resolve a column key/id to {src:'v7'|'v6', def}
+  function _v7ResolveCol(ck) {
+    if (!ck) return null;
+    for (var i = 0; i < _colLibrary.length; i++) {
+      if (_colLibrary[i].id === ck) return { src: 'v7', def: _colLibrary[i] };
+    }
+    for (var j = 0; j < V6_COLS.length; j++) {
+      if (V6_COLS[j].key === ck) return { src: 'v6', def: V6_COLS[j] };
+    }
+    // Also match V7_COL_TYPES by key (for quick type-palette adds without saving)
+    for (var k = 0; k < V7_COL_TYPES.length; k++) {
+      if (V7_COL_TYPES[k].key === ck) return { src: 'v7type', def: V7_COL_TYPES[k] };
+    }
+    return null;
+  }
+
+  // Get V7_COL_TYPES def by key
+  function _v7TypeDef(key) {
+    for (var i = 0; i < V7_COL_TYPES.length; i++) {
+      if (V7_COL_TYPES[i].key === key) return V7_COL_TYPES[i];
+    }
+    return null;
+  }
+
+  // Refresh palette panel only
+  function _v7RefreshPalette() {
+    var el = document.getElementById('mxd6-palette');
+    if (el) el.innerHTML = _v6PaletteHTML();
+  }
+
+  // Switch palette tab
+  function _v7SetPalTab(tab) {
+    _v7PalTab = tab;
+    _v7RefreshPalette();
+  }
+
+  // Firestore: load library with realtime updates
+  function _v7LoadLibrary() {
+    if (_colLibUnsub) return;
+    try {
+      _colLibUnsub = db.collection('mxColLibrary')
+        .orderBy('_createdAt', 'asc')
+        .onSnapshot(function(snap) {
+          _colLibrary = [];
+          snap.forEach(function(doc) { _colLibrary.push(Object.assign({ id: doc.id }, doc.data())); });
+          _v7RefreshPalette();
+        }, function(err) { console.warn('[V7] Library:', err); });
+    } catch(e) { console.warn('[V7] Library unavailable'); }
+  }
+
+  function _v7UnloadLibrary() {
+    if (_colLibUnsub) { _colLibUnsub(); _colLibUnsub = null; }
+  }
+
+  function _v7SaveColLib(def) {
+    var col = db.collection('mxColLibrary');
+    if (def.id) {
+      col.doc(def.id).set(def, { merge: true });
+    } else {
+      def._createdAt = FV.serverTimestamp();
+      col.add(def).then(function(ref) { def.id = ref.id; });
+    }
+  }
+
+  function _v7DeleteColLib(colId) {
+    if (!colId) return;
+    db.collection('mxColLibrary').doc(colId).delete();
+  }
+
+  // ── PALETTE DRAG/CLICK HANDLERS ──
+
+  // Type palette click — adds a V7 type key to active section
+  function _v7TypeClick(typeKey) {
+    var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
+    if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.rows) return;
+    _v6Push();
+    var cols = sec.columns || [];
+    if (cols.indexOf(typeKey) < 0) { cols.push(typeKey); sec.columns = cols; }
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  // Type palette drag start
+  function _v7TypeDragStart(e, typeKey) {
+    _v6DragData = { type: 'col', colKey: typeKey };
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', typeKey || '');
+  }
+
+  // Library card click — adds library col ID to active section
+  function _v7LibClick(colId) {
+    var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
+    if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.rows) return;
+    _v6Push();
+    var cols = sec.columns || [];
+    if (cols.indexOf(colId) < 0) { cols.push(colId); sec.columns = cols; }
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  // Library card drag start
+  function _v7LibDragStart(e, colId) {
+    _v6DragData = { type: 'col', colKey: colId };
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', colId || '');
+  }
+
+  // Remove a column from section by index
+  function _v7RemoveCol(sIdx, ci) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.rows) return;
+    _v6Push();
+    sec.columns = (sec.columns || []).filter(function(_, i) { return i !== ci; });
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  // Column header drag (reorder columns within a section)
+  function _v7ColHdrDragStart(e, sIdx, ci) {
+    _v6DragData = { type: 'colhdr', sIdx: sIdx, fromCi: ci };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'colhdr');
+    e.stopPropagation();
+  }
+
+  function _v7ColHdrDrop(e, sIdx, toCi) {
+    e.preventDefault(); e.stopPropagation();
+    var dd = _v6DragData;
+    if (!dd || dd.type !== 'colhdr' || dd.sIdx !== sIdx || dd.fromCi === toCi) return;
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.rows) return;
+    _v6Push();
+    var cols = (sec.columns || []).slice();
+    var moved = cols.splice(dd.fromCi, 1)[0];
+    var insertAt = toCi > dd.fromCi ? toCi - 1 : toCi;
+    cols.splice(insertAt, 0, moved);
+    sec.columns = cols;
+    _v6RefreshSection(sIdx);
+  }
+
+  // ── COLUMN CREATION MODAL ────────────────────────────────────────────────────
+
+  function _v7OpenColModal(colId) {
+    if (colId) {
+      var found = null;
+      for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { found = _colLibrary[i]; break; } }
+      if (!found) return;
+      _v7ModalDef = JSON.parse(JSON.stringify(found));
+      _v7ModalIsNew = false;
+    } else {
+      _v7ModalDef = { id: null, name: '', icon: '', color: '#0EA5E9', type: 'decimal', required: false };
+      _v7ModalIsNew = true;
+    }
+    _v7ModalTab = 'info';
+    _v7RenderModal();
+  }
+
+  function _v7CloseColModal() {
+    _v7ModalDef = null;
+    var el = document.getElementById('mxd7-modal-overlay');
+    if (el) el.remove();
+  }
+
+  function _v7RenderModal() {
+    var existing = document.getElementById('mxd7-modal-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'mxd7-modal-overlay';
+    overlay.className = 'mxd7-modal-overlay';
+    overlay.innerHTML = _v7ModalHTML();
+    document.body.appendChild(overlay);
+  }
+
+  function _v7ModalHTML() {
+    var e = _e;
+    var def = _v7ModalDef || {};
+    var type = def.type || 'decimal';
+    var ct = _v7TypeDef(type);
+    var h = '<div class="mxd7-modal">';
+    h += '<div class="mxd7-modal-hdr">'
+      + '<span class="mxd7-modal-title">' + (_v7ModalIsNew ? 'Nouvelle colonne' : 'Modifier la colonne') + '</span>'
+      + '<button class="mxd7-modal-close" onclick="MX.Pages.MxDoc._v7CloseColModal()"><i class="fa-solid fa-xmark"></i></button>'
+      + '</div>';
+    h += '<div class="mxd7-modal-body">';
+
+    // Name + icon + color row
+    h += '<div class="mxd7-mf-row">'
+      + '<div class="mxd7-mf-grp mxd7-mf-grp--grow">'
+      +   '<label class="mxd7-mf-lbl">Nom</label>'
+      +   '<input class="mxd7-mf-inp" id="mxd7-col-name" value="' + e(def.name || '') + '" placeholder="PH Brut…" oninput="MX.Pages.MxDoc._v7MUpdate(\'name\',this.value)">'
+      + '</div>'
+      + '<div class="mxd7-mf-grp">'
+      +   '<label class="mxd7-mf-lbl">Icône</label>'
+      +   '<input class="mxd7-mf-inp mxd7-mf-emoji" id="mxd7-col-icon" value="' + e(def.icon || '') + '" placeholder="🧪" maxlength="2" oninput="MX.Pages.MxDoc._v7MUpdate(\'icon\',this.value)">'
+      + '</div>'
+      + '<div class="mxd7-mf-grp">'
+      +   '<label class="mxd7-mf-lbl">Couleur</label>'
+      +   '<input class="mxd7-mf-color" type="color" value="' + e(def.color || '#0EA5E9') + '" oninput="MX.Pages.MxDoc._v7MUpdate(\'color\',this.value)">'
+      + '</div>'
+      + '</div>';
+
+    // Type grid
+    h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Type de colonne</label>';
+    h += '<div class="mxd7-type-grid">';
+    V7_COL_TYPES.forEach(function(c) {
+      var on = c.key === type;
+      h += '<button class="mxd7-type-chip' + (on ? ' mxd7-type-chip--on' : '') + '"'
+        + ' style="' + (on ? 'border-color:' + (ct ? ct.color : c.color) + ';color:' + (ct ? ct.color : c.color) + ';' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v7MSetType(' + JSON.stringify(c.key) + ')">'
+        + '<i class="fa-solid ' + c.icon + '"></i><span>' + e(c.l) + '</span>'
+        + '</button>';
+    });
+    h += '</div></div>';
+
+    // Type-specific params
+    h += _v7ModalParamsHTML(def, type);
+
+    // Required toggle
+    h += '<div class="mxd7-mf-row mxd7-mf-row--mt">'
+      + '<label class="mxd7-mf-lbl">Champ obligatoire</label>'
+      + '<label class="mxd7-toggle"><input type="checkbox" ' + (def.required ? 'checked' : '') + ' onchange="MX.Pages.MxDoc._v7MUpdate(\'required\',this.checked)"><span class="mxd7-toggle-slider"></span></label>'
+      + '</div>';
+
+    h += '</div>';
+    h += '<div class="mxd7-modal-foot">';
+    if (!_v7ModalIsNew && def.id) {
+      h += '<button class="mxd7-btn-del" onclick="MX.Pages.MxDoc._v7DeleteColConfirm(' + JSON.stringify(def.id) + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>';
+    }
+    h += '<button class="mxd7-btn-cancel" onclick="MX.Pages.MxDoc._v7CloseColModal()">Annuler</button>';
+    h += '<button class="mxd7-btn-save" onclick="MX.Pages.MxDoc._v7SaveColModal()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>';
+    h += '</div></div>';
+    return '<div class="mxd7-modal-inner">' + h + '</div>';
+  }
+
+  function _v7ModalParamsHTML(def, type) {
+    var e = _e;
+    var h = '';
+    if (type === 'int' || type === 'decimal' || type === 'pourcent' || type === 'monnaie' || type === 'compteur') {
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Paramètres numériques</p>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfField('Unité', 'text', def.unit || '', '_v7MUpdate(\'unit\',this.value)', 'pH, °C, bar…');
+      h += _mfField('Valeur mini', 'number', def.min !== undefined ? def.min : '', '_v7MUpdate(\'min\',parseFloat(this.value)||null)', '');
+      h += _mfField('Valeur maxi', 'number', def.max !== undefined ? def.max : '', '_v7MUpdate(\'max\',parseFloat(this.value)||null)', '');
+      h += _mfField('Décimales', 'number', def.decimals !== undefined ? def.decimals : 1, '_v7MUpdate(\'decimals\',parseInt(this.value)||0)', '');
+      h += _mfField('Valeur par défaut', 'number', def.defaultVal !== undefined ? def.defaultVal : '', '_v7MUpdate(\'defaultVal\',parseFloat(this.value))', '');
+      h += '</div></div>';
+    }
+    if (type === 'photo') {
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Paramètres photo</p>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfField('Nombre max', 'number', def.photoMax || 1, '_v7MUpdate(\'photoMax\',parseInt(this.value)||1)', '');
+      h += '</div>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfToggle('Appareil photo', 'photoCamera', def.photoCamera !== false);
+      h += _mfToggle('Galerie', 'photoGallery', def.photoGallery !== false);
+      h += _mfToggle('Compression auto', 'photoCompress', def.photoCompress !== false);
+      h += '</div></div>';
+    }
+    if (type === 'signature') {
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Paramètres signature</p>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfToggle('Signature responsable', 'sigResponsable', !!def.sigResponsable);
+      h += _mfToggle('Signature technicien', 'sigTechnicien', !!def.sigTechnicien);
+      h += '</div></div>';
+    }
+    if (type === 'liste') {
+      var vals = def.listeValues || [];
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Valeurs de la liste</p>';
+      h += '<div class="mxd7-liste-vals" id="mxd7-liste-vals">';
+      vals.forEach(function(v, i) {
+        h += '<div class="mxd7-liste-val-row">'
+          + '<input class="mxd7-mf-inp" value="' + e(v) + '" oninput="MX.Pages.MxDoc._v7MListeUpdate(' + i + ',this.value)">'
+          + '<button class="mxd7-liste-rm" onclick="MX.Pages.MxDoc._v7MListeRemove(' + i + ')"><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      });
+      h += '</div>';
+      h += '<button class="mxd7-liste-add" onclick="MX.Pages.MxDoc._v7MListeAdd()"><i class="fa-solid fa-plus"></i> Ajouter</button>';
+      h += '</div>';
+    }
+    if (type === 'conforme') {
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Libellés</p>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfField('Libellé vert', 'text', def.libelleOk || 'Conforme', '_v7MUpdate(\'libelleOk\',this.value)', '');
+      h += _mfField('Libellé rouge', 'text', def.libelleKo || 'Non conforme', '_v7MUpdate(\'libelleKo\',this.value)', '');
+      h += '</div></div>';
+    }
+    if (type === 'ouinon') {
+      h += '<div class="mxd7-mf-section"><p class="mxd7-mf-section-lbl">Libellés</p>';
+      h += '<div class="mxd7-mf-row">';
+      h += _mfField('Libellé Oui', 'text', def.labelOui || 'Oui', '_v7MUpdate(\'labelOui\',this.value)', '');
+      h += _mfField('Libellé Non', 'text', def.labelNon || 'Non', '_v7MUpdate(\'labelNon\',this.value)', '');
+      h += '</div></div>';
+    }
+    return h;
+  }
+
+  function _mfField(label, type, val, handler, ph) {
+    var e = _e;
+    return '<div class="mxd7-mf-grp">'
+      + '<label class="mxd7-mf-lbl">' + e(label) + '</label>'
+      + '<input class="mxd7-mf-inp" type="' + type + '" value="' + e(String(val)) + '" placeholder="' + e(ph) + '" oninput="MX.Pages.MxDoc.' + handler + '">'
+      + '</div>';
+  }
+
+  function _mfToggle(label, key, on) {
+    var e = _e;
+    return '<div class="mxd7-mf-grp">'
+      + '<label class="mxd7-mf-lbl">' + e(label) + '</label>'
+      + '<label class="mxd7-toggle"><input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="MX.Pages.MxDoc._v7MUpdate(\'' + key + '\',this.checked)"><span class="mxd7-toggle-slider"></span></label>'
+      + '</div>';
+  }
+
+  // Modal state update (called from inline handlers)
+  function _v7MUpdate(key, val) {
+    if (!_v7ModalDef) return;
+    _v7ModalDef[key] = val;
+    if (key === 'type') { _v7ModalTab = 'info'; }
+  }
+
+  function _v7MSetType(typeKey) {
+    if (!_v7ModalDef) return;
+    _v7ModalDef.type = typeKey;
+    _v7RenderModal();
+  }
+
+  function _v7MListeAdd() {
+    if (!_v7ModalDef) return;
+    _v7ModalDef.listeValues = (_v7ModalDef.listeValues || []).concat(['']);
+    _v7RenderModal();
+  }
+
+  function _v7MListeUpdate(i, val) {
+    if (!_v7ModalDef || !_v7ModalDef.listeValues) return;
+    _v7ModalDef.listeValues[i] = val;
+  }
+
+  function _v7MListeRemove(i) {
+    if (!_v7ModalDef || !_v7ModalDef.listeValues) return;
+    _v7ModalDef.listeValues.splice(i, 1);
+    _v7RenderModal();
+  }
+
+  function _v7SaveColModal() {
+    var def = _v7ModalDef;
+    if (!def) return;
+    // Collect current input values from DOM before saving
+    var nameEl = document.getElementById('mxd7-col-name');
+    if (nameEl) def.name = nameEl.value.trim();
+    if (!def.name) { MX.toast && MX.toast('Veuillez saisir un nom pour la colonne', true); return; }
+    _v7SaveColLib(def);
+    _v7CloseColModal();
+    MX.toast && MX.toast('Colonne enregistrée dans la bibliothèque');
+  }
+
+  function _v7DeleteColConfirm(colId) {
+    if (!confirm('Supprimer cette colonne de la bibliothèque ?')) return;
+    _v7DeleteColLib(colId);
+    _v7CloseColModal();
+  }
+
+  // ── AI COLUMN SUGGESTION MODAL ───────────────────────────────────────────────
+
+  function _v7OpenAIModal() {
+    var existing = document.getElementById('mxd7-ai-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'mxd7-ai-overlay';
+    overlay.className = 'mxd7-modal-overlay';
+    overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal mxd7-ai-modal">'
+      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Générer les colonnes</span>'
+      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd7-ai-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxd7-modal-body">'
+      + '<label class="mxd7-mf-lbl">Décrivez votre procédure</label>'
+      + '<textarea class="mxd7-ai-inp" id="mxd7-ai-txt" placeholder="Ex: Tournée CTA avec pH brut, pH adoucie, température, pression, niveau d\'eau, état des pompes…" rows="4"></textarea>'
+      + '<div id="mxd7-ai-results" class="mxd7-ai-results"></div>'
+      + '</div>'
+      + '<div class="mxd7-modal-foot">'
+      + '<button class="mxd7-btn-cancel" onclick="document.getElementById(\'mxd7-ai-overlay\').remove()">Fermer</button>'
+      + '<button class="mxd7-btn-save" onclick="MX.Pages.MxDoc._v7AIGenerate()"><i class="fa-solid fa-sparkles"></i> Analyser</button>'
+      + '</div></div></div>';
+    document.body.appendChild(overlay);
+  }
+
+  function _v7AIGenerate() {
+    var txt = (document.getElementById('mxd7-ai-txt') || {}).value || '';
+    if (!txt.trim()) return;
+    var words = txt.toLowerCase().split(/[\s,;.\/\(\)]+/).filter(Boolean);
+    var seen = {};
+    var suggestions = [];
+    words.forEach(function(w) {
+      // Match against keywords
+      Object.keys(V7_AI_KW).forEach(function(kw) {
+        if (w.indexOf(kw) >= 0 && !seen[kw]) {
+          seen[kw] = true;
+          var hint = V7_AI_KW[kw];
+          // Check if library already has a matching column
+          var libMatch = _colLibrary.filter(function(c) { return c.name && c.name.toLowerCase().indexOf(kw) >= 0; })[0];
+          suggestions.push({ label: libMatch ? libMatch.name : (w.charAt(0).toUpperCase() + w.slice(1)), hint: hint, libCol: libMatch || null });
+        }
+      });
+      // Direct library name match
+      _colLibrary.forEach(function(c) {
+        var cname = (c.name || '').toLowerCase();
+        if (cname.indexOf(w) >= 0 && !seen['lib_' + c.id]) {
+          seen['lib_' + c.id] = true;
+          suggestions.push({ label: c.name, hint: { type: c.type }, libCol: c });
+        }
+      });
+    });
+    var res = document.getElementById('mxd7-ai-results');
+    if (!res) return;
+    if (!suggestions.length) {
+      res.innerHTML = '<p class="mxd7-ai-none">Aucune suggestion — essayez des termes comme : pH, température, pression, pompe, conforme, photo…</p>';
+      return;
+    }
+    var e = _e;
+    var html = '<p class="mxd7-ai-subtitle">Colonnes suggérées — cliquez pour ajouter à la section active</p><div class="mxd7-ai-chips">';
+    suggestions.forEach(function(s, si) {
+      var ct = _v7TypeDef(s.hint.type || 'decimal');
+      var color = ct ? ct.color : '#64748B';
+      html += '<div class="mxd7-ai-chip" style="border-color:' + color + '20;color:' + color + '" onclick="MX.Pages.MxDoc._v7AIAddCol(' + si + ')">'
+        + '<i class="fa-solid ' + (ct ? ct.icon : 'fa-columns') + '"></i> ' + e(s.label)
+        + (s.libCol ? ' <span class="mxd7-ai-from-lib">bibliothèque</span>' : '')
+        + '</div>';
+    });
+    html += '</div>';
+    res.innerHTML = html;
+    res._suggestions = suggestions;
+  }
+
+  function _v7AIAddCol(si) {
+    var res = document.getElementById('mxd7-ai-results');
+    if (!res || !res._suggestions) return;
+    var s = res._suggestions[si];
+    if (!s) return;
+    var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
+    if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.rows) return;
+    _v6Push();
+    var cols = sec.columns || [];
+    if (s.libCol) {
+      // Use existing library column
+      if (cols.indexOf(s.libCol.id) < 0) { cols.push(s.libCol.id); sec.columns = cols; }
+    } else {
+      // Create a new quick column from hint
+      var newDef = Object.assign({ id: null, name: s.label, icon: '', color: ((_v7TypeDef(s.hint.type) || {}).color || '#64748B'), type: s.hint.type || 'decimal', required: false }, s.hint);
+      _v7SaveColLib(newDef);
+      // Will appear in library via snapshot — for now add the type key
+      if (cols.indexOf(s.hint.type || 'decimal') < 0) { cols.push(s.hint.type || 'decimal'); sec.columns = cols; }
+    }
+    _v6RefreshSection(sIdx);
+    MX.toast && MX.toast('Colonne ajoutée : ' + s.label);
   }
 
   // ── LEGACY BLOCK RENDERING (backward compat for sec.blocks model) ──
@@ -4160,24 +4771,37 @@
     var cols = sec.columns || [];
     var rows = sec.rows || [];
     if (!rows.length) return '';
-    var colDefs = cols.map(function(k) {
-      return window.V6_COLS_MAP ? window.V6_COLS_MAP[k] : { key: k, l: k, icon: '' };
-    });
+    var resolved = cols.map(_v7ResolveCol).filter(Boolean);
     var thead = '<thead><tr>'
       + '<th class="mxd-v6exec-th-label">Contrôle</th>'
-      + cols.map(function(k, ci) {
-          var cd = colDefs[ci];
-          return '<th class="mxd-v6exec-th-col">' + (cd ? e(cd.l) : e(k)) + '</th>';
+      + resolved.map(function(r) {
+          var col = r.def;
+          var label = col.name || col.l || col.key;
+          var emoji = col.icon || '';
+          var ct = _v7TypeDef(col.type || col.key);
+          var faIcon = ct ? ct.icon : 'fa-columns';
+          var color = col.color || (ct ? ct.color : '#64748B');
+          return '<th class="mxd-v6exec-th-col" style="color:' + color + '">'
+            + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span> ' : '<i class="fa-solid ' + faIcon + '"></i> ')
+            + e(label) + (col.unit ? ' <span class="mxd7-th-unit">(' + e(col.unit) + ')</span>' : '')
+            + '</th>';
         }).join('')
       + '</tr></thead>';
     var tbody = '<tbody>'
       + rows.map(function(row) {
           var rid = e(row.id);
-          var tds = cols.map(function(k) {
-            return '<td class="mxd-v6exec-td-cell">' + _v6ExecCellHTML(k, row) + '</td>';
+          var tds = resolved.map(function(r) {
+            return '<td class="mxd-v6exec-td-cell" id="mxd7-exec-' + rid + '-' + e(r.def.id || r.def.key) + '">'
+              + _v7ExecCellHTML(r.def, row)
+              + '<span class="mxd7-val-err" id="mxd7-err-' + rid + '-' + e(r.def.id || r.def.key) + '"></span>'
+              + '</td>';
           }).join('');
           return '<tr class="mxd-v6exec-tr" data-rid="' + rid + '">'
-            + '<td class="mxd-v6exec-td-label">' + e(row.label || '') + (row.unit ? '<span class="mxd-v6exec-unit"> ' + e(row.unit) + '</span>' : '') + (row.required ? '<span class="mxd-req"> *</span>' : '') + '</td>'
+            + '<td class="mxd-v6exec-td-label">'
+            + e(row.label || '')
+            + (row.unit ? '<span class="mxd-v6exec-unit"> ' + e(row.unit) + '</span>' : '')
+            + (row.required ? '<span class="mxd-req"> *</span>' : '')
+            + '</td>'
             + tds
             + '</tr>';
         }).join('')
@@ -4188,40 +4812,86 @@
       + '</div>';
   }
 
-  function _v6ExecCellHTML(colKey, row) {
-    var rid = _e(row.id);
-    switch (colKey) {
-      case 'valeur':
-        return '<input class="mxd-v6exec-val" type="number" placeholder="—"'
-          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'valeur\',this.value)">';
-      case 'etat':
+  // Validate a value against a column def — returns error message or null
+  function _v7Validate(col, val) {
+    if (!col) return null;
+    var type = col.type || col.key;
+    if ((type === 'int' || type === 'decimal' || type === 'pourcent' || type === 'monnaie' || type === 'compteur') && val !== '' && val !== null && val !== undefined) {
+      var num = parseFloat(val);
+      if (isNaN(num)) return 'Valeur invalide';
+      if (col.min !== undefined && col.min !== null && num < col.min) return 'Valeur hors tolérance (min ' + col.min + (col.unit ? ' ' + col.unit : '') + ')';
+      if (col.max !== undefined && col.max !== null && num > col.max) return 'Valeur hors tolérance (max ' + col.max + (col.unit ? ' ' + col.unit : '') + ')';
+    }
+    return null;
+  }
+
+  // Exec cell HTML using full column def
+  function _v7ExecCellHTML(col, row) {
+    var e = _e;
+    var rid = e(row.id);
+    var cid = e(col.id || col.key);
+    var type = col.type || col.key || 'texte';
+    var storeKey = col.id || col.key;
+    var safeKey = JSON.stringify(storeKey);
+    var ph = col.defaultVal !== undefined ? String(col.defaultVal) : '—';
+    switch (type) {
+      case 'valeur': case 'int': case 'decimal': case 'compteur': case 'pourcent': case 'monnaie':
+        return '<input class="mxd-v6exec-val" type="number" placeholder="' + e(ph) + '"'
+          + (col.min !== undefined ? ' min="' + col.min + '"' : '')
+          + (col.max !== undefined ? ' max="' + col.max + '"' : '')
+          + (col.decimals !== undefined ? ' step="' + Math.pow(10, -col.decimals) + '"' : '')
+          + ' oninput="MX.Pages.MxDoc._v7ExecSetValidate(\'' + rid + '\',' + safeKey + ',this.value)">'
+          + (col.unit ? '<span class="mxd-v6exec-unit"> ' + e(col.unit) + '</span>' : '');
+      case 'etat': case 'etatcheck':
         return '<div class="mxd-v6exec-etat">'
-          + '<button class="mxd-v6exec-etat-ok" onclick="MX.Pages.MxDoc._v6ExecEtat(\'' + rid + '\',\'ok\',this)"><i class="fa-solid fa-check"></i></button>'
-          + '<button class="mxd-v6exec-etat-ko" onclick="MX.Pages.MxDoc._v6ExecEtat(\'' + rid + '\',\'ko\',this)"><i class="fa-solid fa-xmark"></i></button>'
+          + '<button class="mxd-v6exec-etat-ok" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'ok\',this,\'.mxd-v6exec-etat-ok\',\'mxd-v6exec-etat--on\')"><i class="fa-solid fa-check"></i></button>'
+          + '<button class="mxd-v6exec-etat-ko" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'ko\',this,\'.mxd-v6exec-etat-ko\',\'mxd-v6exec-etat--on\')"><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      case 'conforme':
+        return '<div class="mxd-v6exec-etat">'
+          + '<button class="mxd-v6exec-etat-ok" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'ok\',this,\'.mxd-v6exec-etat-ok\',\'mxd-v6exec-etat--on\')">' + e(col.libelleOk || 'Conforme') + '</button>'
+          + '<button class="mxd-v6exec-etat-ko" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'ko\',this,\'.mxd-v6exec-etat-ko\',\'mxd-v6exec-etat--on\')">' + e(col.libelleKo || 'Non conforme') + '</button>'
           + '</div>';
       case 'ouinon':
         return '<div class="mxd-v6exec-yn">'
-          + '<button class="mxd-v6exec-yn-oui" onclick="MX.Pages.MxDoc._v6ExecYN(\'' + rid + '\',\'oui\',this)">Oui</button>'
-          + '<button class="mxd-v6exec-yn-non" onclick="MX.Pages.MxDoc._v6ExecYN(\'' + rid + '\',\'non\',this)">Non</button>'
+          + '<button class="mxd-v6exec-yn-oui" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'oui\',this,\'.mxd-v6exec-yn-oui\',\'mxd-v6exec-yn--on\')">' + e(col.labelOui || 'Oui') + '</button>'
+          + '<button class="mxd-v6exec-yn-non" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'non\',this,\'.mxd-v6exec-yn-non\',\'mxd-v6exec-yn--on\')">' + e(col.labelNon || 'Non') + '</button>'
           + '</div>';
-      case 'commentaire':
+      case 'marchearret':
+        return '<div class="mxd-v6exec-yn">'
+          + '<button class="mxd-v6exec-yn-oui" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'marche\',this,\'.mxd-v6exec-yn-oui\',\'mxd-v6exec-yn--on\')">Marche</button>'
+          + '<button class="mxd-v6exec-yn-non" onclick="MX.Pages.MxDoc._v7ExecToggle(\'' + rid + '\',' + safeKey + ',\'arret\',this,\'.mxd-v6exec-yn-non\',\'mxd-v6exec-yn--on\')">Arrêt</button>'
+          + '</div>';
+      case 'liste':
+        var opts = (col.listeValues || []).map(function(v) { return '<option value="' + e(v) + '">' + e(v) + '</option>'; }).join('');
+        return '<select class="mxd-v6exec-select" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',this.value)"><option value="">—</option>' + opts + '</select>';
+      case 'commentaire': case 'texte':
         return '<input class="mxd-v6exec-comment" type="text" placeholder="Commentaire…"'
-          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'commentaire\',this.value)">';
+          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',this.value)">';
       case 'photo':
-        return '<label class="mxd-v6exec-photo-btn"><i class="fa-solid fa-camera"></i>'
-          + '<input type="file" accept="image/*" capture="environment" style="display:none"'
-          + ' onchange="MX.Pages.MxDoc._v6ExecPhoto(\'' + rid + '\',this)"></label>';
+        return '<label class="mxd-v6exec-photo-btn" id="mxd7-photo-lbl-' + rid + '-' + cid + '">'
+          + '<i class="fa-solid fa-camera"></i>'
+          + (col.photoMax > 1 ? '<span class="mxd7-cell-badge">' + col.photoMax + '</span>' : '')
+          + '<input type="file" accept="image/*"'
+          + (col.photoCamera !== false ? ' capture="environment"' : '')
+          + ' style="display:none" onchange="MX.Pages.MxDoc._v6ExecPhoto(\'' + rid + '\',this)"></label>';
       case 'signature':
-        return '<button class="mxd-v6exec-sig-btn" onclick="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'signature\',\'signed\')"><i class="fa-solid fa-pen-nib"></i></button>';
+        return '<button class="mxd-v6exec-sig-btn" onclick="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',\'signed\')"><i class="fa-solid fa-pen-nib"></i></button>';
+      case 'barcode': case 'qrcode':
+        return '<button class="mxd-v6exec-sig-btn" onclick="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',\'scanned\')"><i class="fa-solid ' + (type === 'qrcode' ? 'fa-qrcode' : 'fa-barcode') + '"></i></button>';
       case 'date':
-        return '<input class="mxd-v6exec-date" type="date"'
-          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'date\',this.value)">';
-      case 'heure':
-        return '<input class="mxd-v6exec-heure" type="time"'
-          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'heure\',this.value)">';
+        return '<input class="mxd-v6exec-date" type="date" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',this.value)">';
+      case 'heure': case 'temps':
+        return '<input class="mxd-v6exec-heure" type="time" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',this.value)">';
       default:
-        return '<span class="mxd-v6exec-unknown">?</span>';
+        return '<input class="mxd-v6exec-comment" type="text" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',' + safeKey + ',this.value)">';
     }
+  }
+
+  // Backward compat wrapper
+  function _v6ExecCellHTML(colKey, row) {
+    var r = _v7ResolveCol(colKey);
+    return r ? _v7ExecCellHTML(r.def, row) : '<span class="mxd-v6exec-unknown">?</span>';
   }
 
   function _v6ExecSet(rowId, key, val) {
@@ -4229,28 +4899,40 @@
     _execResponses[rowId][key] = val;
   }
 
-  function _v6ExecEtat(rowId, val, btn) {
+  // V7: set with validation feedback
+  function _v7ExecSetValidate(rowId, key, val) {
+    _v6ExecSet(rowId, key, val);
+    // Find column def for validation
+    var colDef = null;
+    for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === key) { colDef = _colLibrary[i]; break; } }
+    if (!colDef) { var r = _v7ResolveCol(key); if (r) colDef = r.def; }
+    var errEl = document.getElementById('mxd7-err-' + rowId + '-' + key);
+    if (!errEl) return;
+    var err = _v7Validate(colDef, val);
+    errEl.textContent = err || '';
+    var cell = errEl.closest('td');
+    if (cell) cell.classList.toggle('mxd7-cell--err', !!err);
+  }
+
+  // V7: generic toggle for 2-state cells (etatcheck, ouinon, conforme, marchearret)
+  function _v7ExecToggle(rowId, key, val, btn, sibSel, onCls) {
     if (!_execResponses[rowId]) _execResponses[rowId] = {};
-    var prev = _execResponses[rowId]['etat'];
+    var prev = _execResponses[rowId][key];
     var next = (prev === val) ? null : val;
-    _execResponses[rowId]['etat'] = next;
-    var wrap = btn.closest('.mxd-v6exec-etat');
+    _execResponses[rowId][key] = next;
+    var wrap = btn.closest('div');
     if (wrap) {
-      wrap.querySelectorAll('button').forEach(function(b) { b.classList.remove('mxd-v6exec-etat--on'); });
-      if (next) btn.classList.add('mxd-v6exec-etat--on');
+      wrap.querySelectorAll(sibSel).forEach(function(b) { b.classList.remove(onCls); });
+      if (next) btn.classList.add(onCls);
     }
   }
 
+  function _v6ExecEtat(rowId, val, btn) {
+    _v7ExecToggle(rowId, 'etat', val, btn, '.mxd-v6exec-etat-ok,.mxd-v6exec-etat-ko', 'mxd-v6exec-etat--on');
+  }
+
   function _v6ExecYN(rowId, val, btn) {
-    if (!_execResponses[rowId]) _execResponses[rowId] = {};
-    var prev = _execResponses[rowId]['ouinon'];
-    var next = (prev === val) ? null : val;
-    _execResponses[rowId]['ouinon'] = next;
-    var wrap = btn.closest('.mxd-v6exec-yn');
-    if (wrap) {
-      wrap.querySelectorAll('button').forEach(function(b) { b.classList.remove('mxd-v6exec-yn--on'); });
-      if (next) btn.classList.add('mxd-v6exec-yn--on');
-    }
+    _v7ExecToggle(rowId, 'ouinon', val, btn, '.mxd-v6exec-yn-oui,.mxd-v6exec-yn-non', 'mxd-v6exec-yn--on');
   }
 
   function _v6ExecPhoto(rowId, input) {
@@ -4735,6 +5417,29 @@
     _v6SetUnit,
     _v6PalClick,
     _v6PalDragStart,
+    // V7 Column Library
+    _v7SetPalTab,
+    _v7TypeClick,
+    _v7TypeDragStart,
+    _v7LibClick,
+    _v7LibDragStart,
+    _v7RemoveCol,
+    _v7ColHdrDragStart,
+    _v7ColHdrDrop,
+    _v7OpenColModal,
+    _v7CloseColModal,
+    _v7MUpdate,
+    _v7MSetType,
+    _v7MListeAdd,
+    _v7MListeUpdate,
+    _v7MListeRemove,
+    _v7SaveColModal,
+    _v7DeleteColConfirm,
+    _v7OpenAIModal,
+    _v7AIGenerate,
+    _v7AIAddCol,
+    _v7ExecSetValidate,
+    _v7ExecToggle,
     _v6SecDragStart,
     _v6SecDzOver,
     _v6SecDzLeave,
