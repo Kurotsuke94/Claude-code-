@@ -4801,6 +4801,79 @@
 
   // ── V8 SECTION BUILDER ───────────────────────────────────────────────────────
 
+  // ── V8 AUTO ICON ─────────────────────────────────────────────────────────────
+
+  function _v8AutoIcon(name, type) {
+    var n = (name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    var kw = [
+      [['ph','piscine','eau','aquatique','hydro','chlore','phmetre'], '💧'],
+      [['temp','thermometre','chaud','froid','chaleur','celsius','degre'], '🌡️'],
+      [['photo','image','camer','appareil','cliche'], '📷'],
+      [['signature','signer','sign'], '✍️'],
+      [['date','jour','calendrier','planning'], '📅'],
+      [['heure','horloge','temps','chrono'], '🕒'],
+      [['compteur','count','nombre','numero'], '🔢'],
+      [['qr','qrcode'], '⬛'],
+      [['barre','barcode','code barre','code-barre'], '🏷️'],
+      [['pression','psi','bar ','pascal'], '🔽'],
+      [['niveau','litre','volume','reservoir'], '📊'],
+      [['pompe','moteur','compresseur','machine'], '⚙️'],
+      [['filtre','tamis','filtration'], '🔧'],
+      [['chimie','produit','biocide','reactif'], '🧪'],
+      [['poids','masse','kg','gramme'], '⚖️'],
+      [['electrique','tension','volt','ampere','courant','intensite'], '⚡'],
+      [['securite','danger','alerte','urgence'], '⚠️'],
+      [['commentaire','note','remarque','observation'], '💬'],
+      [['conforme','controle','verif','check'], '✅'],
+      [['etat','statut','etatcheck'], '🔵'],
+      [['debit','flux','ecoulement'], '🌊'],
+      [['turbidite','limpidite','visibilite'], '👁️'],
+      [['desinfect','bacterie','micro'], '🦠'],
+      [['consommat','kwh','energie'], '⚡'],
+      [['bruit','decibel','son'], '🔊'],
+      [['humidite','hygro'], '💦'],
+      [['oxygene','o2','ozone'], '🫧'],
+      [['acide','alcalin','alkalin'], '🧫'],
+      [['salinite','sel','sodium'], '🧂'],
+    ];
+    for (var i = 0; i < kw.length; i++) {
+      for (var j = 0; j < kw[i][0].length; j++) {
+        if (n.indexOf(kw[i][0][j]) >= 0) return kw[i][1];
+      }
+    }
+    var tf = {
+      int: '🔢', decimal: '🔢', pourcent: '%', monnaie: '💶', compteur: '🔢',
+      etat: '✅', etatcheck: '✅', conforme: '✅', ouinon: '🔄', marchearret: '⚙️',
+      liste: '📋', date: '📅', heure: '🕒', photo: '📷', signature: '✍️',
+      commentaire: '💬', texte: '💬', barcode: '🏷️', qrcode: '⬛', temps: '⏱️'
+    };
+    return tf[type] || '';
+  }
+
+  // ── LIBRARY SUGGEST ──────────────────────────────────────────────────────────
+
+  function _v8LibSuggest(sIdx, name) {
+    var el = document.getElementById('mxd8-add-suggest-' + sIdx);
+    if (!el) return;
+    var n = (name || '').trim().toLowerCase();
+    if (n.length < 2 || !_colLibrary.length) { el.innerHTML = ''; return; }
+    var match = null;
+    for (var i = 0; i < _colLibrary.length; i++) {
+      var cn = (_colLibrary[i].name || '').toLowerCase();
+      if (cn.indexOf(n) >= 0 || n.indexOf(cn) >= 0) { match = _colLibrary[i]; break; }
+    }
+    if (!match) { el.innerHTML = ''; return; }
+    var e = _e;
+    el.innerHTML = '<div class="mxd8-lib-suggest">'
+      + '<i class="fa-solid fa-circle-info"></i> '
+      + '<strong>' + e(match.name) + '</strong> existe déjà dans la bibliothèque. '
+      + '<button class="mxd8-suggest-use" onclick="MX.Pages.MxDoc._v8ImportControl(' + sIdx + ',' + JSON.stringify(match.id) + ')">Utiliser cet élément</button>'
+      + ' <button class="mxd8-suggest-skip" onclick="this.closest(\'.mxd8-lib-suggest\').remove()">Créer quand même</button>'
+      + '</div>';
+  }
+
+  // ── V8 SECTION BUILDER ───────────────────────────────────────────────────────
+
   function _v8SectionBodyHTML(sec, sIdx) {
     var e = _e;
     var extras = (sec.extraCols || []).map(_v7ResolveCol).filter(Boolean);
@@ -4817,13 +4890,13 @@
         var faIcon = ct ? ct.icon : 'fa-columns';
         var emoji = col.icon || '';
         h += '<span class="mxd8-extra-tag" style="border-color:' + color + '22;color:' + color + '">'
-          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
-          + ' ' + e(col.name || col.l || col.key)
+          + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '"></i> ')
+          + e(col.name || col.l || col.key)
           + '<button class="mxd8-extra-rm" onclick="event.stopPropagation();MX.Pages.MxDoc._v8RemoveExtraCol(' + sIdx + ',' + ci + ')" title="Retirer"><i class="fa-solid fa-xmark"></i></button>'
           + '</span>';
       });
     } else {
-      h += '<span class="mxd8-extras-empty">Aucune — ex : Photo, Commentaire, Signature…</span>';
+      h += '<span class="mxd8-extras-empty">Aucune colonne partagée — ex : Photo, Commentaire, Signature…</span>';
     }
     h += '<button class="mxd8-extras-add" onclick="event.stopPropagation();MX.Pages.MxDoc._v8AddExtraColMenu(' + sIdx + ')">'
       + '<i class="fa-solid fa-plus"></i> Ajouter</button>';
@@ -4833,13 +4906,13 @@
     if (!controls.length) {
       h += '<div class="mxd8-empty">'
         + '<i class="fa-regular fa-circle-dot"></i>'
-        + '<p>Glissez un type depuis la palette, ou cliquez <strong>Ajouter un contrôle</strong></p>'
+        + '<p>Aucun contrôle — cliquez <strong>+ Ajouter un contrôle</strong> pour commencer</p>'
         + '</div>';
     } else {
       h += '<table class="mxd8-tbl"><thead><tr>'
         + '<th class="mxd8-th-drag"></th>'
-        + '<th class="mxd8-th-ctrl">Contrôle</th>'
-        + '<th class="mxd8-th-primary">Mesure principale</th>';
+        + '<th class="mxd8-th-ctrl">Contrôle / Mesure</th>'
+        + '<th class="mxd8-th-primary">Aperçu</th>';
       extras.forEach(function(r) {
         var col = r.def;
         var ct = _v7TypeDef(col.type || col.key);
@@ -4847,8 +4920,8 @@
         var emoji = col.icon || '';
         var faIcon = ct ? ct.icon : 'fa-columns';
         h += '<th class="mxd8-th-extra" style="color:' + color + '">'
-          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
-          + ' ' + e(col.name || col.l || col.key) + '</th>';
+          + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '"></i> ')
+          + e(col.name || col.l || col.key) + '</th>';
       });
       h += '<th class="mxd8-th-acts"></th></tr></thead><tbody>';
       controls.forEach(function(ctrl, cIdx) {
@@ -4857,9 +4930,174 @@
       h += '</tbody></table>';
     }
 
-    h += '<button class="mxd6-add-line" onclick="MX.Pages.MxDoc._v8AddControl(' + sIdx + ')">'
-      + '<i class="fa-solid fa-plus"></i> Ajouter un contrôle</button>';
+    // Inline add panel (hidden, toggled by + button)
+    h += _v8AddPanelHTML(sIdx);
+
+    // Bottom action bar: two options
+    h += '<div class="mxd8-add-bar">'
+      + '<button class="mxd8-add-ctrl-btn" onclick="MX.Pages.MxDoc._v8ShowAddPanel(' + sIdx + ')">'
+      + '<i class="fa-solid fa-plus"></i> Ajouter un contrôle</button>'
+      + '<button class="mxd8-import-lib-btn" onclick="MX.Pages.MxDoc._v8ShowImportPanel(' + sIdx + ')">'
+      + '<i class="fa-regular fa-folder-open"></i> Importer depuis la bibliothèque</button>'
+      + '</div>';
+
     return h;
+  }
+
+  // Inline add panel HTML
+  function _v8AddPanelHTML(sIdx) {
+    var e = _e;
+    var h = '<div class="mxd8-add-panel" id="mxd8-add-panel-' + sIdx + '" style="display:none">';
+    h += '<div class="mxd8-add-panel-inner">';
+
+    // Name input
+    h += '<div class="mxd8-add-name-row">'
+      + '<label class="mxd8-add-lbl">Nom du contrôle</label>'
+      + '<input class="mxd8-add-name-inp" id="mxd8-add-name-' + sIdx + '" type="text"'
+      + ' placeholder="ex : PH Brut, Température eau, Pression pompe…" autocomplete="off"'
+      + ' oninput="MX.Pages.MxDoc._v8LibSuggest(' + sIdx + ',this.value)"'
+      + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();MX.Pages.MxDoc._v8CommitCreate(' + sIdx + ')}">'
+      + '</div>';
+
+    // Library suggestion zone
+    h += '<div id="mxd8-add-suggest-' + sIdx + '" class="mxd8-suggest-zone"></div>';
+
+    // Type selector grid
+    h += '<label class="mxd8-add-lbl" style="margin-top:14px;display:block">Type de mesure</label>';
+    h += '<div class="mxd8-type-selector" id="mxd8-type-sel-' + sIdx + '">';
+    V7_COL_TYPES.forEach(function(c) {
+      h += '<label class="mxd8-type-opt" title="' + e(c.l) + '">'
+        + '<input type="radio" name="mxd8-type-' + sIdx + '" value="' + e(c.key) + '"'
+        + ' onchange="this.closest(\'.mxd8-type-selector\').querySelectorAll(\'.mxd8-type-opt-ic\').forEach(function(x){x.classList.remove(\'mxd8-type-opt-ic--on\')});this.nextElementSibling.classList.add(\'mxd8-type-opt-ic--on\')">'
+        + '<span class="mxd8-type-opt-ic" style="--tc:' + c.color + '">'
+        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i>'
+        + '<span class="mxd8-type-opt-lbl">' + e(c.l) + '</span>'
+        + '</span>'
+        + '</label>';
+    });
+    h += '</div>';
+
+    // Action buttons
+    h += '<div class="mxd8-add-actions">'
+      + '<button class="mxd8-add-create-btn" onclick="MX.Pages.MxDoc._v8CommitCreate(' + sIdx + ')">'
+      + '<i class="fa-solid fa-check"></i> Créer</button>'
+      + '<button class="mxd8-add-cancel-btn" onclick="MX.Pages.MxDoc._v8HideAddPanel(' + sIdx + ')">'
+      + '<i class="fa-solid fa-xmark"></i> Annuler</button>'
+      + '</div>';
+
+    h += '</div></div>';
+    return h;
+  }
+
+  function _v8ShowAddPanel(sIdx) {
+    // Hide any other open panels first
+    document.querySelectorAll('[id^="mxd8-add-panel-"]').forEach(function(p) { p.style.display = 'none'; });
+    var panel = document.getElementById('mxd8-add-panel-' + sIdx);
+    if (!panel) return;
+    panel.style.display = '';
+    // Reset form
+    var inp = document.getElementById('mxd8-add-name-' + sIdx);
+    if (inp) { inp.value = ''; setTimeout(function() { inp.focus(); }, 50); }
+    var sug = document.getElementById('mxd8-add-suggest-' + sIdx);
+    if (sug) sug.innerHTML = '';
+    panel.querySelectorAll('input[type="radio"]').forEach(function(r) { r.checked = false; });
+    panel.querySelectorAll('.mxd8-type-opt-ic--on').forEach(function(el) { el.classList.remove('mxd8-type-opt-ic--on'); });
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function _v8HideAddPanel(sIdx) {
+    var panel = document.getElementById('mxd8-add-panel-' + sIdx);
+    if (panel) panel.style.display = 'none';
+  }
+
+  function _v8CommitCreate(sIdx) {
+    var panel = document.getElementById('mxd8-add-panel-' + sIdx);
+    if (!panel) return;
+    var nameInp = document.getElementById('mxd8-add-name-' + sIdx);
+    var name = nameInp ? (nameInp.value || '').trim() : '';
+    if (!name) {
+      if (nameInp) { nameInp.classList.add('mxd8-add-name-err'); setTimeout(function() { nameInp.classList.remove('mxd8-add-name-err'); }, 600); nameInp.focus(); }
+      return;
+    }
+    var typeInp = panel.querySelector('input[name="mxd8-type-' + sIdx + '"]:checked');
+    var typeKey = typeInp ? typeInp.value : null;
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v6Push();
+    sec.controls = sec.controls || [];
+    sec.controls.push({
+      id: _uid(),
+      label: name,
+      icon: _v8AutoIcon(name, typeKey),
+      colId: null,
+      type: typeKey,
+      required: false,
+      history: false
+    });
+    _v8HideAddPanel(sIdx);
+    _v6RefreshSection(sIdx);
+    _v8SelectControl(sIdx, sec.controls.length - 1);
+  }
+
+  function _v8ShowImportPanel(sIdx) {
+    var e = _e;
+    var existing = document.getElementById('mxd8-import-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'mxd8-import-overlay';
+    overlay.className = 'mxd7-modal-overlay';
+
+    if (!_colLibrary.length) {
+      overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal">'
+        + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title">Importer depuis la bibliothèque</span>'
+        + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-import-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+        + '<div class="mxd7-modal-body"><div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Bibliothèque vide. Créez des contrôles et sauvegardez-les avec <i class="fa-regular fa-star"></i> pour les réutiliser.</p></div></div>'
+        + '</div></div>';
+      document.body.appendChild(overlay);
+      return;
+    }
+
+    var libHtml = '<div class="mxd7-type-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">';
+    _colLibrary.forEach(function(col) {
+      var ct = _v7TypeDef(col.type);
+      var color = col.color || (ct ? ct.color : '#64748B');
+      var faIcon = ct ? ct.icon : 'fa-columns';
+      var emoji = col.icon || '';
+      libHtml += '<button class="mxd7-type-chip" style="border-color:' + color + '30;flex-direction:row;text-align:left;padding:10px 12px;gap:8px"'
+        + ' onclick="MX.Pages.MxDoc._v8ImportControl(' + sIdx + ',' + JSON.stringify(col.id) + ');document.getElementById(\'mxd8-import-overlay\').remove()">'
+        + '<span style="font-size:18px;flex-shrink:0">' + (emoji || '<i class="fa-solid ' + faIcon + '" style="color:' + color + ';font-size:14px"></i>') + '</span>'
+        + '<span style="color:' + color + ';font-weight:600;font-size:12px">' + e(col.name) + '</span>'
+        + '</button>';
+    });
+    libHtml += '</div>';
+
+    overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal">'
+      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title"><i class="fa-regular fa-folder-open"></i> Importer depuis la bibliothèque</span>'
+      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-import-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxd7-modal-body">' + libHtml + '</div>'
+      + '</div></div>';
+    document.body.appendChild(overlay);
+  }
+
+  function _v8ImportControl(sIdx, colId) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v6Push();
+    sec.controls = sec.controls || [];
+    var r = _v7ResolveCol(colId);
+    var label = r ? (r.def.name || r.def.l || r.def.key) : 'Contrôle';
+    sec.controls.push({
+      id: _uid(),
+      label: label,
+      icon: r ? (r.def.icon || _v8AutoIcon(label, r.def.type || r.def.key)) : '',
+      colId: colId,
+      type: null,
+      required: false,
+      history: false
+    });
+    _v8HideAddPanel(sIdx);
+    _v6RefreshSection(sIdx);
+    _v8SelectControl(sIdx, sec.controls.length - 1);
   }
 
   function _v8ControlRowHTML(ctrl, sIdx, cIdx, extras) {
@@ -4867,8 +5105,9 @@
     var isSelected = (_v6SelSIdx === sIdx && _v6SelBIdx === cIdx);
     var resolved = _v8ResolveCtrl(ctrl);
     var col = resolved ? resolved.def : null;
+    var icon = ctrl.icon || _v8AutoIcon(ctrl.label, col ? (col.type || col.key) : null);
 
-    h = '<tr class="mxd8-ctrl-row' + (isSelected ? ' mxd8-ctrl-row--sel' : '') + '"'
+    var h = '<tr class="mxd8-ctrl-row' + (isSelected ? ' mxd8-ctrl-row--sel' : '') + '"'
       + ' id="mxd8-ctrl-' + sIdx + '-' + cIdx + '"'
       + ' draggable="true"'
       + ' ondragstart="MX.Pages.MxDoc._v8CtrlDragStart(event,' + sIdx + ',' + cIdx + ')"'
@@ -4878,16 +5117,14 @@
       + ' onclick="MX.Pages.MxDoc._v8SelectControl(' + sIdx + ',' + cIdx + ')">'
       + '<td class="mxd8-td-drag"><i class="fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i></td>'
       + '<td class="mxd8-td-ctrl">'
-      +   '<span class="mxd8-ctrl-lbl' + (ctrl.required ? ' mxd8-ctrl-lbl--req' : '') + '"'
-      +     ' contenteditable="true" onclick="event.stopPropagation()"'
-      +     ' onblur="MX.Pages.MxDoc._v8CtrlSetLabel(' + sIdx + ',' + cIdx + ',this)"'
-      +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
-      +     '>' + e(ctrl.label || '') + '</span>'
-      +   (col ? _v8TypeBadge(col) : '<span class="mxd8-badge-pick">— Choisir un type</span>')
+      + (icon ? '<span class="mxd8-ctrl-icon">' + e(icon) + '</span>' : '')
+      + '<span class="mxd8-ctrl-lbl' + (ctrl.required ? ' mxd8-ctrl-lbl--req' : '') + '"'
+      + ' id="mxd8-ctrl-lbl-' + sIdx + '-' + cIdx + '"'
+      + '>' + e(ctrl.label || '') + '</span>'
+      + (col ? _v8TypeBadge(col) : '<span class="mxd8-badge-pick">— Choisir un type</span>')
       + '</td>'
       + '<td class="mxd8-td-primary">' + (col ? _v8PrimaryPreview(ctrl, col) : '<span class="mxd8-no-type"><i class="fa-regular fa-question-circle"></i></span>') + '</td>';
 
-    // Extra col preview cells
     (extras || []).forEach(function() {
       h += '<td class="mxd8-td-extra"><span class="mxd8-extra-dot"></span></td>';
     });
@@ -4900,7 +5137,6 @@
     return h;
   }
 
-  // Resolve a control's primary column definition
   function _v8ResolveCtrl(ctrl) {
     if (!ctrl) return null;
     if (ctrl.colId) {
@@ -4908,14 +5144,12 @@
       if (r) return r;
     }
     if (ctrl.type) {
-      // Inline type → synthetic def merging ctrl props
       var ct = _v7TypeDef(ctrl.type);
       return { src: 'inline', def: Object.assign({}, ct || {}, ctrl, { key: ctrl.type }) };
     }
     return null;
   }
 
-  // Type badge for builder
   function _v8TypeBadge(col) {
     var e = _e;
     var ct = _v7TypeDef(col.type || col.key);
@@ -4934,7 +5168,6 @@
       + '</span>';
   }
 
-  // Preview cell in builder (non-interactive)
   function _v8PrimaryPreview(ctrl, col) {
     var e = _e;
     var type = col.type || col.key || 'texte';
@@ -4953,10 +5186,10 @@
       case 'marchearret':
         return '<div class="mxd8-preview-toggle"><button class="mxd8-btn-ok-sm" disabled>M</button><button class="mxd8-btn-ko-sm" disabled>A</button></div>';
       case 'liste':
-        var opts = (col.listeValues || []).slice(0, 3).map(function(v) { return '<option>' + e(v) + '</option>'; }).join('');
+        var opts = (col.listeValues || ctrl.listeValues || []).slice(0, 3).map(function(v) { return '<option>' + e(v) + '</option>'; }).join('');
         return '<select class="mxd8-preview-select" disabled><option>—</option>' + opts + '</select>';
       case 'photo':
-        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-camera"></i>' + (col.photoMax > 1 ? ' ×' + col.photoMax : '') + '</span>';
+        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-camera"></i>' + ((col.photoMax || ctrl.photoMax) > 1 ? ' ×' + (col.photoMax || ctrl.photoMax) : '') + '</span>';
       case 'signature':
         return '<span class="mxd8-preview-ic"><i class="fa-solid fa-pen-nib"></i> Signature</span>';
       case 'date':
@@ -4996,7 +5229,7 @@
       +   '</div>'
       + '</div>'
       + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Colonnes partagées</label>'
-      + '<p class="mxd8-props-tip">Colonnes ajoutées après la mesure principale sur chaque contrôle (photo, commentaire, signature…)</p>';
+      + '<p class="mxd8-props-tip">Colonnes ajoutées sur chaque contrôle après la mesure principale (photo, commentaire, signature…)</p>';
 
     if (extras.length) {
       h += '<div class="mxd8-extras-prop-list">';
@@ -5009,8 +5242,8 @@
         var faIcon = ct ? ct.icon : 'fa-columns';
         var emoji = col ? (col.icon || '') : '';
         h += '<div class="mxd8-extras-prop-row" style="color:' + color2 + '">'
-          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
-          + ' <span>' + e(label) + '</span>'
+          + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '"></i> ')
+          + '<span>' + e(label) + '</span>'
           + '<button class="mxd8-extra-rm" onclick="MX.Pages.MxDoc._v8RemoveExtraCol(' + sIdx + ',' + ci + ')"><i class="fa-solid fa-xmark"></i></button>'
           + '</div>';
       });
@@ -5033,99 +5266,271 @@
     var col = resolved ? resolved.def : null;
     var type = col ? (col.type || col.key) : null;
     var ct = type ? _v7TypeDef(type) : null;
+    var color = col ? (col.color || (ct ? ct.color : '#0EA5E9')) : '#64748B';
+    var icon = ctrl.icon || _v8AutoIcon(ctrl.label, type);
 
     var h = '<div class="mxd6-props-inner">'
-      + '<div class="mxd6-props-hd"><i class="fa-regular fa-circle-dot"></i> Contrôle</div>'
-      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
-      +   '<input class="mxd6-prop-inp" type="text" id="mxd8-ctrl-name-inp" value="' + e(ctrl.label || '') + '"'
-      +   ' oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'label\',this.value)">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-circle-dot"></i> Contrôle</div>';
+
+    // Name
+    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      + '<input class="mxd6-prop-inp" type="text" id="mxd8-ctrl-name-inp" value="' + e(ctrl.label || '') + '"'
+      + ' oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'label\',this.value);var l=document.getElementById(\'mxd8-ctrl-lbl-' + sIdx + '-' + cIdx + '\');if(l)l.textContent=this.value">'
       + '</div>';
 
-    // Primary column selector
-    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Type de mesure principale</label>';
-    if (col) {
-      h += '<div class="mxd8-ctrl-col-sel">'
-        + _v8TypeBadge(col)
-        + '<button class="mxd8-change-btn" onclick="MX.Pages.MxDoc._v8OpenPrimaryPicker(' + sIdx + ',' + cIdx + ')">Changer</button>'
+    // Type selector — always visible, toggle to expand type grid
+    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Type de mesure</label>';
+    if (type) {
+      h += '<div class="mxd8-cur-type" style="border-color:' + color + '40">'
+        + '<span class="mxd8-cur-type-ic" style="background:' + color + '22;color:' + color + '">'
+        + (ct ? '<i class="fa-solid ' + ct.icon + '"></i>' : '') + '</span>'
+        + '<span class="mxd8-cur-type-lbl" style="color:' + color + '">' + e(ct ? ct.l : type) + '</span>'
+        + '<button class="mxd8-change-btn" onclick="MX.Pages.MxDoc._v8PropTypePickerToggle(' + sIdx + ',' + cIdx + ')">'
+        + 'Changer <i class="fa-solid fa-chevron-down" style="font-size:9px"></i></button>'
         + '</div>';
-
-      // Type-specific props inline
-      if (type === 'int' || type === 'decimal' || type === 'pourcent' || type === 'monnaie' || type === 'compteur') {
-        h += '<div class="mxd8-inline-params">';
-        h += '<div class="mxd7-mf-row">';
-        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Unité</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.unit !== undefined ? ctrl.unit : (col.unit || '')) + '" placeholder="pH, °C…" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'unit\',this.value)"></div>';
-        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Mini</label><input class="mxd7-mf-inp" type="number" value="' + (ctrl.min !== undefined ? ctrl.min : (col.min !== undefined ? col.min : '')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'min\',parseFloat(this.value)||null)"></div>';
-        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Maxi</label><input class="mxd7-mf-inp" type="number" value="' + (ctrl.max !== undefined ? ctrl.max : (col.max !== undefined ? col.max : '')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'max\',parseFloat(this.value)||null)"></div>';
-        h += '</div></div>';
-      }
     } else {
-      h += '<button class="mxd8-pick-type-btn" onclick="MX.Pages.MxDoc._v8OpenPrimaryPicker(' + sIdx + ',' + cIdx + ')">'
+      h += '<button class="mxd8-pick-type-btn" onclick="MX.Pages.MxDoc._v8PropTypePickerToggle(' + sIdx + ',' + cIdx + ')">'
         + '<i class="fa-solid fa-plus"></i> Choisir un type de mesure</button>';
     }
+
+    // Inline type picker (collapsed by default)
+    h += '<div class="mxd8-prop-type-picker" id="mxd8-prop-type-picker-' + sIdx + '-' + cIdx + '" style="display:none">';
+    if (_colLibrary.length) {
+      h += '<p class="mxd6-pal-label" style="margin:8px 0 6px">BIBLIOTHÈQUE</p>';
+      h += '<div class="mxd8-prop-type-grid">';
+      _colLibrary.forEach(function(libcol) {
+        var lct = _v7TypeDef(libcol.type);
+        var lc = libcol.color || (lct ? lct.color : '#64748B');
+        var li = lct ? lct.icon : 'fa-columns';
+        var em = libcol.icon || '';
+        h += '<button class="mxd8-prop-type-chip' + (ctrl.colId === libcol.id ? ' mxd8-prop-type-chip--on' : '') + '" style="border-color:' + lc + '30"'
+          + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'lib\',' + JSON.stringify(libcol.id) + ');MX.Pages.MxDoc._v8PropTypePickerHide(' + sIdx + ',' + cIdx + ')">'
+          + (em ? e(em) + ' ' : '<i class="fa-solid ' + li + '" style="color:' + lc + '"></i> ')
+          + '<span style="color:' + lc + '">' + e(libcol.name) + '</span>'
+          + '</button>';
+      });
+      h += '</div><hr class="mxd6-sep">';
+    }
+    h += '<p class="mxd6-pal-label" style="margin:0 0 6px">TYPES RAPIDES</p>';
+    h += '<div class="mxd8-prop-type-grid">';
+    V7_COL_TYPES.forEach(function(c) {
+      h += '<button class="mxd8-prop-type-chip' + (ctrl.type === c.key && !ctrl.colId ? ' mxd8-prop-type-chip--on' : '') + '"'
+        + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'type\',' + JSON.stringify(c.key) + ');MX.Pages.MxDoc._v8PropTypePickerHide(' + sIdx + ',' + cIdx + ')">'
+        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i> '
+        + '<span>' + e(c.l) + '</span>'
+        + '</button>';
+    });
     h += '</div>';
+    h += '</div>'; // end prop-type-picker
+    h += '</div>'; // end prop-grp
+
+    // Numeric params
+    if (type === 'int' || type === 'decimal' || type === 'pourcent' || type === 'monnaie' || type === 'compteur') {
+      var effUnit = ctrl.unit !== undefined ? ctrl.unit : (col.unit || '');
+      var effMin = ctrl.min !== undefined ? ctrl.min : (col.min !== undefined ? col.min : '');
+      var effMax = ctrl.max !== undefined ? ctrl.max : (col.max !== undefined ? col.max : '');
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Paramètres numériques</label>';
+      h += '<div class="mxd7-mf-row">';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Unité</label><input class="mxd7-mf-inp" type="text" value="' + e(effUnit) + '" placeholder="pH, °C…" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'unit\',this.value)"></div>';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Mini</label><input class="mxd7-mf-inp" type="number" value="' + e(String(effMin)) + '" placeholder="—" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'min\',this.value===\'\'?null:parseFloat(this.value))"></div>';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Maxi</label><input class="mxd7-mf-inp" type="number" value="' + e(String(effMax)) + '" placeholder="—" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'max\',this.value===\'\'?null:parseFloat(this.value))"></div>';
+      h += '</div>';
+      if (type === 'decimal') {
+        var effDec = ctrl.decimals !== undefined ? ctrl.decimals : (col.decimals !== undefined ? col.decimals : 2);
+        var effDef = ctrl.defaultVal !== undefined ? ctrl.defaultVal : '';
+        h += '<div class="mxd7-mf-row">';
+        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Décimales</label><input class="mxd7-mf-inp" type="number" min="0" max="6" value="' + e(String(effDec)) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'decimals\',parseInt(this.value)||0)"></div>';
+        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Défaut</label><input class="mxd7-mf-inp" type="number" value="' + e(String(effDef)) + '" placeholder="—" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'defaultVal\',this.value===\'\'?null:parseFloat(this.value))"></div>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+
+    // Liste values
+    if (type === 'liste') {
+      var listVals = ctrl.listeValues || (col ? col.listeValues : null) || [];
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Valeurs de la liste</label>';
+      listVals.forEach(function(v, vi) {
+        h += '<div class="mxd7-liste-row">'
+          + '<input class="mxd7-mf-inp" type="text" style="flex:1" value="' + e(v) + '" oninput="MX.Pages.MxDoc._v8ListeValUpdate(' + sIdx + ',' + cIdx + ',' + vi + ',this.value)">'
+          + '<button class="mxd7-liste-del" onclick="MX.Pages.MxDoc._v8ListeValRemove(' + sIdx + ',' + cIdx + ',' + vi + ')"><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      });
+      h += '<button class="mxd7-liste-add" onclick="MX.Pages.MxDoc._v8ListeValAdd(' + sIdx + ',' + cIdx + ')"><i class="fa-solid fa-plus"></i> Ajouter une valeur</button>';
+      h += '</div>';
+    }
+
+    // Conforme labels
+    if (type === 'conforme') {
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Libellés OK / KO</label>';
+      h += '<div class="mxd7-mf-row">';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl" style="color:#22C55E">OK</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.libelleOk !== undefined ? ctrl.libelleOk : (col ? (col.libelleOk || 'Conforme') : 'Conforme')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'libelleOk\',this.value)"></div>';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl" style="color:#EF4444">KO</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.libelleKo !== undefined ? ctrl.libelleKo : (col ? (col.libelleKo || 'Défaut') : 'Défaut')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'libelleKo\',this.value)"></div>';
+      h += '</div></div>';
+    }
+
+    // Oui/Non labels
+    if (type === 'ouinon') {
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Libellés Oui / Non</label>';
+      h += '<div class="mxd7-mf-row">';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl" style="color:#22C55E">Oui</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.labelOui !== undefined ? ctrl.labelOui : (col ? (col.labelOui || 'Oui') : 'Oui')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'labelOui\',this.value)"></div>';
+      h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl" style="color:#EF4444">Non</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.labelNon !== undefined ? ctrl.labelNon : (col ? (col.labelNon || 'Non') : 'Non')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'labelNon\',this.value)"></div>';
+      h += '</div></div>';
+    }
+
+    // Photo max
+    if (type === 'photo') {
+      var effPhotoMax = ctrl.photoMax || (col ? (col.photoMax || 1) : 1);
+      h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Photos max</label>'
+        + '<input class="mxd6-prop-inp" type="number" min="1" max="20" style="width:80px" value="' + effPhotoMax + '"'
+        + ' oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'photoMax\',parseInt(this.value)||1)">'
+        + '</div>';
+    }
+
+    // Icon
+    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Icône</label>';
+    h += '<div class="mxd8-icon-row">'
+      + '<span class="mxd8-icon-preview" id="mxd8-icon-prev-' + sIdx + '-' + cIdx + '">' + e(icon || '—') + '</span>'
+      + '<input class="mxd7-mf-inp" type="text" placeholder="Emoji…" style="width:80px" value="' + e(icon) + '"'
+      + ' oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'icon\',this.value);var p=document.getElementById(\'mxd8-icon-prev-' + sIdx + '-' + cIdx + '\');if(p)p.textContent=this.value||\'—\'">'
+      + '<button class="mxd8-icon-auto-btn" title="Icône automatique"'
+      + ' onclick="(function(){var a=MX.Pages.MxDoc._v8AutoIcon(' + JSON.stringify(ctrl.label) + ',' + JSON.stringify(type || '') + ');MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'icon\',a);var p=document.getElementById(\'mxd8-icon-prev-' + sIdx + '-' + cIdx + '\');if(p)p.textContent=a||\'—\';})()">'
+      + '<i class="fa-solid fa-wand-magic-sparkles"></i></button>'
+      + '</div></div>';
 
     // Toggles
     h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Obligatoire</span>'
       + '<button class="mxd6-toggle' + (ctrl.required ? ' mxd6-toggle--on' : '') + '"'
-      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'required\')"></button></div>';
+      + ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'required\')"></button></div>';
     h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Historique</span>'
       + '<button class="mxd6-toggle' + (ctrl.history ? ' mxd6-toggle--on' : '') + '"'
-      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'history\')"></button></div>';
+      + ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'history\')"></button></div>';
     h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Commentaire si défaut</span>'
       + '<button class="mxd6-toggle' + (ctrl.commentIfDefaut ? ' mxd6-toggle--on' : '') + '"'
-      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'commentIfDefaut\')"></button></div>';
+      + ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'commentIfDefaut\')"></button></div>';
 
+    // Save to library
+    h += '<div class="mxd8-save-lib-wrap">'
+      + '<button class="mxd8-save-lib-btn" onclick="MX.Pages.MxDoc._v8SaveToLibrary(' + sIdx + ',' + cIdx + ')">'
+      + '<i class="fa-regular fa-star"></i> Sauvegarder dans la bibliothèque</button>'
+      + '</div>';
+
+    // Actions
     h += '<hr class="mxd6-sep"><div class="mxd6-prop-actions">'
       + '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v8DupControl(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
       + '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v8DelControl(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
-      + '</div></div>';
+      + '</div>';
+
+    h += '</div>';
     return h;
   }
 
-  // ── PRIMARY PICKER MODAL ─────────────────────────────────────────────────────
+  // Type picker helpers for props panel
+  function _v8PropTypePickerToggle(sIdx, cIdx) {
+    var el = document.getElementById('mxd8-prop-type-picker-' + sIdx + '-' + cIdx);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+  }
 
-  function _v8OpenPrimaryPicker(sIdx, cIdx) {
+  function _v8PropTypePickerHide(sIdx, cIdx) {
+    var el = document.getElementById('mxd8-prop-type-picker-' + sIdx + '-' + cIdx);
+    if (el) el.style.display = 'none';
+  }
+
+  // Liste values CRUD
+  function _v8ListeValAdd(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    _v6Push();
+    ctrl.listeValues = ctrl.listeValues || [];
+    ctrl.listeValues.push('');
+    _v6RefreshProps();
+  }
+
+  function _v8ListeValUpdate(sIdx, cIdx, vi, val) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    ctrl.listeValues = ctrl.listeValues || [];
+    ctrl.listeValues[vi] = val;
+  }
+
+  function _v8ListeValRemove(sIdx, cIdx, vi) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl || !ctrl.listeValues) return;
+    _v6Push();
+    ctrl.listeValues.splice(vi, 1);
+    _v6RefreshProps();
+  }
+
+  // Save to library
+  function _v8SaveToLibrary(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
     var e = _e;
-    var existing = document.getElementById('mxd8-picker-overlay');
+    var existing = document.getElementById('mxd8-savlib-overlay');
     if (existing) existing.remove();
     var overlay = document.createElement('div');
-    overlay.id = 'mxd8-picker-overlay';
+    overlay.id = 'mxd8-savlib-overlay';
     overlay.className = 'mxd7-modal-overlay';
-
-    var libHtml = '';
-    if (_colLibrary.length) {
-      libHtml += '<p class="mxd6-pal-label" style="margin:0 0 8px">DEPUIS LA BIBLIOTHÈQUE</p><div class="mxd7-type-grid">';
-      _colLibrary.forEach(function(col) {
-        var ct = _v7TypeDef(col.type);
-        var color = col.color || (ct ? ct.color : '#64748B');
-        var faIcon = ct ? ct.icon : 'fa-columns';
-        var emoji = col.icon || '';
-        libHtml += '<button class="mxd7-type-chip" style="border-color:' + color + '30"'
-          + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'lib\',' + JSON.stringify(col.id) + ');document.getElementById(\'mxd8-picker-overlay\').remove()">'
-          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '" style="color:' + color + '"></i>')
-          + '<span style="color:' + color + '">' + e(col.name) + '</span>'
-          + '</button>';
-      });
-      libHtml += '</div><hr class="mxd6-sep">';
-    }
-
-    var typesHtml = '<p class="mxd6-pal-label" style="margin:0 0 8px">TYPES RAPIDES</p><div class="mxd7-type-grid">';
-    V7_COL_TYPES.forEach(function(c) {
-      typesHtml += '<button class="mxd7-type-chip"'
-        + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'type\',' + JSON.stringify(c.key) + ');document.getElementById(\'mxd8-picker-overlay\').remove()">'
-        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i>'
-        + '<span>' + e(c.l) + '</span>'
-        + '</button>';
-    });
-    typesHtml += '</div>';
-
     overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal">'
-      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title">Choisir le type de mesure</span>'
-      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-picker-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
-      + '<div class="mxd7-modal-body">' + libHtml + typesHtml + '</div>'
-      + '</div></div>';
+      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title"><i class="fa-regular fa-star"></i> Sauvegarder dans la bibliothèque</span>'
+      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-savlib-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxd7-modal-body" style="gap:12px;display:flex;flex-direction:column">'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      + '<input class="mxd6-prop-inp" id="mxd8-savlib-name" type="text" value="' + e(ctrl.label || '') + '"></div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Catégorie <span style="color:#8B949E;font-weight:400">(optionnel)</span></label>'
+      + '<input class="mxd6-prop-inp" id="mxd8-savlib-cat" type="text" placeholder="ex : Piscine, Électrique, Sécurité…"></div>'
+      + '<button class="mxd7-btn-save" onclick="MX.Pages.MxDoc._v8SaveToLibraryDo(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-star"></i> Enregistrer</button>'
+      + '</div></div></div>';
     document.body.appendChild(overlay);
+    setTimeout(function() { var n = document.getElementById('mxd8-savlib-name'); if (n) { n.focus(); n.select(); } }, 50);
   }
+
+  async function _v8SaveToLibraryDo(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    var nameEl = document.getElementById('mxd8-savlib-name');
+    var catEl = document.getElementById('mxd8-savlib-cat');
+    var name = nameEl ? (nameEl.value || '').trim() : (ctrl.label || '');
+    if (!name) return;
+    var category = catEl ? (catEl.value || '').trim() : '';
+    var resolved = _v8ResolveCtrl(ctrl);
+    var col = resolved ? resolved.def : null;
+    var type = col ? (col.type || col.key) : null;
+    var doc = {
+      name: name,
+      type: type || 'texte',
+      icon: ctrl.icon || _v8AutoIcon(name, type),
+      color: (col ? (col.color || '') : ''),
+      unit: ctrl.unit !== undefined ? ctrl.unit : (col ? (col.unit || '') : ''),
+      min: ctrl.min !== undefined ? ctrl.min : (col ? (col.min !== undefined ? col.min : null) : null),
+      max: ctrl.max !== undefined ? ctrl.max : (col ? (col.max !== undefined ? col.max : null) : null),
+      decimals: ctrl.decimals !== undefined ? ctrl.decimals : (col ? (col.decimals !== undefined ? col.decimals : null) : null),
+      listeValues: ctrl.listeValues || (col ? (col.listeValues || []) : []),
+      libelleOk: ctrl.libelleOk || (col ? (col.libelleOk || '') : ''),
+      libelleKo: ctrl.libelleKo || (col ? (col.libelleKo || '') : ''),
+      labelOui: ctrl.labelOui || (col ? (col.labelOui || '') : ''),
+      labelNon: ctrl.labelNon || (col ? (col.labelNon || '') : ''),
+      photoMax: ctrl.photoMax || (col ? (col.photoMax || 1) : 1),
+      category: category,
+      _createdAt: FV.serverTimestamp()
+    };
+    // Clean empty / null values
+    Object.keys(doc).forEach(function(k) {
+      if (doc[k] === null || doc[k] === '' || (Array.isArray(doc[k]) && !doc[k].length)) delete doc[k];
+    });
+    try {
+      MX.syncStart();
+      await db.collection('mxColLibrary').add(doc);
+      MX.syncEnd(); MX.toast('✅ Sauvegardé dans la bibliothèque');
+      var ov = document.getElementById('mxd8-savlib-overlay');
+      if (ov) ov.remove();
+    } catch (err) {
+      MX.syncFail(); MX.toast('Erreur: ' + err.message, true);
+    }
+  }
+
+  // ── PRIMARY PICKER (kept for _v8PickPrimary compatibility) ───────────────────
 
   function _v8PickPrimary(sIdx, cIdx, src, keyOrId) {
     var sec = _builderSecs[sIdx];
@@ -5139,6 +5544,8 @@
     } else {
       ctrl.type = keyOrId;
       ctrl.colId = null;
+      // Auto-assign icon if not set
+      if (!ctrl.icon) ctrl.icon = _v8AutoIcon(ctrl.label, keyOrId);
     }
     _v6RefreshSection(sIdx);
     _v6RefreshProps();
@@ -5166,13 +5573,13 @@
       var emoji = col.icon || '';
       libHtml += '<button class="mxd7-type-chip' + (alreadyIn ? ' mxd7-type-chip--on' : '') + '" style="border-color:' + color + '30"'
         + ' onclick="MX.Pages.MxDoc._v8AddExtraCol(' + sIdx + ',' + JSON.stringify(col.id) + ');document.getElementById(\'mxd8-extra-overlay\').remove()">'
-        + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '" style="color:' + color + '"></i>')
+        + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '" style="color:' + color + '"></i> ')
         + '<span style="color:' + color + '">' + e(col.name) + '</span>'
         + (alreadyIn ? ' <i class="fa-solid fa-check" style="font-size:10px;color:#22C55E"></i>' : '')
         + '</button>';
     });
     libHtml += '</div>';
-    if (!_colLibrary.length) libHtml = '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Aucune colonne dans la bibliothèque. Créez-en une depuis l\'onglet Bibliothèque.</p></div>';
+    if (!_colLibrary.length) libHtml = '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Aucune colonne dans la bibliothèque.</p></div>';
 
     var typesHtml = '<hr class="mxd6-sep"><p class="mxd6-pal-label" style="margin:0 0 8px">TYPES RAPIDES</p><div class="mxd7-type-grid">';
     V7_COL_TYPES.forEach(function(c) {
@@ -5214,13 +5621,7 @@
   // ── V8 CRUD ──────────────────────────────────────────────────────────────────
 
   function _v8AddControl(sIdx) {
-    var sec = _builderSecs[sIdx];
-    if (!sec) return;
-    _v6Push();
-    sec.controls = sec.controls || [];
-    sec.controls.push({ id: _uid(), label: 'Contrôle ' + (sec.controls.length + 1), colId: null, type: null, required: false, history: false });
-    _v6RefreshSection(sIdx);
-    _v8SelectControl(sIdx, sec.controls.length - 1);
+    _v8ShowAddPanel(sIdx);
   }
 
   function _v8DelControl(sIdx, cIdx) {
@@ -5320,7 +5721,6 @@
       var insertAt = cIdx > dd.cIdx ? cIdx - 1 : cIdx;
       arr.splice(insertAt, 0, moved);
     } else {
-      // Cross-section move
       var srcSec = _builderSecs[dd.sIdx];
       if (!srcSec || !srcSec.controls) return;
       var moved2 = srcSec.controls.splice(dd.cIdx, 1)[0];
@@ -5330,20 +5730,16 @@
     _v6RefreshSection(sIdx);
   }
 
-  // When palette type/lib item is dropped on a V8 section: create control
   function _v8HandleColDrop(sIdx, colKey) {
     var sec = _builderSecs[sIdx];
     if (!sec || !sec.controls) return;
     _v6Push();
-    // Is it a library ID?
     var r = _v7ResolveCol(colKey);
-    var label = '';
-    if (r) {
-      label = r.def.name || r.def.l || r.def.key;
-    }
+    var label = r ? (r.def.name || r.def.l || r.def.key) : ('Contrôle ' + (sec.controls.length + 1));
     sec.controls.push({
       id: _uid(),
-      label: label || ('Contrôle ' + (sec.controls.length + 1)),
+      label: label,
+      icon: _v8AutoIcon(label, r ? (r.def.type || r.def.key) : colKey),
       colId: (r && r.src === 'v7') ? colKey : null,
       type: (r && r.src !== 'v7') ? colKey : null,
       required: false,
@@ -5352,6 +5748,7 @@
     _v6RefreshSection(sIdx);
     _v8SelectControl(sIdx, sec.controls.length - 1);
   }
+
 
   // ── V8 EXEC RENDERING ────────────────────────────────────────────────────────
 
@@ -6280,6 +6677,20 @@
     _v8CtrlDzLeave,
     _v8CtrlDzDrop,
     _v8HandleColDrop,
+    _v8AutoIcon,
+    _v8LibSuggest,
+    _v8ShowAddPanel,
+    _v8HideAddPanel,
+    _v8CommitCreate,
+    _v8ShowImportPanel,
+    _v8ImportControl,
+    _v8PropTypePickerToggle,
+    _v8PropTypePickerHide,
+    _v8ListeValAdd,
+    _v8ListeValUpdate,
+    _v8ListeValRemove,
+    _v8SaveToLibrary,
+    _v8SaveToLibraryDo,
     _v8ExecNumInput,
     _v8ExecToggleBtn,
     // V6 Exec

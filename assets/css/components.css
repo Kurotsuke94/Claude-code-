@@ -20911,3 +20911,75 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .mxd8-exec-extra-item { display:flex; align-items:center; gap:10px; font-size:12px; }
 .mxd8-exec-cmt-cond { margin-top:8px; }
 .mxd8-exec-no-type { font-size:12px; color:#484F58; font-style:italic; }
+
+/* ── V8 UX Refonte — Add Panel & Type Selector ── */
+.mxd8-add-bar { display:flex; align-items:center; gap:8px; padding:10px 12px; border-top:1px solid #21262D; }
+.mxd8-add-ctrl-btn { background:#1F6FEB; border:none; border-radius:8px; padding:8px 16px; color:#fff; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.mxd8-add-ctrl-btn:hover { background:#388bfd; }
+.mxd8-import-lib-btn { background:transparent; border:1px solid #30363D; border-radius:8px; padding:7px 14px; color:#8B949E; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.mxd8-import-lib-btn:hover { border-color:#58A6FF; color:#58A6FF; }
+
+/* Inline Add Panel */
+.mxd8-add-panel { background:#161B22; border-top:1px solid #21262D; animation:mxd8-slide-in .15s ease; }
+.mxd8-add-panel-inner { padding:16px; display:flex; flex-direction:column; gap:0; }
+.mxd8-add-name-row { margin-bottom:8px; }
+.mxd8-add-lbl { font-size:11px; font-weight:600; color:#8B949E; text-transform:uppercase; letter-spacing:.06em; display:block; margin-bottom:5px; }
+.mxd8-add-name-inp { width:100%; background:#0D1117; border:1px solid #30363D; border-radius:8px; padding:10px 12px; color:#E6EDF3; font-size:14px; box-sizing:border-box; transition:border-color .15s; }
+.mxd8-add-name-inp:focus { outline:none; border-color:#1F6FEB; }
+.mxd8-add-name-inp.mxd8-add-name-err { border-color:#EF4444; animation:mxd8-shake .3s ease; }
+
+/* Library Suggestion */
+.mxd8-suggest-zone { min-height:0; }
+.mxd8-lib-suggest { background:#1a2332; border:1px solid #1F6FEB44; border-radius:8px; padding:8px 12px; font-size:12px; color:#8B949E; display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.mxd8-lib-suggest strong { color:#E6EDF3; }
+.mxd8-suggest-use { background:#1F6FEB; border:none; border-radius:6px; padding:4px 10px; color:#fff; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.mxd8-suggest-use:hover { background:#388bfd; }
+.mxd8-suggest-skip { background:transparent; border:1px solid #30363D; border-radius:6px; padding:3px 9px; color:#8B949E; font-size:11px; cursor:pointer; white-space:nowrap; }
+.mxd8-suggest-skip:hover { color:#E6EDF3; border-color:#58A6FF; }
+
+/* Type Selector Grid in Add Panel */
+.mxd8-type-selector { display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:4px; margin-bottom:14px; }
+.mxd8-type-opt { position:relative; cursor:pointer; }
+.mxd8-type-opt input { position:absolute; opacity:0; width:0; height:0; pointer-events:none; }
+.mxd8-type-opt-ic { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; padding:8px 4px 6px; background:#0D1117; border:1px solid #21262D; border-radius:8px; cursor:pointer; transition:all .12s; }
+.mxd8-type-opt-ic:hover { background:#161B22; border-color:#30363D; }
+.mxd8-type-opt-ic--on { background:#1a2332 !important; border-color:var(--tc,#1F6FEB) !important; box-shadow:0 0 0 2px var(--tc,#1F6FEB)22; }
+.mxd8-type-opt-lbl { font-size:9px; color:#8B949E; text-align:center; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px; }
+
+/* Add Panel Actions */
+.mxd8-add-actions { display:flex; gap:8px; padding-top:4px; }
+.mxd8-add-create-btn { background:#1F6FEB; border:none; border-radius:8px; padding:9px 20px; color:#fff; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.mxd8-add-create-btn:hover { background:#388bfd; }
+.mxd8-add-cancel-btn { background:transparent; border:1px solid #30363D; border-radius:8px; padding:8px 14px; color:#8B949E; font-size:13px; cursor:pointer; }
+.mxd8-add-cancel-btn:hover { color:#E6EDF3; border-color:#58A6FF; }
+
+/* Control row icon */
+.mxd8-ctrl-icon { font-size:16px; margin-right:6px; }
+
+/* Props Panel — Current type display */
+.mxd8-cur-type { display:flex; align-items:center; gap:8px; background:#161B22; border:1px solid; border-radius:8px; padding:8px 10px; }
+.mxd8-cur-type-ic { width:28px; height:28px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+.mxd8-cur-type-lbl { flex:1; font-size:13px; font-weight:600; }
+
+/* Props Panel — Inline type picker */
+.mxd8-prop-type-picker { background:#161B22; border:1px solid #21262D; border-radius:8px; padding:10px; margin-top:8px; }
+.mxd8-prop-type-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:4px; }
+.mxd8-prop-type-chip { display:flex; flex-direction:column; align-items:center; gap:3px; background:#0D1117; border:1px solid #21262D; border-radius:7px; padding:7px 4px 5px; cursor:pointer; font-size:10px; transition:all .12s; color:#8B949E; }
+.mxd8-prop-type-chip:hover { background:#1a2332; border-color:#30363D; color:#E6EDF3; }
+.mxd8-prop-type-chip--on { background:#1a2332 !important; border-color:#1F6FEB !important; color:#58A6FF !important; }
+.mxd8-prop-type-chip i { font-size:14px; }
+.mxd8-prop-type-chip span { font-size:9px; text-align:center; line-height:1.2; }
+
+/* Icon row in props */
+.mxd8-icon-row { display:flex; align-items:center; gap:8px; }
+.mxd8-icon-preview { font-size:22px; min-width:32px; text-align:center; }
+.mxd8-icon-auto-btn { background:#161B22; border:1px solid #30363D; border-radius:7px; padding:5px 8px; color:#8B949E; cursor:pointer; font-size:12px; }
+.mxd8-icon-auto-btn:hover { border-color:#A855F7; color:#A855F7; }
+
+/* Save to library button */
+.mxd8-save-lib-wrap { padding:10px 0; }
+.mxd8-save-lib-btn { width:100%; background:transparent; border:1px solid #F59E0B44; border-radius:8px; padding:9px 14px; color:#F59E0B; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; }
+.mxd8-save-lib-btn:hover { background:#1a1508; border-color:#F59E0B; }
+
+@keyframes mxd8-slide-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes mxd8-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
