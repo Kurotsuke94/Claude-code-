@@ -20622,3 +20622,78 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 @media (min-width:769px) {
   .mxd6-mob-bar { display:none; }
 }
+
+/* ── MX DOC V6 TABLE BUILDER ──────────────────────────────────────────────── */
+.mxd6-tbl-wrap { overflow-x:auto; }
+.mxd6-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.mxd6-tbl thead th { padding:6px 10px; text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:#8B949E; background:#161B22; border-bottom:1px solid #21262D; white-space:nowrap; }
+.mxd6-tbl tbody tr { border-bottom:1px solid #21262D; transition:background .1s; }
+.mxd6-tbl tbody tr:hover { background:#161B22; }
+.mxd6-tbl-row--sel { background:#1c2432 !important; outline:1px solid #1F6FEB; }
+.mxd6-tbl-row--dz { background:#1a2a1a !important; outline:1px dashed #22C55E; }
+.mxd6-th-label { min-width:140px; }
+.mxd6-th-col { min-width:90px; }
+.mxd6-th-acts { width:64px; }
+.mxd6-th-txt { display:flex; align-items:center; gap:5px; }
+.mxd6-th-txt i { font-size:11px; }
+.mxd6-td-label { padding:8px 10px; color:#E6EDF3; font-weight:500; cursor:pointer; user-select:none; }
+.mxd6-td-cell { padding:6px 8px; }
+.mxd6-td-acts { padding:4px 6px; white-space:nowrap; }
+.mxd6-tbl-empty { padding:20px; text-align:center; color:#8B949E; font-size:13px; font-style:italic; }
+.mxd6-tbl-nocols { padding:16px; text-align:center; color:#8B949E; font-size:12px; }
+
+/* V6 cell previews in builder */
+.mxd6-cell-val-wrap { display:flex; align-items:center; gap:4px; }
+.mxd6-cell-val { flex:1; background:#0D1117; border:1px solid #30363D; border-radius:4px; padding:3px 6px; font-size:12px; color:#8B949E; min-width:50px; }
+.mxd6-cell-unit { font-size:10px; color:#8B949E; }
+.mxd6-cell-etat { display:flex; gap:4px; }
+.mxd6-etat-ok,.mxd6-etat-ko { border:none; border-radius:4px; padding:3px 8px; font-size:12px; cursor:not-allowed; }
+.mxd6-etat-ok { background:#052e16; color:#22C55E; }
+.mxd6-etat-ko { background:#2d1515; color:#EF4444; }
+.mxd6-cell-yn { display:flex; gap:4px; }
+.mxd6-yn-oui,.mxd6-yn-non { border:none; border-radius:4px; padding:3px 8px; font-size:12px; cursor:not-allowed; }
+.mxd6-yn-oui { background:#052e16; color:#10B981; }
+.mxd6-yn-non { background:#2d1515; color:#EF4444; }
+.mxd6-cell-ic { background:#21262D; border:1px solid #30363D; border-radius:4px; padding:3px 8px; font-size:12px; color:#8B949E; cursor:not-allowed; }
+.mxd6-cell-date,.mxd6-cell-heure { background:#0D1117; border:1px solid #30363D; border-radius:4px; padding:3px 6px; font-size:12px; color:#8B949E; }
+
+/* V6 palette column toggle grid */
+.mxd6-col-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:4px 0; }
+.mxd6-col-tog { display:flex; align-items:center; gap:6px; background:#21262D; border:1px solid #30363D; border-radius:6px; padding:7px 10px; font-size:12px; color:#8B949E; cursor:pointer; transition:all .15s; text-align:left; }
+.mxd6-col-tog:hover { background:#2d333b; color:#E6EDF3; }
+.mxd6-col-tog--on { background:#0D1117; }
+.mxd6-col-tog i { font-size:13px; width:14px; text-align:center; }
+
+/* ── MX DOC V6 EXEC TABLE ─────────────────────────────────────────────────── */
+.mxd-v6exec-wrap { overflow-x:auto; }
+.mxd-v6exec-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.mxd-v6exec-tbl thead th { padding:8px 12px; text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:#8B949E; background:#161B22; border-bottom:1px solid #30363D; white-space:nowrap; }
+.mxd-v6exec-th-label { min-width:150px; }
+.mxd-v6exec-th-col { min-width:100px; }
+.mxd-v6exec-tbl tbody tr { border-bottom:1px solid #21262D; }
+.mxd-v6exec-tbl tbody tr:hover { background:#161B22; }
+.mxd-v6exec-td-label { padding:10px 12px; color:#E6EDF3; font-weight:500; }
+.mxd-v6exec-unit { font-size:11px; color:#8B949E; }
+.mxd-v6exec-td-cell { padding:8px 10px; }
+.mxd-v6exec-val { width:80px; background:#0D1117; border:1px solid #30363D; border-radius:6px; padding:6px 8px; color:#E6EDF3; font-size:13px; text-align:right; }
+.mxd-v6exec-val:focus { outline:none; border-color:#1F6FEB; }
+.mxd-v6exec-comment { width:100%; min-width:120px; background:#0D1117; border:1px solid #30363D; border-radius:6px; padding:6px 8px; color:#E6EDF3; font-size:13px; }
+.mxd-v6exec-comment:focus { outline:none; border-color:#1F6FEB; }
+.mxd-v6exec-date,.mxd-v6exec-heure { background:#0D1117; border:1px solid #30363D; border-radius:6px; padding:6px 8px; color:#E6EDF3; font-size:13px; }
+.mxd-v6exec-etat { display:flex; gap:5px; }
+.mxd-v6exec-etat-ok,.mxd-v6exec-etat-ko { border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; transition:all .15s; }
+.mxd-v6exec-etat-ok { background:#21262D; color:#22C55E; }
+.mxd-v6exec-etat-ko { background:#21262D; color:#EF4444; }
+.mxd-v6exec-etat-ok.mxd-v6exec-etat--on { background:#052e16; box-shadow:0 0 0 2px #22C55E; }
+.mxd-v6exec-etat-ko.mxd-v6exec-etat--on { background:#2d1515; box-shadow:0 0 0 2px #EF4444; }
+.mxd-v6exec-yn { display:flex; gap:5px; }
+.mxd-v6exec-yn-oui,.mxd-v6exec-yn-non { border:none; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; transition:all .15s; }
+.mxd-v6exec-yn-oui { background:#21262D; color:#10B981; }
+.mxd-v6exec-yn-non { background:#21262D; color:#EF4444; }
+.mxd-v6exec-yn-oui.mxd-v6exec-yn--on { background:#052e16; box-shadow:0 0 0 2px #10B981; }
+.mxd-v6exec-yn-non.mxd-v6exec-yn--on { background:#2d1515; box-shadow:0 0 0 2px #EF4444; }
+.mxd-v6exec-photo-btn { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; background:#21262D; border-radius:6px; cursor:pointer; color:#8B949E; font-size:16px; transition:all .15s; }
+.mxd-v6exec-photo-btn:hover { background:#2d333b; color:#E6EDF3; }
+.mxd-v6exec-photo--done { background:#0d2a2a; color:#22C55E; }
+.mxd-v6exec-sig-btn { background:#21262D; border:none; border-radius:6px; padding:6px 12px; color:#A855F7; font-size:14px; cursor:pointer; }
+.mxd-v6exec-unknown { color:#8B949E; font-size:11px; }
