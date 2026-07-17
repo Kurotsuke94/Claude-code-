@@ -64,6 +64,9 @@
   var _v7ModalIsNew  = true;
   var _v7ModalTab    = 'info';
 
+  // V8 Builder state
+  var _v8SelCIdx     = null;
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -104,7 +107,7 @@
     quarterly: 'Trimestriel',
   };
 
-  var STATUS_LABELS = { draft: 'Brouillon', published: 'Publié', archived: 'Archivé' };
+  var STATUS_LABELS = { draft: 'Brouillon', en_test: 'En test', published: 'Publié', archived: 'Archivé' };
 
   var STATIC_TYPES = ['titre', 'sstitre', 'separator', 'texte'];
 
@@ -337,7 +340,7 @@
       : { id: null, title: '', description: '', icon: 'fa-file-lines', color: '#8B5CF6', status: 'draft', frequency: 'on_demand', sections: [] };
     _builderSecs = JSON.parse(JSON.stringify(_builderTpl.sections || []));
     if (!_builderSecs.length) {
-      _builderSecs.push({ id: _uid(), label: 'Section 1', color: SEC_COLORS[0], columns: ['etat'], rows: [] });
+      _builderSecs.push({ id: _uid(), label: 'Section 1', color: SEC_COLORS[0], extraCols: [], controls: [] });
     } else {
       _builderSecs.forEach(function(s, i) { if (!s.color) s.color = SEC_COLORS[i % SEC_COLORS.length]; });
     }
@@ -406,6 +409,7 @@
     _v7PalTab      = 'types';
     _v7ModalDef    = null;
     _v7ModalIsNew  = true;
+    _v8SelCIdx     = null;
     render();
   }
 
@@ -1256,8 +1260,9 @@
     var color = sec.color || '#6366F1';
     var collapsed = !!_v6SecCollapsed[sIdx];
     var selected = (_v6SelSIdx === sIdx && _v6SelBIdx === null);
-    var isTable = !!sec.rows;
-    var cnt = isTable ? (sec.rows || []).length : (sec.blocks || []).length;
+    var isV8 = sec.controls !== undefined;
+    var isTable = !isV8 && !!sec.rows;
+    var cnt = isV8 ? (sec.controls || []).length : (isTable ? (sec.rows || []).length : (sec.blocks || []).length);
     var h = '<div class="mxd6-sec' + (selected ? ' mxd6-sec--sel' : '') + '" id="mxd6-sec-' + sIdx + '"'
       + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6SecDzOver(event,' + sIdx + ')"'
       + ' ondragleave="MX.Pages.MxDoc._v6SecDzLeave(event,' + sIdx + ')"'
@@ -1282,7 +1287,9 @@
       + '</div>';
     if (!collapsed) {
       h += '<div class="mxd6-sec-bd">';
-      if (isTable) {
+      if (isV8) {
+        h += _v8SectionBodyHTML(sec, sIdx);
+      } else if (isTable) {
         h += _v6TableHTML(sec, sIdx);
       } else {
         var blks = sec.blocks || [];
@@ -1528,7 +1535,9 @@
     var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
     if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
     var sec = _builderSecs[sIdx];
-    if (!sec || !sec.rows) return;
+    if (!sec) return;
+    if (sec.controls !== undefined) { _v8HandleColDrop(sIdx, typeKey); return; }
+    if (!sec.rows) return;
     _v6Push();
     var cols = sec.columns || [];
     if (cols.indexOf(typeKey) < 0) { cols.push(typeKey); sec.columns = cols; }
@@ -1547,7 +1556,9 @@
     var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
     if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
     var sec = _builderSecs[sIdx];
-    if (!sec || !sec.rows) return;
+    if (!sec) return;
+    if (sec.controls !== undefined) { _v8HandleColDrop(sIdx, colId); return; }
+    if (!sec.rows) return;
     _v6Push();
     var cols = sec.columns || [];
     if (cols.indexOf(colId) < 0) { cols.push(colId); sec.columns = cols; }
@@ -2000,6 +2011,13 @@
     if (_v6SelSIdx === null) return _v6DocPropsHTML();
     var sec = _builderSecs[_v6SelSIdx];
     if (!sec) return _v6DocPropsHTML();
+    // V8 section dispatch
+    if (sec.controls !== undefined) {
+      if (_v6SelBIdx === null) return _v8SecPropsHTML(sec, _v6SelSIdx);
+      var ctrl = sec.controls[_v6SelBIdx];
+      if (!ctrl) return _v8SecPropsHTML(sec, _v6SelSIdx);
+      return _v8CtrlPropsHTML(ctrl, _v6SelSIdx, _v6SelBIdx);
+    }
     if (_v6SelBIdx === null) return _v6SecPropsHTML(sec, _v6SelSIdx);
     var items = sec.rows || sec.blocks || [];
     var item = items[_v6SelBIdx];
@@ -2284,7 +2302,7 @@
   function _v6AddSection() {
     _v6Push();
     var color = V6_SECTION_COLORS[_builderSecs.length % V6_SECTION_COLORS.length];
-    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', color: color, columns: ['etat'], rows: [] });
+    _builderSecs.push({ id: _uid(), label: 'Nouvelle section', color: color, extraCols: [], controls: [] });
     _v6RefreshCanvas();
     _v6SelectSec(_builderSecs.length - 1);
   }
@@ -2301,7 +2319,8 @@
     _v6Push();
     var copy = JSON.parse(JSON.stringify(_builderSecs[sIdx]));
     copy.id = _uid(); copy.label += ' (copie)';
-    if (copy.rows) { copy.rows.forEach(function(r) { r.id = _uid(); }); }
+    if (copy.controls) { copy.controls.forEach(function(c) { c.id = _uid(); }); }
+    else if (copy.rows) { copy.rows.forEach(function(r) { r.id = _uid(); }); }
     else if (copy.blocks) { copy.blocks.forEach(function(b) { b.id = _uid(); }); }
     _builderSecs.splice(sIdx + 1, 0, copy);
     _v6RefreshCanvas(); _v6SelectSec(sIdx + 1);
@@ -2530,7 +2549,11 @@
       _v6RefreshCanvas(); _v6RefreshProps();
     } else if (dd.type === 'col') {
       var sec = _builderSecs[sIdx];
-      if (sec && sec.rows) _v6ToggleCol(sIdx, dd.colKey);
+      if (sec && sec.controls !== undefined) {
+        _v8HandleColDrop(sIdx, dd.colKey);
+      } else if (sec && sec.rows) {
+        _v6ToggleCol(sIdx, dd.colKey);
+      }
     }
   }
 
@@ -4765,6 +4788,751 @@
     render();
   }
 
+
+  // ── V8 EXEC & BUILDER FUNCTIONS ────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════════
+  // MX DOC V8 — CONSTRUCTEUR DE PROCÉDURES TECHNIQUES INTELLIGENTES
+  // Philosophie: Contrôle métier = ligne indépendante avec Smart Column primaire
+  // Section → Contrôles (chacun avec son type) + Colonnes partagées (extras)
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  // ── V8 STATE ─────────────────────────────────────────────────────────────────
+  // (declared at top of module — see _v6SelBIdx etc. — _v8SelCIdx added there)
+
+  // ── V8 SECTION BUILDER ───────────────────────────────────────────────────────
+
+  function _v8SectionBodyHTML(sec, sIdx) {
+    var e = _e;
+    var extras = (sec.extraCols || []).map(_v7ResolveCol).filter(Boolean);
+    var controls = sec.controls || [];
+
+    // Extra columns bar
+    var h = '<div class="mxd8-extras-bar">';
+    h += '<span class="mxd8-extras-lbl">Colonnes partagées :</span>';
+    if (extras.length) {
+      extras.forEach(function(r, ci) {
+        var col = r.def;
+        var ct = _v7TypeDef(col.type || col.key);
+        var color = col.color || (ct ? ct.color : '#64748B');
+        var faIcon = ct ? ct.icon : 'fa-columns';
+        var emoji = col.icon || '';
+        h += '<span class="mxd8-extra-tag" style="border-color:' + color + '22;color:' + color + '">'
+          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
+          + ' ' + e(col.name || col.l || col.key)
+          + '<button class="mxd8-extra-rm" onclick="event.stopPropagation();MX.Pages.MxDoc._v8RemoveExtraCol(' + sIdx + ',' + ci + ')" title="Retirer"><i class="fa-solid fa-xmark"></i></button>'
+          + '</span>';
+      });
+    } else {
+      h += '<span class="mxd8-extras-empty">Aucune — ex : Photo, Commentaire, Signature…</span>';
+    }
+    h += '<button class="mxd8-extras-add" onclick="event.stopPropagation();MX.Pages.MxDoc._v8AddExtraColMenu(' + sIdx + ')">'
+      + '<i class="fa-solid fa-plus"></i> Ajouter</button>';
+    h += '</div>';
+
+    // Control table
+    if (!controls.length) {
+      h += '<div class="mxd8-empty">'
+        + '<i class="fa-regular fa-circle-dot"></i>'
+        + '<p>Glissez un type depuis la palette, ou cliquez <strong>Ajouter un contrôle</strong></p>'
+        + '</div>';
+    } else {
+      h += '<table class="mxd8-tbl"><thead><tr>'
+        + '<th class="mxd8-th-drag"></th>'
+        + '<th class="mxd8-th-ctrl">Contrôle</th>'
+        + '<th class="mxd8-th-primary">Mesure principale</th>';
+      extras.forEach(function(r) {
+        var col = r.def;
+        var ct = _v7TypeDef(col.type || col.key);
+        var color = col.color || (ct ? ct.color : '#64748B');
+        var emoji = col.icon || '';
+        var faIcon = ct ? ct.icon : 'fa-columns';
+        h += '<th class="mxd8-th-extra" style="color:' + color + '">'
+          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
+          + ' ' + e(col.name || col.l || col.key) + '</th>';
+      });
+      h += '<th class="mxd8-th-acts"></th></tr></thead><tbody>';
+      controls.forEach(function(ctrl, cIdx) {
+        h += _v8ControlRowHTML(ctrl, sIdx, cIdx, extras);
+      });
+      h += '</tbody></table>';
+    }
+
+    h += '<button class="mxd6-add-line" onclick="MX.Pages.MxDoc._v8AddControl(' + sIdx + ')">'
+      + '<i class="fa-solid fa-plus"></i> Ajouter un contrôle</button>';
+    return h;
+  }
+
+  function _v8ControlRowHTML(ctrl, sIdx, cIdx, extras) {
+    var e = _e;
+    var isSelected = (_v6SelSIdx === sIdx && _v6SelBIdx === cIdx);
+    var resolved = _v8ResolveCtrl(ctrl);
+    var col = resolved ? resolved.def : null;
+
+    h = '<tr class="mxd8-ctrl-row' + (isSelected ? ' mxd8-ctrl-row--sel' : '') + '"'
+      + ' id="mxd8-ctrl-' + sIdx + '-' + cIdx + '"'
+      + ' draggable="true"'
+      + ' ondragstart="MX.Pages.MxDoc._v8CtrlDragStart(event,' + sIdx + ',' + cIdx + ')"'
+      + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v8CtrlDzOver(event,' + sIdx + ',' + cIdx + ')"'
+      + ' ondragleave="MX.Pages.MxDoc._v8CtrlDzLeave(event,' + sIdx + ',' + cIdx + ')"'
+      + ' ondrop="MX.Pages.MxDoc._v8CtrlDzDrop(event,' + sIdx + ',' + cIdx + ')"'
+      + ' onclick="MX.Pages.MxDoc._v8SelectControl(' + sIdx + ',' + cIdx + ')">'
+      + '<td class="mxd8-td-drag"><i class="fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i></td>'
+      + '<td class="mxd8-td-ctrl">'
+      +   '<span class="mxd8-ctrl-lbl' + (ctrl.required ? ' mxd8-ctrl-lbl--req' : '') + '"'
+      +     ' contenteditable="true" onclick="event.stopPropagation()"'
+      +     ' onblur="MX.Pages.MxDoc._v8CtrlSetLabel(' + sIdx + ',' + cIdx + ',this)"'
+      +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
+      +     '>' + e(ctrl.label || '') + '</span>'
+      +   (col ? _v8TypeBadge(col) : '<span class="mxd8-badge-pick">— Choisir un type</span>')
+      + '</td>'
+      + '<td class="mxd8-td-primary">' + (col ? _v8PrimaryPreview(ctrl, col) : '<span class="mxd8-no-type"><i class="fa-regular fa-question-circle"></i></span>') + '</td>';
+
+    // Extra col preview cells
+    (extras || []).forEach(function() {
+      h += '<td class="mxd8-td-extra"><span class="mxd8-extra-dot"></span></td>';
+    });
+
+    h += '<td class="mxd8-td-acts">'
+      + '<button class="mxd6-row-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v8DupControl(' + sIdx + ',' + cIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
+      + '<button class="mxd6-row-act' + (ctrl.required ? ' mxd6-row-act--on' : '') + '" onclick="event.stopPropagation();MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'required\')" title="Obligatoire"><i class="fa-solid fa-asterisk"></i></button>'
+      + '<button class="mxd6-row-act mxd6-row-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v8DelControl(' + sIdx + ',' + cIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+      + '</td></tr>';
+    return h;
+  }
+
+  // Resolve a control's primary column definition
+  function _v8ResolveCtrl(ctrl) {
+    if (!ctrl) return null;
+    if (ctrl.colId) {
+      var r = _v7ResolveCol(ctrl.colId);
+      if (r) return r;
+    }
+    if (ctrl.type) {
+      // Inline type → synthetic def merging ctrl props
+      var ct = _v7TypeDef(ctrl.type);
+      return { src: 'inline', def: Object.assign({}, ct || {}, ctrl, { key: ctrl.type }) };
+    }
+    return null;
+  }
+
+  // Type badge for builder
+  function _v8TypeBadge(col) {
+    var e = _e;
+    var ct = _v7TypeDef(col.type || col.key);
+    var color = col.color || (ct ? ct.color : '#64748B');
+    var faIcon = ct ? ct.icon : 'fa-columns';
+    var label = col.name || col.l || (ct ? ct.l : col.key);
+    var sub = [];
+    if (col.unit) sub.push(col.unit);
+    if (col.min !== undefined && col.max !== undefined) sub.push(col.min + '–' + col.max);
+    else if (col.min !== undefined) sub.push('≥' + col.min);
+    else if (col.max !== undefined) sub.push('≤' + col.max);
+    return '<span class="mxd8-type-badge" style="color:' + color + '">'
+      + '<i class="fa-solid ' + faIcon + '"></i> '
+      + e(label)
+      + (sub.length ? ' <span class="mxd8-badge-sub">' + e(sub.join(' · ')) + '</span>' : '')
+      + '</span>';
+  }
+
+  // Preview cell in builder (non-interactive)
+  function _v8PrimaryPreview(ctrl, col) {
+    var e = _e;
+    var type = col.type || col.key || 'texte';
+    switch (type) {
+      case 'int': case 'decimal': case 'pourcent': case 'monnaie': case 'compteur':
+        return '<div class="mxd8-preview-num-wrap">'
+          + '<input class="mxd8-preview-num" type="number" placeholder="' + (col.defaultVal !== undefined ? col.defaultVal : '—') + '" tabindex="-1" disabled>'
+          + (col.unit ? '<span class="mxd8-preview-unit">' + e(col.unit) + '</span>' : '')
+          + '</div>';
+      case 'etat': case 'etatcheck':
+        return '<div class="mxd8-preview-toggle"><button class="mxd8-btn-ok-sm" disabled><i class="fa-solid fa-check"></i></button><button class="mxd8-btn-ko-sm" disabled><i class="fa-solid fa-xmark"></i></button></div>';
+      case 'conforme':
+        return '<div class="mxd8-preview-toggle"><button class="mxd8-btn-ok-sm" disabled>' + e(col.libelleOk || 'Conforme') + '</button><button class="mxd8-btn-ko-sm" disabled>' + e(col.libelleKo || 'Défaut') + '</button></div>';
+      case 'ouinon':
+        return '<div class="mxd8-preview-toggle"><button class="mxd8-btn-ok-sm" disabled>' + e(col.labelOui || 'Oui') + '</button><button class="mxd8-btn-ko-sm" disabled>' + e(col.labelNon || 'Non') + '</button></div>';
+      case 'marchearret':
+        return '<div class="mxd8-preview-toggle"><button class="mxd8-btn-ok-sm" disabled>M</button><button class="mxd8-btn-ko-sm" disabled>A</button></div>';
+      case 'liste':
+        var opts = (col.listeValues || []).slice(0, 3).map(function(v) { return '<option>' + e(v) + '</option>'; }).join('');
+        return '<select class="mxd8-preview-select" disabled><option>—</option>' + opts + '</select>';
+      case 'photo':
+        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-camera"></i>' + (col.photoMax > 1 ? ' ×' + col.photoMax : '') + '</span>';
+      case 'signature':
+        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-pen-nib"></i> Signature</span>';
+      case 'date':
+        return '<input class="mxd8-preview-num" type="date" tabindex="-1" disabled style="width:120px">';
+      case 'heure': case 'temps':
+        return '<input class="mxd8-preview-num" type="time" tabindex="-1" disabled style="width:90px">';
+      case 'commentaire': case 'texte':
+        return '<span class="mxd8-preview-ic"><i class="fa-regular fa-comment"></i> Commentaire</span>';
+      case 'barcode':
+        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-barcode"></i> Code-barres</span>';
+      case 'qrcode':
+        return '<span class="mxd8-preview-ic"><i class="fa-solid fa-qrcode"></i> QR Code</span>';
+      default:
+        return '<span class="mxd8-preview-ic">—</span>';
+    }
+  }
+
+  // ── V8 PROPS PANEL ───────────────────────────────────────────────────────────
+
+  function _v8SecPropsHTML(sec, sIdx) {
+    var e = _e;
+    var color = sec.color || '#6366F1';
+    var extras = sec.extraCols || [];
+    var h = '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-folder-open"></i> Section</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      +   '<input class="mxd6-prop-inp" type="text" value="' + e(sec.label || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v6SecLabelProp(' + sIdx + ',this.value)">'
+      + '</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Couleur</label>'
+      +   '<div class="mxd6-color-pal">'
+      +   V6_SECTION_COLORS.map(function(c) {
+            return '<button class="mxd6-color-dot' + (color === c ? ' mxd6-color-dot--on' : '') + '"'
+              + ' style="background:' + c + '"'
+              + ' onclick="MX.Pages.MxDoc._v6SecColor(' + sIdx + ',\'' + c + '\')"></button>';
+          }).join('')
+      +   '</div>'
+      + '</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Colonnes partagées</label>'
+      + '<p class="mxd8-props-tip">Colonnes ajoutées après la mesure principale sur chaque contrôle (photo, commentaire, signature…)</p>';
+
+    if (extras.length) {
+      h += '<div class="mxd8-extras-prop-list">';
+      extras.forEach(function(ck, ci) {
+        var r = _v7ResolveCol(ck);
+        var col = r ? r.def : null;
+        var ct = col ? _v7TypeDef(col.type || col.key) : null;
+        var color2 = col ? (col.color || (ct ? ct.color : '#64748B')) : '#64748B';
+        var label = col ? (col.name || col.l || col.key) : ck;
+        var faIcon = ct ? ct.icon : 'fa-columns';
+        var emoji = col ? (col.icon || '') : '';
+        h += '<div class="mxd8-extras-prop-row" style="color:' + color2 + '">'
+          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '"></i>')
+          + ' <span>' + e(label) + '</span>'
+          + '<button class="mxd8-extra-rm" onclick="MX.Pages.MxDoc._v8RemoveExtraCol(' + sIdx + ',' + ci + ')"><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      });
+      h += '</div>';
+    }
+
+    h += '<button class="mxd7-liste-add" onclick="MX.Pages.MxDoc._v8AddExtraColMenu(' + sIdx + ')">'
+      + '<i class="fa-solid fa-plus"></i> Ajouter une colonne partagée</button>';
+    h += '</div>'
+      + '<hr class="mxd6-sep"><div class="mxd6-prop-actions">'
+      + '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v6DupSection(' + sIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v6DelSection(' + sIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div></div>';
+    return h;
+  }
+
+  function _v8CtrlPropsHTML(ctrl, sIdx, cIdx) {
+    var e = _e;
+    var resolved = _v8ResolveCtrl(ctrl);
+    var col = resolved ? resolved.def : null;
+    var type = col ? (col.type || col.key) : null;
+    var ct = type ? _v7TypeDef(type) : null;
+
+    var h = '<div class="mxd6-props-inner">'
+      + '<div class="mxd6-props-hd"><i class="fa-regular fa-circle-dot"></i> Contrôle</div>'
+      + '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Nom</label>'
+      +   '<input class="mxd6-prop-inp" type="text" id="mxd8-ctrl-name-inp" value="' + e(ctrl.label || '') + '"'
+      +   ' oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'label\',this.value)">'
+      + '</div>';
+
+    // Primary column selector
+    h += '<div class="mxd6-prop-grp"><label class="mxd6-prop-lbl">Type de mesure principale</label>';
+    if (col) {
+      h += '<div class="mxd8-ctrl-col-sel">'
+        + _v8TypeBadge(col)
+        + '<button class="mxd8-change-btn" onclick="MX.Pages.MxDoc._v8OpenPrimaryPicker(' + sIdx + ',' + cIdx + ')">Changer</button>'
+        + '</div>';
+
+      // Type-specific props inline
+      if (type === 'int' || type === 'decimal' || type === 'pourcent' || type === 'monnaie' || type === 'compteur') {
+        h += '<div class="mxd8-inline-params">';
+        h += '<div class="mxd7-mf-row">';
+        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Unité</label><input class="mxd7-mf-inp" type="text" value="' + e(ctrl.unit !== undefined ? ctrl.unit : (col.unit || '')) + '" placeholder="pH, °C…" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'unit\',this.value)"></div>';
+        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Mini</label><input class="mxd7-mf-inp" type="number" value="' + (ctrl.min !== undefined ? ctrl.min : (col.min !== undefined ? col.min : '')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'min\',parseFloat(this.value)||null)"></div>';
+        h += '<div class="mxd7-mf-grp"><label class="mxd7-mf-lbl">Maxi</label><input class="mxd7-mf-inp" type="number" value="' + (ctrl.max !== undefined ? ctrl.max : (col.max !== undefined ? col.max : '')) + '" oninput="MX.Pages.MxDoc._v8CtrlProp(' + sIdx + ',' + cIdx + ',\'max\',parseFloat(this.value)||null)"></div>';
+        h += '</div></div>';
+      }
+    } else {
+      h += '<button class="mxd8-pick-type-btn" onclick="MX.Pages.MxDoc._v8OpenPrimaryPicker(' + sIdx + ',' + cIdx + ')">'
+        + '<i class="fa-solid fa-plus"></i> Choisir un type de mesure</button>';
+    }
+    h += '</div>';
+
+    // Toggles
+    h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Obligatoire</span>'
+      + '<button class="mxd6-toggle' + (ctrl.required ? ' mxd6-toggle--on' : '') + '"'
+      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'required\')"></button></div>';
+    h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Historique</span>'
+      + '<button class="mxd6-toggle' + (ctrl.history ? ' mxd6-toggle--on' : '') + '"'
+      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'history\')"></button></div>';
+    h += '<div class="mxd6-prop-toggle-row"><span class="mxd6-prop-toggle-lbl">Commentaire si défaut</span>'
+      + '<button class="mxd6-toggle' + (ctrl.commentIfDefaut ? ' mxd6-toggle--on' : '') + '"'
+      +   ' onclick="MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'commentIfDefaut\')"></button></div>';
+
+    h += '<hr class="mxd6-sep"><div class="mxd6-prop-actions">'
+      + '<button class="mxd6-prop-act-btn" onclick="MX.Pages.MxDoc._v8DupControl(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button class="mxd6-prop-act-btn mxd6-prop-act-btn--del" onclick="MX.Pages.MxDoc._v8DelControl(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div></div>';
+    return h;
+  }
+
+  // ── PRIMARY PICKER MODAL ─────────────────────────────────────────────────────
+
+  function _v8OpenPrimaryPicker(sIdx, cIdx) {
+    var e = _e;
+    var existing = document.getElementById('mxd8-picker-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'mxd8-picker-overlay';
+    overlay.className = 'mxd7-modal-overlay';
+
+    var libHtml = '';
+    if (_colLibrary.length) {
+      libHtml += '<p class="mxd6-pal-label" style="margin:0 0 8px">DEPUIS LA BIBLIOTHÈQUE</p><div class="mxd7-type-grid">';
+      _colLibrary.forEach(function(col) {
+        var ct = _v7TypeDef(col.type);
+        var color = col.color || (ct ? ct.color : '#64748B');
+        var faIcon = ct ? ct.icon : 'fa-columns';
+        var emoji = col.icon || '';
+        libHtml += '<button class="mxd7-type-chip" style="border-color:' + color + '30"'
+          + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'lib\',' + JSON.stringify(col.id) + ');document.getElementById(\'mxd8-picker-overlay\').remove()">'
+          + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '" style="color:' + color + '"></i>')
+          + '<span style="color:' + color + '">' + e(col.name) + '</span>'
+          + '</button>';
+      });
+      libHtml += '</div><hr class="mxd6-sep">';
+    }
+
+    var typesHtml = '<p class="mxd6-pal-label" style="margin:0 0 8px">TYPES RAPIDES</p><div class="mxd7-type-grid">';
+    V7_COL_TYPES.forEach(function(c) {
+      typesHtml += '<button class="mxd7-type-chip"'
+        + ' onclick="MX.Pages.MxDoc._v8PickPrimary(' + sIdx + ',' + cIdx + ',\'type\',' + JSON.stringify(c.key) + ');document.getElementById(\'mxd8-picker-overlay\').remove()">'
+        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i>'
+        + '<span>' + e(c.l) + '</span>'
+        + '</button>';
+    });
+    typesHtml += '</div>';
+
+    overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal">'
+      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title">Choisir le type de mesure</span>'
+      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-picker-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxd7-modal-body">' + libHtml + typesHtml + '</div>'
+      + '</div></div>';
+    document.body.appendChild(overlay);
+  }
+
+  function _v8PickPrimary(sIdx, cIdx, src, keyOrId) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx];
+    if (!ctrl) return;
+    _v6Push();
+    if (src === 'lib') {
+      ctrl.colId = keyOrId;
+      ctrl.type = null;
+    } else {
+      ctrl.type = keyOrId;
+      ctrl.colId = null;
+    }
+    _v6RefreshSection(sIdx);
+    _v6RefreshProps();
+  }
+
+  // ── V8 EXTRA COLUMNS MENU ────────────────────────────────────────────────────
+
+  function _v8AddExtraColMenu(sIdx) {
+    var e = _e;
+    var existing = document.getElementById('mxd8-extra-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'mxd8-extra-overlay';
+    overlay.className = 'mxd7-modal-overlay';
+
+    var sec = _builderSecs[sIdx];
+    var currentExtras = sec ? (sec.extraCols || []) : [];
+
+    var libHtml = '<p class="mxd6-pal-label" style="margin:0 0 8px">BIBLIOTHÈQUE</p><div class="mxd7-type-grid">';
+    _colLibrary.forEach(function(col) {
+      var alreadyIn = currentExtras.indexOf(col.id) >= 0;
+      var ct = _v7TypeDef(col.type);
+      var color = col.color || (ct ? ct.color : '#64748B');
+      var faIcon = ct ? ct.icon : 'fa-columns';
+      var emoji = col.icon || '';
+      libHtml += '<button class="mxd7-type-chip' + (alreadyIn ? ' mxd7-type-chip--on' : '') + '" style="border-color:' + color + '30"'
+        + ' onclick="MX.Pages.MxDoc._v8AddExtraCol(' + sIdx + ',' + JSON.stringify(col.id) + ');document.getElementById(\'mxd8-extra-overlay\').remove()">'
+        + (emoji ? '<span class="mxd7-col-emoji-sm">' + e(emoji) + '</span>' : '<i class="fa-solid ' + faIcon + '" style="color:' + color + '"></i>')
+        + '<span style="color:' + color + '">' + e(col.name) + '</span>'
+        + (alreadyIn ? ' <i class="fa-solid fa-check" style="font-size:10px;color:#22C55E"></i>' : '')
+        + '</button>';
+    });
+    libHtml += '</div>';
+    if (!_colLibrary.length) libHtml = '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Aucune colonne dans la bibliothèque. Créez-en une depuis l\'onglet Bibliothèque.</p></div>';
+
+    var typesHtml = '<hr class="mxd6-sep"><p class="mxd6-pal-label" style="margin:0 0 8px">TYPES RAPIDES</p><div class="mxd7-type-grid">';
+    V7_COL_TYPES.forEach(function(c) {
+      typesHtml += '<button class="mxd7-type-chip"'
+        + ' onclick="MX.Pages.MxDoc._v8AddExtraCol(' + sIdx + ',' + JSON.stringify(c.key) + ');document.getElementById(\'mxd8-extra-overlay\').remove()">'
+        + '<i class="fa-solid ' + c.icon + '" style="color:' + c.color + '"></i>'
+        + '<span>' + e(c.l) + '</span>'
+        + '</button>';
+    });
+    typesHtml += '</div>';
+
+    overlay.innerHTML = '<div class="mxd7-modal-inner"><div class="mxd7-modal">'
+      + '<div class="mxd7-modal-hdr"><span class="mxd7-modal-title">Ajouter une colonne partagée</span>'
+      + '<button class="mxd7-modal-close" onclick="document.getElementById(\'mxd8-extra-overlay\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxd7-modal-body">' + libHtml + typesHtml + '</div>'
+      + '</div></div>';
+    document.body.appendChild(overlay);
+  }
+
+  function _v8AddExtraCol(sIdx, colKey) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v6Push();
+    sec.extraCols = sec.extraCols || [];
+    if (sec.extraCols.indexOf(colKey) < 0) sec.extraCols.push(colKey);
+    _v6RefreshSection(sIdx);
+    _v6RefreshProps();
+  }
+
+  function _v8RemoveExtraCol(sIdx, ci) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.extraCols) return;
+    _v6Push();
+    sec.extraCols.splice(ci, 1);
+    _v6RefreshSection(sIdx);
+    _v6RefreshProps();
+  }
+
+  // ── V8 CRUD ──────────────────────────────────────────────────────────────────
+
+  function _v8AddControl(sIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec) return;
+    _v6Push();
+    sec.controls = sec.controls || [];
+    sec.controls.push({ id: _uid(), label: 'Contrôle ' + (sec.controls.length + 1), colId: null, type: null, required: false, history: false });
+    _v6RefreshSection(sIdx);
+    _v8SelectControl(sIdx, sec.controls.length - 1);
+  }
+
+  function _v8DelControl(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.controls) return;
+    _v6Push();
+    sec.controls.splice(cIdx, 1);
+    _v6SelBIdx = null;
+    _v6RefreshSection(sIdx);
+    _v6RefreshProps();
+  }
+
+  function _v8DupControl(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.controls) return;
+    _v6Push();
+    var copy = JSON.parse(JSON.stringify(sec.controls[cIdx]));
+    copy.id = _uid();
+    copy.label += ' (copie)';
+    sec.controls.splice(cIdx + 1, 0, copy);
+    _v6RefreshSection(sIdx);
+  }
+
+  function _v8SelectControl(sIdx, cIdx) {
+    var prevS = _v6SelSIdx; var prevB = _v6SelBIdx;
+    _v6SelSIdx = sIdx; _v6SelBIdx = cIdx;
+    if (prevB !== null && prevS !== null) {
+      var pr = document.getElementById('mxd8-ctrl-' + prevS + '-' + prevB);
+      if (pr) pr.classList.remove('mxd8-ctrl-row--sel');
+      var pr2 = document.getElementById('mxd6-row-' + prevS + '-' + prevB);
+      if (pr2) { pr2.classList.remove('mxd6-row--sel'); pr2.classList.remove('mxd6-tbl-row--sel'); }
+    }
+    if (prevS !== null && prevB === null) {
+      var ps = document.getElementById('mxd6-sec-' + prevS);
+      if (ps) ps.classList.remove('mxd6-sec--sel');
+    }
+    var nr = document.getElementById('mxd8-ctrl-' + sIdx + '-' + cIdx);
+    if (nr) nr.classList.add('mxd8-ctrl-row--sel');
+    _v6RefreshProps();
+  }
+
+  function _v8CtrlSetLabel(sIdx, cIdx, el) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    var val = el.textContent || '';
+    if (ctrl.label === val) return;
+    _v6Push(); ctrl.label = val;
+  }
+
+  function _v8CtrlProp(sIdx, cIdx, key, val) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    ctrl[key] = val;
+    _v6RefreshSection(sIdx);
+  }
+
+  function _v8CtrlToggle(sIdx, cIdx, key) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    _v6Push(); ctrl[key] = !ctrl[key];
+    _v6RefreshSection(sIdx); _v6RefreshProps();
+  }
+
+  // ── V8 DRAG & DROP CONTROLS ──────────────────────────────────────────────────
+
+  function _v8CtrlDragStart(e, sIdx, cIdx) {
+    _v6DragData = { type: 'ctrl', sIdx: sIdx, cIdx: cIdx };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'ctrl');
+    e.stopPropagation();
+  }
+
+  function _v8CtrlDzOver(e, sIdx, cIdx) {
+    if (!_v6DragData || _v6DragData.type !== 'ctrl') return;
+    e.preventDefault();
+    var el = document.getElementById('mxd8-ctrl-' + sIdx + '-' + cIdx);
+    if (el) el.classList.add('mxd8-ctrl-row--dz');
+  }
+
+  function _v8CtrlDzLeave(e, sIdx, cIdx) {
+    var el = document.getElementById('mxd8-ctrl-' + sIdx + '-' + cIdx);
+    if (el) el.classList.remove('mxd8-ctrl-row--dz');
+  }
+
+  function _v8CtrlDzDrop(e, sIdx, cIdx) {
+    e.preventDefault(); e.stopPropagation();
+    var el = document.getElementById('mxd8-ctrl-' + sIdx + '-' + cIdx);
+    if (el) el.classList.remove('mxd8-ctrl-row--dz');
+    var dd = _v6DragData;
+    if (!dd || dd.type !== 'ctrl') return;
+    if (dd.sIdx === sIdx && dd.cIdx === cIdx) return;
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    _v6Push();
+    if (dd.sIdx === sIdx) {
+      var arr = sec.controls;
+      var moved = arr.splice(dd.cIdx, 1)[0];
+      var insertAt = cIdx > dd.cIdx ? cIdx - 1 : cIdx;
+      arr.splice(insertAt, 0, moved);
+    } else {
+      // Cross-section move
+      var srcSec = _builderSecs[dd.sIdx];
+      if (!srcSec || !srcSec.controls) return;
+      var moved2 = srcSec.controls.splice(dd.cIdx, 1)[0];
+      sec.controls.splice(cIdx, 0, moved2);
+      _v6RefreshSection(dd.sIdx);
+    }
+    _v6RefreshSection(sIdx);
+  }
+
+  // When palette type/lib item is dropped on a V8 section: create control
+  function _v8HandleColDrop(sIdx, colKey) {
+    var sec = _builderSecs[sIdx];
+    if (!sec || !sec.controls) return;
+    _v6Push();
+    // Is it a library ID?
+    var r = _v7ResolveCol(colKey);
+    var label = '';
+    if (r) {
+      label = r.def.name || r.def.l || r.def.key;
+    }
+    sec.controls.push({
+      id: _uid(),
+      label: label || ('Contrôle ' + (sec.controls.length + 1)),
+      colId: (r && r.src === 'v7') ? colKey : null,
+      type: (r && r.src !== 'v7') ? colKey : null,
+      required: false,
+      history: false
+    });
+    _v6RefreshSection(sIdx);
+    _v8SelectControl(sIdx, sec.controls.length - 1);
+  }
+
+  // ── V8 EXEC RENDERING ────────────────────────────────────────────────────────
+
+  function _renderV8ExecSection(sec) {
+    var e = _e;
+    var controls = sec.controls || [];
+    if (!controls.length) return '';
+    var extraResolved = (sec.extraCols || []).map(_v7ResolveCol).filter(Boolean);
+
+    var h = '<div class="mxd-exec-sec">'
+      + '<div class="mxd-exec-sec-hdr">' + e(sec.label || 'Section') + '</div>'
+      + '<div class="mxd8-exec-controls">';
+
+    controls.forEach(function(ctrl) {
+      var rid = e(ctrl.id);
+      var resolved = _v8ResolveCtrl(ctrl);
+      var col = resolved ? resolved.def : null;
+      var type = col ? (col.type || col.key) : null;
+      var ct = type ? _v7TypeDef(type) : null;
+      var color = col ? (col.color || (ct ? ct.color : '#0EA5E9')) : '#64748B';
+
+      h += '<div class="mxd8-exec-ctrl" data-rid="' + rid + '">';
+      h += '<div class="mxd8-exec-ctrl-hd">'
+        + '<span class="mxd8-exec-ctrl-lbl">' + e(ctrl.label || '') + (ctrl.required ? '<span class="mxd-req"> *</span>' : '') + '</span>';
+      if (col && (col.min !== undefined || col.max !== undefined || col.unit)) {
+        h += '<span class="mxd8-exec-ctrl-hint" style="color:' + color + '">';
+        if (col.unit) h += e(col.unit) + ' ';
+        if (col.min !== undefined && col.max !== undefined) h += e(col.min) + '–' + e(col.max);
+        else if (col.min !== undefined) h += '≥' + e(col.min);
+        else if (col.max !== undefined) h += '≤' + e(col.max);
+        h += '</span>';
+      }
+      h += '</div>';
+
+      // Primary input
+      h += '<div class="mxd8-exec-primary">';
+      if (col) {
+        h += _v8ExecPrimaryHTML(ctrl, col, rid);
+        h += '<span class="mxd7-val-err" id="mxd7-err-' + rid + '-primary"></span>';
+      } else {
+        h += '<span class="mxd8-exec-no-type">Type non configuré</span>';
+      }
+      h += '</div>';
+
+      // Conditional comment (commentIfDefaut)
+      if (ctrl.commentIfDefaut) {
+        h += '<div class="mxd8-exec-cmt-cond" id="mxd8-cmt-cond-' + rid + '" style="display:none">'
+          + '<input class="mxd-v6exec-comment" type="text" placeholder="Commentaire obligatoire…"'
+          + ' onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'comment_defaut\',this.value)">'
+          + '</div>';
+      }
+
+      // Extra columns
+      if (extraResolved.length) {
+        h += '<div class="mxd8-exec-extras">';
+        extraResolved.forEach(function(r) {
+          var excol = r.def;
+          var eck = excol.id || excol.key;
+          h += '<div class="mxd8-exec-extra-item">'
+            + _v7ExecCellHTML(excol, ctrl)
+            + '</div>';
+        });
+        h += '</div>';
+      }
+
+      h += '</div>'; // mxd8-exec-ctrl
+    });
+
+    h += '</div></div>';
+    return h;
+  }
+
+  function _v8ExecPrimaryHTML(ctrl, col, rid) {
+    var e = _e;
+    var type = col.type || col.key || 'texte';
+    var safeKey = '"primary"';
+    // Use effective min/max (ctrl override takes precedence over col def)
+    var min = ctrl.min !== undefined ? ctrl.min : col.min;
+    var max = ctrl.max !== undefined ? ctrl.max : col.max;
+    var unit = ctrl.unit !== undefined ? ctrl.unit : col.unit;
+    var decimals = ctrl.decimals !== undefined ? ctrl.decimals : col.decimals;
+    var ph = col.defaultVal !== undefined ? String(col.defaultVal) : '—';
+
+    switch (type) {
+      case 'int': case 'decimal': case 'pourcent': case 'monnaie': case 'compteur':
+        return '<div class="mxd8-exec-num-wrap">'
+          + '<input class="mxd8-exec-num" type="number" placeholder="' + e(ph) + '"'
+          + (min !== undefined && min !== null ? ' min="' + min + '"' : '')
+          + (max !== undefined && max !== null ? ' max="' + max + '"' : '')
+          + (decimals !== undefined ? ' step="' + Math.pow(10, -(decimals || 0)) + '"' : '')
+          + ' oninput="MX.Pages.MxDoc._v8ExecNumInput(\'' + rid + '\',this.value,' + JSON.stringify(min) + ',' + JSON.stringify(max) + ',' + JSON.stringify(unit || '') + ')">'
+          + (unit ? '<span class="mxd8-exec-unit">' + e(unit) + '</span>' : '')
+          + '</div>';
+      case 'etat': case 'etatcheck':
+        return '<div class="mxd8-exec-toggle">'
+          + '<button class="mxd8-exec-btn-ok" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'ok\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\','
+          + (ctrl.commentIfDefaut ? 'false' : 'false') + ')">'
+          + '<i class="fa-solid fa-check"></i> <span class="mxd8-exec-btn-lbl">Conforme</span></button>'
+          + '<button class="mxd8-exec-btn-ko" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'ko\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',' + (ctrl.commentIfDefaut ? 'true' : 'false') + ')">'
+          + '<i class="fa-solid fa-xmark"></i> <span class="mxd8-exec-btn-lbl">Défaut</span></button>'
+          + '</div>';
+      case 'conforme':
+        return '<div class="mxd8-exec-toggle">'
+          + '<button class="mxd8-exec-btn-ok" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'ok\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',false)">'
+          + e(col.libelleOk || 'Conforme') + '</button>'
+          + '<button class="mxd8-exec-btn-ko" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'ko\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',' + (ctrl.commentIfDefaut ? 'true' : 'false') + ')">'
+          + e(col.libelleKo || 'Défaut') + '</button>'
+          + '</div>';
+      case 'ouinon':
+        return '<div class="mxd8-exec-toggle">'
+          + '<button class="mxd8-exec-btn-ok" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'oui\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',false)">' + e(col.labelOui || 'Oui') + '</button>'
+          + '<button class="mxd8-exec-btn-ko" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'non\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',false)">' + e(col.labelNon || 'Non') + '</button>'
+          + '</div>';
+      case 'marchearret':
+        return '<div class="mxd8-exec-toggle">'
+          + '<button class="mxd8-exec-btn-ok" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'marche\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',false)">Marche</button>'
+          + '<button class="mxd8-exec-btn-ko" onclick="MX.Pages.MxDoc._v8ExecToggleBtn(\'' + rid + '\',\'arret\',this,\'.mxd8-exec-btn-ok\',\'.mxd8-exec-btn-ko\',false)">Arrêt</button>'
+          + '</div>';
+      case 'liste':
+        var opts2 = (col.listeValues || []).map(function(v) { return '<option value="' + e(v) + '">' + e(v) + '</option>'; }).join('');
+        return '<select class="mxd8-exec-select" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',this.value)"><option value="">—</option>' + opts2 + '</select>';
+      case 'commentaire': case 'texte':
+        return '<input class="mxd8-exec-text" type="text" placeholder="Saisir…" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',this.value)">';
+      case 'photo':
+        return '<label class="mxd8-exec-photo-lbl">'
+          + '<i class="fa-solid fa-camera"></i> Ajouter une photo'
+          + (col.photoMax > 1 ? ' (max ' + col.photoMax + ')' : '')
+          + '<input type="file" accept="image/*" capture="environment" style="display:none"'
+          + ' onchange="MX.Pages.MxDoc._v6ExecPhoto(\'' + rid + '\',this)"></label>';
+      case 'signature':
+        return '<button class="mxd8-exec-sig-btn" onclick="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',\'signed\')">'
+          + '<i class="fa-solid fa-pen-nib"></i> Signer</button>';
+      case 'date':
+        return '<input class="mxd8-exec-date" type="date" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',this.value)">';
+      case 'heure': case 'temps':
+        return '<input class="mxd8-exec-date" type="time" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',this.value)">';
+      default:
+        return '<input class="mxd8-exec-text" type="text" onchange="MX.Pages.MxDoc._v6ExecSet(\'' + rid + '\',\'primary\',this.value)">';
+    }
+  }
+
+  // Numeric input with validation + out-of-range feedback
+  function _v8ExecNumInput(rowId, val, min, max, unit) {
+    _v6ExecSet(rowId, 'primary', val);
+    var errEl = document.getElementById('mxd7-err-' + rowId + '-primary');
+    if (!errEl) return;
+    var num = parseFloat(val);
+    var err = null;
+    if (val !== '' && !isNaN(num)) {
+      if (min !== null && min !== undefined && num < min) err = 'Valeur hors plage (min ' + min + (unit ? ' ' + unit : '') + ')';
+      else if (max !== null && max !== undefined && num > max) err = 'Valeur hors plage (max ' + max + (unit ? ' ' + unit : '') + ')';
+    }
+    errEl.textContent = err || '';
+    var cell = errEl.closest('.mxd8-exec-primary');
+    if (cell) cell.classList.toggle('mxd8-primary--err', !!err);
+  }
+
+  // Toggle button with optional conditional comment reveal
+  function _v8ExecToggleBtn(rowId, val, btn, selOk, selKo, revealComment) {
+    if (!_execResponses[rowId]) _execResponses[rowId] = {};
+    var prev = _execResponses[rowId]['primary'];
+    var next = (prev === val) ? null : val;
+    _execResponses[rowId]['primary'] = next;
+    var wrap = btn.closest('.mxd8-exec-toggle');
+    if (wrap) {
+      wrap.querySelectorAll('.mxd8-exec-btn-ok,.mxd8-exec-btn-ko').forEach(function(b) {
+        b.classList.remove('mxd8-exec-btn-ok--on', 'mxd8-exec-btn-ko--on');
+      });
+      if (next) {
+        btn.classList.add(btn.classList.contains('mxd8-exec-btn-ok') ? 'mxd8-exec-btn-ok--on' : 'mxd8-exec-btn-ko--on');
+      }
+    }
+    // Show/hide conditional comment
+    var ctrl = btn.closest('.mxd8-exec-ctrl');
+    if (ctrl) {
+      var cmtCond = ctrl.querySelector('[id^="mxd8-cmt-cond-"]');
+      if (cmtCond) cmtCond.style.display = (next && revealComment) ? '' : 'none';
+    }
+  }
+
+
   // ── V6 EXEC ──────────────────────────────────────────────────────────────────
   function _renderV6ExecSection(sec) {
     var e = _e;
@@ -4954,6 +5722,7 @@
     var e      = _e;
     var accent = e(tpl.color || '#8B5CF6');
     var sectH  = (tpl.sections || []).map(function (sec) {
+      if (sec.controls !== undefined) return _renderV8ExecSection(sec);
       if (sec.rows) return _renderV6ExecSection(sec);
       return '<div class="mxd-exec-sec">'
         + '<div class="mxd-exec-sec-hdr">' + e(sec.label || 'Section') + '</div>'
@@ -5486,6 +6255,33 @@
     _v5SetResponse,
     _v5ToggleExpand,
     _v5OnPhoto,
+    // V8 Builder & Exec
+    _v8SectionBodyHTML,
+    _v8ControlRowHTML,
+    _v8ResolveCtrl,
+    _v8TypeBadge,
+    _v8PrimaryPreview,
+    _v8SecPropsHTML,
+    _v8CtrlPropsHTML,
+    _v8OpenPrimaryPicker,
+    _v8PickPrimary,
+    _v8AddExtraColMenu,
+    _v8AddExtraCol,
+    _v8RemoveExtraCol,
+    _v8AddControl,
+    _v8DelControl,
+    _v8DupControl,
+    _v8SelectControl,
+    _v8CtrlSetLabel,
+    _v8CtrlProp,
+    _v8CtrlToggle,
+    _v8CtrlDragStart,
+    _v8CtrlDzOver,
+    _v8CtrlDzLeave,
+    _v8CtrlDzDrop,
+    _v8HandleColDrop,
+    _v8ExecNumInput,
+    _v8ExecToggleBtn,
     // V6 Exec
     _v6ExecSet,
     _v6ExecEtat,
