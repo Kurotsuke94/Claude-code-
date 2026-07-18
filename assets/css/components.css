@@ -22094,3 +22094,31 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* ═══ ENSURE OLD mxd8-* REFERENCES DON'T BREAK ═══ */
 .mxd8-add-panel  { background: var(--v3-card2); border: 1px solid var(--v3-border); border-radius: 10px; margin: 8px 12px; }
 
+
+/* ═══ MX DOC V3 — NOTIFICATION BANNER (fallback when MX.toast unavailable) ═══ */
+#mxd6v3-notif {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  background: #1E2535;
+  color: #E2E8F0;
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  animation: v3-notif-in .2s ease both;
+  white-space: nowrap;
+}
+#mxd6v3-notif.mxd6v3-notif--err {
+  background: rgba(220,38,38,.15);
+  color: #F87171;
+  border-color: rgba(220,38,38,.3);
+}
+@keyframes v3-notif-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

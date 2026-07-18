@@ -86,8 +86,26 @@
   var DB = {
     templates: function () { return db.collection('mx_doc_templates'); },
     instances: function () { return db.collection('mx_doc_instances'); },
+    library:   function () { return db.collection('mxColLibrary'); },
   };
   var FV = firebase.firestore.FieldValue;
+
+  // ── UNIFIED NOTIFICATION HELPER ──
+  function _v6Notify(msg, isError) {
+    if (MX && typeof MX.toast === 'function') {
+      MX.toast(msg, !!isError);
+    } else {
+      // Fallback: inline banner inside the builder
+      var existing = document.getElementById('mxd6v3-notif');
+      if (existing) existing.remove();
+      var el = document.createElement('div');
+      el.id = 'mxd6v3-notif';
+      el.className = 'mxd6v3-notif' + (isError ? ' mxd6v3-notif--err' : '');
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 4000);
+    }
+  }
 
   // ── CONSTANTS ──
   var BLOCK_TYPES = [
@@ -1695,14 +1713,24 @@
   function _v7LoadLibrary() {
     if (_colLibUnsub) return;
     try {
-      _colLibUnsub = db.collection('mxColLibrary')
+      _colLibUnsub = DB.library()
         .orderBy('_createdAt', 'asc')
         .onSnapshot(function(snap) {
           _colLibrary = [];
-          snap.forEach(function(doc) { _colLibrary.push(Object.assign({ id: doc.id }, doc.data())); });
+          snap.forEach(function(doc) {
+            _colLibrary.push(Object.assign({ id: doc.id }, doc.data()));
+          });
+          console.log('[MXDOC LIB] Chargé:', _colLibrary.length, 'élément(s)');
           _v7RefreshPalette();
-        }, function(err) { console.warn('[V7] Library:', err); });
-    } catch(e) { console.warn('[V7] Library unavailable'); }
+        }, function(err) {
+          console.error('[MXDOC LIB] Erreur onSnapshot :', err.code, err.message);
+          if (err.code === 'permission-denied') {
+            console.error('[MXDOC LIB] ⚠️ Permission refusée — vérifiez les règles Firestore pour mxColLibrary');
+          }
+        });
+    } catch(e) {
+      console.error('[MXDOC LIB] Impossible de charger la bibliothèque :', e);
+    }
   }
 
   function _v7UnloadLibrary() {
@@ -1710,7 +1738,7 @@
   }
 
   function _v7SaveColLib(def) {
-    var col = db.collection('mxColLibrary');
+    var col = DB.library();
     if (def.id) {
       col.doc(def.id).set(def, { merge: true });
     } else {
@@ -1719,9 +1747,48 @@
     }
   }
 
+  // ── SINGLE AUTHORITATIVE LIBRARY DELETE ──────────────────────────────────
+  async function _deleteLibraryItem(colId) {
+    if (!colId) { console.error('[MXDOC DELETE] colId manquant'); return false; }
+
+    var col = null;
+    for (var i = 0; i < _colLibrary.length; i++) {
+      if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; }
+    }
+
+    console.group('[MXDOC DELETE] Suppression bibliothèque');
+    console.log('colId :', colId);
+    console.log('objet trouvé :', col);
+    console.log('collection :', 'mxColLibrary');
+    console.groupEnd();
+
+    if (!col) {
+      console.error('[MXDOC DELETE] Objet introuvable dans _colLibrary pour id=', colId);
+      _v6Notify('Erreur : contrôle introuvable', true);
+      return false;
+    }
+
+    try {
+      console.log('[MXDOC DELETE] deleteDoc START →', 'mxColLibrary/' + colId);
+      await DB.library().doc(colId).delete();
+      console.log('[MXDOC DELETE] deleteDoc DONE ✅');
+      _v6Notify('✓ "' + (col.name || 'Contrôle') + '" supprimé de la bibliothèque');
+      return true;
+    } catch (err) {
+      console.error('[MXDOC DELETE] ERREUR Firestore :', err);
+      console.error('[MXDOC DELETE] code :', err.code);
+      console.error('[MXDOC DELETE] message :', err.message);
+      var msg = err.code === 'permission-denied'
+        ? 'Permission refusée — vérifiez les règles Firestore'
+        : ('Erreur suppression : ' + (err.message || err.code || 'inconnue'));
+      _v6Notify(msg, true);
+      return false;
+    }
+  }
+
+  // Kept for backward compatibility — delegates to _deleteLibraryItem
   function _v7DeleteColLib(colId) {
-    if (!colId) return;
-    db.collection('mxColLibrary').doc(colId).delete();
+    _deleteLibraryItem(colId);
   }
 
   // ── PALETTE DRAG/CLICK HANDLERS ──
@@ -2015,10 +2082,10 @@
     MX.toast && MX.toast('Colonne enregistrée dans la bibliothèque');
   }
 
-  function _v7DeleteColConfirm(colId) {
-    if (!confirm('Supprimer cette colonne de la bibliothèque ?')) return;
-    _v7DeleteColLib(colId);
-    _v7CloseColModal();
+  async function _v7DeleteColConfirm(colId) {
+    if (!confirm('Supprimer cet élément de la bibliothèque ? Cette action est irréversible.')) return;
+    var ok = await _deleteLibraryItem(colId);
+    if (ok) _v7CloseColModal();
   }
 
   // ── LIBRARY V2 — ITEM RENDERERS ────────────────────────────────────────────
@@ -2087,7 +2154,7 @@
     for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; } }
     if (!col) return;
     try {
-      await db.collection('mxColLibrary').doc(colId).update({ starred: !col.starred });
+      await DB.library().doc(colId).update({ starred: !col.starred });
     } catch(err) { console.error('[V7] toggleStar:', err); }
   }
 
@@ -2103,19 +2170,19 @@
     copy.starred = false;
     copy._createdAt = FV.serverTimestamp();
     try {
-      await db.collection('mxColLibrary').add(copy);
+      await DB.library().add(copy);
       MX.toast && MX.toast('✅ Dupliqué dans la bibliothèque');
     } catch(err) { MX.toast && MX.toast('Erreur: ' + err.message, true); }
   }
 
-  function _v7LibDeleteConfirm(colId) {
+  async function _v7LibDeleteConfirm(colId) {
     var col = null;
     for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; } }
-    if (!col) return;
-    if (!confirm('Supprimer "' + (col.name || 'ce contrôle') + '" de la bibliothèque ?')) return;
+    if (!col) { console.warn('[MXDOC DELETE] _v7LibDeleteConfirm: col introuvable', colId); return; }
+    if (!confirm('Supprimer "' + (col.name || 'ce contrôle') + '" de la bibliothèque ? Cette action est irréversible.')) return;
     _v7LibMenuId = null;
-    _v7DeleteColLib(colId);
-    MX.toast && MX.toast('Supprimé de la bibliothèque');
+    _v7RefreshPalette();
+    await _deleteLibraryItem(colId);
   }
 
   // ── AI COLUMN SUGGESTION MODAL ───────────────────────────────────────────────
@@ -5919,7 +5986,7 @@
     });
     try {
       MX.syncStart();
-      await db.collection('mxColLibrary').add(doc);
+      await DB.library().add(doc);
       MX.syncEnd(); MX.toast('✅ Sauvegardé dans la bibliothèque');
       var ov = document.getElementById('mxd8-savlib-overlay');
       if (ov) ov.remove();
@@ -7008,6 +7075,10 @@
     _v7LibToggleStar,
     _v7LibDuplicate,
     _v7LibDeleteConfirm,
+    // Unified delete
+    _deleteLibraryItem,
+    _v7DeleteColLib,
+    _v6Notify,
     // V3 Premium
     _v6V3HeaderHTML,
     _v6V3StatCard,
