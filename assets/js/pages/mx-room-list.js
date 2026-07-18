@@ -19,6 +19,9 @@
   var _saveTimer  = null;
   var _filterOpen = false;
 
+  var _dnd        = null;  // drag-and-drop state
+  var _ctx        = null;  // context menu state
+
   // Modal state
   var _showCreate     = false;
   var _createTitle    = '';
@@ -67,6 +70,70 @@
       var cu = MX.Auth && MX.Auth.currentUser && MX.Auth.currentUser();
       return (cu && cu.name) || (firebase.auth().currentUser || {}).email || 'Utilisateur';
     } catch (e) { return 'Utilisateur'; }
+  }
+
+  // ── SMART FLOOR SORT ─────────────────────────────────────────────────────
+  // Returns a numeric key for floor names — negative = underground, 0 = RDC, positive = floors above
+  function _floorKey(name) {
+    if (!name) return 5000;
+    var n = String(name).toLowerCase().trim();
+    // Sous-sol -N or Sous-sol N
+    var ss = n.match(/sous.sol\s*(-?\d+)/);
+    if (ss) return -100 * Math.abs(parseInt(ss[1], 10));
+    if (/sous.sol/.test(n)) return -100;
+    // RDC / Rez-de-chaussée
+    if (/^(rdc|rez.de.chauss[eé]e?|rez)(\s|$)/.test(n)) return 0;
+    // Entresol
+    if (/entresol/.test(n)) return 50;
+    // Mezzanine
+    if (/mezzanine/.test(n)) return 75;
+    // R+N
+    var rp = n.match(/^r\+(\d+)/);
+    if (rp) return parseInt(rp[1], 10) * 100;
+    // 1er, 2ème, 3e, 4…
+    var ord = n.match(/^(\d+)/);
+    if (ord) return parseInt(ord[1], 10) * 100;
+    // Above-roof
+    if (/terrasse/.test(n)) return 9800;
+    if (/toiture/.test(n)) return 9900;
+    if (/technique/.test(n)) return 9950;
+    return 5000;
+  }
+
+  // ── SORT & ORDER HELPERS ─────────────────────────────────────────────────
+  function _sortedBlds() {
+    if (!_curList || !_curList.buildings) return [];
+    return (_curList.buildings || []).slice().sort(function (a, b) {
+      var ao = a.sortOrder !== undefined ? a.sortOrder : 999999;
+      var bo = b.sortOrder !== undefined ? b.sortOrder : 999999;
+      return ao - bo;
+    });
+  }
+
+  function _sortedFlrs(bId) {
+    var b = _findBld(bId);
+    if (!b || !b.floors) return [];
+    return (b.floors || []).slice().sort(function (a, b) {
+      var ao = a.sortOrder !== undefined ? a.sortOrder : _floorKey(a.name);
+      var bo = b.sortOrder !== undefined ? b.sortOrder : _floorKey(b.name);
+      return ao - bo;
+    });
+  }
+
+  // Normalize sortOrders to clean multiples of 1000 (called before any reorder)
+  function _ensureBldOrders() {
+    if (!_curList || !_curList.buildings) return;
+    var sorted = _sortedBlds();
+    sorted.forEach(function (b, i) { b.sortOrder = i * 1000; });
+    _curList.buildings = sorted;
+  }
+
+  function _ensureFlrOrders(bId) {
+    var b = _findBld(bId);
+    if (!b) return;
+    var sorted = _sortedFlrs(bId);
+    sorted.forEach(function (f, i) { f.sortOrder = i * 1000; });
+    b.floors = sorted;
   }
 
   function _calcStats(buildings) {
@@ -128,7 +195,7 @@
       var isFirst = !_curList;
       _curList = Object.assign({ id: doc.id }, doc.data());
       if (isFirst) {
-        var b0 = (_curList.buildings || [])[0];
+        var b0 = _sortedBlds()[0];
         if (b0) _expanded[b0.id] = true;
       }
       _rerender();
@@ -209,7 +276,11 @@
     var name = prompt('Nom du bâtiment :');
     if (!name || !name.trim()) return;
     if (!_curList.buildings) _curList.buildings = [];
-    var bld = { id: _uid(), name: name.trim(), order: _curList.buildings.length, floors: [] };
+    var maxOrder = 0;
+    (_curList.buildings || []).forEach(function (b) {
+      if ((b.sortOrder || 0) > maxOrder) maxOrder = b.sortOrder || 0;
+    });
+    var bld = { id: _uid(), name: name.trim(), sortOrder: maxOrder + 1000, floors: [] };
     _curList.buildings.push(bld);
     _expanded[bld.id] = true;
     _persist(); _rerender();
@@ -220,7 +291,8 @@
     var name = prompt('Nom de l\'étage :');
     if (!name || !name.trim()) return;
     if (!b.floors) b.floors = [];
-    var flr = { id: _uid(), name: name.trim(), order: b.floors.length, rooms: [] };
+    // Use smart key as initial sortOrder so new floors slot in correctly
+    var flr = { id: _uid(), name: name.trim(), sortOrder: _floorKey(name.trim()), rooms: [] };
     b.floors.push(flr);
     _expanded[bId] = true;
     _selNode = { type: 'floor', bId: bId, fId: flr.id };
@@ -285,6 +357,286 @@
     else _rerender();
   }
 
+  // ── DRAG & DROP ───────────────────────────────────────────────────────────
+  function _dndDown(e, handleEl) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    var dtype = handleEl.dataset.dtype;
+    var bId   = handleEl.dataset.bid;
+    var fId   = handleEl.dataset.fid || null;
+
+    var nm  = dtype === 'bld' ? ((_findBld(bId) || {}).name || '?') : ((_findFlr(bId, fId) || {}).name || '?');
+    var ico = dtype === 'bld' ? 'fa-building' : 'fa-layer-group';
+
+    // Ghost card following the cursor
+    var ghost = document.createElement('div');
+    ghost.className = 'mxrl-dnd-ghost';
+    ghost.innerHTML = '<i class="fa-solid ' + ico + '"></i> ' + _e(nm);
+    ghost.style.left = (e.clientX + 14) + 'px';
+    ghost.style.top  = (e.clientY - 18) + 'px';
+    document.body.appendChild(ghost);
+
+    // Drop indicator line
+    var line = document.getElementById('mxrl-drop-line');
+    if (!line) {
+      line = document.createElement('div');
+      line.id = 'mxrl-drop-line';
+      document.body.appendChild(line);
+    }
+    line.style.display = 'none';
+
+    // Mark the dragged row
+    var rowEl = dtype === 'bld'
+      ? document.querySelector('.mxrl-tree-bld[data-bid="' + bId + '"] > .mxrl-tree-bld-row')
+      : document.querySelector('.mxrl-tree-flr[data-fid="' + fId + '"]');
+    if (rowEl) rowEl.classList.add('mxrl-dnd-dragging');
+
+    _dnd = { type: dtype, bId: bId, fId: fId, ghost: ghost, line: line, rowEl: rowEl, dropIdx: null };
+
+    document.addEventListener('pointermove', _dndMove, { passive: true });
+    document.addEventListener('pointerup',   _dndUp);
+    document.addEventListener('pointercancel', _dndUp);
+  }
+
+  function _dndMove(e) {
+    if (!_dnd) return;
+    var d = _dnd;
+
+    d.ghost.style.left = (e.clientX + 14) + 'px';
+    d.ghost.style.top  = (e.clientY - 18) + 'px';
+
+    var lineY = null;
+    var containerEl = document.querySelector('.mxrl-left');
+    var cRect = containerEl ? containerEl.getBoundingClientRect() : null;
+
+    if (d.type === 'bld') {
+      var blds = document.querySelectorAll('.mxrl-tree-bld');
+      var dropIdx = blds.length;
+      for (var i = 0; i < blds.length; i++) {
+        var r = blds[i].getBoundingClientRect();
+        if (e.clientY < r.top + r.height * 0.5) { dropIdx = i; lineY = r.top; break; }
+        lineY = r.bottom;
+      }
+      d.dropIdx = dropIdx;
+    } else {
+      var bldEl = document.querySelector('.mxrl-tree-bld[data-bid="' + d.bId + '"]');
+      if (!bldEl) { d.line.style.display = 'none'; return; }
+      var flrsCont = bldEl.querySelector('.mxrl-tree-floors');
+      if (!flrsCont) { d.line.style.display = 'none'; return; }
+      var flrs = flrsCont.querySelectorAll('.mxrl-tree-flr');
+      var dropIdx = flrs.length;
+      for (var i = 0; i < flrs.length; i++) {
+        var r = flrs[i].getBoundingClientRect();
+        if (e.clientY < r.top + r.height * 0.5) { dropIdx = i; lineY = r.top; break; }
+        lineY = r.bottom;
+      }
+      d.dropIdx = dropIdx;
+    }
+
+    if (lineY !== null && cRect) {
+      d.line.style.display = 'block';
+      d.line.style.top    = (lineY - 1) + 'px';
+      d.line.style.left   = (cRect.left + 6) + 'px';
+      d.line.style.width  = (cRect.width - 12) + 'px';
+    } else {
+      d.line.style.display = 'none';
+    }
+  }
+
+  function _dndUp() {
+    if (!_dnd) return;
+    document.removeEventListener('pointermove', _dndMove);
+    document.removeEventListener('pointerup',   _dndUp);
+    document.removeEventListener('pointercancel', _dndUp);
+
+    var d = _dnd;
+    _dnd = null;
+
+    if (d.ghost.parentNode) d.ghost.parentNode.removeChild(d.ghost);
+    if (d.line) d.line.style.display = 'none';
+
+    if (d.dropIdx !== null) _dndApply(d);
+    else _rerender();
+  }
+
+  function _dndApply(d) {
+    if (!_curList) return;
+
+    if (d.type === 'bld') {
+      _ensureBldOrders();
+      var sorted = _sortedBlds();
+      var curIdx = sorted.findIndex(function (b) { return b.id === d.bId; });
+      if (curIdx < 0) { _rerender(); return; }
+      var item = sorted.splice(curIdx, 1)[0];
+      var newIdx = Math.max(0, Math.min(d.dropIdx > curIdx ? d.dropIdx - 1 : d.dropIdx, sorted.length));
+      sorted.splice(newIdx, 0, item);
+      sorted.forEach(function (b, i) { b.sortOrder = i * 1000; });
+      _curList.buildings = sorted;
+    } else {
+      _ensureFlrOrders(d.bId);
+      var sorted = _sortedFlrs(d.bId);
+      var curIdx = sorted.findIndex(function (f) { return f.id === d.fId; });
+      if (curIdx < 0) { _rerender(); return; }
+      var item = sorted.splice(curIdx, 1)[0];
+      var newIdx = Math.max(0, Math.min(d.dropIdx > curIdx ? d.dropIdx - 1 : d.dropIdx, sorted.length));
+      sorted.splice(newIdx, 0, item);
+      sorted.forEach(function (f, i) { f.sortOrder = i * 1000; });
+      var b = _findBld(d.bId);
+      if (b) b.floors = sorted;
+    }
+
+    _persist();
+    _rerender();
+  }
+
+  // ── CONTEXT MENU ─────────────────────────────────────────────────────────
+  function _openCtx(e, type, bId, fId) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ctx = { type: type, bId: bId, fId: fId || null, x: e.clientX, y: e.clientY };
+    document.addEventListener('keydown', _ctxKeydown);
+    _rerender();
+  }
+
+  function _ctxKeydown(e) {
+    if (e.key === 'Escape' && _ctx) { _ctx = null; document.removeEventListener('keydown', _ctxKeydown); _rerender(); }
+  }
+
+  function _closeCtx() {
+    _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    _rerender();
+  }
+
+  function _ctxUp() {
+    if (!_ctx) return;
+    var ctx = _ctx; _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    if (ctx.type === 'bld') {
+      _ensureBldOrders();
+      var sorted = _sortedBlds();
+      var idx = sorted.findIndex(function (b) { return b.id === ctx.bId; });
+      if (idx > 0) {
+        var tmp = sorted[idx].sortOrder;
+        sorted[idx].sortOrder = sorted[idx - 1].sortOrder;
+        sorted[idx - 1].sortOrder = tmp;
+        _persist();
+      }
+    } else {
+      _ensureFlrOrders(ctx.bId);
+      var sorted = _sortedFlrs(ctx.bId);
+      var idx = sorted.findIndex(function (f) { return f.id === ctx.fId; });
+      if (idx > 0) {
+        var tmp = sorted[idx].sortOrder;
+        sorted[idx].sortOrder = sorted[idx - 1].sortOrder;
+        sorted[idx - 1].sortOrder = tmp;
+        _persist();
+      }
+    }
+    _rerender();
+  }
+
+  function _ctxDown() {
+    if (!_ctx) return;
+    var ctx = _ctx; _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    if (ctx.type === 'bld') {
+      _ensureBldOrders();
+      var sorted = _sortedBlds();
+      var idx = sorted.findIndex(function (b) { return b.id === ctx.bId; });
+      if (idx < sorted.length - 1) {
+        var tmp = sorted[idx].sortOrder;
+        sorted[idx].sortOrder = sorted[idx + 1].sortOrder;
+        sorted[idx + 1].sortOrder = tmp;
+        _persist();
+      }
+    } else {
+      _ensureFlrOrders(ctx.bId);
+      var sorted = _sortedFlrs(ctx.bId);
+      var idx = sorted.findIndex(function (f) { return f.id === ctx.fId; });
+      if (idx < sorted.length - 1) {
+        var tmp = sorted[idx].sortOrder;
+        sorted[idx].sortOrder = sorted[idx + 1].sortOrder;
+        sorted[idx + 1].sortOrder = tmp;
+        _persist();
+      }
+    }
+    _rerender();
+  }
+
+  function _ctxRename() {
+    if (!_ctx) return;
+    var ctx = _ctx; _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    if (ctx.type === 'bld') {
+      var b = _findBld(ctx.bId);
+      if (!b) { _rerender(); return; }
+      var name = prompt('Renommer le bâtiment :', b.name);
+      if (name && name.trim() && name.trim() !== b.name) { b.name = name.trim(); _persist(); }
+    } else {
+      var f = _findFlr(ctx.bId, ctx.fId);
+      if (!f) { _rerender(); return; }
+      var name = prompt('Renommer l\'étage :', f.name);
+      if (name && name.trim() && name.trim() !== f.name) { f.name = name.trim(); _persist(); }
+    }
+    _rerender();
+  }
+
+  function _ctxDupFloor() {
+    if (!_ctx || _ctx.type !== 'flr') return;
+    var ctx = _ctx; _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    var b = _findBld(ctx.bId); var f = _findFlr(ctx.bId, ctx.fId);
+    if (!b || !f) { _rerender(); return; }
+    var name = prompt('Nom du nouvel étage :', f.name + ' (copie)');
+    if (!name || !name.trim()) { _rerender(); return; }
+    var newFlr = Object.assign({}, f, {
+      id: _uid(), name: name.trim(),
+      sortOrder: (f.sortOrder !== undefined ? f.sortOrder : _floorKey(f.name)) + 500,
+      rooms: (f.rooms || []).map(function (r) {
+        return Object.assign({}, r, { id: _uid(), status: 'aucun', comment: '', photos: 0 });
+      })
+    });
+    b.floors.push(newFlr);
+    _ensureFlrOrders(ctx.bId);
+    _selNode = { type: 'floor', bId: ctx.bId, fId: newFlr.id };
+    _persist(); _rerender();
+  }
+
+  function _ctxDelete() {
+    if (!_ctx) return;
+    var ctx = _ctx; _ctx = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    _rerender();
+    if (ctx.type === 'bld') _deleteBuilding(ctx.bId);
+    else _deleteFloor(ctx.bId, ctx.fId);
+  }
+
+  function _tplCtxMenu() {
+    if (!_ctx) return '';
+    var e = _e;
+    var x = _ctx.x, y = _ctx.y;
+    var isFlr = _ctx.type === 'flr';
+    var menuH = isFlr ? 210 : 164;
+    if (x + 210 > window.innerWidth  - 8) x = window.innerWidth  - 210 - 8;
+    if (y + menuH > window.innerHeight - 8) y = window.innerHeight - menuH - 8;
+    var h = '<div class="mxrl-ctx-backdrop" onclick="MX.Pages.MxRoomList._closeCtx()"></div>';
+    h += '<div class="mxrl-ctx" style="left:' + x + 'px;top:' + y + 'px">';
+    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxUp()"><i class="fa-solid fa-arrow-up"></i> Monter</button>';
+    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxDown()"><i class="fa-solid fa-arrow-down"></i> Descendre</button>';
+    h += '<div class="mxrl-ctx-sep"></div>';
+    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxRename()"><i class="fa-regular fa-pen-to-square"></i> Renommer</button>';
+    if (isFlr) {
+      h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxDupFloor()"><i class="fa-regular fa-copy"></i> Dupliquer l\'étage</button>';
+    }
+    h += '<div class="mxrl-ctx-sep"></div>';
+    h += '<button class="mxrl-ctx-item mxrl-ctx-item--danger" onclick="MX.Pages.MxRoomList._ctxDelete()"><i class="fa-regular fa-trash"></i> Supprimer</button>';
+    h += '</div>';
+    return h;
+  }
+
   // ── RENDER ENTRY ──────────────────────────────────────────────────────────
   function render() {
     _loadLists();
@@ -293,6 +645,7 @@
   }
 
   function _rerender() {
+    if (_dnd) return; // Don't disturb DOM while dragging
     var mc = document.getElementById('main-content');
     if (!mc) return;
     if (_curListId && _curList) _renderDoc();
@@ -365,6 +718,7 @@
     h += '</div></div>';
     if (_showPaste) h += _tplPasteModal();
     if (_showDup)   h += _tplDupModal();
+    if (_ctx)       h += _tplCtxMenu();
     mc.innerHTML = h;
   }
 
@@ -429,33 +783,49 @@
   function _tplTree(list) {
     var e = _e;
     var h = '<div class="mxrl-tree">';
-    h += '<div class="mxrl-tree-hdr"><span>Structure de l\'hôtel</span><button class="mxrl-tree-add" onclick="MX.Pages.MxRoomList._addBuilding()" title="Ajouter un bâtiment"><i class="fa-solid fa-plus"></i></button></div>';
+    h += '<div class="mxrl-tree-hdr"><span>Structure de l\'hôtel</span>';
+    h += '<button class="mxrl-tree-add" onclick="MX.Pages.MxRoomList._addBuilding()" title="Ajouter un bâtiment"><i class="fa-solid fa-plus"></i></button></div>';
     h += '<div class="mxrl-tree-body">';
 
-    (list.buildings || []).forEach(function (b) {
-      var bs = _calcStats([b]);
+    var blds = _sortedBlds();
+    blds.forEach(function (b) {
+      var bs   = _calcStats([b]);
       var isExp = !!_expanded[b.id];
-      var bSel = _selNode.bId === b.id && !_selNode.fId;
-      h += '<div class="mxrl-tree-bld">';
-      h += '<div class="mxrl-tree-bld-row' + (bSel ? ' mxrl-sel' : '') + '" onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')">';
-      h += '<button class="mxrl-caret" onclick="event.stopPropagation();MX.Pages.MxRoomList._expand(\'' + e(b.id) + '\')"><i class="fa-solid fa-chevron-' + (isExp ? 'down' : 'right') + '"></i></button>';
+      var bSel  = _selNode.bId === b.id && !_selNode.fId;
+      h += '<div class="mxrl-tree-bld" data-bid="' + e(b.id) + '">';
+      h += '<div class="mxrl-tree-bld-row' + (bSel ? ' mxrl-sel' : '') + '"'
+        + ' onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')"'
+        + ' oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'bld\',\'' + e(b.id) + '\')">';
+      h += '<span class="mxrl-drag-handle" data-dtype="bld" data-bid="' + e(b.id) + '"'
+        + ' onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)"'
+        + ' onclick="event.stopPropagation()" title="Glisser pour réordonner"><i class="fa-solid fa-grip-vertical"></i></span>';
+      h += '<button class="mxrl-caret" onclick="event.stopPropagation();MX.Pages.MxRoomList._expand(\'' + e(b.id) + '\')">'
+        + '<i class="fa-solid fa-chevron-' + (isExp ? 'down' : 'right') + '"></i></button>';
       h += '<i class="fa-solid fa-building mxrl-tree-ico"></i>';
       h += '<span class="mxrl-tree-name">' + e(b.name) + '</span>';
       h += '<span class="mxrl-tree-pct">' + bs.pct + '%</span>';
       h += '<button class="mxrl-tree-add-fl" onclick="event.stopPropagation();MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')" title="Ajouter un étage"><i class="fa-solid fa-plus"></i></button>';
       h += '</div>';
+
       if (isExp) {
         h += '<div class="mxrl-tree-floors">';
-        (b.floors || []).forEach(function (f) {
-          var fs = _calcFlrStats(f);
+        var flrs = _sortedFlrs(b.id);
+        flrs.forEach(function (f) {
+          var fs   = _calcFlrStats(f);
           var fSel = _selNode.fId === f.id;
-          h += '<div class="mxrl-tree-flr' + (fSel ? ' mxrl-sel' : '') + '" onclick="MX.Pages.MxRoomList._selFlr(\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
+          h += '<div class="mxrl-tree-flr' + (fSel ? ' mxrl-sel' : '') + '"'
+            + ' data-fid="' + e(f.id) + '"'
+            + ' onclick="MX.Pages.MxRoomList._selFlr(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"'
+            + ' oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'flr\',\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
+          h += '<span class="mxrl-drag-handle mxrl-drag-handle--sm" data-dtype="flr" data-bid="' + e(b.id) + '" data-fid="' + e(f.id) + '"'
+            + ' onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)"'
+            + ' onclick="event.stopPropagation()" title="Glisser pour réordonner"><i class="fa-solid fa-grip-vertical"></i></span>';
           h += '<i class="fa-solid fa-layer-group mxrl-tree-ico-sm"></i>';
           h += '<div class="mxrl-tree-flr-info"><span class="mxrl-tree-flr-name">' + e(f.name) + '</span><span class="mxrl-tree-flr-cnt">' + fs.total + ' ch.</span></div>';
           h += '<span class="mxrl-tree-pct-sm">' + fs.pct + '%</span>';
           h += '</div>';
         });
-        if (!(b.floors || []).length) {
+        if (!flrs.length) {
           h += '<div class="mxrl-tree-empty-flr">Aucun étage · <a onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')">Ajouter</a></div>';
         }
         h += '</div>';
@@ -463,7 +833,7 @@
       h += '</div>';
     });
 
-    if (!(list.buildings || []).length) {
+    if (!blds.length) {
       h += '<div class="mxrl-tree-empty"><i class="fa-solid fa-building"></i><p>Aucun bâtiment.<br>Commencez par en créer un.</p></div>';
     }
     h += '</div>';
@@ -493,13 +863,14 @@
 
   function _renderOverview(list) {
     var e = _e;
+    var blds = _sortedBlds();
     var h = '<div class="mxrl-content">';
     h += '<div class="mxrl-content-title"><i class="fa-solid fa-hotel"></i> Vue d\'ensemble</div>';
-    if (!(list.buildings || []).length) {
+    if (!blds.length) {
       h += '<div class="mxrl-empty"><i class="fa-solid fa-hotel"></i><p>Commencez par ajouter un bâtiment dans le panneau de gauche.</p></div>';
     } else {
       h += '<div class="mxrl-bld-grid">';
-      (list.buildings || []).forEach(function (b) {
+      blds.forEach(function (b) {
         var bs = _calcStats([b]);
         h += '<div class="mxrl-bld-card" onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')">';
         h += '<div class="mxrl-bld-card-top">';
@@ -524,22 +895,23 @@
 
   function _renderBldDetail(b) {
     var e = _e;
-    var bs = _calcStats([b]);
+    var bs  = _calcStats([b]);
+    var flrs = _sortedFlrs(b.id);
     var h = '<div class="mxrl-content">';
     h += '<div class="mxrl-bc"><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selNode(\'root\')">Vue d\'ensemble</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><span>' + e(b.name) + '</span></div>';
     h += '<div class="mxrl-section-hdr">';
-    h += '<div><h3>' + e(b.name) + '</h3><span class="mxrl-section-meta">' + bs.total + ' chambres · ' + (b.floors || []).length + ' étage(s)</span></div>';
+    h += '<div><h3>' + e(b.name) + '</h3><span class="mxrl-section-meta">' + bs.total + ' chambres · ' + flrs.length + ' étage(s)</span></div>';
     h += '<div class="mxrl-section-actions">';
     h += _miniStats(bs);
     h += '<button class="mxrl-btn-sm mxrl-btn-outline" onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')"><i class="fa-solid fa-plus"></i> Étage</button>';
     h += '<button class="mxrl-btn-sm mxrl-btn-danger" onclick="MX.Pages.MxRoomList._deleteBuilding(\'' + e(b.id) + '\')"><i class="fa-regular fa-trash"></i></button>';
     h += '</div></div>';
     h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + bs.pct + '%"></div></div>';
-    if (!(b.floors || []).length) {
+    if (!flrs.length) {
       h += '<div class="mxrl-empty"><i class="fa-solid fa-layer-group"></i><p>Aucun étage dans ce bâtiment.</p><button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')"><i class="fa-solid fa-plus"></i> Ajouter un étage</button></div>';
     } else {
       h += '<div class="mxrl-floors-grid">';
-      (b.floors || []).forEach(function (f) {
+      flrs.forEach(function (f) {
         var fs = _calcFlrStats(f);
         h += '<div class="mxrl-floor-card" onclick="MX.Pages.MxRoomList._selFlr(\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
         h += '<div class="mxrl-floor-card-hdr"><span class="mxrl-floor-card-name">' + e(f.name) + '</span><span class="mxrl-floor-card-pct">' + fs.pct + '%</span></div>';
@@ -557,7 +929,7 @@
 
   function _renderFloorRooms(b, f) {
     var e = _e;
-    var fs = _calcFlrStats(f);
+    var fs    = _calcFlrStats(f);
     var rooms = _filteredRooms(f.rooms || []);
     var h = '<div class="mxrl-content">';
     h += '<div class="mxrl-bc"><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selNode(\'root\')">Vue d\'ensemble</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')">' + e(b.name) + '</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><span>' + e(f.name) + '</span></div>';
@@ -609,7 +981,7 @@
   }
 
   function _roomRowHTML(bId, fId, r) {
-    var e = _e;
+    var e  = _e;
     var st = STATUS_MAP[r.status || 'aucun'] || STATUS_MAP['aucun'];
     return '<div class="mxrl-room-row" data-rl-room="' + e(r.id) + '">'
       + '<div class="mxrl-room-num">' + e(r.number) + (r.name ? '<span class="mxrl-room-name-lbl">' + e(r.name) + '</span>' : '') + '</div>'
@@ -626,15 +998,17 @@
   // ── PAR ÉTAGE VIEW ────────────────────────────────────────────────────────
   function _renderEtage(list) {
     var e = _e;
-    var floorNames = [], floorMap = {};
+    var floorMap = {};
     (list.buildings || []).forEach(function (b) {
       (b.floors || []).forEach(function (f) {
-        if (!floorMap[f.name]) { floorMap[f.name] = []; floorNames.push(f.name); }
+        if (!floorMap[f.name]) floorMap[f.name] = [];
         floorMap[f.name].push({ b: b, f: f });
       });
     });
+    // Collect unique floor names and sort by smart key
     var seen = {}, uniq = [];
-    floorNames.forEach(function (n) { if (!seen[n]) { seen[n] = true; uniq.push(n); } });
+    Object.keys(floorMap).forEach(function (n) { if (!seen[n]) { seen[n] = true; uniq.push(n); } });
+    uniq.sort(function (a, b) { return _floorKey(a) - _floorKey(b); });
 
     var h = '<div class="mxrl-content">';
     h += '<div class="mxrl-content-title"><i class="fa-solid fa-layer-group"></i> Vue par étage</div>';
@@ -642,10 +1016,10 @@
       h += '<div class="mxrl-empty"><i class="fa-solid fa-layer-group"></i><p>Aucun étage défini.</p></div>';
     } else {
       uniq.forEach(function (fname) {
-        var entries = floorMap[fname];
+        var entries  = floorMap[fname];
         var allRooms = [];
         entries.forEach(function (en) { allRooms = allRooms.concat(en.f.rooms || []); });
-        var fs = _calcFlrStats({ rooms: allRooms });
+        var fs  = _calcFlrStats({ rooms: allRooms });
         var key = 'etg_' + fname;
         var isExp = !!_expanded[key];
         h += '<div class="mxrl-etage-sec">';
@@ -692,11 +1066,11 @@
   }
 
   function _tplPasteModal() {
-    var e = _e;
+    var e      = _e;
     var target = _pasteTarget;
-    var b = target && _findBld(target.bId);
-    var f = target && _findFlr(target.bId, target.fId);
-    var dest = (b && f) ? (e(b.name) + ' › ' + e(f.name)) : '';
+    var b      = target && _findBld(target.bId);
+    var f      = target && _findFlr(target.bId, target.fId);
+    var dest   = (b && f) ? (e(b.name) + ' › ' + e(f.name)) : '';
     return '<div class="mxrl-overlay" onclick="MX.Pages.MxRoomList._hidePaste()">'
       + '<div class="mxrl-modal" onclick="event.stopPropagation()">'
       + '<div class="mxrl-modal-hdr"><h3><i class="fa-regular fa-clipboard"></i> Coller une liste</h3><button class="mxrl-modal-x" onclick="MX.Pages.MxRoomList._hidePaste()"><i class="fa-solid fa-xmark"></i></button></div>'
@@ -713,12 +1087,12 @@
   }
 
   function _tplDupModal() {
-    var e = _e;
+    var e   = _e;
     var src = _lists.find(function (l) { return l.id === _dupSrcId; });
     var opts = [
-      { k: 'blds', v: _dupKeepBlds, l: 'Conserver les bâtiments' },
-      { k: 'floors', v: _dupKeepFloors, l: 'Conserver les étages' },
-      { k: 'rooms', v: _dupKeepRooms, l: 'Conserver les chambres' },
+      { k: 'blds',  v: _dupKeepBlds,    l: 'Conserver les bâtiments' },
+      { k: 'floors',v: _dupKeepFloors,  l: 'Conserver les étages' },
+      { k: 'rooms', v: _dupKeepRooms,   l: 'Conserver les chambres' },
       { k: 'reset', v: _dupResetStatus, l: 'Réinitialiser les statuts' },
     ];
     return '<div class="mxrl-overlay" onclick="MX.Pages.MxRoomList._hideDupModal()">'
@@ -823,7 +1197,11 @@
     if (_listsUnsub) { _listsUnsub(); _listsUnsub = null; }
     if (_listUnsub)  { _listUnsub();  _listUnsub = null; }
     if (_saveTimer)  { clearTimeout(_saveTimer); _saveTimer = null; }
-    _loaded = false; _lists = []; _curListId = null; _curList = null;
+    document.removeEventListener('keydown', _ctxKeydown);
+    document.removeEventListener('pointermove', _dndMove);
+    document.removeEventListener('pointerup',   _dndUp);
+    document.removeEventListener('pointercancel', _dndUp);
+    _loaded = false; _lists = []; _curListId = null; _curList = null; _dnd = null; _ctx = null;
   }
 
   // ── EXPORTS ───────────────────────────────────────────────────────────────
@@ -865,5 +1243,15 @@
     _setDupTitle,
     _setDupOpt,
     _confirmDup,
+    // DnD
+    _dndDown,
+    // Context menu
+    _openCtx,
+    _closeCtx,
+    _ctxUp,
+    _ctxDown,
+    _ctxRename,
+    _ctxDupFloor,
+    _ctxDelete,
   };
 })();
