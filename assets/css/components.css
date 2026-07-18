@@ -20983,3 +20983,73 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 @keyframes mxd8-slide-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
 @keyframes mxd8-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+
+/* ── V7 Library V2 — Redesigned Panel ────────────────────────────────────── */
+
+/* Search bar */
+.mxd7-lib2-search-row { padding:8px 10px 4px; }
+.mxd7-lib2-search { width:100%; background:#0D1117; border:1px solid #30363D; border-radius:8px; padding:8px 12px; color:#E6EDF3; font-size:13px; box-sizing:border-box; }
+.mxd7-lib2-search:focus { outline:none; border-color:#1F6FEB; }
+.mxd7-lib2-search::placeholder { color:#484F58; }
+
+/* Top buttons row */
+.mxd7-lib2-top-btns { display:flex; gap:6px; padding:4px 10px 8px; }
+.mxd7-lib2-new-btn { flex:1; background:#1F6FEB; border:none; border-radius:8px; padding:8px 12px; color:#fff; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; }
+.mxd7-lib2-new-btn:hover { background:#388bfd; }
+.mxd7-ai-btn--sm { background:#161B22; border:1px solid #30363D; border-radius:8px; padding:7px 10px; color:#A855F7; font-size:13px; cursor:pointer; flex-shrink:0; }
+.mxd7-ai-btn--sm:hover { border-color:#A855F7; background:#1a0d26; }
+
+/* Section headers in list */
+.mxd7-lib2-sec-hd { display:flex; align-items:center; justify-content:space-between; padding:6px 10px 4px; }
+.mxd7-lib2-sec-hd span:first-child { font-size:10px; font-weight:700; color:#8B949E; text-transform:uppercase; letter-spacing:.07em; }
+.mxd7-lib2-cnt { font-size:10px; color:#484F58; background:#21262D; border-radius:10px; padding:1px 6px; }
+
+/* Category filter chips */
+.mxd7-lib2-cats { display:flex; flex-wrap:wrap; gap:4px; padding:4px 10px 8px; }
+.mxd7-lib2-cat { background:transparent; border:1px solid #30363D; border-radius:20px; padding:3px 9px; color:#8B949E; font-size:11px; cursor:pointer; white-space:nowrap; transition:all .12s; }
+.mxd7-lib2-cat:hover { border-color:#58A6FF; color:#58A6FF; }
+.mxd7-lib2-cat--on { background:#1F6FEB22; border-color:#1F6FEB; color:#58A6FF; font-weight:600; }
+
+/* Divider between favorites and full list */
+.mxd7-lib2-divider { border:none; border-top:1px solid #21262D; margin:4px 10px 6px; }
+
+/* List container */
+.mxd7-lib2-list { padding-bottom:4px; }
+
+/* Item row */
+.mxd7-lib2-item { display:flex; align-items:center; gap:8px; padding:7px 10px; cursor:pointer; border-radius:0; transition:background .1s; position:relative; }
+.mxd7-lib2-item:hover { background:#161B22; }
+.mxd7-lib2-item:hover .mxd7-lib2-actions { opacity:1; }
+
+/* Item icon */
+.mxd7-lib2-ic { width:30px; height:30px; border-radius:7px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+
+/* Item body (name + category tag) */
+.mxd7-lib2-body { flex:1; min-width:0; }
+.mxd7-lib2-name { font-size:12px; font-weight:600; color:#C9D1D9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mxd7-lib2-cat-tag { font-size:10px; color:#8B949E; margin-top:1px; }
+
+/* Actions (star + more) */
+.mxd7-lib2-actions { display:flex; align-items:center; gap:2px; opacity:0; transition:opacity .12s; flex-shrink:0; }
+.mxd7-lib2-item:hover .mxd7-lib2-actions { opacity:1; }
+
+/* Star button */
+.mxd7-lib2-star { background:none; border:none; cursor:pointer; font-size:13px; padding:3px 4px; color:#484F58; border-radius:4px; line-height:1; }
+.mxd7-lib2-star:hover { color:#F59E0B; }
+.mxd7-lib2-star--on { color:#F59E0B; opacity:1 !important; }
+
+/* More (⋮) button */
+.mxd7-lib2-menu-wrap { position:relative; }
+.mxd7-lib2-more { background:none; border:none; cursor:pointer; font-size:14px; padding:3px 5px; color:#484F58; border-radius:4px; line-height:1; }
+.mxd7-lib2-more:hover { background:#21262D; color:#C9D1D9; }
+
+/* Dropdown menu */
+.mxd7-lib2-dropdown { position:absolute; right:0; top:calc(100% + 2px); background:#1C2128; border:1px solid #30363D; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.6); z-index:200; min-width:160px; padding:4px; }
+.mxd7-lib2-dropdown button { display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; padding:7px 10px; color:#C9D1D9; font-size:12px; cursor:pointer; border-radius:6px; text-align:left; }
+.mxd7-lib2-dropdown button:hover { background:#21262D; }
+.mxd7-lib2-dropdown-del { color:#EF4444 !important; }
+.mxd7-lib2-dropdown-del:hover { background:#2d1515 !important; }
+
+/* Always show actions when starred */
+.mxd7-lib2-star--on { opacity:1 !important; }
+

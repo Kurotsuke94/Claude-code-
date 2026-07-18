@@ -67,6 +67,11 @@
   // V8 Builder state
   var _v8SelCIdx     = null;
 
+  // V7 Library V2 state
+  var _v7LibSearch    = '';
+  var _v7LibCatFilter = '';
+  var _v7LibMenuId    = null;
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -409,6 +414,9 @@
     _v7PalTab      = 'types';
     _v7ModalDef    = null;
     _v7ModalIsNew  = true;
+    _v7LibSearch   = '';
+    _v7LibCatFilter = '';
+    _v7LibMenuId   = null;
     _v8SelCIdx     = null;
     render();
   }
@@ -1112,6 +1120,9 @@
     { key:'monnaie',     icon:'fa-euro-sign',     l:'Monnaie',                 color:'#22C55E' },
   ];
 
+  var V7_LIB_CATS = ['Eau','Électricité','Chauffage','Climatisation','Ascenseurs','Sécurité','Chambres','Photos','Divers'];
+
+
   // AI keyword → column type suggestions
   var V7_AI_KW = {
     'ph':          { type:'decimal', unit:'pH', min:0, max:14, decimals:1 },
@@ -1208,30 +1219,75 @@
           + '</div>';
       });
     } else {
-      // Library tab
-      h += '<button class="mxd7-newcol-btn" onclick="MX.Pages.MxDoc._v7OpenColModal(null)">'
-        + '<i class="fa-solid fa-plus"></i> Nouvelle colonne</button>';
-      h += '<button class="mxd7-ai-btn" onclick="MX.Pages.MxDoc._v7OpenAIModal()">'
-        + '<i class="fa-solid fa-wand-magic-sparkles"></i> Générer les colonnes</button>';
+      // Library tab — V2 redesign
+      // Search bar
+      h += '<div class="mxd7-lib2-search-row">'
+        + '<input class="mxd7-lib2-search" type="search" placeholder="🔍 Rechercher…" value="' + e(_v7LibSearch) + '"'
+        + ' oninput="MX.Pages.MxDoc._v7LibSetSearch(this.value)">'
+        + '</div>';
+
+      // New button + AI button row
+      h += '<div class="mxd7-lib2-top-btns">'
+        + '<button class="mxd7-lib2-new-btn" onclick="MX.Pages.MxDoc._v7OpenColModal(null)">'
+        + '<i class="fa-solid fa-plus"></i> Nouveau</button>'
+        + '<button class="mxd7-ai-btn mxd7-ai-btn--sm" onclick="MX.Pages.MxDoc._v7OpenAIModal()" title="Générer">'
+        + '<i class="fa-solid fa-wand-magic-sparkles"></i></button>'
+        + '</div>';
+
       if (!_colLibrary.length) {
-        h += '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i><p>Aucune colonne sauvegardée.<br>Cliquez <strong>Nouvelle colonne</strong> pour commencer.</p></div>';
+        h += '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i>'
+          + '<p>Aucun contrôle dans la bibliothèque.<br>Cliquez <strong>Nouveau</strong> pour commencer.</p></div>';
       } else {
-        h += '<p class="mxd6-pal-label">MES COLONNES</p>';
-        _colLibrary.forEach(function(col) {
-          var ct = _v7TypeDef(col.type);
-          var ic = ct ? ct.icon : 'fa-columns';
-          var color = col.color || (ct ? ct.color : '#64748B');
-          var emoji = col.icon || '';
-          h += '<div class="mxd6-pal-card mxd7-lib-card" draggable="true"'
-            + ' ondragstart="MX.Pages.MxDoc._v7LibDragStart(event,' + JSON.stringify(col.id) + ')"'
-            + ' onclick="MX.Pages.MxDoc._v7LibClick(' + JSON.stringify(col.id) + ')">'
-            + '<span class="mxd6-pal-ic mxd7-lib-ic" style="background:' + color + '22;color:' + color + '">'
-            + (emoji ? '<span class="mxd7-col-emoji">' + e(emoji) + '</span>' : '<i class="fa-solid ' + ic + '"></i>')
-            + '</span>'
-            + '<span class="mxd6-pal-lbl">' + e(col.name || '—') + '</span>'
-            + '<button class="mxd7-lib-edit" onclick="event.stopPropagation();MX.Pages.MxDoc._v7OpenColModal(' + JSON.stringify(col.id) + ')" title="Modifier"><i class="fa-regular fa-pen-to-square"></i></button>'
-            + '</div>';
+        // Favorites section
+        var _starred = _colLibrary.filter(function(c) { return !!c.starred; });
+        if (_starred.length && !_v7LibSearch && !_v7LibCatFilter) {
+          h += '<div class="mxd7-lib2-sec-hd"><span>⭐ Favoris</span><span class="mxd7-lib2-cnt">' + _starred.length + '</span></div>';
+          _starred.forEach(function(col) { h += _v7LibItemHTML(col); });
+          h += '<div class="mxd7-lib2-divider"></div>';
+        }
+
+        // Category filter chips
+        var _usedCats = V7_LIB_CATS.filter(function(cat) {
+          return _colLibrary.some(function(c) { return c.category === cat; });
         });
+        if (_usedCats.length > 0) {
+          h += '<div class="mxd7-lib2-cats">';
+          h += '<button class="mxd7-lib2-cat' + (!_v7LibCatFilter ? ' mxd7-lib2-cat--on' : '') + '"'
+            + ' onclick="MX.Pages.MxDoc._v7LibSetCat(\'\')">Tous</button>';
+          _usedCats.forEach(function(cat) {
+            var cnt = _colLibrary.filter(function(c) { return c.category === cat; }).length;
+            h += '<button class="mxd7-lib2-cat' + (_v7LibCatFilter === cat ? ' mxd7-lib2-cat--on' : '') + '"'
+              + ' onclick="MX.Pages.MxDoc._v7LibSetCat(' + JSON.stringify(cat) + ')">'
+              + e(cat) + '</button>';
+          });
+          h += '</div>';
+        }
+
+        // Filtered list
+        var _search = _v7LibSearch.toLowerCase().trim();
+        var _catF = _v7LibCatFilter;
+        var _visible = _colLibrary.filter(function(col) {
+          if (_catF && col.category !== _catF) return false;
+          if (_search && (col.name || '').toLowerCase().indexOf(_search) < 0) return false;
+          return true;
+        });
+        // Starred first in full list (when not in favorites section)
+        if (!_search && !_catF) {
+          _visible = _visible.filter(function(c) { return !c.starred; });
+        } else {
+          _visible.sort(function(a,b) { return (b.starred?1:0)-(a.starred?1:0); });
+        }
+
+        if (!_visible.length && (_search || _catF)) {
+          h += '<div class="mxd7-lib-empty" style="padding:16px 0"><i class="fa-regular fa-magnifying-glass"></i><p>Aucun résultat</p></div>';
+        } else if (_visible.length) {
+          h += '<div class="mxd7-lib2-list">';
+          if (!_search && !_catF) {
+            h += '<div class="mxd7-lib2-sec-hd"><span>Tous les contrôles</span><span class="mxd7-lib2-cnt">' + _visible.length + '</span></div>';
+          }
+          _visible.forEach(function(col) { h += _v7LibItemHTML(col); });
+          h += '</div>';
+        }
       }
     }
 
@@ -1822,6 +1878,103 @@
     if (!confirm('Supprimer cette colonne de la bibliothèque ?')) return;
     _v7DeleteColLib(colId);
     _v7CloseColModal();
+  }
+
+  // ── LIBRARY V2 — ITEM RENDERERS ────────────────────────────────────────────
+
+  function _v7LibItemHTML(col) {
+    var e = _e;
+    var ct = _v7TypeDef(col.type);
+    var color = col.color || (ct ? ct.color : '#64748B');
+    var faIcon = ct ? ct.icon : 'fa-columns';
+    var emoji = col.icon || '';
+    var isMenuOpen = _v7LibMenuId === col.id;
+    return '<div class="mxd7-lib2-item" onclick="MX.Pages.MxDoc._v7LibClick(' + JSON.stringify(col.id) + ')"'
+      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v7LibDragStart(event,' + JSON.stringify(col.id) + ')">'
+      + '<span class="mxd7-lib2-ic" style="background:' + color + '22;color:' + color + '">'
+      + (emoji ? e(emoji) : '<i class="fa-solid ' + faIcon + '"></i>')
+      + '</span>'
+      + '<div class="mxd7-lib2-body">'
+      +   '<div class="mxd7-lib2-name">' + e(col.name || '—') + '</div>'
+      +   (col.category ? '<div class="mxd7-lib2-cat-tag">' + e(col.category) + '</div>' : '')
+      + '</div>'
+      + '<div class="mxd7-lib2-actions" onclick="event.stopPropagation()">'
+      +   '<button class="mxd7-lib2-star' + (col.starred ? ' mxd7-lib2-star--on' : '') + '"'
+      +     ' onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibToggleStar(' + JSON.stringify(col.id) + ')"'
+      +     ' title="' + (col.starred ? 'Retirer des favoris' : 'Ajouter aux favoris') + '">'
+      +     (col.starred ? '⭐' : '☆') + '</button>'
+      +   '<div class="mxd7-lib2-menu-wrap">'
+      +     '<button class="mxd7-lib2-more" onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibMenu(' + JSON.stringify(col.id) + ')">⋮</button>'
+      +     (isMenuOpen ? _v7LibMenuHTML(col.id) : '')
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _v7LibMenuHTML(colId) {
+    return '<div class="mxd7-lib2-dropdown" onclick="event.stopPropagation()">'
+      + '<button onclick="MX.Pages.MxDoc._v7OpenColModal(' + JSON.stringify(colId) + ');MX.Pages.MxDoc._v7LibMenu(null)">'
+      +   '<i class="fa-regular fa-pen-to-square"></i> Modifier</button>'
+      + '<button onclick="MX.Pages.MxDoc._v7LibDuplicate(' + JSON.stringify(colId) + ')">'
+      +   '<i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button class="mxd7-lib2-dropdown-del" onclick="MX.Pages.MxDoc._v7LibDeleteConfirm(' + JSON.stringify(colId) + ')">'
+      +   '<i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div>';
+  }
+
+  // ── LIBRARY V2 — ACTIONS ─────────────────────────────────────────────────────
+
+  function _v7LibSetSearch(q) {
+    _v7LibSearch = q || '';
+    _v7LibMenuId = null;
+    _v7RefreshPalette();
+  }
+
+  function _v7LibSetCat(cat) {
+    _v7LibCatFilter = cat;
+    _v7LibMenuId = null;
+    _v7RefreshPalette();
+  }
+
+  function _v7LibMenu(colId) {
+    _v7LibMenuId = (_v7LibMenuId === colId) ? null : colId;
+    _v7RefreshPalette();
+  }
+
+  async function _v7LibToggleStar(colId) {
+    var col = null;
+    for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; } }
+    if (!col) return;
+    try {
+      await db.collection('mxColLibrary').doc(colId).update({ starred: !col.starred });
+    } catch(err) { console.error('[V7] toggleStar:', err); }
+  }
+
+  async function _v7LibDuplicate(colId) {
+    var col = null;
+    for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; } }
+    if (!col) return;
+    _v7LibMenuId = null;
+    _v7RefreshPalette();
+    var copy = {};
+    Object.keys(col).forEach(function(k) { if (k !== 'id') copy[k] = col[k]; });
+    copy.name = (copy.name || '') + ' (copie)';
+    copy.starred = false;
+    copy._createdAt = FV.serverTimestamp();
+    try {
+      await db.collection('mxColLibrary').add(copy);
+      MX.toast && MX.toast('✅ Dupliqué dans la bibliothèque');
+    } catch(err) { MX.toast && MX.toast('Erreur: ' + err.message, true); }
+  }
+
+  function _v7LibDeleteConfirm(colId) {
+    var col = null;
+    for (var i = 0; i < _colLibrary.length; i++) { if (_colLibrary[i].id === colId) { col = _colLibrary[i]; break; } }
+    if (!col) return;
+    if (!confirm('Supprimer "' + (col.name || 'ce contrôle') + '" de la bibliothèque ?')) return;
+    _v7LibMenuId = null;
+    _v7DeleteColLib(colId);
+    MX.toast && MX.toast('Supprimé de la bibliothèque');
   }
 
   // ── AI COLUMN SUGGESTION MODAL ───────────────────────────────────────────────
@@ -6601,6 +6754,15 @@
     _v7MListeRemove,
     _v7SaveColModal,
     _v7DeleteColConfirm,
+    // V7 Library V2
+    _v7LibItemHTML,
+    _v7LibMenuHTML,
+    _v7LibSetSearch,
+    _v7LibSetCat,
+    _v7LibMenu,
+    _v7LibToggleStar,
+    _v7LibDuplicate,
+    _v7LibDeleteConfirm,
     _v7OpenAIModal,
     _v7AIGenerate,
     _v7AIAddCol,
