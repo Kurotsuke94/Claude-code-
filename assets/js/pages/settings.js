@@ -556,6 +556,12 @@
         + '</div>';
     }).join('');
 
+    const vibOn      = sndPrefs.vibration !== false;
+    const dndEnabled = sndPrefs.dnd_enabled === true;
+    const dndFrom    = sndPrefs.dnd_from || '22:00';
+    const dndTo      = sndPrefs.dnd_to   || '07:00';
+    const persistOn  = sndPrefs.persistent === true;
+
     return '<div class="stt-section-head"><i class="fas fa-bell"></i> Notifications</div>'
       + '<div class="stt-card">'
       + '<div class="stt-card-title">Statut navigateur ' + permBadge + '</div>'
@@ -579,6 +585,50 @@
       + '</label>'
       + '</div>'
       + (sndEnabled ? '<div class="stt-toggle-list" style="margin-top:8px">' + sndRows + '</div>' : '')
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Vibration</div>'
+      + '<div class="stt-toggle-row">'
+      + '<span class="stt-toggle-icon"><i class="fas fa-mobile-screen-button"></i></span>'
+      + '<span class="stt-toggle-label">Vibration activée</span>'
+      + '<label class="stt-switch">'
+      + '<input type="checkbox" ' + (vibOn ? 'checked' : '') + ' onchange="MX.Pages.Settings._toggleSound(\'vibration\', this.checked)">'
+      + '<span class="stt-switch-track"></span>'
+      + '</label>'
+      + '</div>'
+      + (vibOn ? '<div class="stt-help-text" style="margin-top:4px;font-size:11px;color:var(--text3);padding:0 4px">'
+        + 'Critique : longue répétée · Important : 2 vibrations · Attention : courte · Info : très courte · Succès : double</div>' : '')
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Ne pas déranger (DND)</div>'
+      + '<div class="stt-toggle-row">'
+      + '<span class="stt-toggle-icon"><i class="fas fa-moon"></i></span>'
+      + '<span class="stt-toggle-label">Silence programmé</span>'
+      + '<label class="stt-switch">'
+      + '<input type="checkbox" ' + (dndEnabled ? 'checked' : '') + ' onchange="MX.Pages.Settings._toggleSound(\'dnd_enabled\', this.checked)">'
+      + '<span class="stt-switch-track"></span>'
+      + '</label>'
+      + '</div>'
+      + (dndEnabled
+        ? '<div class="stt-dnd-times">'
+          + '<label class="stt-dnd-lbl">De<input class="stt-dnd-input" type="time" value="' + dndFrom + '" onchange="MX.Pages.Settings._toggleSound(\'dnd_from\', this.value)"></label>'
+          + '<span class="stt-dnd-sep">→</span>'
+          + '<label class="stt-dnd-lbl">À<input class="stt-dnd-input" type="time" value="' + dndTo + '" onchange="MX.Pages.Settings._toggleSound(\'dnd_to\', this.value)"></label>'
+          + '</div>'
+          + '<div class="stt-help-text" style="font-size:11px;color:var(--text3);padding:0 4px;margin-top:4px">Sons et vibrations désactivés pendant cette plage. Les alertes critiques restent visibles.</div>'
+        : '')
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Alertes critiques</div>'
+      + '<div class="stt-toggle-row">'
+      + '<span class="stt-toggle-icon" style="color:#EF4444"><i class="fas fa-circle-exclamation"></i></span>'
+      + '<span class="stt-toggle-label">Alerte plein écran</span>'
+      + '<label class="stt-switch">'
+      + '<input type="checkbox" ' + (persistOn ? 'checked' : '') + ' onchange="MX.Pages.Settings._toggleSound(\'persistent\', this.checked)">'
+      + '<span class="stt-switch-track"></span>'
+      + '</label>'
+      + '</div>'
+      + '<div class="stt-help-text" style="font-size:11px;color:var(--text3);padding:0 4px;margin-top:4px">Les notifications critiques s\'affichent en superposition plein écran jusqu\'à acquittement.</div>'
       + '</div>'
       + '<div class="stt-card" style="margin-top:12px">'
       + '<div class="stt-card-title">Canal de réception</div>'

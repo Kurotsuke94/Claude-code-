@@ -1967,20 +1967,32 @@
 
     function _catColor(type) {
       const m = {
-        message:      'var(--cyan)',
-        intervention: 'var(--orange)',
-        stock:        'var(--jour)',
-        badge:        'var(--green)',
+        message:      '#06B6D4',
+        mission:      '#EF4444',
+        checklist:    '#F97316',
+        counter:      '#EAB308',
+        intervention: '#F97316',
+        absence:      '#8B5CF6',
+        planning:     '#3B82F6',
+        alert:        '#EF4444',
+        stock:        '#EAB308',
+        badge:        '#22C55E',
         update:       '#8B5CF6',
-        system:       'var(--text3)',
+        system:       '#64748b',
       };
-      return m[type] || 'var(--cyan)';
+      return m[type] || '#06B6D4';
     }
 
     function _catIcon(type) {
       const m = {
         message:      '📩',
-        intervention: '🔧',
+        mission:      '🔧',
+        checklist:    '✅',
+        counter:      '📊',
+        intervention: '🛠️',
+        absence:      '🗓️',
+        planning:     '📅',
+        alert:        '🚨',
         stock:        '📦',
         badge:        '🏆',
         update:       '🚀',
@@ -2292,6 +2304,10 @@
     let _floatIds = new Set(), _floatQ = [];
     const _MAX_FLT = 4;
 
+    // Per-type toast ID tracking for batching
+    const _typeToastId = {};
+    const _typeToastTitle = {};
+
     const _LVL = {
       critical:  { color:'#EF4444', icon:'fa-circle-exclamation',  lbl:'CRITIQUE'  },
       important: { color:'#F97316', icon:'fa-triangle-exclamation', lbl:'IMPORTANT' },
@@ -2306,27 +2322,42 @@
       alert:'fa-bell', message:'fa-comments', stock:'fa-box', badge:'fa-medal', system:'fa-gear',
     };
 
+    function _fmtFloatTime() {
+      const now = new Date();
+      return String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+    }
+
     function showFloat(n) {
-      if (_floatIds.size >= _MAX_FLT) { _floatQ.push(n); return; }
+      if (_floatIds.size >= _MAX_FLT) { _floatQ.push(n); return null; }
       const container = document.getElementById('float-notifs');
-      if (!container) return;
+      if (!container) return null;
       const lv  = _LVL[n.level] || _LVL.info;
       const ico = _FA_CAT[n.type] || lv.icon;
-      const dur = (n.duration != null) ? n.duration : _FLOAT_DUR;
+      const persistent = n.persistent === true;
+      const dur = persistent ? 0 : ((n.duration != null) ? n.duration : _FLOAT_DUR);
       const id  = 'flt_' + Date.now() + '_' + (Math.random() * 999 | 0);
       const el  = document.createElement('div');
-      el.className = 'fn-toast'; el.id = id;
+      el.className = 'fn-toast' + (persistent ? ' fn-toast--persist' : '');
+      el.id = id;
       const esc = MX.esc || function(s) {
         return String(s).replace(/[&<>"']/g, function(c) {
           return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
         });
       };
+      const typeLabel = n.type && n.type !== 'system' ? n.type.toUpperCase() : '';
       el.innerHTML = '<div class="fn-accent" style="background:' + lv.color + '"></div>'
         + '<div class="fn-ico" style="color:' + lv.color + ';background:' + lv.color + '1A"><i class="fas ' + ico + '"></i></div>'
         + '<div class="fn-body">'
-        + '<div class="fn-lbl" style="color:' + lv.color + '">' + lv.lbl + (n.type && n.type !== 'system' ? ' · ' + n.type.toUpperCase() : '') + '</div>'
+        + '<div class="fn-meta-row">'
+        + '<span class="fn-lbl" style="color:' + lv.color + '">' + lv.lbl + (typeLabel ? ' · ' + typeLabel : '') + '</span>'
+        + '<span class="fn-time">' + _fmtFloatTime() + '</span>'
+        + '</div>'
         + '<div class="fn-ttl">' + esc(n.title || '') + '</div>'
+        + (n.subtitle ? '<div class="fn-sub">' + esc(n.subtitle) + '</div>' : '')
         + (n.description ? '<div class="fn-dsc">' + esc(n.description) + '</div>' : '')
+        + (n.actionPage
+          ? '<div class="fn-actions"><button class="fn-action-btn" onclick="MX.Notifs.closeFloat(\'' + id + '\');MX.showPage(\'' + esc(n.actionPage) + '\')">Voir <i class="fas fa-chevron-right"></i></button></div>'
+          : '')
         + '</div>'
         + '<button class="fn-cls" onclick="MX.Notifs.closeFloat(\'' + id + '\')" aria-label="Fermer"><i class="fas fa-times"></i></button>'
         + (dur > 0 ? '<div class="fn-bar" style="background:' + lv.color + ';animation-duration:' + dur + 'ms"></div>' : '');
@@ -2334,6 +2365,7 @@
       _floatIds.add(id);
       requestAnimationFrame(function() { el.classList.add('fn-toast--in'); });
       if (dur > 0) setTimeout(function() { closeFloat(id); }, dur);
+      return id;
     }
 
     function closeFloat(id) {
@@ -2344,6 +2376,86 @@
       } else { _floatIds.delete(id); _nextFloat(); }
     }
     function _nextFloat() { if (_floatQ.length && _floatIds.size < _MAX_FLT) showFloat(_floatQ.shift()); }
+
+    // ── Vibration profiles ──
+    function _vibrate(level) {
+      if (!navigator.vibrate) return;
+      const p = getSoundPrefs();
+      if (p.vibration === false) return;
+      const profiles = {
+        critical:  [400, 100, 400, 100, 400],
+        important: [200, 100, 200],
+        warning:   [150],
+        info:      [100],
+        success:   [80, 60, 80],
+      };
+      try { navigator.vibrate(profiles[level] || [100]); } catch(_e) {}
+    }
+
+    // ── Fullscreen critical alert ──
+    let _vibTimer = null;
+
+    function _startCriticalVibration() {
+      _stopCriticalVibration();
+      function _pulse() {
+        try { navigator.vibrate && navigator.vibrate([400, 200, 400]); } catch(_e) {}
+        _vibTimer = setTimeout(_pulse, 1500);
+      }
+      _pulse();
+    }
+
+    function _stopCriticalVibration() {
+      if (_vibTimer) { clearTimeout(_vibTimer); _vibTimer = null; }
+      try { navigator.vibrate && navigator.vibrate(0); } catch(_e) {}
+    }
+
+    function showFullscreenAlert(n) {
+      const existing = document.getElementById('mx-fsa');
+      if (existing) existing.remove();
+      const esc = MX.esc || function(s) {
+        return String(s).replace(/[&<>"']/g, function(c) {
+          return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+      };
+      const el = document.createElement('div');
+      el.id = 'mx-fsa';
+      el.className = 'mx-fsa';
+      el.innerHTML = '<div class="mx-fsa-bg"></div>'
+        + '<div class="mx-fsa-inner">'
+        + '<div class="mx-fsa-icon-ring"><div class="mx-fsa-icon">' + (n.icon || '⚠️') + '</div></div>'
+        + '<div class="mx-fsa-lbl">ALERTE CRITIQUE</div>'
+        + '<div class="mx-fsa-title">' + esc(n.title || 'Attention') + '</div>'
+        + (n.description ? '<div class="mx-fsa-desc">' + esc(n.description) + '</div>' : '')
+        + '<button class="mx-fsa-btn" onclick="MX.Notifs.closeFullscreenAlert(' + (n.id ? '\'' + esc(n.id) + '\'' : '') + ')">'
+        + '<i class="fas fa-check"></i> Acquitter</button>'
+        + '</div>';
+      document.body.appendChild(el);
+      requestAnimationFrame(function() { el.classList.add('mx-fsa--in'); });
+      _startCriticalVibration();
+      if (_SND.critical) _SND.critical();
+    }
+
+    function closeFullscreenAlert(id) {
+      const el = document.getElementById('mx-fsa');
+      if (el) {
+        el.classList.add('mx-fsa--out');
+        setTimeout(function() { el.remove(); }, 400);
+      }
+      _stopCriticalVibration();
+      if (id) MX.DB && MX.DB.markNotificationRead && MX.DB.markNotificationRead(id).catch(function() {});
+    }
+
+    // ── DND check ──
+    function _isDND() {
+      const p = getSoundPrefs();
+      if (!p.dnd_enabled) return false;
+      const now = new Date();
+      const hhmm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+      const from = p.dnd_from || '22:00';
+      const to   = p.dnd_to   || '07:00';
+      if (from <= to) return hhmm >= from && hhmm < to;
+      return hhmm >= from || hhmm < to; // crosses midnight
+    }
 
     // ── Bell flash ──
     function flashBell() {
@@ -2371,9 +2483,43 @@
 
     function push(n) {
       const level = n.level || _lvlForType(n.type);
-      if (!n.silent) playSound(n.type || level);
-      if (!n.noFloat) showFloat(Object.assign({}, n, { level: level }));
+      const dnd   = _isDND();
+
+      if (!n.silent && !dnd) playSound(n.type || level);
+      if (!n.silent && !dnd) _vibrate(level);
       flashBell();
+
+      // Smart batching: if same type toast still visible, upgrade to group toast
+      if (!n.noFloat) {
+        const tkey = n.type || 'system';
+        const prevId = _typeToastId[tkey];
+        if (prevId && document.getElementById(prevId)) {
+          // A same-type toast is already showing — batch it
+          closeFloat(prevId);
+          const prevTitle = _typeToastTitle[tkey] || '';
+          const batchN = Object.assign({}, n, {
+            level: level,
+            title: '🗂 Plusieurs ' + tkey + 's',
+            description: prevTitle ? prevTitle + (n.title ? ' • ' + n.title : '') : (n.description || ''),
+            subtitle: null,
+          });
+          const newId = showFloat(batchN);
+          _typeToastId[tkey] = newId;
+          _typeToastTitle[tkey] = batchN.title;
+        } else {
+          const floatN = Object.assign({}, n, { level: level });
+          const newId = showFloat(floatN);
+          _typeToastId[tkey] = newId;
+          _typeToastTitle[tkey] = n.title || '';
+          // Clear the tracking after float expires so next one is fresh
+          const clearDelay = (floatN.duration != null ? floatN.duration : _FLOAT_DUR) + 500;
+          if (clearDelay > 0) setTimeout(function() { if (_typeToastId[tkey] === newId) { delete _typeToastId[tkey]; delete _typeToastTitle[tkey]; } }, clearDelay);
+        }
+      }
+
+      // Fullscreen overlay for critical with explicit fullscreen flag
+      if (level === 'critical' && n.fullscreen) showFullscreenAlert(n);
+
       if (MX.DB && MX.DB.createNotification) {
         MX.DB.createNotification({
           key: n.key || null, type: n.type || 'system', level: level,
@@ -2407,6 +2553,7 @@
       _catColor, _catIcon, _fmtDate,
       push, showFloat, closeFloat, flashBell, playSound,
       getSoundPrefs, saveSoundPrefs, checkNewAlerts,
+      showFullscreenAlert, closeFullscreenAlert,
     };
   })();
 

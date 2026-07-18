@@ -15,17 +15,38 @@ const _msg = firebase.messaging();
 
 _msg.onBackgroundMessage(payload => {
   const notif = payload.notification || {};
+  const data  = payload.data || {};
+  const level = data.level || 'info';
+  const type  = data.type  || 'system';
+
+  const vibrateProfiles = {
+    critical:  [400, 100, 400, 100, 400],
+    important: [200, 100, 200],
+    warning:   [150],
+    info:      [100],
+    success:   [80, 60, 80],
+  };
+
+  const targetUrl = (payload.fcmOptions && payload.fcmOptions.link) || data.url || '/';
+
   self.registration.showNotification(notif.title || 'Maintix', {
-    body:  notif.body  || '',
-    icon:  '/assets/icons/icon-192.png',
-    badge: '/assets/icons/icon-192.png',
-    vibrate: [200, 100, 200],
-    data:  { url: (payload.fcmOptions && payload.fcmOptions.link) || '/' }
+    body:    notif.body || data.description || '',
+    icon:    '/assets/icons/icon-192.png',
+    badge:   '/assets/icons/icon-192.png',
+    vibrate: vibrateProfiles[level] || [200, 100, 200],
+    tag:     type + '_' + (data.key || Date.now()),
+    renotify: false,
+    actions: [
+      { action: 'view',  title: 'Voir' },
+      { action: 'later', title: 'Plus tard' },
+    ],
+    data: { url: targetUrl, type, level }
   });
 });
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  if (e.action === 'later') return; // dismissed
   const url = (e.notification.data && e.notification.data.url) || '/';
   e.waitUntil(clients.matchAll({ type: 'window' }).then(list => {
     for (const c of list) { if (c.url === url && 'focus' in c) return c.focus(); }
