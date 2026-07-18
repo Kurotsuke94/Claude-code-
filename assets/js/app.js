@@ -95,7 +95,8 @@
     if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
-    if (id === "mx-doc")       return Pages.MxDoc     ? Pages.MxDoc.render()     : _renderStub("MX Doc",    "fa-file-contract", "Chargement…");
+    if (id === "mx-doc")       return Pages.MxDoc      ? Pages.MxDoc.render()      : _renderStub("MX Doc",             "fa-file-contract", "Chargement…");
+    if (id === "mx-room-list") return Pages.MxRoomList ? Pages.MxRoomList.render() : _renderStub("Liste de chambres", "fa-hotel",         "Chargement…");
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 
@@ -481,6 +482,7 @@
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'modeles\')"    title="Mes modèles MX Doc"><i class="fas fa-layer-group sx-ico"></i><span class="sx-lbl">Mes modèles</span></button>';
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'historique\')" title="Historique MX Doc"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'parametres\')" title="Paramètres MX Doc"><i class="fas fa-sliders sx-ico"></i><span class="sx-lbl">Paramètres</span></button>';
+      mxdItems += '<button class="sx-item sx-sub" onclick="MX.showPage(\'mx-room-list\')" title="Liste de chambres"><i class="fas fa-hotel sx-ico"></i><span class="sx-lbl">Liste de chambres</span></button>';
       h += _group("fa-file-contract", "sx-group-ico--cyan", "MX Doc", "mxdoc", "toggleNavMxDoc", _mxdocOpen, mxdItems, "mx-doc", "MX Doc");
       _dbgAdd("[Groupe] MX Doc");
     }
