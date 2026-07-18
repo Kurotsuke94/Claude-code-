@@ -72,6 +72,11 @@
   var _v7LibCatFilter = '';
   var _v7LibMenuId    = null;
 
+  // V3 Premium Builder state
+  var _v7LibTab      = 'tous';  // 'favoris' | 'recents' | 'tous'
+  var _v7LibRecents  = [];       // in-memory recently used lib items
+  var _v6RightPanel  = 'library'; // 'library' | 'props'
+
   // Execution state
   var _execMode      = false;
   var _execTemplate  = null;
@@ -417,6 +422,9 @@
     _v7LibSearch   = '';
     _v7LibCatFilter = '';
     _v7LibMenuId   = null;
+    _v7LibTab      = 'tous';
+    _v7LibRecents  = [];
+    _v6RightPanel  = 'library';
     _v8SelCIdx     = null;
     render();
   }
@@ -1159,141 +1167,251 @@
 
   function _renderBuilderV6(mc) {
     var tpl = _builderTpl || {};
-    mc.innerHTML = '<div class="mxd6-wrap" id="mxd6-root">'
-      + _v6TopBarHTML(tpl)
-      + '<div class="mxd6-layout" id="mxd6-layout">'
-      +   '<aside class="mxd6-palette" id="mxd6-palette">' + _v6PaletteHTML() + '</aside>'
-      +   '<main class="mxd6-canvas" id="mxd6-canvas"'
+    var totalCtrls = _builderSecs.reduce(function(acc,s){ return acc + ((s.controls||[]).length + (s.rows||[]).length + (s.blocks||[]).length); },0);
+    mc.innerHTML = '<div class="mxd6v3-wrap" id="mxd6-root">'
+      + _v6V3HeaderHTML(tpl, totalCtrls)
+      + '<div class="mxd6v3-body">'
+      +   '<main class="mxd6v3-canvas" id="mxd6-canvas"'
       +     ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6CanvasDzOver(event)"'
       +     ' ondrop="MX.Pages.MxDoc._v6CanvasDzDrop(event)">'
       +     _v6CanvasInnerHTML()
       +   '</main>'
-      +   '<aside class="mxd6-props" id="mxd6-props">' + _v6PropsPanelHTML() + '</aside>'
+      +   '<aside class="mxd6v3-right" id="mxd6-right">'
+      +     _v6V3RightPanelHTML()
+      +   '</aside>'
       + '</div>'
       + _v6MobBarHTML()
       + '</div>';
     _v6UpdateUndoRedo();
   }
 
-  function _v6TopBarHTML(tpl) {
+  function _v6V3HeaderHTML(tpl, totalCtrls) {
     var e = _e;
     var status = tpl.status || 'draft';
     var badgeLabel = STATUS_LABELS[status] || 'Brouillon';
-    var badgeCls = status === 'published' ? 'mxd6-badge--pub' : status === 'archived' ? 'mxd6-badge--arch' : 'mxd6-badge--draft';
-    return '<header class="mxd6-topbar">'
-      + '<div class="mxd6-topbar-l">'
-      +   '<button class="mxd6-back-btn" onclick="MX.Pages.MxDoc._closeBuilder()" title="Retour"><i class="fa-solid fa-arrow-left"></i></button>'
-      +   '<input class="mxd6-title-inp" id="mxd6-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
-      +   '<span class="mxd6-status-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+    var badgeCls = status === 'published' ? 'mxd6v3-badge--pub' : status === 'archived' ? 'mxd6v3-badge--arch' : 'mxd6v3-badge--draft';
+    var secCnt = _builderSecs.length;
+    return '<header class="mxd6v3-header">'
+      + '<div class="mxd6v3-hdr-top">'
+      +   '<div class="mxd6v3-hdr-l">'
+      +     '<button class="mxd6v3-back" onclick="MX.Pages.MxDoc._closeBuilder()" title="Retour"><i class="fa-solid fa-arrow-left"></i></button>'
+      +     '<div class="mxd6v3-title-block">'
+      +       '<input class="mxd6v3-title-inp" id="mxd6-title" value="' + e(tpl.title || '') + '" placeholder="Nom du modèle…" oninput="MX.Pages.MxDoc._bldTitleChange(this.value)">'
+      +       '<div class="mxd6v3-meta">'
+      +         (tpl.author ? '<span><i class="fa-regular fa-user"></i> ' + e(tpl.author) + '</span>' : '')
+      +         (tpl.frequency ? '<span><i class="fa-solid fa-rotate"></i> ' + e(FREQ_LABELS[tpl.frequency] || tpl.frequency) + '</span>' : '')
+      +         '<span class="mxd6v3-badge ' + badgeCls + '">' + badgeLabel + '</span>'
+      +       '</div>'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="mxd6v3-hdr-r">'
+      +     '<button class="mxd6v3-ud" id="mxd6-undo" onclick="MX.Pages.MxDoc._v6Undo()" disabled title="Annuler"><i class="fa-solid fa-rotate-left"></i></button>'
+      +     '<button class="mxd6v3-ud" id="mxd6-redo" onclick="MX.Pages.MxDoc._v6Redo()" disabled title="Rétablir"><i class="fa-solid fa-rotate-right"></i></button>'
+      +     '<button class="mxd6v3-btn mxd6v3-btn--ghost" onclick="MX.Pages.MxDoc._v6Preview()"><i class="fa-regular fa-eye"></i><span>Aperçu</span></button>'
+      +     '<button class="mxd6v3-btn mxd6v3-btn--save" onclick="MX.Pages.MxDoc._saveBuilder()"><i class="fa-solid fa-floppy-disk"></i><span>Enregistrer</span></button>'
+      +     '<button class="mxd6v3-btn mxd6v3-btn--pub" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fa-solid fa-rocket"></i><span>Publier</span></button>'
+      +   '</div>'
       + '</div>'
-      + '<div class="mxd6-topbar-c">'
-      +   '<button class="mxd6-ud-btn" id="mxd6-undo" onclick="MX.Pages.MxDoc._v6Undo()" disabled title="Annuler"><i class="fa-solid fa-rotate-left"></i></button>'
-      +   '<button class="mxd6-ud-btn" id="mxd6-redo" onclick="MX.Pages.MxDoc._v6Redo()" disabled title="Rétablir"><i class="fa-solid fa-rotate-right"></i></button>'
-      + '</div>'
-      + '<div class="mxd6-topbar-r">'
-      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--ghost" onclick="MX.Pages.MxDoc._v6Preview()"><i class="fa-regular fa-eye"></i><span> Aperçu</span></button>'
-      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--save" onclick="MX.Pages.MxDoc._saveBuilder()"><i class="fa-solid fa-floppy-disk"></i><span> Enregistrer</span></button>'
-      +   '<button class="mxd6-topbar-btn mxd6-topbar-btn--pub" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')"><i class="fa-solid fa-rocket"></i><span> Publier</span></button>'
+      + '<div class="mxd6v3-stats">'
+      +   _v6V3StatCard('fa-layer-group', secCnt, secCnt > 1 ? 'Sections' : 'Section', '--s-purple')
+      +   _v6V3StatCard('fa-list-check', totalCtrls, totalCtrls > 1 ? 'Contrôles' : 'Contrôle', '--s-blue')
+      +   _v6V3StatCard('fa-circle-check', 0, 'Remplis', '--s-green')
+      +   _v6V3StatCard('fa-triangle-exclamation', 0, 'Alertes', '--s-orange')
       + '</div>'
       + '</header>';
   }
 
+  function _v6V3StatCard(icon, val, label, accent) {
+    return '<div class="mxd6v3-stat" style="--sa:var(' + accent + ')">'
+      + '<span class="mxd6v3-stat-val">' + val + '</span>'
+      + '<span class="mxd6v3-stat-lbl">' + label + '</span>'
+      + '</div>';
+  }
+
+  // ── V3 RIGHT PANEL (Library ↔ Props) ────────────────────────────────────────
+
+  function _v6V3RightPanelHTML() {
+    if (_v6RightPanel === 'props') {
+      return '<div id="mxd6-props" class="mxd6v3-right-inner mxd6v3-right-props">'
+        + '<div class="mxd6v3-right-back">'
+        +   '<button class="mxd6v3-lib-back-btn" onclick="MX.Pages.MxDoc._v6V3ShowLibrary()">'
+        +     '<i class="fa-solid fa-arrow-left"></i> Bibliothèque</button>'
+        + '</div>'
+        + _v6PropsPanelHTML()
+        + '</div>';
+    }
+    return '<div id="mxd6-palette" class="mxd6v3-right-inner mxd6v3-right-lib">'
+      + _v6PaletteHTML()
+      + '</div>';
+  }
+
+  function _v6V3RefreshRight() {
+    var el = document.getElementById('mxd6-right');
+    if (el) el.innerHTML = _v6V3RightPanelHTML();
+  }
+
+  function _v6V3ShowLibrary() {
+    _v6RightPanel = 'library';
+    _v6SelSIdx = null; _v6SelBIdx = null;
+    // Clear selection highlights
+    document.querySelectorAll('.mxd6-sec--sel').forEach(function(e) { e.classList.remove('mxd6-sec--sel'); });
+    document.querySelectorAll('.mxd8-ctrl-row--sel').forEach(function(e) { e.classList.remove('mxd8-ctrl-row--sel'); });
+    _v6V3RefreshRight();
+  }
+
+  // ── LEGACY TOP BAR (kept for non-V3 builders or direct call compat) ────────
+
+  function _v6TopBarHTML(tpl) {
+    return _v6V3HeaderHTML(tpl, 0);
+  }
+
+
   function _v6PaletteHTML() {
     var e = _e;
-    var tab = _v7PalTab;
-    var h = '<div class="mxd6-pal-inner">';
-    // Tab bar
-    h += '<div class="mxd7-pal-tabs">'
-      + '<button class="mxd7-pal-tab' + (tab === 'types' ? ' mxd7-pal-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7SetPalTab(\'types\')"><i class="fa-solid fa-table-columns"></i> Types</button>'
-      + '<button class="mxd7-pal-tab' + (tab === 'library' ? ' mxd7-pal-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7SetPalTab(\'library\')"><i class="fa-solid fa-book"></i> Bibliothèque</button>'
+    var tab = _v7LibTab;
+
+    var h = '<div class="mxd6v3-lib-inner">';
+
+    // Header
+    h += '<div class="mxd6v3-lib-hdr">'
+      + '<span class="mxd6v3-lib-title"><i class="fa-solid fa-book"></i> Bibliothèque</span>'
+      + '<button class="mxd6v3-lib-new-btn" onclick="MX.Pages.MxDoc._v7OpenColModal(null)" title="Nouveau contrôle">'
+      + '<i class="fa-solid fa-plus"></i></button>'
       + '</div>';
 
-    if (tab === 'types') {
-      h += '<p class="mxd6-pal-label">TYPES DE COLONNES</p>';
-      V7_COL_TYPES.forEach(function(c) {
-        h += '<div class="mxd6-pal-card" draggable="true"'
-          + ' ondragstart="MX.Pages.MxDoc._v7TypeDragStart(event,' + JSON.stringify(c.key) + ')"'
-          + ' onclick="MX.Pages.MxDoc._v7TypeClick(' + JSON.stringify(c.key) + ')">'
-          + '<span class="mxd6-pal-ic" style="background:' + c.color + '22;color:' + c.color + '"><i class="fa-solid ' + c.icon + '"></i></span>'
-          + '<span class="mxd6-pal-lbl">' + e(c.l) + '</span>'
-          + '</div>';
-      });
+    // Search bar
+    h += '<div class="mxd6v3-lib-search-wrap">'
+      + '<i class="fa-solid fa-magnifying-glass mxd6v3-lib-search-ic"></i>'
+      + '<input class="mxd6v3-lib-search" type="search" placeholder="Rechercher…" value="' + e(_v7LibSearch) + '"'
+      + ' oninput="MX.Pages.MxDoc._v7LibSetSearch(this.value)">'
+      + ((_v7LibSearch) ? '<button class="mxd6v3-lib-search-clr" onclick="MX.Pages.MxDoc._v7LibSetSearch(\'\')"><i class="fa-solid fa-xmark"></i></button>' : '')
+      + '</div>';
+
+    // Tabs: Favoris / Récents / Tous
+    h += '<div class="mxd6v3-lib-tabs">'
+      + '<button class="mxd6v3-lib-tab' + (tab === 'favoris' ? ' mxd6v3-lib-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7LibSetTab(\'favoris\')">'
+      + '<i class="fa-solid fa-star"></i> Favoris</button>'
+      + '<button class="mxd6v3-lib-tab' + (tab === 'recents' ? ' mxd6v3-lib-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7LibSetTab(\'recents\')">'
+      + '<i class="fa-regular fa-clock"></i> Récents</button>'
+      + '<button class="mxd6v3-lib-tab' + (tab === 'tous' ? ' mxd6v3-lib-tab--on' : '') + '" onclick="MX.Pages.MxDoc._v7LibSetTab(\'tous\')">'
+      + '<i class="fa-solid fa-list"></i> Tous</button>'
+      + '</div>';
+
+    if (!_colLibrary.length) {
+      h += '<div class="mxd6v3-lib-empty">'
+        + '<i class="fa-regular fa-folder-open fa-2x"></i>'
+        + '<p>Aucun contrôle dans la bibliothèque.<br><small>Cliquez <strong>+</strong> pour commencer.</small></p>'
+        + '</div>';
     } else {
-      // Library tab — V2 redesign
-      // Search bar
-      h += '<div class="mxd7-lib2-search-row">'
-        + '<input class="mxd7-lib2-search" type="search" placeholder="🔍 Rechercher…" value="' + e(_v7LibSearch) + '"'
-        + ' oninput="MX.Pages.MxDoc._v7LibSetSearch(this.value)">'
-        + '</div>';
+      var _search = _v7LibSearch.toLowerCase().trim();
 
-      // New button + AI button row
-      h += '<div class="mxd7-lib2-top-btns">'
-        + '<button class="mxd7-lib2-new-btn" onclick="MX.Pages.MxDoc._v7OpenColModal(null)">'
-        + '<i class="fa-solid fa-plus"></i> Nouveau</button>'
-        + '<button class="mxd7-ai-btn mxd7-ai-btn--sm" onclick="MX.Pages.MxDoc._v7OpenAIModal()" title="Générer">'
-        + '<i class="fa-solid fa-wand-magic-sparkles"></i></button>'
-        + '</div>';
-
-      if (!_colLibrary.length) {
-        h += '<div class="mxd7-lib-empty"><i class="fa-regular fa-folder-open"></i>'
-          + '<p>Aucun contrôle dans la bibliothèque.<br>Cliquez <strong>Nouveau</strong> pour commencer.</p></div>';
-      } else {
-        // Favorites section
-        var _starred = _colLibrary.filter(function(c) { return !!c.starred; });
-        if (_starred.length && !_v7LibSearch && !_v7LibCatFilter) {
-          h += '<div class="mxd7-lib2-sec-hd"><span>⭐ Favoris</span><span class="mxd7-lib2-cnt">' + _starred.length + '</span></div>';
-          _starred.forEach(function(col) { h += _v7LibItemHTML(col); });
-          h += '<div class="mxd7-lib2-divider"></div>';
+      if (tab === 'favoris') {
+        var _fav = _colLibrary.filter(function(c) { return !!c.starred; });
+        if (_search) _fav = _fav.filter(function(c) { return (c.name||'').toLowerCase().indexOf(_search) >= 0; });
+        if (!_fav.length) {
+          h += '<div class="mxd6v3-lib-empty"><i class="fa-regular fa-star fa-2x"></i><p>Aucun favori.<br><small>Cliquez ⭐ sur un contrôle.</small></p></div>';
+        } else {
+          h += '<div class="mxd6v3-lib-list">';
+          _fav.forEach(function(col) { h += _v7LibItemHTML(col); });
+          h += '</div>';
         }
 
+      } else if (tab === 'recents') {
+        var _recentIds = _v7LibRecents.slice(0, 20);
+        var _recMap = {};
+        _colLibrary.forEach(function(c) { _recMap[c.id] = c; });
+        var _recList = _recentIds.map(function(id) { return _recMap[id]; }).filter(Boolean);
+        if (_search) _recList = _recList.filter(function(c) { return (c.name||'').toLowerCase().indexOf(_search) >= 0; });
+        if (!_recList.length) {
+          h += '<div class="mxd6v3-lib-empty"><i class="fa-regular fa-clock fa-2x"></i><p>Aucun contrôle utilisé récemment.</p></div>';
+        } else {
+          h += '<div class="mxd6v3-lib-list">';
+          _recList.forEach(function(col) { h += _v7LibItemHTML(col); });
+          h += '</div>';
+        }
+
+      } else {
+        // Tous tab — with cat filter + search
         // Category filter chips
         var _usedCats = V7_LIB_CATS.filter(function(cat) {
           return _colLibrary.some(function(c) { return c.category === cat; });
         });
-        if (_usedCats.length > 0) {
-          h += '<div class="mxd7-lib2-cats">';
-          h += '<button class="mxd7-lib2-cat' + (!_v7LibCatFilter ? ' mxd7-lib2-cat--on' : '') + '"'
+
+        var _visible = _colLibrary.filter(function(col) {
+          if (_v7LibCatFilter && col.category !== _v7LibCatFilter) return false;
+          if (_search && (col.name || '').toLowerCase().indexOf(_search) < 0) return false;
+          return true;
+        });
+
+        if (_usedCats.length && !_search) {
+          h += '<div class="mxd6v3-lib-cats">';
+          h += '<button class="mxd6v3-lib-cat' + (!_v7LibCatFilter ? ' mxd6v3-lib-cat--on' : '') + '"'
             + ' onclick="MX.Pages.MxDoc._v7LibSetCat(\'\')">Tous</button>';
           _usedCats.forEach(function(cat) {
             var cnt = _colLibrary.filter(function(c) { return c.category === cat; }).length;
-            h += '<button class="mxd7-lib2-cat' + (_v7LibCatFilter === cat ? ' mxd7-lib2-cat--on' : '') + '"'
+            h += '<button class="mxd6v3-lib-cat' + (_v7LibCatFilter === cat ? ' mxd6v3-lib-cat--on' : '') + '"'
               + ' onclick="MX.Pages.MxDoc._v7LibSetCat(' + JSON.stringify(cat) + ')">'
-              + e(cat) + '</button>';
+              + e(cat) + ' <span class="mxd6v3-lib-cat-cnt">' + cnt + '</span></button>';
           });
           h += '</div>';
         }
 
-        // Filtered list
-        var _search = _v7LibSearch.toLowerCase().trim();
-        var _catF = _v7LibCatFilter;
-        var _visible = _colLibrary.filter(function(col) {
-          if (_catF && col.category !== _catF) return false;
-          if (_search && (col.name || '').toLowerCase().indexOf(_search) < 0) return false;
-          return true;
-        });
-        // Starred first in full list (when not in favorites section)
-        if (!_search && !_catF) {
-          _visible = _visible.filter(function(c) { return !c.starred; });
+        if (!_visible.length) {
+          h += '<div class="mxd6v3-lib-empty"><i class="fa-regular fa-magnifying-glass fa-2x"></i><p>Aucun résultat.</p></div>';
         } else {
-          _visible.sort(function(a,b) { return (b.starred?1:0)-(a.starred?1:0); });
+          var _starred = _visible.filter(function(c) { return !!c.starred; });
+          var _unstarred = _visible.filter(function(c) { return !c.starred; });
+          var _sorted = _starred.concat(_unstarred);
+          h += '<div class="mxd6v3-lib-list">';
+          _sorted.forEach(function(col) { h += _v7LibItemHTML(col); });
+          h += '</div>';
         }
 
-        if (!_visible.length && (_search || _catF)) {
-          h += '<div class="mxd7-lib-empty" style="padding:16px 0"><i class="fa-regular fa-magnifying-glass"></i><p>Aucun résultat</p></div>';
-        } else if (_visible.length) {
-          h += '<div class="mxd7-lib2-list">';
-          if (!_search && !_catF) {
-            h += '<div class="mxd7-lib2-sec-hd"><span>Tous les contrôles</span><span class="mxd7-lib2-cnt">' + _visible.length + '</span></div>';
-          }
-          _visible.forEach(function(col) { h += _v7LibItemHTML(col); });
+        // Categories section at bottom (only when no filter/search)
+        if (!_search && !_v7LibCatFilter && _usedCats.length) {
+          h += '<div class="mxd6v3-lib-cats-section">';
+          h += '<div class="mxd6v3-lib-sec-hd">Catégories <button class="mxd6v3-lib-see-all" onclick="">Voir tout</button></div>';
+          h += '<div class="mxd6v3-lib-cat-grid">';
+          var _catIcons = { 'Eau': 'fa-droplet', 'Électricité': 'fa-bolt', 'Chauffage': 'fa-fire', 'Climatisation': 'fa-snowflake', 'Ascenseurs': 'fa-elevator', 'Sécurité': 'fa-shield-halved', 'Chambres': 'fa-bed', 'Photos': 'fa-camera', 'Divers': 'fa-folder' };
+          var _catColors = { 'Eau': '#3B82F6', 'Électricité': '#EAB308', 'Chauffage': '#F97316', 'Climatisation': '#06B6D4', 'Ascenseurs': '#8B5CF6', 'Sécurité': '#EF4444', 'Chambres': '#EC4899', 'Photos': '#14B8A6', 'Divers': '#64748B' };
+          _usedCats.forEach(function(cat) {
+            var cnt = _colLibrary.filter(function(c) { return c.category === cat; }).length;
+            var ico = _catIcons[cat] || 'fa-folder';
+            var clr = _catColors[cat] || '#64748B';
+            h += '<button class="mxd6v3-lib-cat-card" onclick="MX.Pages.MxDoc._v7LibSetCat(' + JSON.stringify(cat) + ')" style="--cc:' + clr + '">'
+              + '<i class="fa-solid ' + ico + '"></i>'
+              + '<span class="mxd6v3-lib-cat-card-name">' + e(cat) + '</span>'
+              + '<span class="mxd6v3-lib-cat-card-cnt">' + cnt + '</span>'
+              + '</button>';
+          });
+          h += '</div>';
           h += '</div>';
         }
       }
     }
 
     h += '</div>';
-    h += '<button class="mxd6-add-sec-pal" onclick="MX.Pages.MxDoc._v6AddSection()"><i class="fa-solid fa-plus"></i> Nouvelle section</button>';
+
+    // Promo card at bottom
+    h += '<div class="mxd6v3-lib-promo">'
+      + '<i class="fa-solid fa-wand-magic-sparkles"></i>'
+      + '<div>'
+      + '<div class="mxd6v3-lib-promo-title">Gagnez du temps</div>'
+      + '<div class="mxd6v3-lib-promo-sub">Enregistrez vos contrôles et réutilisez-les partout.</div>'
+      + '</div>'
+      + '<button class="mxd6v3-lib-ai-btn" onclick="MX.Pages.MxDoc._v7OpenAIModal()" title="Générer avec IA"><i class="fa-solid fa-robot"></i></button>'
+      + '</div>';
+
     return h;
+  }
+
+  function _v7LibSetTab(tab) {
+    _v7LibTab = tab;
+    _v7RefreshPalette();
+  }
+
+  function _v7LibPushRecent(colId) {
+    _v7LibRecents = [colId].concat(_v7LibRecents.filter(function(id) { return id !== colId; })).slice(0, 20);
   }
 
   function _v6CanvasInnerHTML() {
@@ -1319,30 +1437,45 @@
     var isV8 = sec.controls !== undefined;
     var isTable = !isV8 && !!sec.rows;
     var cnt = isV8 ? (sec.controls || []).length : (isTable ? (sec.rows || []).length : (sec.blocks || []).length);
-    var h = '<div class="mxd6-sec' + (selected ? ' mxd6-sec--sel' : '') + '" id="mxd6-sec-' + sIdx + '"'
+
+    // Section icon based on color hue or label
+    var secIcon = sec.icon || 'fa-layer-group';
+
+    var h = '<div class="mxd6v3-sec' + (selected ? ' mxd6v3-sec--sel' : '') + '" id="mxd6-sec-' + sIdx + '"'
       + ' ondragover="event.preventDefault();MX.Pages.MxDoc._v6SecDzOver(event,' + sIdx + ')"'
       + ' ondragleave="MX.Pages.MxDoc._v6SecDzLeave(event,' + sIdx + ')"'
       + ' ondrop="MX.Pages.MxDoc._v6SecDzDrop(event,' + sIdx + ')">'
-      + '<div class="mxd6-sec-hd" style="border-left:4px solid ' + color + '" onclick="MX.Pages.MxDoc._v6SelectSec(' + sIdx + ')">'
-      +   '<i class="mxd6-sec-dh fa-solid fa-grip-vertical" draggable="true"'
-      +     ' ondragstart="event.stopPropagation();MX.Pages.MxDoc._v6SecDragStart(event,' + sIdx + ')"'
-      +     ' onmousedown="event.stopPropagation()"></i>'
-      +   '<span class="mxd6-sec-name" contenteditable="true"'
-      +     ' onclick="event.stopPropagation()"'
-      +     ' onblur="MX.Pages.MxDoc._v6SecLabelChange(' + sIdx + ',this)"'
-      +     ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
-      +     '>' + e(sec.label || 'Section') + '</span>'
-      +   '<span class="mxd6-sec-cnt">' + cnt + '</span>'
-      +   '<div class="mxd6-sec-hd-acts">'
-      +     '<button class="mxd6-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupSection(' + sIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
-      +     '<button class="mxd6-sec-act mxd6-sec-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DelSection(' + sIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+
+      // Card header with gradient accent
+      + '<div class="mxd6v3-sec-hd" style="--sec-color:' + color + '" onclick="MX.Pages.MxDoc._v6SelectSec(' + sIdx + ')">'
+      +   '<div class="mxd6v3-sec-hd-l">'
+      +     '<div class="mxd6v3-sec-num" style="background:' + color + '">' + (sIdx + 1) + '</div>'
+      +     '<i class="mxd6v3-sec-grip fa-solid fa-grip-vertical" draggable="true"'
+      +       ' ondragstart="event.stopPropagation();MX.Pages.MxDoc._v6SecDragStart(event,' + sIdx + ')"'
+      +       ' onmousedown="event.stopPropagation()"></i>'
+      +     '<div class="mxd6v3-sec-icon" style="background:' + color + '22;color:' + color + '">'
+      +       '<i class="fa-solid ' + secIcon + '"></i>'
+      +     '</div>'
+      +     '<div class="mxd6v3-sec-title-wrap">'
+      +       '<div class="mxd6v3-sec-name" contenteditable="true"'
+      +         ' onclick="event.stopPropagation()"'
+      +         ' onblur="MX.Pages.MxDoc._v6SecLabelChange(' + sIdx + ',this)"'
+      +         ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur()}"'
+      +         '>' + e(sec.label || 'Section') + '</div>'
+      +       '<div class="mxd6v3-sec-meta"><span class="mxd6v3-sec-cnt">' + cnt + ' contrôle' + (cnt > 1 ? 's' : '') + '</span></div>'
+      +     '</div>'
       +   '</div>'
-      +   '<button class="mxd6-sec-toggle" onclick="event.stopPropagation();MX.Pages.MxDoc._v6ToggleCollapse(' + sIdx + ')">'
-      +     '<i class="fa-solid fa-chevron-' + (collapsed ? 'down' : 'up') + '"></i>'
-      +   '</button>'
+      +   '<div class="mxd6v3-sec-hd-r">'
+      +     '<button class="mxd6v3-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6ToggleCollapse(' + sIdx + ')" title="' + (collapsed ? 'Déplier' : 'Replier') + '">'
+      +       '<i class="fa-solid fa-chevron-' + (collapsed ? 'down' : 'up') + '"></i>'
+      +     '</button>'
+      +     '<button class="mxd6v3-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6DupSection(' + sIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
+      +     '<button class="mxd6v3-sec-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v6SecMenu(' + sIdx + ')" title="Plus d\'options"><i class="fa-solid fa-ellipsis-vertical"></i></button>'
+      +   '</div>'
       + '</div>';
+
     if (!collapsed) {
-      h += '<div class="mxd6-sec-bd">';
+      h += '<div class="mxd6v3-sec-bd">';
       if (isV8) {
         h += _v8SectionBodyHTML(sec, sIdx);
       } else if (isTable) {
@@ -1367,6 +1500,13 @@
     }
     h += '</div>';
     return h;
+  }
+
+  function _v6SecMenu(sIdx) {
+    // Simple inline confirm-delete context for now; can be expanded
+    if (confirm('Supprimer cette section et tous ses contrôles ?')) {
+      MX.Pages.MxDoc._v6DelSection(sIdx);
+    }
   }
 
   // ── V6/V7 TABLE RENDERING ──
@@ -1609,6 +1749,7 @@
 
   // Library card click — adds library col ID to active section
   function _v7LibClick(colId) {
+    _v7LibPushRecent(colId);
     var sIdx = (_v6SelSIdx !== null) ? _v6SelSIdx : (_builderSecs.length ? 0 : -1);
     if (sIdx < 0) { _v6AddSection(); sIdx = 0; }
     var sec = _builderSecs[sIdx];
@@ -2317,18 +2458,28 @@
   }
 
   function _v6MobBarHTML() {
-    var tabs = [
-      { key: 'palette', icon: 'fa-layer-group', l: 'Palette' },
-      { key: 'canvas',  icon: 'fa-file-lines',  l: 'Document' },
-      { key: 'props',   icon: 'fa-sliders',     l: 'Propriétés' },
-    ];
-    return '<nav class="mxd6-mob-bar">'
-      + tabs.map(function(t) {
-          return '<button class="mxd6-mob-btn' + (t.key === _v6MobPanel ? ' mxd6-mob-btn--on' : '') + '"'
-            + ' onclick="MX.Pages.MxDoc._v6MobSwitch(\'' + t.key + '\')">'
-            + '<i class="fa-solid ' + t.icon + '"></i><span>' + t.l + '</span></button>';
-        }).join('')
+    return '<div class="mxd6v3-bottom-bar">'
+      + '<button class="mxd6v3-bottom-btn" onclick="MX.Pages.MxDoc._saveBuilder()">'
+      + '<i class="fa-solid fa-floppy-disk"></i><span>Sauvegarder le brouillon</span></button>'
+      + '<button class="mxd6v3-bottom-btn" onclick="MX.Pages.MxDoc._v6DupDoc()">'
+      + '<i class="fa-regular fa-copy"></i><span>Dupliquer le document</span></button>'
+      + '<button class="mxd6v3-bottom-btn mxd6v3-bottom-btn--pub" onclick="MX.Pages.MxDoc._saveBuilder(\'published\')">'
+      + '<i class="fa-solid fa-check"></i><span>Valider et terminer</span></button>'
+      + '</div>'
+      + '<nav class="mxd6-mob-bar mxd6v3-mob-bar">'
+      + '<button class="mxd6-mob-btn' + (_v6MobPanel === 'canvas' ? ' mxd6-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v6MobSwitch(\'canvas\')">'
+      + '<i class="fa-solid fa-file-lines"></i><span>Document</span></button>'
+      + '<button class="mxd6-mob-btn' + (_v6MobPanel === 'palette' ? ' mxd6-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v6MobSwitch(\'palette\')">'
+      + '<i class="fa-solid fa-book"></i><span>Bibliothèque</span></button>'
+      + '<button class="mxd6-mob-btn' + (_v6MobPanel === 'props' ? ' mxd6-mob-btn--on' : '') + '" onclick="MX.Pages.MxDoc._v6MobSwitch(\'props\')">'
+      + '<i class="fa-solid fa-sliders"></i><span>Propriétés</span></button>'
       + '</nav>';
+  }
+
+  function _v6DupDoc() {
+    // Duplicate template — reuse existing duplicate logic
+    if (typeof _v6DupTemplate === 'function') { _v6DupTemplate(); return; }
+    if (typeof _v5DupDoc === 'function') { _v5DupDoc(); }
   }
 
   // ── V6 REFRESH ──
@@ -2370,6 +2521,11 @@
   }
 
   function _v6RefreshProps() {
+    // Auto-switch right panel to props when something is selected
+    if ((_v6SelSIdx !== null) && _v6RightPanel !== 'props') {
+      _v6RightPanel = 'props';
+      _v6V3RefreshRight();
+    }
     var el = document.getElementById('mxd6-props');
     if (el) el.innerHTML = _v6PropsPanelHTML();
   }
@@ -5028,69 +5184,40 @@
   // ── V8 SECTION BUILDER ───────────────────────────────────────────────────────
 
   function _v8SectionBodyHTML(sec, sIdx) {
-    var e = _e;
-    var extras = (sec.extraCols || []).map(_v7ResolveCol).filter(Boolean);
     var controls = sec.controls || [];
 
-    // Extra columns bar
-    var h = '<div class="mxd8-extras-bar">';
-    h += '<span class="mxd8-extras-lbl">Colonnes partagées :</span>';
-    if (extras.length) {
-      extras.forEach(function(r, ci) {
-        var col = r.def;
-        var ct = _v7TypeDef(col.type || col.key);
-        var color = col.color || (ct ? ct.color : '#64748B');
-        var faIcon = ct ? ct.icon : 'fa-columns';
-        var emoji = col.icon || '';
-        h += '<span class="mxd8-extra-tag" style="border-color:' + color + '22;color:' + color + '">'
-          + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '"></i> ')
-          + e(col.name || col.l || col.key)
-          + '<button class="mxd8-extra-rm" onclick="event.stopPropagation();MX.Pages.MxDoc._v8RemoveExtraCol(' + sIdx + ',' + ci + ')" title="Retirer"><i class="fa-solid fa-xmark"></i></button>'
-          + '</span>';
-      });
-    } else {
-      h += '<span class="mxd8-extras-empty">Aucune colonne partagée — ex : Photo, Commentaire, Signature…</span>';
-    }
-    h += '<button class="mxd8-extras-add" onclick="event.stopPropagation();MX.Pages.MxDoc._v8AddExtraColMenu(' + sIdx + ')">'
-      + '<i class="fa-solid fa-plus"></i> Ajouter</button>';
-    h += '</div>';
+    var h = '';
 
-    // Control table
+    // Control table — premium V3 layout
     if (!controls.length) {
-      h += '<div class="mxd8-empty">'
+      h += '<div class="mxd6v3-ctrl-empty">'
         + '<i class="fa-regular fa-circle-dot"></i>'
         + '<p>Aucun contrôle — cliquez <strong>+ Ajouter un contrôle</strong> pour commencer</p>'
         + '</div>';
     } else {
-      h += '<table class="mxd8-tbl"><thead><tr>'
-        + '<th class="mxd8-th-drag"></th>'
-        + '<th class="mxd8-th-ctrl">Contrôle / Mesure</th>'
-        + '<th class="mxd8-th-primary">Aperçu</th>';
-      extras.forEach(function(r) {
-        var col = r.def;
-        var ct = _v7TypeDef(col.type || col.key);
-        var color = col.color || (ct ? ct.color : '#64748B');
-        var emoji = col.icon || '';
-        var faIcon = ct ? ct.icon : 'fa-columns';
-        h += '<th class="mxd8-th-extra" style="color:' + color + '">'
-          + (emoji ? e(emoji) + ' ' : '<i class="fa-solid ' + faIcon + '"></i> ')
-          + e(col.name || col.l || col.key) + '</th>';
-      });
-      h += '<th class="mxd8-th-acts"></th></tr></thead><tbody>';
+      h += '<table class="mxd6v3-tbl"><thead><tr>'
+        + '<th class="mxd6v3-th-drag"></th>'
+        + '<th class="mxd6v3-th-ctrl">CONTRÔLE</th>'
+        + '<th class="mxd6v3-th-val">VALEUR</th>'
+        + '<th class="mxd6v3-th-etat">ÉTAT</th>'
+        + '<th class="mxd6v3-th-photo">PHOTO</th>'
+        + '<th class="mxd6v3-th-cmt">COMMENTAIRE</th>'
+        + '<th class="mxd6v3-th-acts">ACTIONS</th>'
+        + '</tr></thead><tbody>';
       controls.forEach(function(ctrl, cIdx) {
-        h += _v8ControlRowHTML(ctrl, sIdx, cIdx, extras);
+        h += _v8ControlRowHTML(ctrl, sIdx, cIdx, null);
       });
       h += '</tbody></table>';
     }
 
-    // Inline add panel (hidden, toggled by + button)
+    // Inline add panel
     h += _v8AddPanelHTML(sIdx);
 
-    // Bottom action bar: two options
-    h += '<div class="mxd8-add-bar">'
-      + '<button class="mxd8-add-ctrl-btn" onclick="MX.Pages.MxDoc._v8ShowAddPanel(' + sIdx + ')">'
+    // Bottom action bar
+    h += '<div class="mxd6v3-add-bar">'
+      + '<button class="mxd6v3-add-ctrl-btn" onclick="MX.Pages.MxDoc._v8ShowAddPanel(' + sIdx + ')">'
       + '<i class="fa-solid fa-plus"></i> Ajouter un contrôle</button>'
-      + '<button class="mxd8-import-lib-btn" onclick="MX.Pages.MxDoc._v8ShowImportPanel(' + sIdx + ')">'
+      + '<button class="mxd6v3-import-lib-btn" onclick="MX.Pages.MxDoc._v8ShowImportPanel(' + sIdx + ')">'
       + '<i class="fa-regular fa-folder-open"></i> Importer depuis la bibliothèque</button>'
       + '</div>';
 
@@ -5253,14 +5380,26 @@
     _v8SelectControl(sIdx, sec.controls.length - 1);
   }
 
-  function _v8ControlRowHTML(ctrl, sIdx, cIdx, extras) {
+  function _v8ControlRowHTML(ctrl, sIdx, cIdx, _extras) {
     var e = _e;
     var isSelected = (_v6SelSIdx === sIdx && _v6SelBIdx === cIdx);
     var resolved = _v8ResolveCtrl(ctrl);
     var col = resolved ? resolved.def : null;
-    var icon = ctrl.icon || _v8AutoIcon(ctrl.label, col ? (col.type || col.key) : null);
+    var type = col ? (col.type || col.key || 'texte') : 'texte';
 
-    var h = '<tr class="mxd8-ctrl-row' + (isSelected ? ' mxd8-ctrl-row--sel' : '') + '"'
+    // Determine icon color from type definition
+    var ct = col ? _v7TypeDef(type) : null;
+    var color = (col && col.color) || (ct ? ct.color : '#6366F1');
+    var faIcon = ct ? ct.icon : 'fa-circle-question';
+    var ctrlIcon = ctrl.icon || '';
+
+    // Unit label (e.g. °C, pH, bar)
+    var unit = (col && col.unit) ? col.unit : '';
+
+    // Inline ⋮ menu open?
+    var menuOpen = (_v8CtrlMenuOpen === sIdx + '-' + cIdx);
+
+    var h = '<tr class="mxd6v3-ctrl-row' + (isSelected ? ' mxd6v3-ctrl-row--sel' : '') + '"'
       + ' id="mxd8-ctrl-' + sIdx + '-' + cIdx + '"'
       + ' draggable="true"'
       + ' ondragstart="MX.Pages.MxDoc._v8CtrlDragStart(event,' + sIdx + ',' + cIdx + ')"'
@@ -5268,26 +5407,132 @@
       + ' ondragleave="MX.Pages.MxDoc._v8CtrlDzLeave(event,' + sIdx + ',' + cIdx + ')"'
       + ' ondrop="MX.Pages.MxDoc._v8CtrlDzDrop(event,' + sIdx + ',' + cIdx + ')"'
       + ' onclick="MX.Pages.MxDoc._v8SelectControl(' + sIdx + ',' + cIdx + ')">'
-      + '<td class="mxd8-td-drag"><i class="fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i></td>'
-      + '<td class="mxd8-td-ctrl">'
-      + (icon ? '<span class="mxd8-ctrl-icon">' + e(icon) + '</span>' : '')
-      + '<span class="mxd8-ctrl-lbl' + (ctrl.required ? ' mxd8-ctrl-lbl--req' : '') + '"'
-      + ' id="mxd8-ctrl-lbl-' + sIdx + '-' + cIdx + '"'
-      + '>' + e(ctrl.label || '') + '</span>'
-      + (col ? _v8TypeBadge(col) : '<span class="mxd8-badge-pick">— Choisir un type</span>')
+
+      // Drag handle
+      + '<td class="mxd6v3-td-drag"><i class="fa-solid fa-grip-vertical" onmousedown="event.stopPropagation()"></i></td>'
+
+      // Control name + icon
+      + '<td class="mxd6v3-td-ctrl">'
+      +   '<span class="mxd6v3-ctrl-ic" style="background:' + color + '22;color:' + color + '">'
+      +     (ctrlIcon ? e(ctrlIcon) : '<i class="fa-solid ' + faIcon + '"></i>')
+      +   '</span>'
+      +   '<div class="mxd6v3-ctrl-info">'
+      +     '<span class="mxd6v3-ctrl-name' + (ctrl.required ? ' mxd6v3-ctrl-name--req' : '') + '">'
+      +       e(ctrl.label || '—')
+      +     '</span>'
+      +     (unit ? '<span class="mxd6v3-ctrl-unit">' + e(unit) + '</span>' : '')
+      +   '</div>'
       + '</td>'
-      + '<td class="mxd8-td-primary">' + (col ? _v8PrimaryPreview(ctrl, col) : '<span class="mxd8-no-type"><i class="fa-regular fa-question-circle"></i></span>') + '</td>';
 
-    (extras || []).forEach(function() {
-      h += '<td class="mxd8-td-extra"><span class="mxd8-extra-dot"></span></td>';
-    });
+      // Value column
+      + '<td class="mxd6v3-td-val">'
+      +   _v8V3ValuePreview(ctrl, col, type, sIdx, cIdx)
+      + '</td>'
 
-    h += '<td class="mxd8-td-acts">'
-      + '<button class="mxd6-row-act" onclick="event.stopPropagation();MX.Pages.MxDoc._v8DupControl(' + sIdx + ',' + cIdx + ')" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>'
-      + '<button class="mxd6-row-act' + (ctrl.required ? ' mxd6-row-act--on' : '') + '" onclick="event.stopPropagation();MX.Pages.MxDoc._v8CtrlToggle(' + sIdx + ',' + cIdx + ',\'required\')" title="Obligatoire"><i class="fa-solid fa-asterisk"></i></button>'
-      + '<button class="mxd6-row-act mxd6-row-act--del" onclick="event.stopPropagation();MX.Pages.MxDoc._v8DelControl(' + sIdx + ',' + cIdx + ')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
-      + '</td></tr>';
+      // État column (Conforme/Défaut for compatible types, else —)
+      + '<td class="mxd6v3-td-etat">'
+      +   _v8V3EtatPreview(type, col)
+      + '</td>'
+
+      // Photo column
+      + '<td class="mxd6v3-td-photo">'
+      +   '<button class="mxd6v3-td-photo-btn" onclick="event.stopPropagation()" title="Photo"><i class="fa-solid fa-camera"></i></button>'
+      + '</td>'
+
+      // Comment column
+      + '<td class="mxd6v3-td-cmt">'
+      +   '<button class="mxd6v3-td-cmt-btn" onclick="event.stopPropagation()" title="Commentaire"><i class="fa-regular fa-comment"></i></button>'
+      + '</td>'
+
+      // Actions ⋮ with inline context menu
+      + '<td class="mxd6v3-td-acts" onclick="event.stopPropagation()">'
+      +   '<div class="mxd6v3-ctrl-menu-wrap">'
+      +     '<button class="mxd6v3-ctrl-more" onclick="MX.Pages.MxDoc._v8CtrlMenuToggle(' + sIdx + ',' + cIdx + ')"><i class="fa-solid fa-ellipsis-vertical"></i></button>'
+      +     (menuOpen ? _v8CtrlMenuHTML(sIdx, cIdx) : '')
+      +   '</div>'
+      + '</td>'
+
+      + '</tr>';
     return h;
+  }
+
+  var _v8CtrlMenuOpen = null;
+
+  function _v8CtrlMenuToggle(sIdx, cIdx) {
+    var key = sIdx + '-' + cIdx;
+    _v8CtrlMenuOpen = (_v8CtrlMenuOpen === key) ? null : key;
+    var row = document.getElementById('mxd8-ctrl-' + sIdx + '-' + cIdx);
+    if (row) {
+      var sec = _builderSecs[sIdx];
+      if (sec && sec.controls) {
+        var h = _v8ControlRowHTML(sec.controls[cIdx], sIdx, cIdx, null);
+        var tmp = document.createElement('tbody');
+        tmp.innerHTML = h;
+        row.parentNode.replaceChild(tmp.firstChild, row);
+      }
+    }
+  }
+
+  function _v8CtrlMenuHTML(sIdx, cIdx) {
+    return '<div class="mxd6v3-ctrl-dropdown">'
+      + '<button onclick="MX.Pages.MxDoc._v8DupControl(' + sIdx + ',' + cIdx + ');MX.Pages.MxDoc._v8CtrlMenuToggle(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
+      + '<button onclick="MX.Pages.MxDoc._v8SaveCtrlToLib(' + sIdx + ',' + cIdx + ');MX.Pages.MxDoc._v8CtrlMenuToggle(' + sIdx + ',' + cIdx + ')"><i class="fa-solid fa-star"></i> Sauvegarder en bibliothèque</button>'
+      + '<button onclick="MX.Pages.MxDoc._v8SelectControl(' + sIdx + ',' + cIdx + ');MX.Pages.MxDoc._v8CtrlMenuToggle(' + sIdx + ',' + cIdx + ')"><i class="fa-solid fa-pen"></i> Modifier</button>'
+      + '<button class="mxd6v3-ctrl-dropdown-del" onclick="MX.Pages.MxDoc._v8DelControl(' + sIdx + ',' + cIdx + ');MX.Pages.MxDoc._v8CtrlMenuToggle(' + sIdx + ',' + cIdx + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div>';
+  }
+
+  function _v8V3ValuePreview(ctrl, col, type, sIdx, cIdx) {
+    if (!col) return '<span class="mxd6v3-no-type">—</span>';
+    switch (type) {
+      case 'int': case 'decimal': case 'pourcent': case 'monnaie': case 'compteur':
+        return '<input class="mxd6v3-val-inp" type="number" placeholder="—" tabindex="-1" disabled'
+          + (col.unit ? ' title="' + col.unit + '"' : '') + '>';
+      case 'texte': case 'commentaire':
+        return '<input class="mxd6v3-val-inp mxd6v3-val-inp--text" type="text" placeholder="Texte…" tabindex="-1" disabled>';
+      case 'date':
+        return '<input class="mxd6v3-val-inp" type="date" tabindex="-1" disabled>';
+      case 'heure': case 'temps':
+        return '<input class="mxd6v3-val-inp" type="time" tabindex="-1" disabled>';
+      case 'liste':
+        return '<select class="mxd6v3-val-select" disabled><option>—</option></select>';
+      case 'photo':
+        return '<span class="mxd6v3-val-ic"><i class="fa-solid fa-camera"></i></span>';
+      case 'signature':
+        return '<span class="mxd6v3-val-ic"><i class="fa-solid fa-pen-nib"></i></span>';
+      case 'barcode': case 'qrcode':
+        return '<span class="mxd6v3-val-ic"><i class="fa-solid fa-qrcode"></i></span>';
+      default:
+        return '<span class="mxd6v3-no-type">—</span>';
+    }
+  }
+
+  function _v8V3EtatPreview(type, col) {
+    switch (type) {
+      case 'conforme':
+        return '<div class="mxd6v3-etat-btns">'
+          + '<button class="mxd6v3-etat-ok" disabled><i class="fa-solid fa-check"></i> ' + ((col && col.libelleOk) || 'Conforme') + '</button>'
+          + '<button class="mxd6v3-etat-ko" disabled><i class="fa-solid fa-xmark"></i> ' + ((col && col.libelleKo) || 'Défaut') + '</button>'
+          + '</div>';
+      case 'ouinon':
+        return '<div class="mxd6v3-etat-btns">'
+          + '<button class="mxd6v3-etat-ok" disabled><i class="fa-solid fa-check"></i> ' + ((col && col.labelOui) || 'Oui') + '</button>'
+          + '<button class="mxd6v3-etat-ko" disabled><i class="fa-solid fa-xmark"></i> ' + ((col && col.labelNon) || 'Non') + '</button>'
+          + '</div>';
+      case 'etat': case 'etatcheck': case 'marchearret':
+        return '<div class="mxd6v3-etat-btns">'
+          + '<button class="mxd6v3-etat-ok" disabled><i class="fa-solid fa-check"></i></button>'
+          + '<button class="mxd6v3-etat-ko" disabled><i class="fa-solid fa-xmark"></i></button>'
+          + '</div>';
+      default:
+        return '<span class="mxd6v3-etat-na">—</span>';
+    }
+  }
+
+  function _v8SaveCtrlToLib(sIdx, cIdx) {
+    var sec = _builderSecs[sIdx]; if (!sec || !sec.controls) return;
+    var ctrl = sec.controls[cIdx]; if (!ctrl) return;
+    _v8SaveToLibrary(sIdx, cIdx);
   }
 
   function _v8ResolveCtrl(ctrl) {
@@ -6763,6 +7008,21 @@
     _v7LibToggleStar,
     _v7LibDuplicate,
     _v7LibDeleteConfirm,
+    // V3 Premium
+    _v6V3HeaderHTML,
+    _v6V3StatCard,
+    _v6V3RightPanelHTML,
+    _v6V3RefreshRight,
+    _v6V3ShowLibrary,
+    _v7LibSetTab,
+    _v7LibPushRecent,
+    _v6SecMenu,
+    _v8CtrlMenuToggle,
+    _v8CtrlMenuHTML,
+    _v8V3ValuePreview,
+    _v8V3EtatPreview,
+    _v8SaveCtrlToLib,
+    _v6DupDoc,
     _v7OpenAIModal,
     _v7AIGenerate,
     _v7AIAddCol,
