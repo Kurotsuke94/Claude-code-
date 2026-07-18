@@ -1368,7 +1368,8 @@
           _usedCats.forEach(function(cat) {
             var cnt = _colLibrary.filter(function(c) { return c.category === cat; }).length;
             h += '<button class="mxd6v3-lib-cat' + (_v7LibCatFilter === cat ? ' mxd6v3-lib-cat--on' : '') + '"'
-              + ' onclick="MX.Pages.MxDoc._v7LibSetCat(' + JSON.stringify(cat) + ')">'
+              + ' data-cat="' + e(cat) + '"'
+              + ' onclick="MX.Pages.MxDoc._v7LibSetCat(this.dataset.cat)">'
               + e(cat) + ' <span class="mxd6v3-lib-cat-cnt">' + cnt + '</span></button>';
           });
           h += '</div>';
@@ -1396,7 +1397,7 @@
             var cnt = _colLibrary.filter(function(c) { return c.category === cat; }).length;
             var ico = _catIcons[cat] || 'fa-folder';
             var clr = _catColors[cat] || '#64748B';
-            h += '<button class="mxd6v3-lib-cat-card" onclick="MX.Pages.MxDoc._v7LibSetCat(' + JSON.stringify(cat) + ')" style="--cc:' + clr + '">'
+            h += '<button class="mxd6v3-lib-cat-card" data-cat="' + e(cat) + '" onclick="MX.Pages.MxDoc._v7LibSetCat(this.dataset.cat)" style="--cc:' + clr + '">'
               + '<i class="fa-solid ' + ico + '"></i>'
               + '<span class="mxd6v3-lib-cat-card-name">' + e(cat) + '</span>'
               + '<span class="mxd6v3-lib-cat-card-cnt">' + cnt + '</span>'
@@ -1718,9 +1719,13 @@
         .onSnapshot(function(snap) {
           _colLibrary = [];
           snap.forEach(function(doc) {
-            _colLibrary.push(Object.assign({ id: doc.id }, doc.data()));
+            // doc.id ALWAYS wins over any 'id' field stored inside document data
+            _colLibrary.push(Object.assign({}, doc.data(), { id: doc.id }));
           });
           console.log('[MXDOC LIB] Chargé:', _colLibrary.length, 'élément(s)');
+          if (_colLibrary.length) {
+            console.log('[MXDOC LIB] Premier élément:', JSON.stringify({ id: _colLibrary[0].id, name: _colLibrary[0].name }));
+          }
           _v7RefreshPalette();
         }, function(err) {
           console.error('[MXDOC LIB] Erreur onSnapshot :', err.code, err.message);
@@ -1739,11 +1744,16 @@
 
   function _v7SaveColLib(def) {
     var col = DB.library();
+    // Strip `id` from document data — Firestore doc ID is the source of truth,
+    // storing id inside data caused Object.assign to overwrite doc.id on load
+    var data = Object.assign({}, def);
+    delete data.id;
+
     if (def.id) {
-      col.doc(def.id).set(def, { merge: true });
+      col.doc(def.id).set(data, { merge: true });
     } else {
-      def._createdAt = FV.serverTimestamp();
-      col.add(def).then(function(ref) { def.id = ref.id; });
+      data._createdAt = FV.serverTimestamp();
+      col.add(data).then(function(ref) { def.id = ref.id; });
     }
   }
 
@@ -1878,7 +1888,7 @@
       _v7ModalDef = JSON.parse(JSON.stringify(found));
       _v7ModalIsNew = false;
     } else {
-      _v7ModalDef = { id: null, name: '', icon: '', color: '#0EA5E9', type: 'decimal', required: false };
+      _v7ModalDef = { name: '', icon: '', color: '#0EA5E9', type: 'decimal', required: false };
       _v7ModalIsNew = true;
     }
     _v7ModalTab = 'info';
@@ -1954,7 +1964,7 @@
     h += '</div>';
     h += '<div class="mxd7-modal-foot">';
     if (!_v7ModalIsNew && def.id) {
-      h += '<button class="mxd7-btn-del" onclick="MX.Pages.MxDoc._v7DeleteColConfirm(' + JSON.stringify(def.id) + ')"><i class="fa-regular fa-trash"></i> Supprimer</button>';
+      h += '<button class="mxd7-btn-del" data-cid="' + _e(def.id) + '" onclick="MX.Pages.MxDoc._v7DeleteColConfirm(this.dataset.cid)"><i class="fa-regular fa-trash"></i> Supprimer</button>';
     }
     h += '<button class="mxd7-btn-cancel" onclick="MX.Pages.MxDoc._v7CloseColModal()">Annuler</button>';
     h += '<button class="mxd7-btn-save" onclick="MX.Pages.MxDoc._v7SaveColModal()"><i class="fa-solid fa-floppy-disk"></i> Enregistrer</button>';
@@ -2092,13 +2102,20 @@
 
   function _v7LibItemHTML(col) {
     var e = _e;
+    if (!col.id) {
+      console.error('[MXDOC LIB] Item sans id:', col);
+      return '';
+    }
+    // Use data-cid attribute to pass Firestore id without quoting issues in onclick
+    var cid = e(col.id);
     var ct = _v7TypeDef(col.type);
     var color = col.color || (ct ? ct.color : '#64748B');
     var faIcon = ct ? ct.icon : 'fa-columns';
     var emoji = col.icon || '';
     var isMenuOpen = _v7LibMenuId === col.id;
-    return '<div class="mxd7-lib2-item" onclick="MX.Pages.MxDoc._v7LibClick(' + JSON.stringify(col.id) + ')"'
-      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v7LibDragStart(event,' + JSON.stringify(col.id) + ')">'
+    return '<div class="mxd7-lib2-item" data-cid="' + cid + '"'
+      + ' onclick="MX.Pages.MxDoc._v7LibClick(this.dataset.cid)"'
+      + ' draggable="true" ondragstart="MX.Pages.MxDoc._v7LibDragStart(event,this.dataset.cid)">'
       + '<span class="mxd7-lib2-ic" style="background:' + color + '22;color:' + color + '">'
       + (emoji ? e(emoji) : '<i class="fa-solid ' + faIcon + '"></i>')
       + '</span>'
@@ -2108,11 +2125,11 @@
       + '</div>'
       + '<div class="mxd7-lib2-actions" onclick="event.stopPropagation()">'
       +   '<button class="mxd7-lib2-star' + (col.starred ? ' mxd7-lib2-star--on' : '') + '"'
-      +     ' onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibToggleStar(' + JSON.stringify(col.id) + ')"'
+      +     ' onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibToggleStar(this.closest(\'[data-cid]\').dataset.cid)"'
       +     ' title="' + (col.starred ? 'Retirer des favoris' : 'Ajouter aux favoris') + '">'
       +     (col.starred ? '⭐' : '☆') + '</button>'
       +   '<div class="mxd7-lib2-menu-wrap">'
-      +     '<button class="mxd7-lib2-more" onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibMenu(' + JSON.stringify(col.id) + ')">⋮</button>'
+      +     '<button class="mxd7-lib2-more" onclick="event.stopPropagation();MX.Pages.MxDoc._v7LibMenu(this.closest(\'[data-cid]\').dataset.cid)">⋮</button>'
       +     (isMenuOpen ? _v7LibMenuHTML(col.id) : '')
       +   '</div>'
       + '</div>'
@@ -2120,12 +2137,13 @@
   }
 
   function _v7LibMenuHTML(colId) {
-    return '<div class="mxd7-lib2-dropdown" onclick="event.stopPropagation()">'
-      + '<button onclick="MX.Pages.MxDoc._v7OpenColModal(' + JSON.stringify(colId) + ');MX.Pages.MxDoc._v7LibMenu(null)">'
+    var cid = _e(colId);
+    return '<div class="mxd7-lib2-dropdown" onclick="event.stopPropagation()" data-cid="' + cid + '">'
+      + '<button onclick="MX.Pages.MxDoc._v7OpenColModal(this.closest(\'[data-cid]\').dataset.cid);MX.Pages.MxDoc._v7LibMenu(null)">'
       +   '<i class="fa-regular fa-pen-to-square"></i> Modifier</button>'
-      + '<button onclick="MX.Pages.MxDoc._v7LibDuplicate(' + JSON.stringify(colId) + ')">'
+      + '<button onclick="MX.Pages.MxDoc._v7LibDuplicate(this.closest(\'[data-cid]\').dataset.cid)">'
       +   '<i class="fa-regular fa-copy"></i> Dupliquer</button>'
-      + '<button class="mxd7-lib2-dropdown-del" onclick="MX.Pages.MxDoc._v7LibDeleteConfirm(' + JSON.stringify(colId) + ')">'
+      + '<button class="mxd7-lib2-dropdown-del" onclick="MX.Pages.MxDoc._v7LibDeleteConfirm(this.closest(\'[data-cid]\').dataset.cid)">'
       +   '<i class="fa-regular fa-trash"></i> Supprimer</button>'
       + '</div>';
   }
