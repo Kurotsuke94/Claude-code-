@@ -6660,7 +6660,6 @@
     _v8PrimaryPreview,
     _v8SecPropsHTML,
     _v8CtrlPropsHTML,
-    _v8OpenPrimaryPicker,
     _v8PickPrimary,
     _v8AddExtraColMenu,
     _v8AddExtraCol,
