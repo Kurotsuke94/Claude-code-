@@ -379,74 +379,125 @@
   function cancelLogin() { hideLogin(); }
 
   function updateSidebarFooter() {
-    const el = document.getElementById("sidebar-footer");
-    if (!el) return;
+    _updateSidebarTrigger();
+    _buildAccountPanel();
+  }
+
+  function _updateSidebarTrigger() {
+    const avatarEl = document.getElementById("sxap-trigger-avatar");
+    const nameEl   = document.getElementById("sxap-trigger-name");
+    const roleEl   = document.getElementById("sxap-trigger-role");
+    if (!avatarEl) return;
     const admin = window.MX.state.adminUser;
     const cu    = window.MX.state.currentUser;
 
     if (admin) {
       const email    = admin.email || "";
       const initials = email.substring(0, 2).toUpperCase();
-      el.innerHTML = `
-        <button class="sxf-btn" onclick="MX.Auth.logout()">
-          <div class="sxf-avatar sxf-avatar--admin">${MX.esc(initials)}</div>
-          <div class="sxf-info">
-            <div class="sxf-name">${MX.esc(email.split("@")[0])}</div>
-            <div class="sxf-role"><span class="sxf-dot sxf-dot--on"></span><span class="sxf-role-lbl">Administrateur</span></div>
-          </div>
-          <i class="fas fa-sign-out-alt sxf-logout"></i>
-        </button>`;
+      avatarEl.className        = "sxap-trigger-avatar sxap-trigger-avatar--admin";
+      avatarEl.innerHTML        = MX.esc(initials);
+      avatarEl.style.background = "";
+      avatarEl.style.color      = "";
+      if (nameEl) nameEl.textContent = email.split("@")[0];
+      if (roleEl) roleEl.textContent = "Administrateur";
     } else if (cu) {
       const nc       = MX.userColors ? MX.userColors(cu.name) : { bg: MX.avatarBg(cu.name), fg: MX.avatarFg(cu.name) };
       const bg       = cu.color || nc.bg;
       const fg       = cu.color ? _contrastColor(cu.color) : nc.fg;
-      const _cuRole  = (window.MX.state.roles || []).find(r => r.id === cu.roleId);
-      const lbl      = _cuRole ? (_cuRole.emoji ? _cuRole.emoji + ' ' + _cuRole.name : _cuRole.name) : (cu.role === "responsable" ? "Responsable" : "Technicien");
       const fullUser = (MX.state.users || []).find(u => u.id === cu.id) || cu;
-      const gradeBadge = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : "";
-      const rUser    = (MX.state.rewardsUsers || {})[cu.name] || {};
-      const pts      = rUser.points || 0;
-      const _sfBdgBorder = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
-      el.innerHTML = `
-        <button class="sxf-btn" onclick="MX.Auth.clearCurrentUser()">
-          <div class="sxf-avatar" style="background:${bg};color:${fg}${_sfBdgBorder?';border:2px solid '+_sfBdgBorder:''}">${
-            fullUser.avatarUrl
-              ? `<img src="${MX.esc(fullUser.avatarUrl)}" class="sxf-avatar-img">`
-              : MX.esc(cu.name.substring(0, 2).toUpperCase())
-          }</div>
-          <div class="sxf-info">
-            <div class="sxf-name">${MX.badgeTag ? MX.badgeTag(cu.name) : ''}${MX.esc(cu.name)}</div>
-            <div class="sxf-role">
-              <span class="sxf-dot sxf-dot--on"></span>
-              <span class="sxf-role-lbl">${lbl}</span>
-              ${pts ? `<span class="sxf-pts">${pts} pts</span>` : ""}
-            </div>
-            ${gradeBadge ? `<div class="sxf-grade">${gradeBadge}</div>` : ""}
-          </div>
-          <i class="fas fa-exchange-alt sxf-logout"></i>
-        </button>`;
+      const _cuRole  = (window.MX.state.roles || []).find(r => r.id === cu.roleId);
+      const lbl      = _cuRole ? (_cuRole.emoji ? _cuRole.emoji + " " + _cuRole.name : _cuRole.name) : (cu.role === "responsable" ? "Responsable" : "Technicien");
+      avatarEl.className        = "sxap-trigger-avatar";
+      avatarEl.style.background = bg;
+      avatarEl.style.color      = fg;
+      if (fullUser.avatarUrl) {
+        avatarEl.innerHTML = '<img src="' + MX.esc(fullUser.avatarUrl) + '" class="sxap-trigger-img" alt="">';
+      } else {
+        avatarEl.textContent = cu.name.substring(0, 2).toUpperCase();
+      }
+      if (nameEl) nameEl.textContent = cu.name;
+      if (roleEl) roleEl.textContent = lbl;
     } else {
-      el.innerHTML = `
-        <div class="sxf-anon">
-          <button class="sxf-anon-btn sxf-anon-btn--primary" onclick="MX.Auth.showUserPicker()"><i class="fas fa-user-circle"></i> Se connecter</button>
-          <button class="sxf-anon-btn" onclick="MX.showPage('utilisateurs')"><i class="fas fa-shield-halved"></i> Administration</button>
-        </div>`;
-    }
-    if ("Notification" in window && Notification.permission !== "granted") {
-      const d = document.createElement("div");
-      d.style.cssText = "padding:4px 0 0";
-      d.innerHTML = `<button onclick="MX.enableNotifications()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--bg4);color:var(--text2);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-bell-slash"></i> Activer les notifications</button>`;
-      el.appendChild(d);
-    }
-    if (MX._canInstall) {
-      const d = document.createElement("div");
-      d.style.cssText = "padding:4px 0 0";
-      d.innerHTML = `<button onclick="MX.tryInstall()" style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--cyan-border);border-radius:8px;background:var(--cyan-dim);color:var(--cyan);cursor:pointer;font-size:11px;font-family:var(--ffs);width:100%;justify-content:center"><i class="fas fa-download"></i> Installer l'appli</button>`;
-      el.appendChild(d);
+      avatarEl.className        = "sxap-trigger-avatar sxap-trigger-avatar--anon";
+      avatarEl.innerHTML        = '<i class="fas fa-user" aria-hidden="true"></i>';
+      avatarEl.style.background = "";
+      avatarEl.style.color      = "";
+      if (nameEl) nameEl.textContent = "Se connecter";
+      if (roleEl) roleEl.textContent = "";
     }
   }
 
-  window.MX = window.MX || {};
+  function _buildAccountPanel() {
+    const panel = document.getElementById("sxap-panel");
+    if (!panel) return;
+    const admin = window.MX.state.adminUser;
+    const cu    = window.MX.state.currentUser;
+    let html = '<div class="sxap-items">';
+
+    if (admin) {
+      const email    = admin.email || "";
+      const initials = email.substring(0, 2).toUpperCase();
+      html += '<div class="sxap-head">'
+            + '<div class="sxap-head-avatar sxap-head-avatar--admin">' + MX.esc(initials) + '</div>'
+            + '<div class="sxap-head-info">'
+            + '<div class="sxap-head-name">' + MX.esc(email.split("@")[0]) + '</div>'
+            + '<div class="sxap-head-role"><span class="sxap-dot sxap-dot--on"></span>Administrateur</div>'
+            + '</div></div>';
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item" onclick="MX.showPage(\'admin\');MX.closeAccountPanel()"><i class="fas fa-shield-halved"></i><span>Administration</span></button>';
+      html += '<button class="sxap-item" onclick="MX.showPage(\'ios-diag\');MX.closeAccountPanel()"><i class="fas fa-mobile-screen-button"></i><span>Diagnostic Push</span></button>';
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item sxap-item--danger" onclick="MX.Auth.logout()"><i class="fas fa-sign-out-alt"></i><span>Déconnexion</span></button>';
+    } else if (cu) {
+      const nc           = MX.userColors ? MX.userColors(cu.name) : { bg: MX.avatarBg(cu.name), fg: MX.avatarFg(cu.name) };
+      const bg           = cu.color || nc.bg;
+      const fg           = cu.color ? _contrastColor(cu.color) : nc.fg;
+      const fullUser     = (MX.state.users || []).find(u => u.id === cu.id) || cu;
+      const _cuRole      = (window.MX.state.roles || []).find(r => r.id === cu.roleId);
+      const lbl          = _cuRole ? (_cuRole.emoji ? _cuRole.emoji + " " + _cuRole.name : _cuRole.name) : (cu.role === "responsable" ? "Responsable" : "Technicien");
+      const gradeBadge   = (MX.Rewards && MX.Rewards.getUserGradeBadge) ? MX.Rewards.getUserGradeBadge(cu.name, { small: true }) : "";
+      const rUser        = (MX.state.rewardsUsers || {})[cu.name] || {};
+      const pts          = rUser.points || 0;
+      const _sfBdgBorder = MX.badgeBorder ? MX.badgeBorder(cu.name) : null;
+      const borderStyle  = _sfBdgBorder ? ";border:2px solid " + _sfBdgBorder : "";
+      const avatarInner  = fullUser.avatarUrl
+        ? '<img src="' + MX.esc(fullUser.avatarUrl) + '" class="sxap-head-img" alt="">'
+        : MX.esc(cu.name.substring(0, 2).toUpperCase());
+      html += '<div class="sxap-head">'
+            + '<div class="sxap-head-avatar" style="background:' + bg + ';color:' + fg + borderStyle + '">' + avatarInner + '</div>'
+            + '<div class="sxap-head-info">'
+            + '<div class="sxap-head-name">' + (MX.badgeTag ? MX.badgeTag(cu.name) : "") + MX.esc(cu.name) + '</div>'
+            + '<div class="sxap-head-role"><span class="sxap-dot sxap-dot--on"></span>' + lbl + (pts ? ' <span class="sxap-pts">' + pts + ' pts</span>' : "") + '</div>'
+            + (gradeBadge ? '<div class="sxap-head-grade">' + gradeBadge + '</div>' : "")
+            + '</div></div>';
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item" onclick="MX.showPage(\'settings\');MX.closeAccountPanel()"><i class="fas fa-sliders"></i><span>Paramètres</span></button>';
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item" onclick="MX.Auth.clearCurrentUser();MX.closeAccountPanel()"><i class="fas fa-exchange-alt"></i><span>Changer de profil</span></button>';
+    } else {
+      html += '<div class="sxap-head sxap-head--anon">'
+            + '<div class="sxap-head-avatar sxap-head-avatar--anon"><i class="fas fa-user" aria-hidden="true"></i></div>'
+            + '<div class="sxap-head-info">'
+            + '<div class="sxap-head-name">Non connecté</div>'
+            + '<div class="sxap-head-role">Visiteur</div>'
+            + '</div></div>';
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item sxap-item--primary" onclick="MX.Auth.showUserPicker();MX.closeAccountPanel()"><i class="fas fa-user-circle"></i><span>Se connecter</span></button>';
+      html += '<button class="sxap-item" onclick="MX.showPage(\'utilisateurs\');MX.closeAccountPanel()"><i class="fas fa-shield-halved"></i><span>Administration</span></button>';
+    }
+
+    if ("Notification" in window && Notification.permission !== "granted") {
+      html += '<div class="sxap-sep"></div>';
+      html += '<button class="sxap-item" onclick="MX.enableNotifications()"><i class="fas fa-bell-slash"></i><span>Activer les notifications</span></button>';
+    }
+    if (MX._canInstall) {
+      html += '<button class="sxap-item sxap-item--install" onclick="MX.tryInstall()"><i class="fas fa-download"></i><span>Installer l\'appli</span></button>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+  }
+
+    window.MX = window.MX || {};
   window.MX.Auth = {
     login, logout, requireAdmin, showLogin, hideLogin, cancelLogin,
     isAdmin, canSeeAll, isResponsable, can, onLogin, onLogout,

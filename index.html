@@ -89,10 +89,20 @@
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
         <img src="/assets/icons/maintix-logo.png" alt="Maintix" class="sidebar-logo">
+        <button id="sxap-trigger" class="sxap-trigger" onclick="MX.toggleAccountPanel()" aria-label="Mon compte">
+          <div id="sxap-trigger-avatar" class="sxap-trigger-avatar sxap-trigger-avatar--anon">
+            <i class="fas fa-user" aria-hidden="true"></i>
+          </div>
+          <div class="sxap-trigger-info sx-lbl">
+            <span id="sxap-trigger-name" class="sxap-trigger-name">Compte</span>
+            <span id="sxap-trigger-role" class="sxap-trigger-role"></span>
+          </div>
+          <i class="fas fa-chevron-down sxap-chevron sx-lbl" id="sxap-chevron" aria-hidden="true"></i>
+        </button>
       </div>
+      <div id="sxap-panel" class="sxap-panel"></div>
       <div class="sidebar-scroll">
         <nav id="sidebar-nav" class="sidebar-nav"></nav>
-        <div id="sidebar-footer" class="sidebar-footer"></div>
       </div>
     </aside>
 

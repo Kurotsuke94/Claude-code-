@@ -185,14 +185,15 @@ html, body {
 .sidebar-header {
   display: flex !important;
   align-items: center !important;
-  justify-content: flex-start;
-  padding: 10px 14px;
+  justify-content: space-between;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0 !important;
   height: 80px !important;
   max-height: 80px !important;
   min-height: 80px !important;
   overflow: hidden !important;
+  gap: 8px;
 }
 .sidebar-logo {
   height: 58px !important;
@@ -337,13 +338,6 @@ html, body {
 .nav-prog.done { color: var(--green); }
 .nav-prog.warn  { color: var(--orange); }
 .nav-prog.alert { color: var(--red); }
-
-.sidebar-footer {
-  padding: 12px 8px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.sidebar-footer .nav-item { margin: 0; width: 100%; }
 
 /* ── SIDEBAR OVERLAY (MOBILE) ── */
 .sidebar-overlay {
@@ -775,11 +769,6 @@ html, body {
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar { padding-top: env(safe-area-inset-top); }
-  /* C3 — footer en bas de la zone scrollable ; toujours atteignable */
-  .sidebar-footer {
-    margin-top: auto;  /* repousse le footer en bas quand la nav est courte */
-    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  }
 }
 @media (max-width: 600px) {
   .page-grid { grid-template-columns: 1fr; }
@@ -832,10 +821,6 @@ html, body {
 [data-theme="light"] .nav-prog.done  { background: rgba(22,163,74,0.10);  color: var(--green); }
 [data-theme="light"] .nav-prog.warn  { background: rgba(234,88,12,0.10);  color: var(--orange); }
 [data-theme="light"] .nav-prog.alert { background: rgba(220,38,38,0.10);  color: var(--red); }
-[data-theme="light"] .sidebar-footer {
-  border-top-color: var(--border);
-  background: #FFFFFF;
-}
 [data-theme="light"] .desk-header {
   background: rgba(255,255,255,0.92);
   border-bottom-color: var(--border);
