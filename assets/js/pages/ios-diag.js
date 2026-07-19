@@ -1,469 +1,642 @@
 (function () {
   'use strict';
 
-  // ── iOS Push Diagnostic Page ──
+  // ── State ──
+  var _mc = null;
+  var _running = false;
+  var _logs = [];
+  var _diagData = {};
 
-  var _mc, _checks = [], _running = false;
-
-  var CHECK_IDS = [
-    'platform', 'ios-version', 'pwa', 'permission',
-    'sw', 'fcm-init', 'fcm-token', 'firestore', 'apns', 'cf'
-  ];
-
-  function render() {
-    _mc = document.getElementById('main-content');
-    if (!_mc) return;
-    _mc.innerHTML = _buildShell();
-    setTimeout(_runDiag, 100);
+  // ── Admin gate ──
+  function _isAdmin() {
+    return !!(window.MX && window.MX.Auth && window.MX.Auth.isAdmin && MX.Auth.isAdmin());
   }
 
-  function _buildShell() {
-    var rows = CHECK_IDS.map(function(id) {
-      return '<div class="iosd-row" id="iosd-' + id + '">'
-        + '<span class="iosd-status iosd-pending"><i class="fas fa-circle-notch fa-spin"></i></span>'
-        + '<span class="iosd-label">' + _label(id) + '</span>'
-        + '<span class="iosd-detail" id="iosd-detail-' + id + '">—</span>'
-        + '</div>';
-    }).join('');
-
-    return '<div class="iosd-wrap">'
-      + '<div class="iosd-header">'
-      + '<i class="fas fa-stethoscope iosd-header-icon"></i>'
-      + '<div>'
-      + '<div class="iosd-title">Diagnostic Push</div>'
-      + '<div class="iosd-subtitle">Vérification complète de la chaîne de notifications</div>'
-      + '</div>'
-      + '</div>'
-      + '<div class="iosd-card" id="iosd-checklist">' + rows + '</div>'
-      + '<div class="iosd-actions">'
-      + '<button class="iosd-btn iosd-btn-primary" id="iosd-btn-refresh" onclick="MX.Pages.IosDiag._refresh()">'
-      + '<i class="fas fa-rotate-right"></i> Relancer le diagnostic</button>'
-      + '<button class="iosd-btn iosd-btn-secondary" id="iosd-btn-inapp" onclick="MX.Pages.IosDiag._testInApp()">'
-      + '<i class="fas fa-bell"></i> Tester in-app</button>'
-      + '<button class="iosd-btn iosd-btn-secondary" id="iosd-btn-system" onclick="MX.Pages.IosDiag._testSystem()">'
-      + '<i class="fas fa-mobile-screen"></i> Tester système</button>'
-      + '</div>'
-      + '<div class="iosd-log-wrap">'
-      + '<div class="iosd-log-title"><i class="fas fa-terminal"></i> Journal</div>'
-      + '<div class="iosd-log" id="iosd-log"></div>'
-      + '</div>'
-      + '<div class="iosd-guide" id="iosd-guide"></div>'
-      + '</div>';
+  // ── Timestamp ──
+  function _ts() {
+    return new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  function _label(id) {
-    var map = {
-      'platform':    'Plateforme',
-      'ios-version': 'Version iOS',
-      'pwa':         'PWA installée',
-      'permission':  'Permission notifications',
-      'sw':          'Service Worker actif',
-      'fcm-init':    'FCM initialisé',
-      'fcm-token':   'Token FCM obtenu',
-      'firestore':   'Token dans Firestore',
-      'apns':        'APNs (push système)',
-      'cf':          'Cloud Functions déployées',
-    };
-    return map[id] || id;
-  }
-
-  // ── Status helpers ──
-
-  function _setStatus(id, state, detail) {
-    var row = document.getElementById('iosd-' + id);
-    var det = document.getElementById('iosd-detail-' + id);
-    if (!row || !det) return;
-    var icons = {
-      ok:      '<i class="fas fa-circle-check"></i>',
-      warn:    '<i class="fas fa-triangle-exclamation"></i>',
-      error:   '<i class="fas fa-circle-xmark"></i>',
-      info:    '<i class="fas fa-circle-info"></i>',
-      pending: '<i class="fas fa-circle-notch fa-spin"></i>',
-    };
-    row.querySelector('.iosd-status').className = 'iosd-status iosd-' + state;
-    row.querySelector('.iosd-status').innerHTML = icons[state] || icons.info;
-    det.textContent = detail || '';
-  }
-
-  function _log(msg) {
+  // ── Log ──
+  function _log(msg, level) {
+    var entry = { ts: _ts(), msg: msg, level: level || 'info' };
+    _logs.push(entry);
     var el = document.getElementById('iosd-log');
     if (!el) return;
-    var ts = new Date().toLocaleTimeString('fr-FR');
     var line = document.createElement('div');
-    line.className = 'iosd-log-line';
-    line.textContent = '[' + ts + '] ' + msg;
+    line.className = 'iosd-log-line iosd-log-' + (level || 'info');
+    line.textContent = '[' + entry.ts + '] ' + msg;
     el.appendChild(line);
     el.scrollTop = el.scrollHeight;
   }
 
-  // ── Main diagnostic runner ──
+  // ── Status dot HTML ──
+  function _dot(state) {
+    // state: ok | warn | error | idle
+    return '<span class="iosd-dot iosd-dot--' + state + '"></span>';
+  }
 
+  function _badge(state, label) {
+    return '<span class="iosd-badge iosd-badge--' + state + '">' + label + '</span>';
+  }
+
+  // ── Section card builder ──
+  function _card(id, icon, title, rows) {
+    return '<div class="iosd-card" id="iosd-card-' + id + '">'
+      + '<div class="iosd-section-title"><i class="fas ' + icon + '"></i> ' + title + '</div>'
+      + '<div class="iosd-check-list">' + rows + '</div>'
+      + '</div>';
+  }
+
+  function _check(label, state, detail, extra) {
+    return '<div class="iosd-check">'
+      + _dot(state)
+      + '<span class="iosd-check-label">' + label + '</span>'
+      + '<span class="iosd-check-val">' + (detail || '—') + '</span>'
+      + (extra ? '<div class="iosd-check-extra">' + extra + '</div>' : '')
+      + '</div>';
+  }
+
+  // ── Main render ──
+  function render() {
+    _mc = document.getElementById('main-content');
+    if (!_mc) return;
+
+    if (!_isAdmin()) {
+      _mc.innerHTML = '<div class="iosd-denied">'
+        + '<i class="fas fa-lock iosd-denied-icon"></i>'
+        + '<div class="iosd-denied-title">Accès refusé</div>'
+        + '<div class="iosd-denied-sub">Cette page est réservée aux administrateurs.</div>'
+        + '<button class="iosd-btn iosd-btn-primary" style="margin-top:20px" onclick="MX.showPage(\'home\')">'
+        + '<i class="fas fa-home"></i> Retour à l\'accueil</button>'
+        + '</div>';
+      return;
+    }
+
+    _logs = [];
+    _diagData = {};
+    _mc.innerHTML = _buildShell();
+    setTimeout(_runDiag, 80);
+  }
+
+  // ── Shell ──
+  function _buildShell() {
+    var skeleton = CHECK_SECTIONS.map(function(s) {
+      return '<div class="iosd-card iosd-card--loading" id="iosd-card-' + s.id + '">'
+        + '<div class="iosd-section-title"><i class="fas ' + s.icon + '"></i> ' + s.label + '</div>'
+        + '<div class="iosd-check-list"><div class="iosd-check-loading">Analyse en cours…</div></div>'
+        + '</div>';
+    }).join('');
+
+    return '<div class="iosd-page">'
+
+      + '<div class="iosd-topbar">'
+      + '<div class="iosd-topbar-left">'
+      + '<i class="fas fa-stethoscope iosd-topbar-icon"></i>'
+      + '<div>'
+      + '<div class="iosd-page-title">Diagnostic Push</div>'
+      + '<div class="iosd-page-sub">Centre de diagnostic FCM · Réservé aux administrateurs</div>'
+      + '</div>'
+      + '</div>'
+      + '<button class="iosd-btn iosd-btn-sm" id="iosd-btn-refresh" onclick="MX.Pages.IosDiag._refresh()">'
+      + '<i class="fas fa-rotate-right"></i> Actualiser</button>'
+      + '</div>'
+
+      + '<div class="iosd-grid">'
+
+      + '<div class="iosd-col-main">' + skeleton + '</div>'
+
+      + '<div class="iosd-col-side">'
+      + '<div class="iosd-card">'
+      + '<div class="iosd-section-title"><i class="fas fa-flask"></i> Tests</div>'
+      + '<div class="iosd-tests-grid">'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._testLocal()"><i class="fas fa-bell"></i><span>Notification locale</span></button>'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._testSystem()"><i class="fas fa-mobile-screen"></i><span>Notification système</span></button>'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._testFCM()"><i class="fas fa-satellite-dish"></i><span>Notification FCM</span></button>'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._recreateToken()"><i class="fas fa-key"></i><span>Recréer le token FCM</span></button>'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._reregisterSW()"><i class="fas fa-arrows-rotate"></i><span>Réenregistrer le SW</span></button>'
+      + '<button class="iosd-test-btn" onclick="MX.Pages.IosDiag._refresh()"><i class="fas fa-rotate-right"></i><span>Actualiser</span></button>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="iosd-card">'
+      + '<div class="iosd-section-title"><i class="fas fa-terminal"></i> Journal'
+      + '<div class="iosd-log-actions">'
+      + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._copyLogs()" title="Copier"><i class="fas fa-copy"></i></button>'
+      + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._exportJSON()" title="JSON"><i class="fas fa-file-code"></i></button>'
+      + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._exportTXT()" title="TXT"><i class="fas fa-file-lines"></i></button>'
+      + '</div>'
+      + '</div>'
+      + '<div class="iosd-log" id="iosd-log"></div>'
+      + '</div>'
+      + '</div>'
+
+      + '</div>'
+      + '</div>';
+  }
+
+  var CHECK_SECTIONS = [
+    { id: 'env',       icon: 'fa-display',          label: 'Environnement' },
+    { id: 'notif',     icon: 'fa-bell',              label: 'Notifications' },
+    { id: 'sw',        icon: 'fa-gears',             label: 'Service Worker' },
+    { id: 'firebase',  icon: 'fa-fire',              label: 'Firebase' },
+    { id: 'token',     icon: 'fa-key',               label: 'Token FCM' },
+    { id: 'firestore', icon: 'fa-database',          label: 'Firestore' },
+    { id: 'cf',        icon: 'fa-cloud',             label: 'Cloud Functions' },
+  ];
+
+  // ── Render a section ──
+  function _setSection(id, html) {
+    var el = document.getElementById('iosd-card-' + id);
+    if (!el) return;
+    el.classList.remove('iosd-card--loading');
+    el.querySelector('.iosd-check-list').innerHTML = html;
+  }
+
+  // ── Main diagnostic runner ──
   async function _runDiag() {
     if (_running) return;
     _running = true;
-    _checks = [];
+    _log('Démarrage du diagnostic…');
 
-    var log = _log;
+    // ── 1. Environnement ──
+    try {
+      var ua = navigator.userAgent;
+      var isIOS = /iphone|ipad|ipod/i.test(ua);
+      var isAndroid = /android/i.test(ua);
+      var platform = isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop';
 
-    // Reset all to pending
-    CHECK_IDS.forEach(function(id) { _setStatus(id, 'pending', '—'); });
-    var guide = document.getElementById('iosd-guide');
-    if (guide) guide.innerHTML = '';
-
-    log('Démarrage du diagnostic…');
-
-    // ── 1. Platform ──
-    var ua = navigator.userAgent;
-    var isIOS = /iphone|ipad|ipod/i.test(ua);
-    var isAndroid = /android/i.test(ua);
-    var platform = isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop/Autre';
-    _setStatus('platform', 'info', platform);
-    log('Plateforme : ' + platform);
-    _checks.push({ id: 'platform', ok: true, value: platform });
-
-    // ── 2. iOS version ──
-    if (isIOS) {
-      var match = ua.match(/OS (\d+)[_.](\d+)/);
-      if (match) {
-        var major = parseInt(match[1], 10);
-        var minor = parseInt(match[2], 10);
-        var verStr = major + '.' + minor;
-        var needed = major > 16 || (major === 16 && minor >= 4);
-        if (needed) {
-          _setStatus('ios-version', 'ok', 'iOS ' + verStr + ' (Web Push supporté)');
-          log('iOS ' + verStr + ' — Web Push supporté (≥ 16.4)');
-        } else {
-          _setStatus('ios-version', 'error', 'iOS ' + verStr + ' — iOS 16.4+ requis');
-          log('⚠ iOS ' + verStr + ' trop ancien. iOS 16.4 minimum pour Web Push.');
+      var iosVerStr = '—', iosOk = true;
+      if (isIOS) {
+        var m = ua.match(/OS (\d+)[_.](\d+)/);
+        if (m) {
+          var maj = parseInt(m[1], 10), min = parseInt(m[2], 10);
+          iosVerStr = maj + '.' + min;
+          iosOk = maj > 16 || (maj === 16 && min >= 4);
         }
-        _checks.push({ id: 'ios-version', ok: needed, value: verStr });
+      } else if (isAndroid) {
+        var am = ua.match(/Android (\d+\.?\d*)/);
+        iosVerStr = am ? am[1] : '—';
+      }
+
+      var browserName = 'Inconnu';
+      if (/safari/i.test(ua) && !/chrome/i.test(ua)) browserName = 'Safari';
+      else if (/chrome/i.test(ua)) browserName = 'Chrome';
+      else if (/firefox/i.test(ua)) browserName = 'Firefox';
+      else if (/edg/i.test(ua)) browserName = 'Edge';
+
+      var isStandalone = window.navigator.standalone === true
+        || window.matchMedia('(display-mode: standalone)').matches
+        || window.matchMedia('(display-mode: minimal-ui)').matches;
+
+      var pwaState = isIOS ? (isStandalone ? 'ok' : 'error') : (isStandalone ? 'ok' : 'warn');
+      var pwaLabel = isStandalone ? 'Standalone (installée)' : (isIOS ? 'Non installée — requis sur iOS' : 'Navigateur standard');
+
+      _diagData.env = { platform, browser: browserName, version: iosVerStr, pwa: isStandalone, url: location.href };
+
+      _setSection('env',
+        _check('Plateforme', 'ok', platform)
+        + _check('Navigateur', 'ok', browserName)
+        + _check(isIOS ? 'Version iOS' : (isAndroid ? 'Version Android' : 'Système'), isIOS && !iosOk ? 'error' : 'ok', iosVerStr + (isIOS ? (iosOk ? ' ✓ ≥16.4' : ' ✗ <16.4') : ''))
+        + _check('PWA installée', pwaState, pwaLabel)
+        + _check('URL courante', 'idle', location.hostname + location.pathname)
+      );
+
+      _log('Plateforme : ' + platform + ' | Navigateur : ' + browserName + ' | PWA : ' + (isStandalone ? 'oui' : 'non'));
+      if (isIOS && !iosOk) _log('⚠ iOS ' + iosVerStr + ' — Web Push nécessite iOS 16.4+', 'warn');
+    } catch(e) { _log('Erreur section Environnement : ' + e.message, 'error'); }
+
+    // ── 2. Notifications ──
+    try {
+      var notifSupported = 'Notification' in window;
+      var perm = notifSupported ? Notification.permission : 'unsupported';
+      var permState = perm === 'granted' ? 'ok' : perm === 'denied' ? 'error' : 'warn';
+      var hasBadge = 'setAppBadge' in navigator;
+      var hasVibrate = 'vibrate' in navigator;
+      var hasPush = 'PushManager' in window;
+
+      _diagData.notif = { supported: notifSupported, permission: perm, badge: hasBadge, vibration: hasVibrate, push: hasPush };
+
+      _setSection('notif',
+        _check('Notification.permission', permState, perm)
+        + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non')
+        + _check('Badge API', hasBadge ? 'ok' : 'warn', hasBadge ? 'Disponible' : 'Non disponible')
+        + _check('Vibration API', hasVibrate ? 'ok' : 'idle', hasVibrate ? 'Disponible' : 'Non disponible')
+        + _check('Push API', hasPush ? 'ok' : 'error', hasPush ? 'Disponible' : 'Non disponible')
+        + (!notifSupported ? _check('API Notification', 'error', 'Non supportée dans ce contexte') : '')
+      );
+
+      _log('Notifications : ' + perm + ' | PushAPI : ' + (hasPush ? 'oui' : 'non') + ' | Badge : ' + (hasBadge ? 'oui' : 'non'));
+      if (perm === 'denied') _log('⚠ Notifications bloquées — réinitialiser dans les réglages du navigateur', 'warn');
+      if (perm === 'default') _log('Permission non encore demandée', 'warn');
+    } catch(e) { _log('Erreur section Notifications : ' + e.message, 'error'); }
+
+    // ── 3. Service Worker ──
+    var _swReg = null;
+    try {
+      if (!('serviceWorker' in navigator)) {
+        _setSection('sw', _check('Service Worker', 'error', 'Non supporté dans ce navigateur'));
+        _log('⚠ Service Worker non supporté', 'error');
       } else {
-        _setStatus('ios-version', 'warn', 'Version iOS non détectée');
-        log('Version iOS non parseable dans le user-agent');
-        _checks.push({ id: 'ios-version', ok: false, value: null });
+        _swReg = await navigator.serviceWorker.getRegistration('/sw.js');
+        if (!_swReg) {
+          _setSection('sw',
+            _check('Enregistré', 'error', 'Aucun SW sur /sw.js')
+            + _check('Actif', 'error', 'Non')
+            + _check('Scope', 'idle', '—')
+            + _check('Version (cache)', 'idle', '—')
+          );
+          _log('⚠ Aucun Service Worker enregistré sur /sw.js', 'error');
+        } else {
+          var swActive = !!_swReg.active;
+          var swState = _swReg.active ? _swReg.active.state : (_swReg.installing ? 'installing' : (_swReg.waiting ? 'waiting' : 'absent'));
+          var swScope = _swReg.scope || '—';
+
+          // Get cache version
+          var cacheVer = '—';
+          try {
+            var cacheKeys = await caches.keys();
+            var mxCache = cacheKeys.find(function(k) { return k.startsWith('maintix-'); });
+            cacheVer = mxCache || '—';
+          } catch(_) {}
+
+          _diagData.sw = { registered: true, active: swActive, scope: swScope, state: swState, cache: cacheVer };
+
+          _setSection('sw',
+            _check('Enregistré', 'ok', 'Oui')
+            + _check('Actif', swActive ? 'ok' : 'warn', swActive ? 'Oui' : 'Non — état : ' + swState)
+            + _check('Scope', 'ok', swScope)
+            + _check('Cache actif', cacheVer !== '—' ? 'ok' : 'warn', cacheVer)
+            + (_swReg.waiting ? _check('En attente', 'warn', 'Un SW est en waiting — SKIP_WAITING nécessaire') : '')
+          );
+
+          _log('SW : enregistré | actif : ' + swActive + ' | scope : ' + swScope + ' | cache : ' + cacheVer);
+          if (!swActive) _log('⚠ SW non actif — état : ' + swState, 'warn');
+        }
       }
-    } else {
-      _setStatus('ios-version', 'info', 'Non applicable (' + platform + ')');
-      _checks.push({ id: 'ios-version', ok: true, value: null });
+    } catch(e) {
+      _setSection('sw', _check('Service Worker', 'error', e.message));
+      _log('Erreur SW : ' + e.message, 'error');
     }
 
-    // ── 3. PWA installée ──
-    var isStandalone = window.navigator.standalone === true
-      || window.matchMedia('(display-mode: standalone)').matches
-      || window.matchMedia('(display-mode: minimal-ui)').matches;
-    if (isIOS && !isStandalone) {
-      _setStatus('pwa', 'error', 'Ouvert dans Safari (non installé)');
-      log('⚠ iOS — PWA non installée. Web Push iOS requiert "Ajouter à l\'écran d\'accueil".');
-      _checks.push({ id: 'pwa', ok: false });
-    } else if (isStandalone) {
-      _setStatus('pwa', 'ok', 'PWA installée (standalone)');
-      log('PWA installée en mode standalone');
-      _checks.push({ id: 'pwa', ok: true });
-    } else {
-      _setStatus('pwa', 'info', 'Non applicable (desktop/Android)');
-      _checks.push({ id: 'pwa', ok: true });
+    // ── 4. Firebase ──
+    try {
+      var fbLoaded = typeof firebase !== 'undefined';
+      var fbApp = fbLoaded && firebase.apps && firebase.apps.length > 0;
+      var fbAuth = fbLoaded && typeof firebase.auth !== 'undefined';
+      var fbStore = fbLoaded && typeof firebase.firestore !== 'undefined';
+      var fbMsg = fbLoaded && typeof firebase.messaging !== 'undefined';
+      var mxMsg = !!(window.MX && window.MX.messaging);
+
+      _diagData.firebase = { loaded: fbLoaded, appInit: fbApp, auth: fbAuth, firestore: fbStore, messagingSDK: fbMsg, messagingInit: mxMsg };
+
+      _setSection('firebase',
+        _check('SDK chargé', fbLoaded ? 'ok' : 'error', fbLoaded ? 'Oui' : 'Non')
+        + _check('App initialisée', fbApp ? 'ok' : 'error', fbApp ? 'Oui (' + firebase.apps.length + ' app)' : 'Non')
+        + _check('Auth', fbAuth ? 'ok' : 'warn', fbAuth ? 'Disponible' : 'Non disponible')
+        + _check('Firestore', fbStore ? 'ok' : 'error', fbStore ? 'Disponible' : 'Non disponible')
+        + _check('Messaging SDK', fbMsg ? 'ok' : 'warn', fbMsg ? 'Disponible' : 'Non disponible (iOS < 16.4?)')
+        + _check('Messaging initialisé', mxMsg ? 'ok' : 'warn', mxMsg ? 'Oui — MX.messaging actif' : 'Non — null')
+      );
+
+      _log('Firebase : SDK=' + (fbLoaded ? 'oui' : 'non') + ' | app=' + (fbApp ? 'oui' : 'non') + ' | messaging=' + (mxMsg ? 'oui' : 'non'));
+      if (!mxMsg) _log('⚠ MX.messaging est null — FCM non disponible sur cette plateforme', 'warn');
+    } catch(e) {
+      _setSection('firebase', _check('Firebase', 'error', e.message));
+      _log('Erreur Firebase : ' + e.message, 'error');
     }
 
-    // ── 4. Permission notifications ──
-    if (!('Notification' in window)) {
-      _setStatus('permission', 'error', 'API Notification non disponible');
-      log('⚠ API Notification absente dans ce contexte');
-      _checks.push({ id: 'permission', ok: false });
-    } else {
-      var perm = Notification.permission;
-      if (perm === 'granted') {
-        _setStatus('permission', 'ok', 'Autorisées');
-        log('Permissions notifications : granted');
-        _checks.push({ id: 'permission', ok: true });
-      } else if (perm === 'denied') {
-        _setStatus('permission', 'error', 'Bloquées par l\'utilisateur');
-        log('⚠ Notifications bloquées. Réinitialiser dans Réglages Safari / Chrome.');
-        _checks.push({ id: 'permission', ok: false });
+    // ── 5. Token FCM ──
+    var _token = null;
+    try {
+      var msg = window.MX && window.MX.messaging;
+      var vk  = window.MX && window.MX.VAPID_KEY;
+
+      if (window._fcmToken) {
+        _token = window._fcmToken;
+        _log('Token FCM (cache) : ' + _token.slice(0, 20) + '…');
+      } else if (msg && vk) {
+        _log('Demande de token FCM…');
+        _token = await msg.getToken({ vapidKey: vk, serviceWorkerRegistration: _swReg || undefined });
+        if (_token) {
+          window._fcmToken = _token;
+          _log('✅ Token FCM obtenu : ' + _token.slice(0, 20) + '…');
+        } else {
+          _log('⚠ getToken() a retourné null — APNs non configuré?', 'warn');
+        }
       } else {
-        _setStatus('permission', 'warn', 'Non demandées (default)');
-        log('Permissions en attente — appuyer sur "Activer" dans Paramètres Notifications');
-        _checks.push({ id: 'permission', ok: false });
-        var reqBtn = document.getElementById('iosd-btn-inapp');
-        if (reqBtn) reqBtn.textContent = 'Demander la permission';
+        _log('⚠ FCM non disponible — token non obtenu', 'warn');
       }
-    }
 
-    // ── 5. Service Worker ──
-    if (!('serviceWorker' in navigator)) {
-      _setStatus('sw', 'error', 'Service Worker non supporté');
-      log('⚠ Service Worker non disponible dans ce navigateur');
-      _checks.push({ id: 'sw', ok: false });
-    } else {
-      try {
-        var reg = await navigator.serviceWorker.getRegistration('/sw.js');
-        if (reg && reg.active) {
-          var swState = reg.active.state;
-          _setStatus('sw', 'ok', 'Actif — ' + (reg.scope || '') + ' [' + swState + ']');
-          log('Service Worker actif — scope: ' + reg.scope + ' — state: ' + swState);
-          _checks.push({ id: 'sw', ok: true, reg: reg });
-        } else if (reg && reg.installing) {
-          _setStatus('sw', 'warn', 'En cours d\'installation');
-          log('Service Worker en cours d\'installation — recharger la page');
-          _checks.push({ id: 'sw', ok: false });
-        } else if (reg && reg.waiting) {
-          _setStatus('sw', 'warn', 'En attente d\'activation (waiting)');
-          log('Service Worker en attente. L\'ancien SW est peut-être encore actif.');
-          _checks.push({ id: 'sw', ok: false });
-        } else {
-          _setStatus('sw', 'error', 'Service Worker absent');
-          log('⚠ Aucun Service Worker enregistré sur /sw.js');
-          _checks.push({ id: 'sw', ok: false });
-        }
-      } catch(swErr) {
-        _setStatus('sw', 'error', 'Erreur: ' + swErr.message);
-        log('⚠ Erreur vérification SW: ' + swErr.message);
-        _checks.push({ id: 'sw', ok: false });
+      var ua2 = navigator.userAgent;
+      var pl = /iphone|ipad|ipod/i.test(ua2) ? 'ios' : /android/i.test(ua2) ? 'android' : 'desktop';
+      _diagData.token = { value: _token, platform: pl };
+
+      var tokenDisplay = _token
+        ? '<div class="iosd-token-box">'
+          + '<div class="iosd-token-label">Token FCM</div>'
+          + '<div class="iosd-token-val" id="iosd-token-val">' + _token + '</div>'
+          + '<div class="iosd-token-actions">'
+          + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._copyToken()" title="Copier le token"><i class="fas fa-copy"></i> Copier</button>'
+          + '</div>'
+          + '</div>'
+        : '';
+
+      _setSection('token',
+        _check('Token obtenu', _token ? 'ok' : 'error', _token ? _token.slice(0, 28) + '…' : 'Aucun')
+        + _check('Plateforme', 'ok', pl)
+      );
+
+      var tokenCard = document.getElementById('iosd-card-token');
+      if (tokenCard && tokenDisplay) {
+        tokenCard.querySelector('.iosd-check-list').insertAdjacentHTML('beforeend', tokenDisplay);
       }
+    } catch(e) {
+      _setSection('token', _check('Token FCM', 'error', e.message));
+      _log('Erreur token FCM : ' + e.message, 'error');
     }
 
-    // ── 6. FCM initialisé ──
-    var messaging = window.MX && window.MX.messaging;
-    if (messaging) {
-      _setStatus('fcm-init', 'ok', 'FCM messaging initialisé');
-      log('FCM messaging SDK initialisé');
-      _checks.push({ id: 'fcm-init', ok: true });
-    } else {
-      _setStatus('fcm-init', 'warn', 'FCM non initialisé (plateforme non supportée?)');
-      log('⚠ window.MX.messaging est null — FCM non disponible sur cette plateforme');
-      _checks.push({ id: 'fcm-init', ok: false });
-    }
+    // ── 6. Firestore ──
+    try {
+      if (!_token) {
+        _setSection('firestore', _check('Vérification', 'idle', 'Pas de token — ignoré'));
+        _log('Firestore : vérification ignorée (pas de token)');
+      } else {
+        _log('Vérification token dans Firestore…');
+        var t1 = Date.now();
+        var snap = await firebase.firestore().collection('fcmTokens').doc(_token).get();
+        var latency = Date.now() - t1;
+        _log('Firestore répondu en ' + latency + ' ms');
 
-    // ── 7. Token FCM ──
-    var vapidKey = window.MX && window.MX.VAPID_KEY;
-    var existingToken = window._fcmToken;
-    if (existingToken) {
-      _setStatus('fcm-token', 'ok', existingToken.slice(0, 20) + '…');
-      log('Token FCM existant (cache) : ' + existingToken.slice(0, 20) + '…');
-      _checks.push({ id: 'fcm-token', ok: true, token: existingToken });
-    } else if (messaging && vapidKey) {
-      try {
-        log('Demande d\'un token FCM…');
-        var swReg = null;
-        if ('serviceWorker' in navigator) {
-          swReg = await navigator.serviceWorker.getRegistration('/sw.js');
-        }
-        var token = await messaging.getToken({ vapidKey: vapidKey, serviceWorkerRegistration: swReg });
-        if (token) {
-          window._fcmToken = token;
-          _setStatus('fcm-token', 'ok', token.slice(0, 20) + '…');
-          log('✅ Token FCM obtenu : ' + token.slice(0, 20) + '…');
-          _checks.push({ id: 'fcm-token', ok: true, token: token });
-        } else {
-          _setStatus('fcm-token', 'error', 'getToken() retourné null');
-          log('⚠ getToken() a retourné null — vérifier APNs (iOS) ou permission');
-          _checks.push({ id: 'fcm-token', ok: false });
-        }
-      } catch(tkErr) {
-        var errMsg = tkErr.code ? tkErr.code + ' ' + tkErr.message : tkErr.message;
-        _setStatus('fcm-token', 'error', errMsg);
-        log('⚠ Erreur getToken : ' + errMsg);
-        _checks.push({ id: 'fcm-token', ok: false, err: tkErr });
-      }
-    } else {
-      _setStatus('fcm-token', 'error', 'FCM non disponible ou VAPID manquant');
-      log('⚠ Impossible de demander un token : FCM non disponible');
-      _checks.push({ id: 'fcm-token', ok: false });
-    }
-
-    // ── 8. Firestore ──
-    var tokenCheck = _checks.find(function(c) { return c.id === 'fcm-token'; });
-    var currentToken = tokenCheck && tokenCheck.token;
-    if (currentToken && window.MX && window.MX.DB) {
-      try {
-        log('Vérification du token dans Firestore…');
-        var snap = await firebase.firestore().collection('fcmTokens').doc(currentToken).get();
         if (snap.exists) {
           var d = snap.data();
-          var ts = d.ts && d.ts.toDate ? d.ts.toDate().toLocaleString('fr-FR') : '?';
-          _setStatus('firestore', 'ok', 'Enregistré — ' + (d.platform || '?') + ' — ' + ts);
-          log('✅ Token présent dans Firestore — plateforme: ' + (d.platform || '?') + ', ts: ' + ts);
-          _checks.push({ id: 'firestore', ok: true });
+          var createdAt = d.ts && d.ts.toDate ? d.ts.toDate().toLocaleString('fr-FR') : (d.ts || '—');
+          _diagData.firestore = { exists: true, data: d };
+          _setSection('firestore',
+            _check('Document existant', 'ok', 'fcmTokens/{token}')
+            + _check('Utilisateur (uid)', 'ok', d.userName || '—')
+            + _check('Plateforme', 'ok', d.platform || '—')
+            + _check('Device (UA abrégé)', 'idle', (navigator.userAgent || '').slice(0, 40) + '…')
+            + _check('createdAt / updatedAt', 'ok', createdAt)
+            + _check('Latence Firestore', latency < 500 ? 'ok' : 'warn', latency + ' ms')
+          );
+          _log('✅ Token dans Firestore — user: ' + (d.userName || '—') + ' | platform: ' + (d.platform || '—'));
         } else {
-          _setStatus('firestore', 'warn', 'Token absent de Firestore');
-          log('⚠ Token obtenu mais pas encore dans Firestore — sauvegarde en cours…');
-          var cu = window.MX && window.MX.currentUser;
-          if (cu && MX.DB.saveFcmToken) {
-            var pl2 = isIOS ? 'ios' : isAndroid ? 'android' : 'desktop';
-            await MX.DB.saveFcmToken(currentToken, cu.name || cu, pl2);
-            _setStatus('firestore', 'ok', 'Enregistré maintenant');
-            log('✅ Token sauvegardé dans Firestore');
-          }
-          _checks.push({ id: 'firestore', ok: false });
+          _diagData.firestore = { exists: false };
+          _setSection('firestore',
+            _check('Document existant', 'error', 'Token absent de fcmTokens')
+            + _check('Latence Firestore', latency < 500 ? 'ok' : 'warn', latency + ' ms')
+          );
+          _log('⚠ Token non présent dans Firestore', 'warn');
         }
-      } catch(fsErr) {
-        _setStatus('firestore', 'error', fsErr.message);
-        log('⚠ Erreur Firestore: ' + fsErr.message);
-        _checks.push({ id: 'firestore', ok: false });
       }
-    } else if (!currentToken) {
-      _setStatus('firestore', 'info', 'Pas de token — vérification ignorée');
-      _checks.push({ id: 'firestore', ok: false });
-    } else {
-      _setStatus('firestore', 'warn', 'MX.DB non disponible');
-      _checks.push({ id: 'firestore', ok: false });
+    } catch(e) {
+      _setSection('firestore', _check('Firestore', 'error', e.message));
+      _log('Erreur Firestore : ' + e.message, 'error');
     }
 
-    // ── 9. APNs (inferred) ──
-    if (isIOS) {
-      var tokenOk = _checks.find(function(c) { return c.id === 'fcm-token'; });
-      if (tokenOk && tokenOk.ok) {
-        _setStatus('apns', 'ok', 'Inféré OK (token iOS obtenu → APNs configuré)');
-        log('APNs inféré OK — un token FCM iOS valide implique APNs configuré');
-        _checks.push({ id: 'apns', ok: true });
-      } else {
-        var tkErr2 = tokenOk && tokenOk.err;
-        var isApnsErr = tkErr2 && (
-          (tkErr2.code && tkErr2.code.includes('messaging/')) ||
-          (tkErr2.message && tkErr2.message.toLowerCase().includes('apns'))
-        );
-        if (isApnsErr) {
-          _setStatus('apns', 'error', 'Erreur APNs probable');
-          log('⚠ Erreur FCM token liée à APNs — voir guide ci-dessous');
-        } else {
-          _setStatus('apns', 'warn', 'Non vérifiable (token non obtenu)');
-          log('APNs : non vérifiable directement — voir Firebase Console');
-        }
-        _checks.push({ id: 'apns', ok: false });
-        _showApnsGuide();
-      }
-    } else {
-      _setStatus('apns', 'info', 'Non applicable (' + platform + ')');
-      log('APNs : non applicable sur ' + platform);
-      _checks.push({ id: 'apns', ok: true });
-    }
-
-    // ── 10. Cloud Functions ──
+    // ── 7. Cloud Functions ──
     try {
-      log('Vérification Cloud Functions (ping Firestore)…');
-      var cfSnap = await firebase.firestore().collection('fcmTokens').limit(1).get();
-      _setStatus('cf', 'ok', 'Firestore accessible — CF déployées (à confirmer Firebase Console)');
-      log('Firestore accessible. Cloud Functions onNewMission + slotReminders existent dans le code.');
-      _checks.push({ id: 'cf', ok: true });
-    } catch(cfErr) {
-      _setStatus('cf', 'error', cfErr.message);
-      log('⚠ Firestore inaccessible — ' + cfErr.message);
-      _checks.push({ id: 'cf', ok: false });
+      _log('Test connectivité Cloud Functions…');
+      var cf_t0 = Date.now();
+      var cfSnap = await firebase.firestore().collection('fcmTokens').get();
+      var cf_lat = Date.now() - cf_t0;
+      var cfCount = cfSnap.size;
+
+      _diagData.cf = { reachable: true, tokenCount: cfCount, latency: cf_lat };
+
+      var cfTokensState = cfCount > 0 ? 'ok' : 'warn';
+      _setSection('cf',
+        _check('Firestore accessible', 'ok', 'Oui — ' + cf_lat + ' ms')
+        + _check('Tokens enregistrés', cfTokensState, cfCount + ' token(s) dans fcmTokens')
+        + _check('onNewMission', 'idle', 'CF existante — à vérifier : Firebase Console → Functions')
+        + _check('slotReminders', 'idle', 'CF existante — à vérifier : Firebase Console → Functions')
+        + _check('Région', 'ok', 'europe-west1')
+        + _check('Déploiement', 'warn', 'Exécuter : firebase deploy --only functions')
+      );
+
+      _log('Cloud Functions : Firestore accessible en ' + cf_lat + ' ms | ' + cfCount + ' token(s)');
+      if (cfCount === 0) _log('⚠ Aucun token FCM enregistré — les CF n\'enverront rien', 'warn');
+    } catch(e) {
+      _diagData.cf = { reachable: false, error: e.message };
+      _setSection('cf', _check('Cloud Functions', 'error', e.message));
+      _log('Erreur Cloud Functions : ' + e.message, 'error');
     }
 
     // ── Summary ──
-    var failed = _checks.filter(function(c) { return !c.ok; });
-    var blocking = ['permission', 'sw', 'fcm-token'];
-    var hasBlocking = failed.some(function(c) { return blocking.indexOf(c.id) >= 0; });
-    if (hasBlocking) {
-      log('');
-      log('⛔ Des problèmes bloquants ont été détectés. Voir les lignes marquées en rouge.');
-    } else if (failed.length) {
-      log('');
-      log('⚠ Diagnostic terminé avec avertissements. Les notifications peuvent fonctionner partiellement.');
+    _log('');
+    _log('── Diagnostic terminé ──');
+    var hasCritical = !_diagData.token || !_diagData.token.value;
+    if (hasCritical) {
+      _log('⛔ Token FCM non obtenu — vérifier APNs dans Firebase Console et permission notifications', 'error');
+    } else if (_diagData.notif && _diagData.notif.permission !== 'granted') {
+      _log('⚠ Permission notifications non accordée', 'warn');
     } else {
-      log('');
-      log('✅ Tous les checks OK — les notifications push devraient fonctionner.');
+      _log('✅ Diagnostic OK — chaîne push opérationnelle côté client', 'ok');
     }
 
     _running = false;
   }
 
-  function _showApnsGuide() {
-    var guide = document.getElementById('iosd-guide');
-    if (!guide) return;
-    guide.innerHTML = '<div class="iosd-guide-inner">'
-      + '<div class="iosd-guide-title"><i class="fas fa-apple"></i> Configuration APNs requise</div>'
-      + '<p class="iosd-guide-intro">Les push iOS nécessitent une clé APNs (.p8) configurée dans Firebase Console. Voici les étapes exactes :</p>'
-      + '<ol class="iosd-guide-steps">'
-      + '<li><strong>Apple Developer Console</strong><br>'
-      + 'Aller sur <code>developer.apple.com</code> → Certificates, IDs &amp; Profiles → Keys → (+)<br>'
-      + 'Cocher <em>Apple Push Notifications service (APNs)</em> → Continue → Register<br>'
-      + 'Télécharger le fichier <code>.p8</code> <em>(une seule chance !)</em> — noter le <strong>Key ID</strong></li>'
-      + '<li><strong>Identifiants nécessaires</strong><br>'
-      + '• <strong>Key ID</strong> : 10 caractères alphanumériques (ex: ABC1234DEF)<br>'
-      + '• <strong>Team ID</strong> : sur developer.apple.com → Account → Membership Details<br>'
-      + '• <strong>Bundle ID</strong> : App ID de l\'app (ex: com.maintix.app)<br>'
-      + '• <strong>Fichier .p8</strong> : téléchargé à l\'étape précédente</li>'
-      + '<li><strong>Firebase Console</strong><br>'
-      + 'Aller sur <code>console.firebase.google.com</code> → projet <strong>maintix-c9dbd</strong><br>'
-      + 'Project Settings → Cloud Messaging → Apple app configuration<br>'
-      + 'Uploader le <code>.p8</code> → entrer Key ID, Team ID, Bundle ID → Save</li>'
-      + '<li><strong>Déploiement Cloud Functions</strong><br>'
-      + '<code>firebase deploy --only functions --project maintix-c9dbd</code><br>'
-      + 'Les fonctions <code>onNewMission</code> et <code>slotReminders</code> sont déjà codées.</li>'
-      + '</ol>'
-      + '<div class="iosd-guide-note"><i class="fas fa-circle-info"></i> '
-      + 'Sans clé APNs dans Firebase, getToken() retourne null sur iOS même si tout le reste est correct.</div>'
-      + '</div>';
-  }
-
   // ── Test buttons ──
 
-  function _testInApp() {
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-      if ('Notification' in window && Notification.permission !== 'denied') {
-        Notification.requestPermission().then(function(p) {
-          if (p === 'granted') _runDiag();
-        });
-        return;
-      }
-    }
+  function _testLocal() {
+    _log('Test notification locale…');
     if (window.MX && window.MX.Notifs && window.MX.Notifs.push) {
-      MX.Notifs.push({
-        title:       'Maintix — Test diagnostic',
-        description: 'Notification in-app générée par le diagnostic push.',
-        type:        'system',
-        level:       'info',
-      });
-      _log('✅ Notification in-app envoyée');
+      MX.Notifs.push({ title: 'Test diagnostic', description: 'Notification locale — canal MX.Notifs.push().', type: 'system', level: 'info' });
+      _log('✅ Notification locale envoyée via MX.Notifs.push()');
     } else {
-      _log('⚠ MX.Notifs.push non disponible');
+      _log('⚠ MX.Notifs.push non disponible', 'error');
     }
   }
 
   function _testSystem() {
-    if (!('Notification' in window)) {
-      _log('⚠ API Notification non disponible');
-      return;
-    }
+    _log('Test notification système…');
+    if (!('Notification' in window)) { _log('⚠ API Notification indisponible', 'error'); return; }
     if (Notification.permission !== 'granted') {
-      _log('⚠ Permission requise — cliquer "Tester in-app" pour demander la permission');
+      _log('⚠ Permission requise. Demande en cours…', 'warn');
+      Notification.requestPermission().then(function(p) {
+        _log('Permission : ' + p);
+        if (p === 'granted') _testSystem();
+      });
       return;
     }
     navigator.serviceWorker.getRegistration('/sw.js').then(function(reg) {
-      if (reg) {
-        reg.showNotification('Maintix — Test système', {
-          body:    'Notification système générée par le diagnostic push.',
-          icon:    '/assets/icons/icon-192.png',
-          badge:   '/assets/icons/icon-192.png',
-          vibrate: [200, 100, 200],
-          tag:     'mx-diag-test-' + Date.now(),
-          data:    { url: '/?page=ios-diag', type: 'system', level: 'info' },
-        });
-        _log('✅ Notification système envoyée via Service Worker');
+      var opts = {
+        body:    'Notification système via Service Worker — diagnostic push.',
+        icon:    '/assets/icons/icon-192.png',
+        badge:   '/assets/icons/icon-192.png',
+        vibrate: [200, 100, 200],
+        tag:     'mx-diag-sys-' + Date.now(),
+        data:    { url: '/?page=ios-diag', type: 'system', level: 'info' },
+      };
+      if (reg && reg.active) {
+        reg.showNotification('Maintix — Test système', opts);
+        _log('✅ Notification système envoyée via SW.showNotification()');
       } else {
-        new Notification('Maintix — Test système', {
-          body: 'Notification système générée par le diagnostic push.',
-          icon: '/assets/icons/icon-192.png',
-        });
+        new Notification('Maintix — Test système', { body: opts.body, icon: opts.icon });
         _log('✅ Notification système envoyée (sans SW)');
       }
-    }).catch(function(e) {
-      _log('⚠ Erreur notification système : ' + e.message);
-    });
+    }).catch(function(e) { _log('Erreur notification système : ' + e.message, 'error'); });
+  }
+
+  async function _testFCM() {
+    _log('Test notification FCM — création d\'une mission test…');
+    if (!firebase || !firebase.firestore) { _log('⚠ Firestore non disponible', 'error'); return; }
+    try {
+      var ref = await firebase.firestore().collection('missions').add({
+        text:        '[Test Diagnostic Push]',
+        assignedTo:  'all',
+        createdBy:   'diagnostic',
+        status:      'test',
+        priority:    'info',
+        _diag:       true,
+        createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      _log('✅ Mission test créée (' + ref.id + ') — onNewMission CF devrait se déclencher');
+      _log('Si les Cloud Functions sont déployées et APNs configuré, une notification FCM arrivera dans quelques secondes.');
+      // Auto-delete after 5s
+      setTimeout(function() {
+        ref.delete().then(function() {
+          _log('Mission test supprimée (' + ref.id + ')');
+        }).catch(function(e) { _log('Erreur suppression mission test : ' + e.message, 'error'); });
+      }, 5000);
+    } catch(e) {
+      _log('Erreur création mission test : ' + e.message, 'error');
+    }
+  }
+
+  async function _recreateToken() {
+    _log('Recréation du token FCM…');
+    var msg = window.MX && window.MX.messaging;
+    var vk  = window.MX && window.MX.VAPID_KEY;
+    if (!msg || !vk) { _log('⚠ FCM non disponible', 'error'); return; }
+    try {
+      if (window._fcmToken) {
+        _log('Suppression de l\'ancien token dans Firestore…');
+        await firebase.firestore().collection('fcmTokens').doc(window._fcmToken).delete();
+        try { await msg.deleteToken(); } catch(_) {}
+        window._fcmToken = null;
+        _log('Ancien token supprimé');
+      }
+      var reg = null;
+      try { reg = await navigator.serviceWorker.getRegistration('/sw.js'); } catch(_) {}
+      var newToken = await msg.getToken({ vapidKey: vk, serviceWorkerRegistration: reg || undefined });
+      if (newToken) {
+        window._fcmToken = newToken;
+        var ua3 = navigator.userAgent;
+        var pl2 = /iphone|ipad|ipod/i.test(ua3) ? 'ios' : /android/i.test(ua3) ? 'android' : 'desktop';
+        var cu = window.MX && window.MX.state && window.MX.state.currentUser;
+        var uname = cu ? (cu.name || '') : 'admin';
+        if (window.MX && window.MX.DB && window.MX.DB.saveFcmToken) {
+          await MX.DB.saveFcmToken(newToken, uname, pl2);
+        }
+        _log('✅ Nouveau token FCM : ' + newToken.slice(0, 20) + '…');
+        var el = document.getElementById('iosd-token-val');
+        if (el) el.textContent = newToken;
+      } else {
+        _log('⚠ getToken() a retourné null', 'warn');
+      }
+    } catch(e) { _log('Erreur recréation token : ' + e.message, 'error'); }
+  }
+
+  async function _reregisterSW() {
+    _log('Réenregistrement du Service Worker…');
+    if (!('serviceWorker' in navigator)) { _log('⚠ Service Worker non supporté', 'error'); return; }
+    try {
+      var reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      if (reg) {
+        await reg.unregister();
+        _log('SW désenregistré');
+      }
+      var newReg = await navigator.serviceWorker.register('/sw.js');
+      _log('✅ SW réenregistré — scope : ' + (newReg.scope || ''));
+      setTimeout(_runDiag, 1500);
+    } catch(e) { _log('Erreur réenregistrement SW : ' + e.message, 'error'); }
   }
 
   function _refresh() {
     if (_running) return;
-    var log = document.getElementById('iosd-log');
-    if (log) log.innerHTML = '';
-    CHECK_IDS.forEach(function(id) { _setStatus(id, 'pending', '—'); });
-    var guide = document.getElementById('iosd-guide');
-    if (guide) guide.innerHTML = '';
-    setTimeout(_runDiag, 100);
+    var logEl = document.getElementById('iosd-log');
+    if (logEl) logEl.innerHTML = '';
+    _logs = [];
+    _diagData = {};
+    CHECK_SECTIONS.forEach(function(s) {
+      var el = document.getElementById('iosd-card-' + s.id);
+      if (el) {
+        el.classList.add('iosd-card--loading');
+        el.querySelector('.iosd-check-list').innerHTML = '<div class="iosd-check-loading">Analyse en cours…</div>';
+      }
+    });
+    setTimeout(_runDiag, 80);
   }
 
+  // ── Token copy ──
+  function _copyToken() {
+    var el = document.getElementById('iosd-token-val');
+    var val = el ? el.textContent : (window._fcmToken || '');
+    if (val) {
+      navigator.clipboard.writeText(val).then(function() {
+        _log('Token FCM copié dans le presse-papiers');
+        MX.toast && MX.toast('Token copié ✓');
+      }).catch(function(e) { _log('Erreur copie : ' + e.message, 'error'); });
+    }
+  }
+
+  // ── Export ──
+  function _copyLogs() {
+    var txt = _logs.map(function(l) { return '[' + l.ts + '] ' + l.msg; }).join('\n');
+    navigator.clipboard.writeText(txt).then(function() {
+      _log('Logs copiés dans le presse-papiers');
+      MX.toast && MX.toast('Logs copiés ✓');
+    }).catch(function(e) { _log('Erreur copie : ' + e.message, 'error'); });
+  }
+
+  function _exportJSON() {
+    var data = {
+      exportedAt: new Date().toISOString(),
+      diagnostic: _diagData,
+      logs: _logs,
+    };
+    _download('maintix-diag-' + Date.now() + '.json', JSON.stringify(data, null, 2), 'application/json');
+    _log('Export JSON téléchargé');
+  }
+
+  function _exportTXT() {
+    var lines = [
+      'Maintix — Diagnostic Push',
+      'Exporté le : ' + new Date().toLocaleString('fr-FR'),
+      '',
+      '── Données ──',
+      JSON.stringify(_diagData, null, 2),
+      '',
+      '── Journal ──',
+    ].concat(_logs.map(function(l) { return '[' + l.ts + '] ' + l.msg; }));
+    _download('maintix-diag-' + Date.now() + '.txt', lines.join('\n'), 'text/plain');
+    _log('Export TXT téléchargé');
+  }
+
+  function _download(filename, content, mime) {
+    var a = document.createElement('a');
+    a.href = 'data:' + mime + ';charset=utf-8,' + encodeURIComponent(content);
+    a.download = filename;
+    a.click();
+  }
+
+  // ── Export public API ──
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.IosDiag = { render: render, _testInApp: _testInApp, _testSystem: _testSystem, _refresh: _refresh };
+  window.MX.Pages.IosDiag = {
+    render:        render,
+    _testLocal:    _testLocal,
+    _testSystem:   _testSystem,
+    _testFCM:      _testFCM,
+    _recreateToken:_recreateToken,
+    _reregisterSW: _reregisterSW,
+    _refresh:      _refresh,
+    _copyToken:    _copyToken,
+    _copyLogs:     _copyLogs,
+    _exportJSON:   _exportJSON,
+    _exportTXT:    _exportTXT,
+  };
 })();

@@ -97,7 +97,10 @@
     if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
     if (id === "mx-doc")       return Pages.MxDoc      ? Pages.MxDoc.render()      : _renderStub("MX Doc",             "fa-file-contract", "Chargement…");
     if (id === "mx-room-list") return Pages.MxRoomList ? Pages.MxRoomList.render() : _renderStub("Liste de chambres", "fa-hotel",         "Chargement…");
-    if (id === "ios-diag")    return Pages.IosDiag    ? Pages.IosDiag.render()    : _renderStub("Diagnostic Push",    "fa-stethoscope",   "Chargement…");
+    if (id === "ios-diag") {
+      if (!MX.Auth || !MX.Auth.isAdmin || !MX.Auth.isAdmin()) { MX.showPage("home"); return; }
+      return Pages.IosDiag ? Pages.IosDiag.render() : _renderStub("Diagnostic Push", "fa-stethoscope", "Chargement…");
+    }
     if (DAYS.find(d => d.id === id)) return Pages.Checklist.render(id);
   }
 

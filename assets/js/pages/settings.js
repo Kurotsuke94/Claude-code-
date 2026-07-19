@@ -28,7 +28,8 @@
     { id: 'informations',  icon: 'fa-shield-halved',    l: 'Informations' },
     { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
     { id: 'maintenance',   icon: 'fa-wrench',           l: 'Maintenance', adminOnly: true },
-    { id: 'energie', icon: 'fa-bolt-lightning', l: 'Performance énergie', adminOnly: true },
+    { id: 'energie',       icon: 'fa-bolt-lightning',   l: 'Performance énergie', adminOnly: true },
+    { id: 'push-diag',    icon: 'fa-stethoscope',      l: 'Diagnostic Push', adminOnly: true },
   ];
 
   // ── AVATAR CANVAS CROP ──
@@ -643,14 +644,6 @@
             + '</label>';
         }).join('')
       + '</div>'
-      + '</div>'
-      + '<div class="stt-card" style="margin-top:12px">'
-      + '<div class="stt-card-title">Diagnostic push</div>'
-      + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'
-      + 'Vérifiez en temps réel pourquoi les notifications ne fonctionnent pas (iOS, Android, desktop).'
-      + '</div>'
-      + '<button class="stt-btn" onclick="MX.showPage(\'ios-diag\')">'
-      + '<i class="fas fa-stethoscope"></i> Ouvrir le diagnostic push</button>'
       + '</div>';
   }
 
@@ -1705,10 +1698,38 @@
       apropos:       _renderApropos,
       diagnostic:    _renderDiagnostic,
       maintenance:   _renderMaintenance,
-      energie:        _renderEnergie,
+      energie:       _renderEnergie,
+      'push-diag':   _renderPushDiag,
     };
     if (id === 'maintenance') _maintInit();
     content.innerHTML = (renderers[id] || (() => ''))();
+  }
+
+  // ── PUSH DIAGNOSTIC SECTION (admin-only) ──
+  function _renderPushDiag() {
+    if (!MX.Auth.isAdmin || !MX.Auth.isAdmin()) {
+      return '<div class="stt-empty"><i class="fas fa-lock"></i><p>Section réservée aux administrateurs.</p></div>';
+    }
+    return '<div class="stt-section-head"><i class="fas fa-stethoscope"></i> Diagnostic Push</div>'
+      + '<div class="stt-card">'
+      + '<div class="stt-card-title">Centre de diagnostic FCM</div>'
+      + '<div class="stt-info-row" style="margin-bottom:10px">'
+      + '<span class="stt-info-label" style="flex:1;font-size:12px;color:var(--text3)">Analyse en temps réel de la chaîne de notifications&nbsp;: plateforme, permissions, Service Worker, FCM SDK, token, Firestore, Cloud Functions.</span>'
+      + '</div>'
+      + '<button class="stt-btn" onclick="MX.showPage(\'ios-diag\')">'
+      + '<i class="fas fa-stethoscope"></i> Ouvrir le diagnostic</button>'
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Déploiement Cloud Functions</div>'
+      + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.6">'
+      + 'Les Cloud Functions <code style="background:rgba(255,255,255,0.07);border-radius:4px;padding:1px 5px">onNewMission</code> et '
+      + '<code style="background:rgba(255,255,255,0.07);border-radius:4px;padding:1px 5px">slotReminders</code> '
+      + 'existent dans le code source. Pour les activer, exécuter depuis la racine du projet&nbsp;:'
+      + '</div>'
+      + '<div style="background:#080F1C;border-radius:8px;padding:10px 12px;font-family:monospace;font-size:11px;color:#94A3B8;word-break:break-all">'
+      + 'firebase deploy --only functions --project maintix-c9dbd'
+      + '</div>'
+      + '</div>';
   }
 
   // ── PREF SETTERS ──
