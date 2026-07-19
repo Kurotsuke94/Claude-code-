@@ -23195,3 +23195,189 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .mxrl-ctx-item--danger i { opacity: 1; }
 .mxrl-ctx-item--danger:hover { background: rgba(239,68,68,0.09); }
 .mxrl-ctx-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 4px 8px; }
+
+/* ══════════════════════════════════════════════
+   iOS Push Diagnostic Page  (.iosd-*)
+   ══════════════════════════════════════════════ */
+.iosd-wrap {
+  padding: 16px;
+  max-width: 680px;
+  margin: 0 auto;
+}
+.iosd-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.iosd-header-icon {
+  font-size: 32px;
+  color: var(--accent, #06B6D4);
+  flex-shrink: 0;
+}
+.iosd-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text1, #F1F5F9);
+}
+.iosd-subtitle {
+  font-size: 12px;
+  color: var(--text3, #94A3B8);
+  margin-top: 2px;
+}
+.iosd-card {
+  background: var(--card, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  overflow: hidden;
+}
+.iosd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+  font-size: 13px;
+}
+.iosd-row:last-child { border-bottom: none; }
+.iosd-status {
+  width: 18px;
+  text-align: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.iosd-pending { color: var(--text3, #94A3B8); }
+.iosd-ok      { color: #22C55E; }
+.iosd-warn    { color: #EAB308; }
+.iosd-error   { color: #EF4444; }
+.iosd-info    { color: #06B6D4; }
+.iosd-label {
+  flex: 1;
+  color: var(--text1, #F1F5F9);
+  font-weight: 500;
+  min-width: 0;
+}
+.iosd-detail {
+  font-size: 11px;
+  color: var(--text3, #94A3B8);
+  text-align: right;
+  max-width: 220px;
+  word-break: break-all;
+}
+.iosd-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.iosd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.iosd-btn:active { opacity: 0.75; }
+.iosd-btn-primary {
+  background: var(--accent, #06B6D4);
+  color: #fff;
+}
+.iosd-btn-secondary {
+  background: rgba(255,255,255,0.08);
+  color: var(--text1, #F1F5F9);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+}
+.iosd-log-wrap {
+  margin-top: 16px;
+}
+.iosd-log-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3, #94A3B8);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.iosd-log {
+  background: #0F172A;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #94A3B8;
+  max-height: 180px;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+.iosd-log-line {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.iosd-guide {
+  margin-top: 16px;
+}
+.iosd-guide-inner {
+  background: rgba(234,179,8,0.06);
+  border: 1px solid rgba(234,179,8,0.25);
+  border-radius: 12px;
+  padding: 16px;
+}
+.iosd-guide-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #EAB308;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.iosd-guide-intro {
+  font-size: 12px;
+  color: var(--text2, #CBD5E1);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.iosd-guide-steps {
+  padding-left: 18px;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.iosd-guide-steps li {
+  font-size: 12px;
+  color: var(--text2, #CBD5E1);
+  line-height: 1.6;
+}
+.iosd-guide-steps code {
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--text1, #F1F5F9);
+}
+.iosd-guide-note {
+  font-size: 11px;
+  color: #EAB308;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.5;
+}
+/* Light theme */
+@media (prefers-color-scheme: light) {
+  .iosd-log { background: #1E293B; }
+  .iosd-btn-secondary { background: rgba(0,0,0,0.05); color: var(--text1, #0F172A); }
+}
+:root[data-theme="light"] .iosd-log { background: #1E293B; }
+:root[data-theme="light"] .iosd-btn-secondary { background: rgba(0,0,0,0.05); color: var(--text1, #0F172A); }

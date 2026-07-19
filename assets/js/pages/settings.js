@@ -643,6 +643,14 @@
             + '</label>';
         }).join('')
       + '</div>'
+      + '</div>'
+      + '<div class="stt-card" style="margin-top:12px">'
+      + '<div class="stt-card-title">Diagnostic push</div>'
+      + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">'
+      + 'Vérifiez en temps réel pourquoi les notifications ne fonctionnent pas (iOS, Android, desktop).'
+      + '</div>'
+      + '<button class="stt-btn" onclick="MX.showPage(\'ios-diag\')">'
+      + '<i class="fas fa-stethoscope"></i> Ouvrir le diagnostic push</button>'
       + '</div>';
   }
 
