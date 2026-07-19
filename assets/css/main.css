@@ -591,7 +591,14 @@ html, body {
   background: var(--bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 8000;
-  padding: 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Safe-area: garantit que "Se connecter" n'est jamais caché
+     par le Home Indicator, la Dynamic Island ou les encoches. */
+  padding: max(24px, env(safe-area-inset-top,    0px))
+           max(24px, env(safe-area-inset-right,  0px))
+           max(24px, env(safe-area-inset-bottom, 0px))
+           max(24px, env(safe-area-inset-left,   0px));
 }
 .login-card {
   width: 100%; max-width: 380px;
