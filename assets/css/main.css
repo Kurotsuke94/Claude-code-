@@ -230,7 +230,9 @@ html, body {
 
 .sidebar-nav {
   flex: 1;
+  min-height: 0;                     /* allow flex to shrink nav below content height */
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 8px 0;
   scrollbar-width: thin;
   scrollbar-color: var(--border2) transparent;
@@ -698,9 +700,24 @@ html, body {
     width: var(--sidebar-w);
     transform: translateX(-100%);
     z-index: 100;
-    overflow: hidden;
+    overflow-x: hidden;               /* clip horizontal overflow */
+    overflow-y: auto;                 /* sidebar body becomes the scroll container */
+    -webkit-overflow-scrolling: touch;
   }
   .sidebar.open { transform: translateX(0); }
+  /* Header stays pinned below the notch while body scrolls */
+  .sidebar-header {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 2;
+    background: var(--bg2);
+  }
+  /* Nav expands to full content height — sidebar provides the scroll */
+  .sidebar-nav {
+    flex: 0 0 auto;
+    overflow-y: visible;
+    overflow-x: hidden;
+  }
   .main-wrapper { width: 100%; min-width: 0; flex: 1; }
   .sidebar-overlay.show { display: block; }
   .desk-header { display: none; }
@@ -746,8 +763,8 @@ html, body {
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar { padding-top: env(safe-area-inset-top); }
-  /* C3 — pied de sidebar ne passe pas sous la barre de gestes iOS */
-  .sidebar-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  /* C3 — le dernier élément de sidebar reste au-dessus du Home Indicator */
+  .sidebar-footer { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (max-width: 600px) {
   .page-grid { grid-template-columns: 1fr; }
