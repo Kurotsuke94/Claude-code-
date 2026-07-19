@@ -3166,4 +3166,117 @@
   })();
 
   document.addEventListener("DOMContentLoaded", init);
+
+  // ── DEBUG SIDEBAR (?debugSidebar=1) ──────────────────────────────────────
+  (function() {
+    if (!/[?&]debugSidebar=1/.test(location.search)) return;
+
+    // Contours colorés pour voir les conteneurs
+    var _dbgStyle = document.createElement('style');
+    _dbgStyle.id = 'mx-dbg-style';
+    _dbgStyle.textContent = [
+      '.sidebar       { outline: 4px solid red   !important; }',
+      '.sidebar-scroll{ outline: 4px solid #0f0  !important; }',
+      '.sidebar-footer{ outline: 4px solid #00f  !important; }'
+    ].join('\n');
+    document.head.appendChild(_dbgStyle);
+
+    // Création de l'overlay de mesures
+    function _mkOverlay() {
+      var o = document.getElementById('mx-dbg-overlay');
+      if (!o) {
+        o = document.createElement('div');
+        o.id = 'mx-dbg-overlay';
+        o.style.cssText = [
+          'position:fixed;top:70px;right:6px;z-index:2147483647',
+          'background:rgba(0,0,0,.88);color:#fff',
+          'font:10px/1.7 monospace;padding:10px 13px',
+          'border-radius:10px;border:1px solid #444',
+          'max-width:272px;min-width:220px',
+          'pointer-events:none;white-space:pre'
+        ].join(';');
+        document.body.appendChild(o);
+      }
+      return o;
+    }
+
+    // Mesure et affichage
+    function _update() {
+      var sidebar   = document.querySelector('.sidebar');
+      var scroll    = document.querySelector('.sidebar-scroll');
+      var footer    = document.querySelector('.sidebar-footer');
+      var nav       = document.querySelector('.sidebar-nav');
+      if (!sidebar || !scroll || !footer) { return; }
+
+      var sR = sidebar.getBoundingClientRect();
+      var scR= scroll.getBoundingClientRect();
+      var fR = footer.getBoundingClientRect();
+      var nR = nav    ? nav.getBoundingClientRect() : null;
+      var vvp = window.visualViewport;
+      var maxScroll = scroll.scrollHeight - scroll.clientHeight;
+      var fVisible  = fR.bottom > 0 && fR.top < window.innerHeight;
+
+      var lines = [
+        '🟥 .sidebar',
+        '  height:         ' + sR.height.toFixed(0) + 'px',
+        '',
+        '🟩 .sidebar-scroll',
+        '  rect.height:    ' + scR.height.toFixed(0) + 'px',
+        '  scrollHeight:   ' + scroll.scrollHeight  + 'px',
+        '  clientHeight:   ' + scroll.clientHeight  + 'px',
+        '  scrollTop:      ' + scroll.scrollTop.toFixed(0) + 'px',
+        '  maxScrollTop:   ' + maxScroll + 'px',
+        '',
+        '🟦 .sidebar-footer',
+        '  offsetTop:      ' + footer.offsetTop  + 'px',
+        '  offsetHeight:   ' + footer.offsetHeight + 'px',
+        '  rect.top:       ' + fR.top.toFixed(0)    + 'px',
+        '  rect.bottom:    ' + fR.bottom.toFixed(0) + 'px',
+        '  VISIBLE:        ' + (fVisible ? '✅ oui' : '❌ non'),
+        '',
+        nR ? ('📋 .sidebar-nav bottom: ' + nR.bottom.toFixed(0) + 'px') : '',
+        '',
+        '📐 VIEWPORT',
+        '  innerHeight:    ' + window.innerHeight + 'px',
+        '  vvp.height:     ' + (vvp ? vvp.height.toFixed(0) + 'px' : 'N/A')
+      ].join('\n');
+
+      _mkOverlay().textContent = lines;
+
+      // Console table (throttled)
+      if (!_update._last || Date.now() - _update._last > 2000) {
+        _update._last = Date.now();
+        console.table({
+          sidebar: { top: sR.top.toFixed(0), bottom: sR.bottom.toFixed(0), height: sR.height.toFixed(0) },
+          scroll:  { top: scR.top.toFixed(0), bottom: scR.bottom.toFixed(0), height: scR.height.toFixed(0),
+                     scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight,
+                     scrollTop: scroll.scrollTop.toFixed(0), maxScrollTop: maxScroll },
+          footer:  { top: fR.top.toFixed(0), bottom: fR.bottom.toFixed(0), height: fR.height.toFixed(0),
+                     offsetTop: footer.offsetTop, VISIBLE: fVisible ? 'OUI' : 'NON' }
+        });
+      }
+    }
+
+    // Mise à jour sur scroll du scroll-body
+    document.addEventListener('scroll', _update, true);
+
+    // Mise à jour lors de l'ouverture de la sidebar
+    var _origToggle = window.MX && window.MX.toggleSidebar;
+    if (_origToggle) {
+      window.MX.toggleSidebar = function() {
+        _origToggle.apply(this, arguments);
+        setTimeout(_update, 120);
+      };
+    }
+
+    // Mise à jour régulière (1s) pour attraper les changements dynamiques
+    setInterval(_update, 1000);
+    setTimeout(_update, 600);
+
+    console.warn('[MX Debug Sidebar] actif — mesures toutes les 1 s.\n' +
+      'console.table à jour toutes les 2 s.\n' +
+      'Ouvrez la sidebar pour voir les valeurs en temps réel.');
+  })();
+  // ── FIN DEBUG SIDEBAR ────────────────────────────────────────────────────
+
 })();
