@@ -4062,159 +4062,81 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 
 /* ═══════════════════════════════════════════════════
-   SIDEBAR ACCOUNT PANEL — sxap- prefix
+   SIDEBAR FOOTER REDESIGN — sxf- prefix
    ═══════════════════════════════════════════════════ */
+.sidebar-footer { padding: 8px; }
 
-/* ── Trigger button in sidebar header ── */
-.sxap-trigger {
+.sxf-btn {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 6px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: transparent;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
   cursor: pointer;
-  transition: background var(--t), border-color var(--t);
-  min-width: 0;
-  flex-shrink: 1;
-  margin-left: auto;
+  width: 100%;
+  text-align: left;
   font-family: var(--ffs);
+  transition: background var(--t), border-color var(--t);
 }
-.sxap-trigger:hover { background: var(--bg3); border-color: var(--border2); }
-.sxap-trigger.open  { background: var(--cyan-dim); border-color: var(--cyan-border); }
+.sxf-btn:hover { background: var(--bg4); border-color: var(--border3); }
 
-.sxap-trigger-avatar {
-  width: 32px; height: 32px;
-  border-radius: 9px;
+.sxf-avatar {
+  width: 36px; height: 36px;
+  border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700;
+  font-size: 13px; font-weight: 700;
   font-family: var(--ffm);
   flex-shrink: 0;
   overflow: hidden;
-  background: var(--bg4);
-  color: var(--text2);
-  border: 1px solid var(--border2);
 }
-.sxap-trigger-avatar--admin { background: var(--cyan-dim); color: var(--cyan); border-color: var(--cyan-border); }
-.sxap-trigger-avatar--anon  { background: var(--bg3); color: var(--text3); }
-.sxap-trigger-img { width: 32px; height: 32px; object-fit: cover; border-radius: 8px; }
+.sxf-avatar--admin { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan-border); }
+.sxf-avatar-img { width: 36px; height: 36px; object-fit: cover; border-radius: 10px; }
 
-.sxap-trigger-info {
-  display: flex; flex-direction: column;
-  min-width: 0; flex: 1; text-align: left;
-}
-.sxap-trigger-name {
-  font-size: 11px; font-weight: 600;
-  color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  line-height: 1.3;
-}
-.sxap-trigger-role {
-  font-size: 9px; color: var(--text3);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  line-height: 1.2;
-}
-
-.sxap-chevron {
-  font-size: 9px; color: var(--text3); flex-shrink: 0;
-  transition: transform 0.22s ease, color var(--t);
-}
-.sxap-trigger.open .sxap-chevron { transform: rotate(180deg); color: var(--cyan); }
-
-/* ── Account Panel ── */
-.sxap-panel {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  background: var(--bg2);
-  border-bottom: 0px solid var(--border);
-  flex-shrink: 0;
-}
-.sxap-panel.open { max-height: 520px; border-bottom-width: 1px; }
-
-.sxap-items {
-  padding: 8px;
-  display: flex; flex-direction: column; gap: 2px;
-}
-
-/* Profile head */
-.sxap-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 6px 10px;
-}
-.sxap-head--anon { opacity: 0.7; }
-.sxap-head-avatar {
-  width: 40px; height: 40px;
-  border-radius: 11px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 700;
-  font-family: var(--ffm);
-  flex-shrink: 0; overflow: hidden;
-  border: 1px solid var(--border2);
-  background: var(--bg3); color: var(--text3);
-}
-.sxap-head-avatar--admin { background: var(--cyan-dim); color: var(--cyan); border-color: var(--cyan-border); }
-.sxap-head-avatar--anon  { background: var(--bg3); color: var(--text3); }
-.sxap-head-img { width: 40px; height: 40px; object-fit: cover; border-radius: 10px; }
-.sxap-head-info { flex: 1; min-width: 0; }
-.sxap-head-name {
-  font-size: 13px; font-weight: 600;
+.sxf-info { flex: 1; min-width: 0; }
+.sxf-name {
+  font-size: 12.5px; font-weight: 600;
   color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--ffs);
+  line-height: 1.3;
 }
-.sxap-head-role {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 10px; color: var(--text3);
-  margin-top: 2px; flex-wrap: wrap;
+.sxf-role { display: flex; align-items: center; gap: 5px; margin-top: 2px; flex-wrap: wrap; }
+.sxf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+.sxf-dot--on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.sxf-role-lbl { font-size: 10px; color: var(--text3); }
+.sxf-pts {
+  font-size: 9.5px;
+  font-family: var(--ffm);
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
-.sxap-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-.sxap-dot--on { background: var(--green); box-shadow: 0 0 5px var(--green); }
-.sxap-pts {
-  font-size: 9.5px; font-family: var(--ffm);
-  color: var(--cyan); background: var(--cyan-dim);
-  padding: 1px 5px; border-radius: 4px;
-}
-.sxap-head-grade { margin-top: 3px; }
-
-/* Separator */
-.sxap-sep { height: 1px; background: var(--border); margin: 3px 2px; }
-
-/* Action items */
-.sxap-item {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12.5px; font-weight: 500;
-  font-family: var(--ffs);
-  width: 100%; text-align: left;
-  transition: background var(--t), color var(--t);
-}
-.sxap-item i {
-  width: 16px; text-align: center; font-size: 12px;
-  color: var(--text2); flex-shrink: 0;
+.sxf-grade { margin-top: 3px; }
+.sxf-logout {
+  font-size: 11px; color: var(--text3); flex-shrink: 0;
   transition: color var(--t);
 }
-.sxap-item:hover { background: var(--bg3); color: #FFFFFF; }
-.sxap-item:hover i { color: var(--cyan); }
-.sxap-item--primary {
-  background: var(--cyan-dim); color: var(--cyan);
-  border: 1px solid var(--cyan-border);
+.sxf-btn:hover .sxf-logout { color: var(--cyan); }
+
+.sxf-anon { display: flex; flex-direction: column; gap: 5px; }
+.sxf-anon-btn {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px; font-weight: 500;
+  font-family: var(--ffs);
+  border: 1px solid var(--border2);
+  background: var(--bg4);
+  color: var(--text2);
+  width: 100%;
+  transition: background var(--t), color var(--t), border-color var(--t);
 }
-.sxap-item--primary i { color: var(--cyan); }
-.sxap-item--primary:hover { background: rgba(139,92,246,0.18); color: var(--cyan); }
-.sxap-item--danger { color: var(--red); }
-.sxap-item--danger i { color: var(--red); }
-.sxap-item--danger:hover { background: rgba(239,68,68,0.08); color: var(--red); }
-.sxap-item--danger:hover i { color: var(--red); }
-.sxap-item--install { color: var(--cyan); }
-.sxap-item--install i { color: var(--cyan); }
-.sxap-item--install:hover { background: var(--cyan-dim); color: var(--cyan); }
+.sxf-anon-btn--primary { background: var(--cyan-dim); border-color: var(--cyan-border); color: var(--cyan); }
+.sxf-anon-btn:hover { background: var(--bg5); color: var(--text); }
+.sxf-anon-btn--primary:hover { background: rgba(139,92,246,0.18); }
 
 /* ── Light theme ── */
 [data-theme="light"] .sx-card { background: #FFFFFF; border-color: var(--border); box-shadow: var(--shadow-card); }
@@ -4233,11 +4155,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 [data-theme="light"] .sx-item.active { background: var(--cyan-dim); color: var(--text); box-shadow: inset 3px 0 0 var(--cyan); }
 [data-theme="light"] .sx-ico--on { color: var(--cyan) !important; }
 [data-theme="light"] .sx-track { background: var(--border); }
-[data-theme="light"] .sxap-panel { background: #F8F8F8; border-bottom-color: var(--border); }
-[data-theme="light"] .sxap-trigger:hover { background: var(--bg2); border-color: var(--border); }
-[data-theme="light"] .sxap-trigger.open { background: var(--cyan-dim); border-color: var(--cyan-border); }
-[data-theme="light"] .sxap-item:hover { background: var(--bg2); color: var(--text); }
-[data-theme="light"] .sxap-item:hover i { color: var(--cyan); }
+[data-theme="light"] .sxf-btn { background: #FFFFFF; border-color: var(--border); }
+[data-theme="light"] .sxf-btn:hover { background: var(--bg2); }
+[data-theme="light"] .sxf-anon-btn { background: var(--bg2); }
 [data-theme="light"] .sx-admin-sep span { color: var(--red); }
 [data-theme="light"] .sadmin-wrap .sadmin-card { background: #FFFFFF; }
 
@@ -4261,10 +4181,26 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .sx-lbl      { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sx-params   { padding: 4px 0 2px; }
 
-  /* Mobile account panel */
-  .sxap-trigger-avatar { width: 34px; height: 34px; }
-  .sxap-trigger-img    { width: 34px; height: 34px; }
-  .sxap-item           { min-height: 44px; font-size: 13px; }
+  /* Mobile profile footer — vertical centered layout */
+  .sxf-btn {
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 10px 10px;
+    gap: 5px;
+    text-align: center;
+  }
+  .sxf-avatar        { width: 64px; height: 64px; border-radius: 16px; font-size: 22px; }
+  .sxf-avatar-img    { width: 64px; height: 64px; }
+  .sxf-avatar--admin { width: 64px; height: 64px; border-radius: 16px; font-size: 22px; }
+  .sxf-info          { align-items: center; gap: 3px; }
+  .sxf-name          { font-size: 13px; font-weight: 700; }
+  .sxf-role          { justify-content: center; gap: 4px; }
+  .sxf-role-lbl      { font-size: 11px; }
+  .sxf-pts           { font-size: 10px; padding: 1px 5px; }
+  .sxf-grade         { justify-content: center; margin-top: 2px; }
+  .sxf-logout        { display: none; }
+  .sxf-anon          { flex-direction: column; gap: 6px; }
+  .sxf-anon-btn      { justify-content: center; }
 }
 
 /* ══════════════════════════════════════════════════════
@@ -4466,12 +4402,6 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* ══════════════════════════════════════════════════════
    SIDEBAR COMPACT MODE
 ══════════════════════════════════════════════════════ */
-/* Account panel trigger in compact mode: center avatar, hide logo */
-#sidebar.sx-compact .sidebar-logo   { display: none !important; }
-#sidebar.sx-compact .sidebar-header { justify-content: center; }
-#sidebar.sx-compact .sxap-trigger   { margin: 0; padding: 4px; justify-content: center; flex: 0 0 auto; }
-#sidebar.sx-compact .sxap-trigger-avatar { width: 36px; height: 36px; border-radius: 10px; }
-
 #sidebar.sx-compact { width: 64px !important; }
 #sidebar.sx-compact .sx-lbl,
 #sidebar.sx-compact .sx-card-txt,

@@ -122,28 +122,6 @@
   window.MX.closeSidebar = function () {
     document.getElementById("sidebar").classList.remove("open");
     document.getElementById("sidebar-overlay").classList.remove("show");
-    window.MX.closeAccountPanel && window.MX.closeAccountPanel();
-  };
-
-  window.MX.toggleAccountPanel = function () {
-    var panel   = document.getElementById("sxap-panel");
-    var trigger = document.getElementById("sxap-trigger");
-    if (!panel) return;
-    if (panel.classList.contains("open")) {
-      panel.classList.remove("open");
-      if (trigger) trigger.classList.remove("open");
-    } else {
-      MX.Auth.updateSidebarFooter && MX.Auth.updateSidebarFooter();
-      panel.classList.add("open");
-      if (trigger) trigger.classList.add("open");
-    }
-  };
-
-  window.MX.closeAccountPanel = function () {
-    var panel   = document.getElementById("sxap-panel");
-    var trigger = document.getElementById("sxap-trigger");
-    if (panel)   panel.classList.remove("open");
-    if (trigger) trigger.classList.remove("open");
   };
 
   // ── NAV ACCORDION STATE ──
