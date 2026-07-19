@@ -780,6 +780,14 @@ html, body {
     margin-top: auto;  /* repousse le footer en bas quand la nav est courte */
     padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   }
+  /* Espace tampon sous le footer — permet de scroller les derniers boutons
+     au-dessus de la barre Safari iOS (~50 px) */
+  .sidebar-footer::after {
+    content: "";
+    display: block;
+    height: 200px;
+    flex-shrink: 0;
+  }
 }
 @media (max-width: 600px) {
   .page-grid { grid-template-columns: 1fr; }
