@@ -241,6 +241,26 @@ html, body {
 .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
+/* ── SIDEBAR SCROLL BODY ──
+   Seul conteneur de scroll de la sidebar.
+   Le sidebar parent garde overflow:hidden pour éviter les conflits iOS.
+   Sur desktop : sidebar-nav prend flex:1 à l'intérieur → c'est la nav qui scroll.
+   Sur mobile  : sidebar-nav passe en flex:0 0 auto → c'est ce wrapper qui scroll. */
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;                     /* indispensable : permet au flex de contraindre la hauteur */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
 .nav-section-label {
   font-size: 9px;
   font-family: var(--ffm);
@@ -700,19 +720,11 @@ html, body {
     width: var(--sidebar-w);
     transform: translateX(-100%);
     z-index: 100;
-    overflow-x: hidden;               /* clip horizontal overflow */
-    overflow-y: auto;                 /* sidebar body becomes the scroll container */
-    -webkit-overflow-scrolling: touch;
+    overflow: hidden;  /* layout only — .sidebar-scroll est le seul scroll container */
   }
   .sidebar.open { transform: translateX(0); }
-  /* Header stays pinned below the notch while body scrolls */
-  .sidebar-header {
-    position: sticky;
-    top: env(safe-area-inset-top, 0px);
-    z-index: 2;
-    background: var(--bg2);
-  }
-  /* Nav expands to full content height — sidebar provides the scroll */
+  /* Sur mobile, la nav s'étend à sa hauteur naturelle ;
+     c'est .sidebar-scroll (flex:1; min-height:0; overflow-y:auto) qui gère le scroll. */
   .sidebar-nav {
     flex: 0 0 auto;
     overflow-y: visible;
@@ -763,8 +775,11 @@ html, body {
   .hamburger { min-width: 44px; min-height: 44px; }
   /* Sidebar — compense aussi le notch quand ouverte */
   .sidebar { padding-top: env(safe-area-inset-top); }
-  /* C3 — le dernier élément de sidebar reste au-dessus du Home Indicator */
-  .sidebar-footer { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+  /* C3 — footer en bas de la zone scrollable ; toujours atteignable */
+  .sidebar-footer {
+    margin-top: auto;  /* repousse le footer en bas quand la nav est courte */
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
 }
 @media (max-width: 600px) {
   .page-grid { grid-template-columns: 1fr; }
