@@ -137,12 +137,14 @@
 
   var CHECK_SECTIONS = [
     { id: 'env',       icon: 'fa-display',          label: 'Environnement' },
-    { id: 'notif',     icon: 'fa-bell',              label: 'Notifications' },
-    { id: 'sw',        icon: 'fa-gears',             label: 'Service Worker' },
-    { id: 'firebase',  icon: 'fa-fire',              label: 'Firebase' },
-    { id: 'token',     icon: 'fa-key',               label: 'Token FCM' },
-    { id: 'firestore', icon: 'fa-database',          label: 'Firestore' },
-    { id: 'cf',        icon: 'fa-cloud',             label: 'Cloud Functions' },
+    { id: 'ios-ctx',   icon: 'fa-mobile-screen',    label: 'Contexte iOS' },
+    { id: 'notif',     icon: 'fa-bell',             label: 'Notifications' },
+    { id: 'sw',        icon: 'fa-gears',            label: 'Service Worker' },
+    { id: 'firebase',  icon: 'fa-fire',             label: 'Firebase' },
+    { id: 'token',     icon: 'fa-key',              label: 'Token FCM' },
+    { id: 'firestore', icon: 'fa-database',         label: 'Firestore' },
+    { id: 'cf',        icon: 'fa-cloud',            label: 'Cloud Functions' },
+    { id: 'debug',     icon: 'fa-bug',              label: 'Debug iOS' },
   ];
 
   // ── Render a section ──
@@ -206,6 +208,41 @@
       if (isIOS && !iosOk) _log('⚠ iOS ' + iosVerStr + ' — Web Push nécessite iOS 16.4+', 'warn');
     } catch(e) { _log('Erreur section Environnement : ' + e.message, 'error'); }
 
+    // ── 1b. Contexte iOS ──
+    try {
+      var ctxPwa      = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+      var ctxNotif    = 'Notification' in window;
+      var ctxPush     = 'PushManager' in window;
+      var ctxCtrl     = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+      var ctxMsg      = !!(window.MX && window.MX.messaging);
+      var ctxVapid    = !!(window.MX && window.MX.VAPID_KEY && window.MX.VAPID_KEY.length > 10);
+      var ctxPerm     = ctxNotif ? Notification.permission : 'unsupported';
+      var ctxReady    = '—';
+      try {
+        ctxReady = await Promise.race([
+          navigator.serviceWorker.ready.then(function(r) { return r.active ? 'actif ✓' : 'registré mais inactif'; }),
+          new Promise(function(res) { setTimeout(function() { res('timeout 2s'); }, 2000); })
+        ]);
+      } catch(er) { ctxReady = 'erreur : ' + er.message; }
+
+      _setSection('ios-ctx',
+        _check('Mode PWA (standalone)',     ctxPwa  ? 'ok'    : 'error',  ctxPwa   ? 'Oui — requis pour Push iOS' : '⚠ Non — push iOS impossibles hors PWA installée')
+        + _check('SW contrôle la page',    ctxCtrl ? 'ok'    : 'warn',   ctxCtrl  ? 'Oui (controller actif)' : 'Non — recharger après installation SW')
+        + _check('SW ready state',         ctxReady.includes('actif') ? 'ok' : 'warn', ctxReady)
+        + _check('API Notification',       ctxNotif ? 'ok'   : 'error',  ctxNotif  ? 'Disponible' : 'Indisponible — iOS < 16.4 ou hors PWA')
+        + _check('API PushManager',        ctxPush  ? 'ok'   : 'error',  ctxPush   ? 'Disponible' : 'Indisponible — iOS < 16.4 ou hors PWA')
+        + _check('Firebase Messaging',     ctxMsg   ? 'ok'   : 'error',  ctxMsg    ? 'Initialisé (MX.messaging)' : '⚠ null — getToken() impossible')
+        + _check('Clé VAPID',              ctxVapid ? 'ok'   : 'error',  ctxVapid  ? ((window.MX.VAPID_KEY || '').slice(0, 14) + '… (' + (window.MX.VAPID_KEY || '').length + ' chars)') : 'Absente ou invalide')
+        + _check('Permission actuelle',    ctxPerm === 'granted' ? 'ok' : ctxPerm === 'denied' ? 'error' : 'warn', ctxPerm)
+      );
+
+      _log('Contexte iOS — PWA:' + ctxPwa + ' SWctrl:' + ctxCtrl + ' SWready:' + ctxReady + ' Notif:' + ctxNotif + ' Push:' + ctxPush + ' Msg:' + ctxMsg + ' VAPID:' + ctxVapid + ' perm:' + ctxPerm);
+      if (!ctxPwa)   _log('⛔ App NON en mode standalone — Web Push iOS nécessite une PWA installée depuis Safari', 'error');
+      if (!ctxCtrl)  _log('⚠ SW ne contrôle pas encore la page (controller=null) — rechargez après 1ère install', 'warn');
+      if (!ctxMsg)   _log('⛔ MX.messaging=null — getToken() échouera', 'error');
+      if (!ctxVapid) _log('⛔ Clé VAPID absente — getToken() échouera', 'error');
+    } catch(e) { _log('Erreur Contexte iOS : ' + e.message, 'error'); }
+
     // ── 2. Notifications ──
     try {
       var notifSupported = 'Notification' in window;
@@ -217,23 +254,13 @@
 
       _diagData.notif = { supported: notifSupported, permission: perm, badge: hasBadge, vibration: hasVibrate, push: hasPush };
 
-      var _permBtn = perm !== 'granted'
-        ? '<button class="iosd-btn iosd-btn-primary iosd-btn-sm" style="margin-top:8px" onclick="MX.Pages.IosDiag._requestPermission()">'
-          + '<i class="fas fa-bell"></i> Demander l\'autorisation</button>'
-        : '';
+      _log('Notification.permission = "' + perm + '"');
+      _setSection('notif', _buildNotifSection(perm, hasBadge, hasVibrate, hasPush, notifSupported));
 
-      _setSection('notif',
-        _check('Notification.permission', permState, perm)
-        + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non', _permBtn)
-        + _check('Badge API', hasBadge ? 'ok' : 'warn', hasBadge ? 'Disponible' : 'Non disponible')
-        + _check('Vibration API', hasVibrate ? 'ok' : 'idle', hasVibrate ? 'Disponible' : 'Non disponible')
-        + _check('Push API', hasPush ? 'ok' : 'error', hasPush ? 'Disponible' : 'Non disponible')
-        + (!notifSupported ? _check('API Notification', 'error', 'Non supportée dans ce contexte') : '')
-      );
-
-      _log('Notifications : ' + perm + ' | PushAPI : ' + (hasPush ? 'oui' : 'non') + ' | Badge : ' + (hasBadge ? 'oui' : 'non'));
-      if (perm === 'denied') _log('⚠ Notifications bloquées — réinitialiser dans les réglages du navigateur', 'warn');
-      if (perm === 'default') _log('Permission non encore demandée', 'warn');
+      _log('PushAPI : ' + (hasPush ? 'oui' : 'non') + ' | Badge : ' + (hasBadge ? 'oui' : 'non'));
+      if (perm === 'denied')  _log('⛔ Notifications bloquées — Réglages iPhone → Notifications → Maintix', 'error');
+      if (perm === 'default') _log('⚠ Permission jamais demandée — cliquez "Demander l\'autorisation"', 'warn');
+      if (!notifSupported)    _log('⛔ API Notification indisponible dans ce contexte', 'error');
     } catch(e) { _log('Erreur section Notifications : ' + e.message, 'error'); }
 
     // ── 3. Service Worker ──
@@ -382,6 +409,38 @@
       _log('Erreur Cloud Functions : ' + e.message, 'error');
     }
 
+    // ── 8. Debug iOS ──
+    try {
+      var dbgPerm  = 'Notification' in window ? Notification.permission : 'API indisponible';
+      var dbgCtrl  = navigator.serviceWorker
+        ? (navigator.serviceWorker.controller ? 'Actif (contrôle la page)' : 'null — page non contrôlée')
+        : 'SW non supporté';
+      var dbgSw    = _swReg
+        ? (_swReg.active ? 'actif — ' + _swReg.active.state : (_swReg.waiting ? 'waiting' : (_swReg.installing ? 'installing' : 'absent')))
+        : 'aucune registration';
+      var dbgPush  = 'PushManager' in window ? 'Disponible' : 'Non disponible';
+      var dbgMsg   = window.MX && window.MX.messaging ? 'Initialisé' : 'null';
+      var dbgGetT  = window.MX && window.MX.messaging && typeof window.MX.messaging.getToken === 'function' ? 'Oui' : 'Non';
+      var dbgVapid = window.MX && window.MX.VAPID_KEY
+        ? (window.MX.VAPID_KEY.length + ' chars — ' + window.MX.VAPID_KEY.slice(0, 16) + '…')
+        : 'Absent';
+      var dbgCached = window._fcmToken ? ('Oui — ' + window._fcmToken.slice(0, 20) + '…') : 'Absent';
+      var dbgMode   = (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) ? 'standalone' : 'browser';
+
+      _setSection('debug',
+        _check('Notification.permission',  dbgPerm === 'granted' ? 'ok' : dbgPerm === 'denied' ? 'error' : 'warn', dbgPerm)
+        + _check('SW controller',          navigator.serviceWorker && navigator.serviceWorker.controller ? 'ok' : 'warn', dbgCtrl)
+        + _check('SW state',               _swReg && _swReg.active ? 'ok' : 'warn', dbgSw)
+        + _check('PushManager',            'PushManager' in window ? 'ok' : 'error', dbgPush)
+        + _check('Firebase Messaging',     window.MX && window.MX.messaging ? 'ok' : 'error', dbgMsg)
+        + _check('getToken() disponible',  dbgGetT === 'Oui' ? 'ok' : 'error', dbgGetT)
+        + _check('Clé VAPID',              window.MX && window.MX.VAPID_KEY ? 'ok' : 'error', dbgVapid)
+        + _check('Token FCM (cache)',       window._fcmToken ? 'ok' : 'idle', dbgCached)
+        + _check('Mode d\'affichage',      dbgMode === 'standalone' ? 'ok' : 'warn', dbgMode)
+      );
+      _log('Debug — perm:' + dbgPerm + ' ctrl:' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'oui' : 'non') + ' sw:' + dbgSw + ' msg:' + dbgMsg + ' getToken:' + dbgGetT + ' vapid:' + (window.MX && window.MX.VAPID_KEY ? 'oui' : 'non') + ' mode:' + dbgMode);
+    } catch(e) { _log('Erreur Debug : ' + e.message, 'error'); }
+
     // ── Summary ──
     _log('');
     _log('── Diagnostic terminé ──');
@@ -514,49 +573,88 @@
     } catch(e) { _log('Erreur réenregistrement SW : ' + e.message, 'error'); }
   }
 
-  // ── Demande de permission + chaîne FCM ──
-  async function _requestPermission() {
-    _log('Demande d\'autorisation notifications…');
-    if (!('Notification' in window)) {
-      _log('⚠ API Notification non disponible dans ce contexte', 'error');
-      return;
-    }
-    var perm;
-    try {
-      perm = await Notification.requestPermission();
-    } catch(e) {
-      _log('Erreur requestPermission() : ' + e.message, 'error');
-      return;
-    }
-    _log('Réponse utilisateur : ' + perm);
-
+  // ── Builder HTML section Notifications (réutilisé par _runDiag + _onPermResult) ──
+  function _buildNotifSection(perm, hasBadge, hasVibrate, hasPush, notifSup) {
     var permState = perm === 'granted' ? 'ok' : perm === 'denied' ? 'error' : 'warn';
-    var permBtn   = perm !== 'granted'
-      ? '<button class="iosd-btn iosd-btn-primary iosd-btn-sm" style="margin-top:8px" onclick="MX.Pages.IosDiag._requestPermission()">'
-        + '<i class="fas fa-bell"></i> Demander l\'autorisation</button>'
-      : '';
-    var hasBadge   = 'setAppBadge' in navigator;
-    var hasVibrate = 'vibrate' in navigator;
-    var hasPush    = 'PushManager' in window;
-
-    if (_diagData.notif) _diagData.notif.permission = perm;
-
-    _setSection('notif',
-      _check('Notification.permission', permState, perm)
-      + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non', permBtn)
-      + _check('Badge API', hasBadge ? 'ok' : 'warn', hasBadge ? 'Disponible' : 'Non disponible')
+    var permExtra = '';
+    if (perm !== 'granted') {
+      permExtra += '<button class="iosd-btn iosd-btn-primary iosd-btn-sm" style="margin-top:8px" onclick="MX.Pages.IosDiag._requestPermission()">'
+        + '<i class="fas fa-bell"></i> Demander l\'autorisation</button>';
+    }
+    if (perm === 'denied') {
+      permExtra += '<div class="iosd-perm-guide iosd-perm-guide--error">'
+        + '<i class="fas fa-circle-exclamation"></i> '
+        + 'Permission refusée. Réactiver dans :<br>'
+        + '<b>Réglages iPhone → Notifications → Maintix → Autoriser les notifications</b>'
+        + '</div>';
+    }
+    if (perm === 'default') {
+      permExtra += '<div class="iosd-perm-guide iosd-perm-guide--warn">'
+        + '<i class="fas fa-triangle-exclamation"></i> '
+        + 'La boîte de dialogue système ne s\'est pas affichée.<br>'
+        + 'Causes possibles : app non en mode standalone · SW non contrôleur · geste non reconnu par iOS.'
+        + '</div>';
+    }
+    return _check('Notification.permission', permState, perm)
+      + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non', permExtra)
+      + _check('Badge API',    hasBadge   ? 'ok' : 'warn', hasBadge   ? 'Disponible' : 'Non disponible')
       + _check('Vibration API', hasVibrate ? 'ok' : 'idle', hasVibrate ? 'Disponible' : 'Non disponible')
-      + _check('Push API', hasPush ? 'ok' : 'error', hasPush ? 'Disponible' : 'Non disponible')
-    );
+      + _check('Push API',     hasPush    ? 'ok' : 'error', hasPush    ? 'Disponible' : 'Non disponible')
+      + (!notifSup ? _check('API Notification', 'error', 'Non supportée dans ce contexte') : '');
+  }
+
+  // ── Callback après résolution de requestPermission() ──
+  function _onPermResult(perm) {
+    _log('Notification.permission APRÈS : ' + (('Notification' in window) ? Notification.permission : 'indisponible'));
+    if (_diagData.notif) _diagData.notif.permission = perm;
+    _setSection('notif', _buildNotifSection(perm, 'setAppBadge' in navigator, 'vibrate' in navigator, 'PushManager' in window, 'Notification' in window));
 
     if (perm === 'granted') {
-      _log('✅ Permission accordée — génération du token FCM…');
-      await _fetchToken(null);
+      _log('✅ Permission accordée — lancement de _fetchToken()…');
+      _fetchToken(null);
     } else if (perm === 'denied') {
-      _log('⛔ Permission refusée — réinitialiser dans Réglages iOS → Notifications', 'error');
+      _log('⛔ Permission refusée — Réglages iPhone → Notifications → Maintix → Autoriser', 'error');
     } else {
-      _log('Permission toujours en attente (default)', 'warn');
+      _log('⚠ Permission "default" — la boîte de dialogue iOS ne s\'est pas affichée', 'warn');
+      _log('Vérifiez : mode standalone (PWA installée) · SW controller actif · iOS ≥ 16.4', 'warn');
     }
+  }
+
+  // ── Demande de permission : NON-async, appel DIRECT à requestPermission() ──
+  function _requestPermission() {
+    _log('── Demande d\'autorisation ──');
+    _log('Notification.permission AVANT : ' + (('Notification' in window) ? Notification.permission : 'API indisponible'));
+
+    if (!('Notification' in window)) {
+      _log('⛔ API Notification indisponible dans ce contexte', 'error');
+      _onPermResult('unsupported');
+      return;
+    }
+
+    _log('Appel direct : Notification.requestPermission() …');
+    var p;
+    try {
+      // APPEL DIRECT — aucun await ni async avant cette ligne
+      p = Notification.requestPermission();
+    } catch (syncErr) {
+      _log('⛔ Exception synchrone lors de requestPermission() : ' + syncErr.message, 'error');
+      return;
+    }
+
+    if (!p || typeof p.then !== 'function') {
+      // API callback (ancienne) — résultat immédiat
+      _log('API callback détectée — Notification.permission = ' + Notification.permission, 'warn');
+      _onPermResult(Notification.permission);
+      return;
+    }
+
+    p.then(function (perm) {
+      _log('Résultat : ' + perm);
+      _onPermResult(perm);
+    }).catch(function (e) {
+      _log('⛔ Promise requestPermission() rejetée : ' + e.message, 'error');
+      _log('Notification.permission APRÈS erreur : ' + Notification.permission);
+    });
   }
 
   // ── Helper : obtenir et afficher le token FCM ──
@@ -576,21 +674,26 @@
         token = await msg.getToken({ vapidKey: vk, serviceWorkerRegistration: reg || undefined });
         if (token) {
           window._fcmToken = token;
-          _log('✅ Token FCM obtenu : ' + token.slice(0, 20) + '…');
+          window._fcmTokenTs = new Date().toLocaleString('fr-FR');
+          _log('✅ Token FCM obtenu : ' + token.slice(0, 20) + '… (' + token.length + ' chars)');
         } else {
-          _log('⚠ getToken() a retourné null — APNs non configuré?', 'warn');
+          _log('⚠ getToken() a retourné null — APNs non configuré dans Firebase Console?', 'warn');
         }
+      } else if (!msg) {
+        _log('⛔ FCM non disponible (MX.messaging=null) — initialisez Firebase Messaging avant d\'appeler getToken()', 'error');
       } else {
-        _log('⚠ FCM non disponible (messaging=null) — token impossible à obtenir', 'warn');
+        _log('⛔ Clé VAPID absente (MX.VAPID_KEY vide) — nécessaire pour getToken()', 'error');
       }
 
       var ua = navigator.userAgent;
       var pl = /iphone|ipad|ipod/i.test(ua) ? 'ios' : /android/i.test(ua) ? 'android' : 'desktop';
-      _diagData.token = { value: token, platform: pl };
+      _diagData.token = { value: token, platform: pl, ts: window._fcmTokenTs || null };
 
       _setSection('token',
-        _check('Token obtenu', token ? 'ok' : 'error', token ? token.slice(0, 28) + '…' : 'Aucun')
-        + _check('Plateforme', 'ok', pl)
+        _check('Token obtenu',   token ? 'ok' : 'error', token ? token.slice(0, 28) + '…' : 'Aucun')
+        + _check('Longueur',     token ? 'ok' : 'idle',  token ? token.length + ' caractères' : '—')
+        + _check('Généré le',    token && window._fcmTokenTs ? 'ok' : 'idle', window._fcmTokenTs || '—')
+        + _check('Plateforme',   'ok', pl)
       );
 
       if (token) {
@@ -598,7 +701,7 @@
         if (tokenCard) {
           tokenCard.querySelector('.iosd-check-list').insertAdjacentHTML('beforeend',
             '<div class="iosd-token-box">'
-            + '<div class="iosd-token-label">Token FCM</div>'
+            + '<div class="iosd-token-label">Token FCM complet</div>'
             + '<div class="iosd-token-val" id="iosd-token-val">' + token + '</div>'
             + '<div class="iosd-token-actions">'
             + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._copyToken()" title="Copier le token"><i class="fas fa-copy"></i> Copier</button>'
@@ -686,10 +789,12 @@
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.IosDiag = {
-    render:             render,
-    _requestPermission: _requestPermission,
-    _fetchToken:        _fetchToken,
-    _testLocal:         _testLocal,
+    render:              render,
+    _requestPermission:  _requestPermission,
+    _onPermResult:       _onPermResult,
+    _buildNotifSection:  _buildNotifSection,
+    _fetchToken:         _fetchToken,
+    _testLocal:          _testLocal,
     _testSystem:        _testSystem,
     _testFCM:           _testFCM,
     _recreateToken:     _recreateToken,

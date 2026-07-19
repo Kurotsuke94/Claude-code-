@@ -23302,6 +23302,23 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   padding-left: 18px;
   margin-top: 2px;
 }
+.iosd-perm-guide {
+  flex: 0 0 100%;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border-left: 3px solid currentColor;
+}
+.iosd-perm-guide--error {
+  color: var(--red, #F87171);
+  background: rgba(248, 113, 113, 0.07);
+}
+.iosd-perm-guide--warn {
+  color: var(--yellow, #FBBF24);
+  background: rgba(251, 191, 36, 0.07);
+}
 
 /* ── Status dots ── */
 .iosd-dot {
