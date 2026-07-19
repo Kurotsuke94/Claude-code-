@@ -1,6 +1,7 @@
 {
   "name": "Maintix",
   "short_name": "Maintix",
+  "gcm_sender_id": "98524288307",
   "description": "Gestion de maintenance technique hôtelière",
   "version": "1.1.07",
   "id": "/",

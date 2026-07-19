@@ -64,16 +64,39 @@
   async function _registerFcmToken(userName) {
     const m = window.MX.messaging;
     const v = window.MX.VAPID_KEY;
-    if (!m || !v || v.startsWith('REMPLACER')) return;
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!m || !v || v.startsWith('REMPLACER')) {
+      console.log('[FCM] Messaging non disponible — token non enregistré');
+      return;
+    }
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      console.log('[FCM] Permission notifications non accordée — token non enregistré');
+      return;
+    }
     try {
+      const platform = /iphone|ipad|ipod/i.test(navigator.userAgent) ? 'ios'
+        : /android/i.test(navigator.userAgent) ? 'android' : 'desktop';
       const reg   = await navigator.serviceWorker.getRegistration('/sw.js');
       const token = await m.getToken({ vapidKey: v, serviceWorkerRegistration: reg });
       if (token) {
-        await MX.DB.saveFcmToken(token, userName);
+        await MX.DB.saveFcmToken(token, userName, platform);
         window._fcmToken = token;
+        console.log('[FCM] ✅ Token enregistré (' + platform + ') :', token.slice(0, 20) + '…');
+        m.onTokenRefresh(async function() {
+          try {
+            const newToken = await m.getToken({ vapidKey: v, serviceWorkerRegistration: reg });
+            if (newToken && newToken !== window._fcmToken) {
+              await MX.DB.saveFcmToken(newToken, userName, platform);
+              window._fcmToken = newToken;
+              console.log('[FCM] 🔄 Token rafraîchi :', newToken.slice(0, 20) + '…');
+            }
+          } catch(refreshErr) {
+            console.error('[FCM] Erreur refresh token :', refreshErr);
+          }
+        });
+      } else {
+        console.warn('[FCM] getToken() a renvoyé null — vérifier APNs (iOS) ou permissions');
       }
-    } catch(e) { console.warn('FCM token:', e); }
+    } catch(e) { console.error('[FCM] ❌ Erreur enregistrement token :', e.code || '', e.message || e); }
   }
 
   // ── USER IDENTITY (PIN) ──
@@ -137,6 +160,12 @@
   }
 
   function clearCurrentUser() {
+    if (window._fcmToken && MX.DB && MX.DB.deleteFcmToken) {
+      MX.DB.deleteFcmToken(window._fcmToken).catch(function(e) {
+        console.warn('[FCM] Erreur suppression token :', e);
+      });
+      window._fcmToken = null;
+    }
     _destroyUI();         // close modals, destroy page listeners — before state is wiped
     setCurrentUser(null); // clear MX.state.currentUser + localStorage
     showUserPicker();

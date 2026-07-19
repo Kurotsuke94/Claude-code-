@@ -28,10 +28,31 @@ let messaging = null;
 try {
   if (typeof firebase.messaging !== 'undefined' && firebase.messaging.isSupported && firebase.messaging.isSupported()) {
     messaging = firebase.messaging();
+    console.log('[FCM] Messaging SDK initialisé');
+  } else {
+    console.log('[FCM] firebase.messaging non disponible sur cette plateforme');
   }
-} catch(e) { console.warn('FCM not supported:', e); }
+} catch(e) { console.warn('[FCM] Erreur init messaging :', e); }
 window.MX.VAPID_KEY = VAPID_KEY;
 window.MX.messaging = messaging;
+
+// Handler foreground (app ouverte) — délégué à MX.Notifs.push quand disponible
+if (messaging) {
+  messaging.onMessage(function(payload) {
+    console.log('[FCM] Message foreground reçu :', payload);
+    var n = payload.notification || {};
+    var d = payload.data || {};
+    if (window.MX && window.MX.Notifs && window.MX.Notifs.push) {
+      window.MX.Notifs.push({
+        title:       n.title || 'Maintix',
+        description: n.body  || d.description || '',
+        type:        d.type  || 'system',
+        level:       d.level || 'info',
+        url:         d.url   || '',
+      });
+    }
+  });
+}
 window.MX.state = {
   adminUser:     null,
   currentPage:   null,

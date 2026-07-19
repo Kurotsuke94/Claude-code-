@@ -1483,8 +1483,16 @@
     next.forEach(m => {
       if (!prevIds.has(m.id) && m.assignedTo === cu.name && !m.done && !_notifiedMissions.has(m.id)) {
         _notifiedMissions.add(m.id);
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification("Nouvelle intervention", { body: m.text + (m.createdBy ? " — de " + m.createdBy : ""), icon: "/assets/icons/icon-192.png" });
+        if (window.MX && window.MX.Notifs && window.MX.Notifs.push) {
+          window.MX.Notifs.push({
+            title:       'Nouvelle intervention',
+            description: m.text + (m.createdBy ? ' — de ' + m.createdBy : ''),
+            type:        'mission',
+            level:       'important',
+            url:         '/?page=missions',
+          });
+        } else if ("Notification" in window && Notification.permission === "granted") {
+          try { new Notification("Nouvelle intervention", { body: m.text + (m.createdBy ? " — de " + m.createdBy : ""), icon: "/assets/icons/icon-192.png" }); } catch(_) {}
         }
       }
     });
@@ -2097,7 +2105,7 @@
     }
 
     function onItemClick(id) {
-      MX.DB.markNotificationRead(id).catch(() => {});
+      MX.DB.markNotificationRead(id).catch(function(e) { console.warn('[Notifs] markRead error:', e); });
       const n = (MX.state.notifications || []).find(x => x.id === id);
       if (n) n.read = true;
       updateBell(MX.state.notifications || []);
@@ -2156,7 +2164,7 @@
             icon: '📩',
             author: a.authorName || '',
             userId: 'all',
-          }).catch(() => {});
+          }).catch(function(e) { console.warn('[Notifs] createNotification (ann) error:', e); });
         }
       });
     }
@@ -2176,7 +2184,7 @@
               icon: '📦',
               author: '',
               userId: 'all',
-            }).catch(() => {});
+            }).catch(function(e) { console.warn('[Notifs] createNotification (stock) error:', e); });
           }
         }
       });
@@ -2203,7 +2211,7 @@
             icon: '🏆',
             author: b.assignedBy || '',
             userId: cu.name,
-          }).catch(() => {});
+          }).catch(function(e) { console.warn('[Notifs] createNotification (badge) error:', e); });
         }
       });
     }
@@ -2218,7 +2226,7 @@
         icon: '🚀',
         author: 'Système',
         userId: 'all',
-      }).catch(() => {});
+      }).catch(function(e) { console.warn('[Notifs] createNotification (update) error:', e); });
     }
 
     // Create system notification
@@ -2231,7 +2239,7 @@
         icon: '⚙️',
         author: 'Système',
         userId: 'all',
-      }).catch(() => {});
+      }).catch(function(e) { console.warn('[Notifs] createNotification (system) error:', e); });
     }
 
     function init() {
@@ -2442,7 +2450,7 @@
         setTimeout(function() { el.remove(); }, 400);
       }
       _stopCriticalVibration();
-      if (id) MX.DB && MX.DB.markNotificationRead && MX.DB.markNotificationRead(id).catch(function() {});
+      if (id) MX.DB && MX.DB.markNotificationRead && MX.DB.markNotificationRead(id).catch(function(e) { console.warn('[Notifs] markRead error:', e); });
     }
 
     // ── DND check ──
@@ -2526,7 +2534,7 @@
           title: n.title || '', description: n.description || '',
           icon: n.icon || null, author: n.author || '',
           userId: n.userId || 'all', data: n.data || {},
-        }).catch(function() {});
+        }).catch(function(e) { console.warn('[Notifs] createNotification (push) error:', e); });
       }
     }
 

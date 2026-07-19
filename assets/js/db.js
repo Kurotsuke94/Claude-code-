@@ -304,8 +304,8 @@
     await db.collection("config").doc("planning").set({ imageUrl: null });
   }
 
-  async function saveFcmToken(token, userName) {
-    await db.collection("fcmTokens").doc(token).set({ token, userName: userName || "", ts: firebase.firestore.FieldValue.serverTimestamp() });
+  async function saveFcmToken(token, userName, platform) {
+    await db.collection("fcmTokens").doc(token).set({ token, userName: userName || "", platform: platform || 'unknown', ts: firebase.firestore.FieldValue.serverTimestamp() });
   }
   async function deleteFcmToken(token) {
     await db.collection("fcmTokens").doc(token).delete();

@@ -161,17 +161,28 @@
       message,
       dateKey:   today,
       acknowledged: false,
-    }).catch(() => {});
+    }).catch(function(e) {
+      console.error('[AlertsEngine] Erreur createTriggeredAlert :', e);
+    });
 
-    // Browser notification
-    if (rule.notifyBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      try {
-        new Notification('Maintix — ' + (rule.name || 'Alerte'), {
-          body: message,
-          icon: '/icon-192.png',
-          tag:  'mx-alert-' + rule.id,
+    // Browser notification — routed via MX.Notifs.push for sound/float/Firestore
+    if (rule.notifyBrowser) {
+      if (window.MX && window.MX.Notifs && window.MX.Notifs.push) {
+        window.MX.Notifs.push({
+          title:       'Maintix — ' + (rule.name || 'Alerte'),
+          description: message,
+          type:        'alert',
+          level:       rule.level || 'warning',
         });
-      } catch (_) {}
+      } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          new Notification('Maintix — ' + (rule.name || 'Alerte'), {
+            body: message,
+            icon: '/assets/icons/icon-192.png',
+            tag:  'mx-alert-' + rule.id,
+          });
+        } catch (_) {}
+      }
     }
   }
 

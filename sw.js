@@ -54,6 +54,12 @@ self.addEventListener('notificationclick', e => {
   }));
 });
 
+self.addEventListener('notificationclose', e => {
+  const type  = (e.notification.data && e.notification.data.type)  || 'system';
+  const level = (e.notification.data && e.notification.data.level) || 'info';
+  console.log('[SW] notificationclose — type:', type, 'level:', level);
+});
+
 // ── VERSION — source unique : version.js ──
 const CACHE = "maintix-" + MX_VERSION;
 const V     = "?v=" + MX_BUILD;
