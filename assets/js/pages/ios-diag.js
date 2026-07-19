@@ -217,9 +217,14 @@
 
       _diagData.notif = { supported: notifSupported, permission: perm, badge: hasBadge, vibration: hasVibrate, push: hasPush };
 
+      var _permBtn = perm !== 'granted'
+        ? '<button class="iosd-btn iosd-btn-primary iosd-btn-sm" style="margin-top:8px" onclick="MX.Pages.IosDiag._requestPermission()">'
+          + '<i class="fas fa-bell"></i> Demander l\'autorisation</button>'
+        : '';
+
       _setSection('notif',
         _check('Notification.permission', permState, perm)
-        + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non')
+        + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non', _permBtn)
         + _check('Badge API', hasBadge ? 'ok' : 'warn', hasBadge ? 'Disponible' : 'Non disponible')
         + _check('Vibration API', hasVibrate ? 'ok' : 'idle', hasVibrate ? 'Disponible' : 'Non disponible')
         + _check('Push API', hasPush ? 'ok' : 'error', hasPush ? 'Disponible' : 'Non disponible')
@@ -307,64 +312,18 @@
     }
 
     // ── 5. Token FCM ──
-    var _token = null;
-    try {
-      var msg = window.MX && window.MX.messaging;
-      var vk  = window.MX && window.MX.VAPID_KEY;
-
-      if (window._fcmToken) {
-        _token = window._fcmToken;
-        _log('Token FCM (cache) : ' + _token.slice(0, 20) + '…');
-      } else if (msg && vk) {
-        _log('Demande de token FCM…');
-        _token = await msg.getToken({ vapidKey: vk, serviceWorkerRegistration: _swReg || undefined });
-        if (_token) {
-          window._fcmToken = _token;
-          _log('✅ Token FCM obtenu : ' + _token.slice(0, 20) + '…');
-        } else {
-          _log('⚠ getToken() a retourné null — APNs non configuré?', 'warn');
-        }
-      } else {
-        _log('⚠ FCM non disponible — token non obtenu', 'warn');
-      }
-
-      var ua2 = navigator.userAgent;
-      var pl = /iphone|ipad|ipod/i.test(ua2) ? 'ios' : /android/i.test(ua2) ? 'android' : 'desktop';
-      _diagData.token = { value: _token, platform: pl };
-
-      var tokenDisplay = _token
-        ? '<div class="iosd-token-box">'
-          + '<div class="iosd-token-label">Token FCM</div>'
-          + '<div class="iosd-token-val" id="iosd-token-val">' + _token + '</div>'
-          + '<div class="iosd-token-actions">'
-          + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._copyToken()" title="Copier le token"><i class="fas fa-copy"></i> Copier</button>'
-          + '</div>'
-          + '</div>'
-        : '';
-
-      _setSection('token',
-        _check('Token obtenu', _token ? 'ok' : 'error', _token ? _token.slice(0, 28) + '…' : 'Aucun')
-        + _check('Plateforme', 'ok', pl)
-      );
-
-      var tokenCard = document.getElementById('iosd-card-token');
-      if (tokenCard && tokenDisplay) {
-        tokenCard.querySelector('.iosd-check-list').insertAdjacentHTML('beforeend', tokenDisplay);
-      }
-    } catch(e) {
-      _setSection('token', _check('Token FCM', 'error', e.message));
-      _log('Erreur token FCM : ' + e.message, 'error');
-    }
+    await _fetchToken(_swReg);
 
     // ── 6. Firestore ──
+    var _fsToken = _diagData.token && _diagData.token.value;
     try {
-      if (!_token) {
+      if (!_fsToken) {
         _setSection('firestore', _check('Vérification', 'idle', 'Pas de token — ignoré'));
         _log('Firestore : vérification ignorée (pas de token)');
       } else {
         _log('Vérification token dans Firestore…');
         var t1 = Date.now();
-        var snap = await firebase.firestore().collection('fcmTokens').doc(_token).get();
+        var snap = await firebase.firestore().collection('fcmTokens').doc(_fsToken).get();
         var latency = Date.now() - t1;
         _log('Firestore répondu en ' + latency + ' ms');
 
@@ -555,6 +514,106 @@
     } catch(e) { _log('Erreur réenregistrement SW : ' + e.message, 'error'); }
   }
 
+  // ── Demande de permission + chaîne FCM ──
+  async function _requestPermission() {
+    _log('Demande d\'autorisation notifications…');
+    if (!('Notification' in window)) {
+      _log('⚠ API Notification non disponible dans ce contexte', 'error');
+      return;
+    }
+    var perm;
+    try {
+      perm = await Notification.requestPermission();
+    } catch(e) {
+      _log('Erreur requestPermission() : ' + e.message, 'error');
+      return;
+    }
+    _log('Réponse utilisateur : ' + perm);
+
+    var permState = perm === 'granted' ? 'ok' : perm === 'denied' ? 'error' : 'warn';
+    var permBtn   = perm !== 'granted'
+      ? '<button class="iosd-btn iosd-btn-primary iosd-btn-sm" style="margin-top:8px" onclick="MX.Pages.IosDiag._requestPermission()">'
+        + '<i class="fas fa-bell"></i> Demander l\'autorisation</button>'
+      : '';
+    var hasBadge   = 'setAppBadge' in navigator;
+    var hasVibrate = 'vibrate' in navigator;
+    var hasPush    = 'PushManager' in window;
+
+    if (_diagData.notif) _diagData.notif.permission = perm;
+
+    _setSection('notif',
+      _check('Notification.permission', permState, perm)
+      + _check('Permission accordée', perm === 'granted' ? 'ok' : 'error', perm === 'granted' ? 'Oui' : 'Non', permBtn)
+      + _check('Badge API', hasBadge ? 'ok' : 'warn', hasBadge ? 'Disponible' : 'Non disponible')
+      + _check('Vibration API', hasVibrate ? 'ok' : 'idle', hasVibrate ? 'Disponible' : 'Non disponible')
+      + _check('Push API', hasPush ? 'ok' : 'error', hasPush ? 'Disponible' : 'Non disponible')
+    );
+
+    if (perm === 'granted') {
+      _log('✅ Permission accordée — génération du token FCM…');
+      await _fetchToken(null);
+    } else if (perm === 'denied') {
+      _log('⛔ Permission refusée — réinitialiser dans Réglages iOS → Notifications', 'error');
+    } else {
+      _log('Permission toujours en attente (default)', 'warn');
+    }
+  }
+
+  // ── Helper : obtenir et afficher le token FCM ──
+  async function _fetchToken(swReg) {
+    var msg = window.MX && window.MX.messaging;
+    var vk  = window.MX && window.MX.VAPID_KEY;
+    var token = null;
+
+    try {
+      if (window._fcmToken) {
+        token = window._fcmToken;
+        _log('Token FCM (cache) : ' + token.slice(0, 20) + '…');
+      } else if (msg && vk) {
+        _log('Demande de token FCM…');
+        var reg = swReg;
+        if (!reg) { try { reg = await navigator.serviceWorker.getRegistration('/sw.js'); } catch(_) {} }
+        token = await msg.getToken({ vapidKey: vk, serviceWorkerRegistration: reg || undefined });
+        if (token) {
+          window._fcmToken = token;
+          _log('✅ Token FCM obtenu : ' + token.slice(0, 20) + '…');
+        } else {
+          _log('⚠ getToken() a retourné null — APNs non configuré?', 'warn');
+        }
+      } else {
+        _log('⚠ FCM non disponible (messaging=null) — token impossible à obtenir', 'warn');
+      }
+
+      var ua = navigator.userAgent;
+      var pl = /iphone|ipad|ipod/i.test(ua) ? 'ios' : /android/i.test(ua) ? 'android' : 'desktop';
+      _diagData.token = { value: token, platform: pl };
+
+      _setSection('token',
+        _check('Token obtenu', token ? 'ok' : 'error', token ? token.slice(0, 28) + '…' : 'Aucun')
+        + _check('Plateforme', 'ok', pl)
+      );
+
+      if (token) {
+        var tokenCard = document.getElementById('iosd-card-token');
+        if (tokenCard) {
+          tokenCard.querySelector('.iosd-check-list').insertAdjacentHTML('beforeend',
+            '<div class="iosd-token-box">'
+            + '<div class="iosd-token-label">Token FCM</div>'
+            + '<div class="iosd-token-val" id="iosd-token-val">' + token + '</div>'
+            + '<div class="iosd-token-actions">'
+            + '<button class="iosd-log-btn" onclick="MX.Pages.IosDiag._copyToken()" title="Copier le token"><i class="fas fa-copy"></i> Copier</button>'
+            + '</div>'
+            + '</div>'
+          );
+        }
+      }
+    } catch(e) {
+      _setSection('token', _check('Token FCM', 'error', e.message));
+      _log('Erreur token FCM : ' + e.message, 'error');
+    }
+    return token;
+  }
+
   function _refresh() {
     if (_running) return;
     var logEl = document.getElementById('iosd-log');
@@ -627,16 +686,18 @@
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.IosDiag = {
-    render:        render,
-    _testLocal:    _testLocal,
-    _testSystem:   _testSystem,
-    _testFCM:      _testFCM,
-    _recreateToken:_recreateToken,
-    _reregisterSW: _reregisterSW,
-    _refresh:      _refresh,
-    _copyToken:    _copyToken,
-    _copyLogs:     _copyLogs,
-    _exportJSON:   _exportJSON,
-    _exportTXT:    _exportTXT,
+    render:             render,
+    _requestPermission: _requestPermission,
+    _fetchToken:        _fetchToken,
+    _testLocal:         _testLocal,
+    _testSystem:        _testSystem,
+    _testFCM:           _testFCM,
+    _recreateToken:     _recreateToken,
+    _reregisterSW:      _reregisterSW,
+    _refresh:           _refresh,
+    _copyToken:         _copyToken,
+    _copyLogs:          _copyLogs,
+    _exportJSON:        _exportJSON,
+    _exportTXT:         _exportTXT,
   };
 })();
