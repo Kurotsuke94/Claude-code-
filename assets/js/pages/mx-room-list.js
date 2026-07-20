@@ -10,46 +10,32 @@
   var _curList    = null;
   var _listUnsub  = null;
 
-  var _viewMode   = 'batiment';
-  var _search     = '';
-  var _statusFilter = { fait: true, ocp: true, pas_fait: true, aucun: true };
-  var _expanded   = {};
-  var _selNode    = { type: 'root' };
+  var _curFloorKey  = null;  // "bId|fId"
+  var _filterPill   = 'all'; // 'all' | 'fait' | 'ocp' | 'restantes'
+  var _expandedRoom = {};
 
-  var _saveTimer  = null;
-  var _filterOpen = false;
-
-  var _dnd        = null;  // drag-and-drop state
-  var _ctx        = null;  // context menu state
-
-  // Modal state
   var _showCreate     = false;
   var _createTitle    = '';
   var _showPaste      = false;
   var _pasteTarget    = null;
   var _pasteText      = '';
-  var _showDup        = false;
+  var _dupVisible     = false;
   var _dupSrcId       = null;
   var _dupTitle       = '';
   var _dupKeepBlds    = true;
   var _dupKeepFloors  = true;
   var _dupKeepRooms   = true;
   var _dupResetStatus = true;
+  var _showAdmin      = false;
+  var _adminExpanded  = {};
+
+  var _dnd       = null;
+  var _ctx       = null;
+  var _saveTimer = null;
 
   // ── DB ────────────────────────────────────────────────────────────────────
   var DB = { lists: function () { return db.collection('mx_room_lists'); } };
   var FV = firebase.firestore.FieldValue;
-
-  // ── CONSTANTS ─────────────────────────────────────────────────────────────
-  var STATUSES = [
-    { key: 'aucun',    label: 'Aucun statut', color: '#64748B', icon: 'fa-circle' },
-    { key: 'fait',     label: 'Fait',         color: '#10B981', icon: 'fa-circle-check' },
-    { key: 'ocp',      label: 'OCP',          color: '#F59E0B', icon: 'fa-triangle-exclamation' },
-    { key: 'pas_fait', label: 'Pas fait',     color: '#EF4444', icon: 'fa-circle-xmark' },
-  ];
-  var STATUS_MAP = {};
-  STATUSES.forEach(function (s) { STATUS_MAP[s.key] = s; });
-  var STATUS_CYCLE = { aucun: 'fait', fait: 'ocp', ocp: 'pas_fait', pas_fait: 'aucun' };
 
   // ── UTILITIES ─────────────────────────────────────────────────────────────
   function _uid() {
@@ -72,41 +58,47 @@
     } catch (e) { return 'Utilisateur'; }
   }
 
+  function _isAdmin() {
+    try {
+      var cu = MX.Auth && MX.Auth.currentUser && MX.Auth.currentUser();
+      return !!(cu && (cu.role === 'admin' || cu.role === 'manager' || (cu.email && cu.email === 'keyzeur94460@hotmail.fr')));
+    } catch (e) { return false; }
+  }
+
+  function _timeStr() {
+    var d = new Date();
+    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function _dateStr() {
+    return new Date().toLocaleDateString('fr-FR');
+  }
+
   // ── SMART FLOOR SORT ─────────────────────────────────────────────────────
-  // Returns a numeric key for floor names — negative = underground, 0 = RDC, positive = floors above
   function _floorKey(name) {
     if (!name) return 5000;
     var n = String(name).toLowerCase().trim();
-    // Sous-sol -N or Sous-sol N
     var ss = n.match(/sous.sol\s*(-?\d+)/);
     if (ss) return -100 * Math.abs(parseInt(ss[1], 10));
     if (/sous.sol/.test(n)) return -100;
-    // RDC / Rez-de-chaussée
     if (/^(rdc|rez.de.chauss[eé]e?|rez)(\s|$)/.test(n)) return 0;
-    // Entresol
     if (/entresol/.test(n)) return 50;
-    // Mezzanine
     if (/mezzanine/.test(n)) return 75;
-    // R+N
     var rp = n.match(/^r\+(\d+)/);
     if (rp) return parseInt(rp[1], 10) * 100;
-    // 1er, 2ème, 3e, 4…
     var ord = n.match(/^(\d+)/);
     if (ord) return parseInt(ord[1], 10) * 100;
-    // Above-roof
     if (/terrasse/.test(n)) return 9800;
     if (/toiture/.test(n)) return 9900;
     if (/technique/.test(n)) return 9950;
     return 5000;
   }
 
-  // ── SORT & ORDER HELPERS ─────────────────────────────────────────────────
+  // ── SORT HELPERS ─────────────────────────────────────────────────────────
   function _sortedBlds() {
     if (!_curList || !_curList.buildings) return [];
     return (_curList.buildings || []).slice().sort(function (a, b) {
-      var ao = a.sortOrder !== undefined ? a.sortOrder : 999999;
-      var bo = b.sortOrder !== undefined ? b.sortOrder : 999999;
-      return ao - bo;
+      return (a.sortOrder !== undefined ? a.sortOrder : 999999) - (b.sortOrder !== undefined ? b.sortOrder : 999999);
     });
   }
 
@@ -120,7 +112,33 @@
     });
   }
 
-  // Normalize sortOrders to clean multiples of 1000 (called before any reorder)
+  function _sortedRooms(rooms) {
+    return (rooms || []).slice().sort(function (a, b) {
+      var an = parseInt(a.number || '', 10);
+      var bn = parseInt(b.number || '', 10);
+      if (!isNaN(an) && !isNaN(bn)) return an - bn;
+      if (!isNaN(an)) return -1;
+      if (!isNaN(bn)) return 1;
+      return String(a.number || '').localeCompare(String(b.number || ''));
+    });
+  }
+
+  function _allFloors() {
+    var result = [];
+    _sortedBlds().forEach(function (b) {
+      _sortedFlrs(b.id).forEach(function (f) {
+        result.push({ bId: b.id, fId: f.id, bName: b.name, fName: f.name, flr: f });
+      });
+    });
+    return result;
+  }
+
+  function _floorFromKey(key) {
+    if (!key) return null;
+    var parts = key.split('|');
+    return { bId: parts[0], fId: parts[1] };
+  }
+
   function _ensureBldOrders() {
     if (!_curList || !_curList.buildings) return;
     var sorted = _sortedBlds();
@@ -129,21 +147,24 @@
   }
 
   function _ensureFlrOrders(bId) {
-    var b = _findBld(bId);
-    if (!b) return;
+    var b = _findBld(bId); if (!b) return;
     var sorted = _sortedFlrs(bId);
     sorted.forEach(function (f, i) { f.sortOrder = i * 1000; });
     b.floors = sorted;
   }
 
+  // ── STATS ─────────────────────────────────────────────────────────────────
   function _calcStats(buildings) {
-    var s = { total: 0, fait: 0, ocp: 0, pas_fait: 0, aucun: 0 };
+    var s = { total: 0, fait: 0, ocp: 0, aucun: 0 };
     (buildings || []).forEach(function (b) {
       (b.floors || []).forEach(function (f) {
         (f.rooms || []).forEach(function (r) {
+          if (r.disabled) return;
           s.total++;
           var k = r.status || 'aucun';
-          if (s[k] !== undefined) s[k]++; else s.aucun++;
+          if (k === 'fait') s.fait++;
+          else if (k === 'ocp') s.ocp++;
+          else s.aucun++;
         });
       });
     });
@@ -152,11 +173,14 @@
   }
 
   function _calcFlrStats(flr) {
-    var s = { total: 0, fait: 0, ocp: 0, pas_fait: 0, aucun: 0 };
+    var s = { total: 0, fait: 0, ocp: 0, aucun: 0 };
     (flr.rooms || []).forEach(function (r) {
+      if (r.disabled) return;
       s.total++;
       var k = r.status || 'aucun';
-      if (s[k] !== undefined) s[k]++; else s.aucun++;
+      if (k === 'fait') s.fait++;
+      else if (k === 'ocp') s.ocp++;
+      else s.aucun++;
     });
     s.pct = s.total ? Math.round(s.fait / s.total * 100) : 0;
     return s;
@@ -164,6 +188,7 @@
 
   function _pct(n, total) { return total ? Math.round(n / total * 100) : 0; }
 
+  // ── FINDERS ──────────────────────────────────────────────────────────────
   function _findBld(bId) {
     return (_curList && _curList.buildings || []).find(function (b) { return b.id === bId; });
   }
@@ -189,14 +214,14 @@
   function _openList(id) {
     if (_listUnsub) { _listUnsub(); _listUnsub = null; }
     _curListId = id; _curList = null;
-    _selNode = { type: 'root' }; _expanded = {};
+    _curFloorKey = null; _filterPill = 'all'; _expandedRoom = {};
     _listUnsub = DB.lists().doc(id).onSnapshot(function (doc) {
       if (!doc.exists) { _curList = null; _rerender(); return; }
       var isFirst = !_curList;
       _curList = Object.assign({ id: doc.id }, doc.data());
       if (isFirst) {
-        var b0 = _sortedBlds()[0];
-        if (b0) _expanded[b0.id] = true;
+        var floors = _allFloors();
+        if (floors.length) _curFloorKey = floors[0].bId + '|' + floors[0].fId;
       }
       _rerender();
     }, function (err) { console.error('[MXRL] list error:', err); });
@@ -218,14 +243,10 @@
   function _createList(title) {
     DB.lists().add({
       title: (title || 'Nouvelle liste de chambres').trim(),
-      status: 'active',
-      createdAt: FV.serverTimestamp(),
-      createdBy: _author(),
-      updatedAt: FV.serverTimestamp(),
-      buildings: []
+      status: 'active', createdAt: FV.serverTimestamp(),
+      createdBy: _author(), updatedAt: FV.serverTimestamp(), buildings: []
     }).then(function (ref) {
-      _showCreate = false; _createTitle = '';
-      _openList(ref.id);
+      _showCreate = false; _createTitle = ''; _openList(ref.id);
     }).catch(function (err) { console.error('[MXRL] create error:', err); _notify('Erreur création', true); });
   }
 
@@ -251,7 +272,9 @@
               id: _uid(),
               status: _dupResetStatus ? 'aucun' : (r.status || 'aucun'),
               comment: _dupResetStatus ? '' : (r.comment || ''),
-              photos: _dupResetStatus ? 0 : (r.photos || 0)
+              changedBy: _dupResetStatus ? '' : (r.changedBy || ''),
+              changedAt: _dupResetStatus ? '' : (r.changedAt || ''),
+              history: _dupResetStatus ? [] : (r.history || [])
             });
           }) : [];
           return Object.assign({}, f, { id: _uid(), rooms: rooms });
@@ -264,10 +287,39 @@
       status: 'active', createdAt: FV.serverTimestamp(),
       createdBy: _author(), updatedAt: FV.serverTimestamp(), buildings: buildings
     }).then(function (ref) {
-      _showDup = false; _dupSrcId = null; _dupTitle = '';
-      _notify('Liste dupliquée');
-      _openList(ref.id);
+      _dupVisible = false; _dupSrcId = null; _dupTitle = '';
+      _notify('Liste dupliquée'); _openList(ref.id);
     }).catch(function (err) { _notify('Erreur duplication', true); console.error(err); });
+  }
+
+  // ── STATUS CHANGE ─────────────────────────────────────────────────────────
+  function _setStatus(bId, fId, rId, status) {
+    var r = _findRoom(bId, fId, rId); if (!r) return;
+    r.status    = status;
+    r.changedBy = _author();
+    r.changedAt = _timeStr();
+    r.date      = _dateStr();
+    if (!r.history) r.history = [];
+    r.history.push({ status: status, changedBy: r.changedBy, changedAt: r.changedAt, date: r.date });
+    _persist();
+    var rowEl = document.querySelector('[data-mxrl-room="' + rId + '"]');
+    if (rowEl) rowEl.outerHTML = _roomRowV2HTML(bId, fId, r, !!_expandedRoom[rId]);
+    _patchStats();
+  }
+
+  function _patchStats() {
+    if (!_curList) return;
+    var st = _calcStats(_curList.buildings || []);
+    var el;
+    el = document.getElementById('mxrl-g-total');    if (el) el.textContent = st.total;
+    el = document.getElementById('mxrl-g-fait');     if (el) el.textContent = st.fait;
+    el = document.getElementById('mxrl-g-ocp');      if (el) el.textContent = st.ocp;
+    el = document.getElementById('mxrl-g-rest');     if (el) el.textContent = st.aucun;
+    el = document.getElementById('mxrl-g-pct');      if (el) el.textContent = st.pct + '%';
+    el = document.getElementById('mxrl-g-bar');      if (el) el.style.width = st.pct + '%';
+    el = document.getElementById('mxrl-g-fait-pct'); if (el) el.textContent = _pct(st.fait, st.total) + '%';
+    el = document.getElementById('mxrl-g-ocp-pct');  if (el) el.textContent = _pct(st.ocp, st.total) + '%';
+    el = document.getElementById('mxrl-g-rest-pct'); if (el) el.textContent = _pct(st.aucun, st.total) + '%';
   }
 
   // ── DATA MUTATIONS ────────────────────────────────────────────────────────
@@ -277,12 +329,10 @@
     if (!name || !name.trim()) return;
     if (!_curList.buildings) _curList.buildings = [];
     var maxOrder = 0;
-    (_curList.buildings || []).forEach(function (b) {
-      if ((b.sortOrder || 0) > maxOrder) maxOrder = b.sortOrder || 0;
-    });
+    (_curList.buildings || []).forEach(function (b) { if ((b.sortOrder || 0) > maxOrder) maxOrder = b.sortOrder || 0; });
     var bld = { id: _uid(), name: name.trim(), sortOrder: maxOrder + 1000, floors: [] };
     _curList.buildings.push(bld);
-    _expanded[bld.id] = true;
+    _adminExpanded[bld.id] = true;
     _persist(); _rerender();
   }
 
@@ -291,20 +341,10 @@
     var name = prompt('Nom de l\'étage :');
     if (!name || !name.trim()) return;
     if (!b.floors) b.floors = [];
-    // Use smart key as initial sortOrder so new floors slot in correctly
     var flr = { id: _uid(), name: name.trim(), sortOrder: _floorKey(name.trim()), rooms: [] };
     b.floors.push(flr);
-    _expanded[bId] = true;
-    _selNode = { type: 'floor', bId: bId, fId: flr.id };
-    _persist(); _rerender();
-  }
-
-  function _addRoom(bId, fId) {
-    var f = _findFlr(bId, fId); if (!f) return;
-    var num = prompt('Numéro ou nom de la chambre :');
-    if (!num || !num.trim()) return;
-    if (!f.rooms) f.rooms = [];
-    f.rooms.push({ id: _uid(), number: num.trim(), name: '', status: 'aucun', comment: '', photos: 0 });
+    _adminExpanded[bId] = true;
+    _curFloorKey = bId + '|' + flr.id;
     _persist(); _rerender();
   }
 
@@ -314,9 +354,23 @@
     var lines = text.split(/[\n,;]+/).map(function (l) { return l.trim(); }).filter(Boolean);
     if (!lines.length) { _notify('Aucune chambre à importer', true); return; }
     lines.forEach(function (num) {
-      f.rooms.push({ id: _uid(), number: num, name: '', status: 'aucun', comment: '', photos: 0 });
+      f.rooms.push({ id: _uid(), number: num, name: '', status: 'aucun', comment: '', history: [] });
     });
     _notify(lines.length + ' chambre(s) ajoutée(s)');
+    _persist(); _rerender();
+  }
+
+  function _renameRoom(bId, fId, rId) {
+    var r = _findRoom(bId, fId, rId); if (!r) return;
+    var num = prompt('Nouveau numéro :', r.number || '');
+    if (num === null) return;
+    r.number = num.trim();
+    _persist(); _rerender();
+  }
+
+  function _toggleDisableRoom(bId, fId, rId) {
+    var r = _findRoom(bId, fId, rId); if (!r) return;
+    r.disabled = !r.disabled;
     _persist(); _rerender();
   }
 
@@ -325,8 +379,7 @@
     var n = (b.floors || []).reduce(function (s, f) { return s + (f.rooms || []).length; }, 0);
     if (!confirm('Supprimer "' + b.name + '"' + (n ? ' et ses ' + n + ' chambre(s)' : '') + ' ?')) return;
     _curList.buildings = (_curList.buildings || []).filter(function (x) { return x.id !== bId; });
-    if (_selNode.bId === bId) _selNode = { type: 'root' };
-    delete _expanded[bId];
+    delete _adminExpanded[bId];
     _persist(); _rerender();
   }
 
@@ -336,7 +389,7 @@
     var n = (f.rooms || []).length;
     if (!confirm('Supprimer "' + f.name + '"' + (n ? ' et ses ' + n + ' chambre(s)' : '') + ' ?')) return;
     b.floors = (b.floors || []).filter(function (x) { return x.id !== fId; });
-    if (_selNode.fId === fId) _selNode = { type: 'building', bId: bId };
+    if (_curFloorKey === bId + '|' + fId) _curFloorKey = null;
     _persist(); _rerender();
   }
 
@@ -348,53 +401,34 @@
     _persist(); _rerender();
   }
 
-  function _cycleStatus(bId, fId, rId) {
+  function _setComment(bId, fId, rId, val) {
     var r = _findRoom(bId, fId, rId); if (!r) return;
-    r.status = STATUS_CYCLE[r.status || 'aucun'] || 'aucun';
-    _persist();
-    var el = document.querySelector('[data-rl-room="' + rId + '"]');
-    if (el) el.outerHTML = _roomRowHTML(bId, fId, r);
-    else _rerender();
+    r.comment = val; _persist();
   }
 
   // ── DRAG & DROP ───────────────────────────────────────────────────────────
   function _dndDown(e, handleEl) {
     if (e.button !== undefined && e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-
+    e.preventDefault(); e.stopPropagation();
     var dtype = handleEl.dataset.dtype;
     var bId   = handleEl.dataset.bid;
     var fId   = handleEl.dataset.fid || null;
-
-    var nm  = dtype === 'bld' ? ((_findBld(bId) || {}).name || '?') : ((_findFlr(bId, fId) || {}).name || '?');
-    var ico = dtype === 'bld' ? 'fa-building' : 'fa-layer-group';
-
-    // Ghost card following the cursor
+    var nm    = dtype === 'bld' ? ((_findBld(bId) || {}).name || '?') : ((_findFlr(bId, fId) || {}).name || '?');
+    var ico   = dtype === 'bld' ? 'fa-building' : 'fa-layer-group';
     var ghost = document.createElement('div');
     ghost.className = 'mxrl-dnd-ghost';
     ghost.innerHTML = '<i class="fa-solid ' + ico + '"></i> ' + _e(nm);
     ghost.style.left = (e.clientX + 14) + 'px';
     ghost.style.top  = (e.clientY - 18) + 'px';
     document.body.appendChild(ghost);
-
-    // Drop indicator line
     var line = document.getElementById('mxrl-drop-line');
-    if (!line) {
-      line = document.createElement('div');
-      line.id = 'mxrl-drop-line';
-      document.body.appendChild(line);
-    }
+    if (!line) { line = document.createElement('div'); line.id = 'mxrl-drop-line'; document.body.appendChild(line); }
     line.style.display = 'none';
-
-    // Mark the dragged row
     var rowEl = dtype === 'bld'
-      ? document.querySelector('.mxrl-tree-bld[data-bid="' + bId + '"] > .mxrl-tree-bld-row')
-      : document.querySelector('.mxrl-tree-flr[data-fid="' + fId + '"]');
+      ? document.querySelector('.mxrl-admin-bld[data-bid="' + bId + '"] > .mxrl-admin-bld-row')
+      : document.querySelector('.mxrl-admin-flr[data-fid="' + fId + '"]');
     if (rowEl) rowEl.classList.add('mxrl-dnd-dragging');
-
     _dnd = { type: dtype, bId: bId, fId: fId, ghost: ghost, line: line, rowEl: rowEl, dropIdx: null };
-
     document.addEventListener('pointermove', _dndMove, { passive: true });
     document.addEventListener('pointerup',   _dndUp);
     document.addEventListener('pointercancel', _dndUp);
@@ -403,46 +437,41 @@
   function _dndMove(e) {
     if (!_dnd) return;
     var d = _dnd;
-
     d.ghost.style.left = (e.clientX + 14) + 'px';
     d.ghost.style.top  = (e.clientY - 18) + 'px';
-
     var lineY = null;
-    var containerEl = document.querySelector('.mxrl-left');
+    var containerEl = document.querySelector('.mxrl-admin-tree');
     var cRect = containerEl ? containerEl.getBoundingClientRect() : null;
-
+    var dropIdx, i, r;
     if (d.type === 'bld') {
-      var blds = document.querySelectorAll('.mxrl-tree-bld');
-      var dropIdx = blds.length;
-      for (var i = 0; i < blds.length; i++) {
-        var r = blds[i].getBoundingClientRect();
+      var blds = document.querySelectorAll('.mxrl-admin-bld');
+      dropIdx = blds.length;
+      for (i = 0; i < blds.length; i++) {
+        r = blds[i].getBoundingClientRect();
         if (e.clientY < r.top + r.height * 0.5) { dropIdx = i; lineY = r.top; break; }
         lineY = r.bottom;
       }
       d.dropIdx = dropIdx;
     } else {
-      var bldEl = document.querySelector('.mxrl-tree-bld[data-bid="' + d.bId + '"]');
+      var bldEl = document.querySelector('.mxrl-admin-bld[data-bid="' + d.bId + '"]');
       if (!bldEl) { d.line.style.display = 'none'; return; }
-      var flrsCont = bldEl.querySelector('.mxrl-tree-floors');
+      var flrsCont = bldEl.querySelector('.mxrl-admin-floors');
       if (!flrsCont) { d.line.style.display = 'none'; return; }
-      var flrs = flrsCont.querySelectorAll('.mxrl-tree-flr');
-      var dropIdx = flrs.length;
-      for (var i = 0; i < flrs.length; i++) {
-        var r = flrs[i].getBoundingClientRect();
+      var flrs = flrsCont.querySelectorAll('.mxrl-admin-flr');
+      dropIdx = flrs.length;
+      for (i = 0; i < flrs.length; i++) {
+        r = flrs[i].getBoundingClientRect();
         if (e.clientY < r.top + r.height * 0.5) { dropIdx = i; lineY = r.top; break; }
         lineY = r.bottom;
       }
       d.dropIdx = dropIdx;
     }
-
     if (lineY !== null && cRect) {
       d.line.style.display = 'block';
-      d.line.style.top    = (lineY - 1) + 'px';
-      d.line.style.left   = (cRect.left + 6) + 'px';
-      d.line.style.width  = (cRect.width - 12) + 'px';
-    } else {
-      d.line.style.display = 'none';
-    }
+      d.line.style.top   = (lineY - 1) + 'px';
+      d.line.style.left  = (cRect.left + 6) + 'px';
+      d.line.style.width = (cRect.width - 12) + 'px';
+    } else { d.line.style.display = 'none'; }
   }
 
   function _dndUp() {
@@ -450,20 +479,14 @@
     document.removeEventListener('pointermove', _dndMove);
     document.removeEventListener('pointerup',   _dndUp);
     document.removeEventListener('pointercancel', _dndUp);
-
-    var d = _dnd;
-    _dnd = null;
-
+    var d = _dnd; _dnd = null;
     if (d.ghost.parentNode) d.ghost.parentNode.removeChild(d.ghost);
     if (d.line) d.line.style.display = 'none';
-
-    if (d.dropIdx !== null) _dndApply(d);
-    else _rerender();
+    if (d.dropIdx !== null) _dndApply(d); else _rerender();
   }
 
   function _dndApply(d) {
     if (!_curList) return;
-
     if (d.type === 'bld') {
       _ensureBldOrders();
       var sorted = _sortedBlds();
@@ -483,132 +506,75 @@
       var newIdx = Math.max(0, Math.min(d.dropIdx > curIdx ? d.dropIdx - 1 : d.dropIdx, sorted.length));
       sorted.splice(newIdx, 0, item);
       sorted.forEach(function (f, i) { f.sortOrder = i * 1000; });
-      var b = _findBld(d.bId);
-      if (b) b.floors = sorted;
+      var b = _findBld(d.bId); if (b) b.floors = sorted;
     }
-
-    _persist();
-    _rerender();
+    _persist(); _rerender();
   }
 
   // ── CONTEXT MENU ─────────────────────────────────────────────────────────
   function _openCtx(e, type, bId, fId) {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     _ctx = { type: type, bId: bId, fId: fId || null, x: e.clientX, y: e.clientY };
     document.addEventListener('keydown', _ctxKeydown);
     _rerender();
   }
-
   function _ctxKeydown(e) {
     if (e.key === 'Escape' && _ctx) { _ctx = null; document.removeEventListener('keydown', _ctxKeydown); _rerender(); }
   }
-
-  function _closeCtx() {
-    _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
-    _rerender();
-  }
+  function _closeCtx() { _ctx = null; document.removeEventListener('keydown', _ctxKeydown); _rerender(); }
 
   function _ctxUp() {
     if (!_ctx) return;
-    var ctx = _ctx; _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
+    var ctx = _ctx; _ctx = null; document.removeEventListener('keydown', _ctxKeydown);
     if (ctx.type === 'bld') {
       _ensureBldOrders();
       var sorted = _sortedBlds();
       var idx = sorted.findIndex(function (b) { return b.id === ctx.bId; });
-      if (idx > 0) {
-        var tmp = sorted[idx].sortOrder;
-        sorted[idx].sortOrder = sorted[idx - 1].sortOrder;
-        sorted[idx - 1].sortOrder = tmp;
-        _persist();
-      }
+      if (idx > 0) { var tmp = sorted[idx].sortOrder; sorted[idx].sortOrder = sorted[idx-1].sortOrder; sorted[idx-1].sortOrder = tmp; _persist(); }
     } else {
       _ensureFlrOrders(ctx.bId);
       var sorted = _sortedFlrs(ctx.bId);
       var idx = sorted.findIndex(function (f) { return f.id === ctx.fId; });
-      if (idx > 0) {
-        var tmp = sorted[idx].sortOrder;
-        sorted[idx].sortOrder = sorted[idx - 1].sortOrder;
-        sorted[idx - 1].sortOrder = tmp;
-        _persist();
-      }
+      if (idx > 0) { var tmp = sorted[idx].sortOrder; sorted[idx].sortOrder = sorted[idx-1].sortOrder; sorted[idx-1].sortOrder = tmp; _persist(); }
     }
     _rerender();
   }
 
   function _ctxDown() {
     if (!_ctx) return;
-    var ctx = _ctx; _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
+    var ctx = _ctx; _ctx = null; document.removeEventListener('keydown', _ctxKeydown);
     if (ctx.type === 'bld') {
       _ensureBldOrders();
       var sorted = _sortedBlds();
       var idx = sorted.findIndex(function (b) { return b.id === ctx.bId; });
-      if (idx < sorted.length - 1) {
-        var tmp = sorted[idx].sortOrder;
-        sorted[idx].sortOrder = sorted[idx + 1].sortOrder;
-        sorted[idx + 1].sortOrder = tmp;
-        _persist();
-      }
+      if (idx < sorted.length-1) { var tmp = sorted[idx].sortOrder; sorted[idx].sortOrder = sorted[idx+1].sortOrder; sorted[idx+1].sortOrder = tmp; _persist(); }
     } else {
       _ensureFlrOrders(ctx.bId);
       var sorted = _sortedFlrs(ctx.bId);
       var idx = sorted.findIndex(function (f) { return f.id === ctx.fId; });
-      if (idx < sorted.length - 1) {
-        var tmp = sorted[idx].sortOrder;
-        sorted[idx].sortOrder = sorted[idx + 1].sortOrder;
-        sorted[idx + 1].sortOrder = tmp;
-        _persist();
-      }
+      if (idx < sorted.length-1) { var tmp = sorted[idx].sortOrder; sorted[idx].sortOrder = sorted[idx+1].sortOrder; sorted[idx+1].sortOrder = tmp; _persist(); }
     }
     _rerender();
   }
 
   function _ctxRename() {
     if (!_ctx) return;
-    var ctx = _ctx; _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
+    var ctx = _ctx; _ctx = null; document.removeEventListener('keydown', _ctxKeydown);
     if (ctx.type === 'bld') {
-      var b = _findBld(ctx.bId);
-      if (!b) { _rerender(); return; }
+      var b = _findBld(ctx.bId); if (!b) { _rerender(); return; }
       var name = prompt('Renommer le bâtiment :', b.name);
       if (name && name.trim() && name.trim() !== b.name) { b.name = name.trim(); _persist(); }
     } else {
-      var f = _findFlr(ctx.bId, ctx.fId);
-      if (!f) { _rerender(); return; }
+      var f = _findFlr(ctx.bId, ctx.fId); if (!f) { _rerender(); return; }
       var name = prompt('Renommer l\'étage :', f.name);
       if (name && name.trim() && name.trim() !== f.name) { f.name = name.trim(); _persist(); }
     }
     _rerender();
   }
 
-  function _ctxDupFloor() {
-    if (!_ctx || _ctx.type !== 'flr') return;
-    var ctx = _ctx; _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
-    var b = _findBld(ctx.bId); var f = _findFlr(ctx.bId, ctx.fId);
-    if (!b || !f) { _rerender(); return; }
-    var name = prompt('Nom du nouvel étage :', f.name + ' (copie)');
-    if (!name || !name.trim()) { _rerender(); return; }
-    var newFlr = Object.assign({}, f, {
-      id: _uid(), name: name.trim(),
-      sortOrder: (f.sortOrder !== undefined ? f.sortOrder : _floorKey(f.name)) + 500,
-      rooms: (f.rooms || []).map(function (r) {
-        return Object.assign({}, r, { id: _uid(), status: 'aucun', comment: '', photos: 0 });
-      })
-    });
-    b.floors.push(newFlr);
-    _ensureFlrOrders(ctx.bId);
-    _selNode = { type: 'floor', bId: ctx.bId, fId: newFlr.id };
-    _persist(); _rerender();
-  }
-
   function _ctxDelete() {
     if (!_ctx) return;
-    var ctx = _ctx; _ctx = null;
-    document.removeEventListener('keydown', _ctxKeydown);
+    var ctx = _ctx; _ctx = null; document.removeEventListener('keydown', _ctxKeydown);
     _rerender();
     if (ctx.type === 'bld') _deleteBuilding(ctx.bId);
     else _deleteFloor(ctx.bId, ctx.fId);
@@ -616,39 +582,32 @@
 
   function _tplCtxMenu() {
     if (!_ctx) return '';
-    var e = _e;
     var x = _ctx.x, y = _ctx.y;
-    var isFlr = _ctx.type === 'flr';
-    var menuH = isFlr ? 210 : 164;
-    if (x + 210 > window.innerWidth  - 8) x = window.innerWidth  - 210 - 8;
-    if (y + menuH > window.innerHeight - 8) y = window.innerHeight - menuH - 8;
-    var h = '<div class="mxrl-ctx-backdrop" onclick="MX.Pages.MxRoomList._closeCtx()"></div>';
-    h += '<div class="mxrl-ctx" style="left:' + x + 'px;top:' + y + 'px">';
-    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxUp()"><i class="fa-solid fa-arrow-up"></i> Monter</button>';
-    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxDown()"><i class="fa-solid fa-arrow-down"></i> Descendre</button>';
-    h += '<div class="mxrl-ctx-sep"></div>';
-    h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxRename()"><i class="fa-regular fa-pen-to-square"></i> Renommer</button>';
-    if (isFlr) {
-      h += '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxDupFloor()"><i class="fa-regular fa-copy"></i> Dupliquer l\'étage</button>';
-    }
-    h += '<div class="mxrl-ctx-sep"></div>';
-    h += '<button class="mxrl-ctx-item mxrl-ctx-item--danger" onclick="MX.Pages.MxRoomList._ctxDelete()"><i class="fa-regular fa-trash"></i> Supprimer</button>';
-    h += '</div>';
-    return h;
+    if (x + 210 > window.innerWidth - 8)   x = window.innerWidth  - 210 - 8;
+    if (y + 150 > window.innerHeight - 8) y = window.innerHeight - 150 - 8;
+    return '<div class="mxrl-ctx-backdrop" onclick="MX.Pages.MxRoomList._closeCtx()"></div>'
+      + '<div class="mxrl-ctx" style="left:' + x + 'px;top:' + y + 'px">'
+      + '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxUp()"><i class="fa-solid fa-arrow-up"></i> Monter</button>'
+      + '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxDown()"><i class="fa-solid fa-arrow-down"></i> Descendre</button>'
+      + '<div class="mxrl-ctx-sep"></div>'
+      + '<button class="mxrl-ctx-item" onclick="MX.Pages.MxRoomList._ctxRename()"><i class="fa-regular fa-pen-to-square"></i> Renommer</button>'
+      + '<div class="mxrl-ctx-sep"></div>'
+      + '<button class="mxrl-ctx-item mxrl-ctx-item--danger" onclick="MX.Pages.MxRoomList._ctxDelete()"><i class="fa-regular fa-trash"></i> Supprimer</button>'
+      + '</div>';
   }
 
   // ── RENDER ENTRY ──────────────────────────────────────────────────────────
   function render() {
     _loadLists();
-    if (_curListId && _curList) _renderDoc();
+    if (_curListId && _curList) _renderDocV2();
     else _renderHome();
   }
 
   function _rerender() {
-    if (_dnd) return; // Don't disturb DOM while dragging
+    if (_dnd) return;
     var mc = document.getElementById('main-content');
     if (!mc) return;
-    if (_curListId && _curList) _renderDoc();
+    if (_curListId && _curList) _renderDocV2();
     else _renderHome();
   }
 
@@ -663,10 +622,8 @@
     h += '<p class="mxrl-home-sub">Créez et gérez vos listes de chambres par hôtel</p></div>';
     h += '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._showCreate()"><i class="fa-solid fa-plus"></i> Nouvelle liste</button>';
     h += '</div>';
-
     if (!_loaded || !_lists.length) {
-      h += '<div class="mxrl-home-empty">';
-      h += '<i class="fa-solid fa-hotel"></i>';
+      h += '<div class="mxrl-home-empty"><i class="fa-solid fa-hotel"></i>';
       h += '<p>' + (_loaded ? 'Aucune liste pour l\'instant.' : 'Chargement…') + '</p>';
       if (_loaded) h += '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._showCreate()"><i class="fa-solid fa-plus"></i> Créer une liste</button>';
       h += '</div>';
@@ -684,368 +641,301 @@
         h += '<div class="mxrl-home-card-body">';
         h += '<div class="mxrl-home-card-title">' + e(lst.title || 'Sans titre') + '</div>';
         h += '<div class="mxrl-home-card-meta">' + st.total + ' chambre' + (st.total !== 1 ? 's' : '') + ' · ' + (lst.buildings || []).length + ' bâtiment' + ((lst.buildings || []).length !== 1 ? 's' : '') + '</div>';
-        h += '<div class="mxrl-home-card-prog">';
-        h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + st.pct + '%"></div></div>';
-        h += '<span class="mxrl-home-card-pct">' + st.pct + '%</span>';
-        h += '</div>';
+        h += '<div class="mxrl-home-card-prog"><div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + st.pct + '%"></div></div><span class="mxrl-home-card-pct">' + st.pct + '%</span></div>';
         h += '<div class="mxrl-home-card-stats">';
         h += '<span class="mxrl-s-fait"><i class="fa-solid fa-circle-check"></i> ' + st.fait + '</span>';
-        if (st.ocp)      h += '<span class="mxrl-s-ocp"><i class="fa-solid fa-triangle-exclamation"></i> ' + st.ocp + '</span>';
-        if (st.pas_fait) h += '<span class="mxrl-s-pf"><i class="fa-solid fa-circle-xmark"></i> ' + st.pas_fait + '</span>';
-        if (st.aucun)    h += '<span class="mxrl-s-aucun"><i class="fa-regular fa-circle"></i> ' + st.aucun + '</span>';
+        if (st.ocp)   h += '<span class="mxrl-s-ocp"><i class="fa-solid fa-triangle-exclamation"></i> ' + st.ocp + '</span>';
+        if (st.aucun) h += '<span class="mxrl-s-aucun"><i class="fa-regular fa-circle"></i> ' + st.aucun + '</span>';
         h += '</div></div></div>';
       });
       h += '</div>';
     }
     h += '</div>';
-    if (_showCreate) h += _tplCreateModal();
-    if (_showDup)    h += _tplDupModal();
+    if (_showCreate)  h += _tplCreateModal();
+    if (_dupVisible)  h += _tplDupModal();
     mc.innerHTML = h;
   }
 
-  // ── DOCUMENT VIEW ─────────────────────────────────────────────────────────
-  function _renderDoc() {
+  // ── DOC V2 ────────────────────────────────────────────────────────────────
+  function _renderDocV2() {
     var mc = document.getElementById('main-content');
     if (!mc) return;
-    var list = _curList;
-    var st = _calcStats(list.buildings || []);
-    var h = '<div class="mxrl-doc">';
-    h += _tplStatsBar(st, list.title);
-    h += _tplToolbar();
-    h += '<div class="mxrl-layout">';
-    h += '<div class="mxrl-left">' + _tplTree(list) + '</div>';
-    h += '<div class="mxrl-main" id="mxrl-main">' + _renderContent(list) + '</div>';
+    var list   = _curList;
+    var st     = _calcStats(list.buildings || []);
+    var floors = _allFloors();
+    var e = _e;
+
+    var h = '<div class="mxrl-v2-page">';
+
+    // Header
+    h += '<div class="mxrl-v2-header">';
+    h += '<div class="mxrl-v2-header-left">';
+    h += '<button class="mxrl-v2-back" onclick="MX.Pages.MxRoomList._closeList()"><i class="fa-solid fa-arrow-left"></i></button>';
+    h += '<div><div class="mxrl-v2-title">' + e(list.title || 'Liste de chambres') + '</div>';
+    h += '<div class="mxrl-v2-subtitle">' + floors.length + ' étage' + (floors.length !== 1 ? 's' : '') + ' · ' + st.total + ' chambres</div></div>';
+    h += '</div>';
+    h += '<div class="mxrl-v2-header-right">';
+    if (_isAdmin()) {
+      h += '<button class="mxrl-v2-admin-btn" onclick="MX.Pages.MxRoomList._openAdmin()" title="Gérer la structure"><i class="fa-solid fa-sliders"></i></button>';
+    }
+    h += '<button class="mxrl-v2-dup-btn" onclick="MX.Pages.MxRoomList._showDupCur()" title="Dupliquer"><i class="fa-regular fa-copy"></i></button>';
     h += '</div></div>';
-    if (_showPaste) h += _tplPasteModal();
-    if (_showDup)   h += _tplDupModal();
+
+    // Stats bar
+    h += _tplStatsBarV2(st);
+
+    // Floor selector
+    h += _tplFloorSelectorV2(floors);
+
+    // Filter pills
+    h += _tplFilterPillsV2(floors);
+
+    // Room grid
+    h += _tplRoomGridV2(floors);
+
+    h += '</div>';
+
+    if (_showPaste)  h += _tplPasteModal();
+    if (_dupVisible) h += _tplDupModal();
+    if (_showAdmin) h += _tplAdminModal();
     if (_ctx)       h += _tplCtxMenu();
+
     mc.innerHTML = h;
   }
 
-  function _tplToolbar() {
+  function _tplStatsBarV2(st) {
+    var faitPct = _pct(st.fait, st.total);
+    var ocpPct  = _pct(st.ocp, st.total);
+    var restPct = _pct(st.aucun, st.total);
+    var h = '<div class="mxrl-v2-stats">';
+    h += '<div class="mxrl-v2-stat"><span class="mxrl-v2-stat-n" id="mxrl-g-total">' + st.total + '</span><span class="mxrl-v2-stat-l">Total</span></div>';
+    h += '<div class="mxrl-v2-stat mxrl-v2-stat--fait"><span class="mxrl-v2-stat-n" id="mxrl-g-fait">' + st.fait + '</span><span class="mxrl-v2-stat-pct" id="mxrl-g-fait-pct">' + faitPct + '%</span><span class="mxrl-v2-stat-l">FAIT</span></div>';
+    h += '<div class="mxrl-v2-stat mxrl-v2-stat--ocp"><span class="mxrl-v2-stat-n" id="mxrl-g-ocp">' + st.ocp + '</span><span class="mxrl-v2-stat-pct" id="mxrl-g-ocp-pct">' + ocpPct + '%</span><span class="mxrl-v2-stat-l">OCP</span></div>';
+    h += '<div class="mxrl-v2-stat mxrl-v2-stat--rest"><span class="mxrl-v2-stat-n" id="mxrl-g-rest">' + st.aucun + '</span><span class="mxrl-v2-stat-pct" id="mxrl-g-rest-pct">' + restPct + '%</span><span class="mxrl-v2-stat-l">Restantes</span></div>';
+    h += '<div class="mxrl-v2-stat mxrl-v2-stat--pbar">';
+    h += '<div class="mxrl-v2-pbar">'
+      + '<div class="mxrl-v2-pbar-fait" id="mxrl-g-bar" style="width:' + st.pct + '%"></div>'
+      + '<div class="mxrl-v2-pbar-ocp" style="width:' + ocpPct + '%"></div>'
+      + '</div>';
+    h += '<span class="mxrl-v2-pct" id="mxrl-g-pct">' + st.pct + '%</span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function _tplFloorSelectorV2(floors) {
     var e = _e;
-    var h = '<div class="mxrl-toolbar">';
-    h += '<div class="mxrl-view-toggle">';
-    h += '<button class="mxrl-vtbtn' + (_viewMode === 'batiment' ? ' on' : '') + '" onclick="MX.Pages.MxRoomList._setView(\'batiment\')"><i class="fa-solid fa-building"></i> Par bâtiment</button>';
-    h += '<button class="mxrl-vtbtn' + (_viewMode === 'etage' ? ' on' : '') + '" onclick="MX.Pages.MxRoomList._setView(\'etage\')"><i class="fa-solid fa-layer-group"></i> Par étage</button>';
+    var h = '<div class="mxrl-v2-floor-sel">';
+    if (!floors.length) {
+      h += '<div class="mxrl-v2-floor-empty">Aucun étage — gérez la structure via <i class="fa-solid fa-sliders"></i></div>';
+    } else if (floors.length <= 10) {
+      floors.forEach(function (fl) {
+        var key    = fl.bId + '|' + fl.fId;
+        var active = _curFloorKey === key;
+        var fs     = _calcFlrStats(fl.flr);
+        var ambig  = floors.filter(function (f2) { return f2.fName === fl.fName; }).length > 1;
+        h += '<button class="mxrl-v2-floor-chip' + (active ? ' active' : '') + '" onclick="MX.Pages.MxRoomList._selFloorKey(\'' + e(key) + '\')">';
+        h += e(fl.fName);
+        if (ambig) h += ' <span class="mxrl-v2-chip-bld">· ' + e(fl.bName) + '</span>';
+        h += ' <span class="mxrl-v2-chip-cnt">' + fs.total + '</span>';
+        h += '</button>';
+      });
+    } else {
+      h += '<select class="mxrl-v2-floor-select" onchange="MX.Pages.MxRoomList._selFloorKey(this.value)">';
+      floors.forEach(function (fl) {
+        var key   = fl.bId + '|' + fl.fId;
+        var ambig = floors.filter(function (f2) { return f2.fName === fl.fName; }).length > 1;
+        var label = ambig ? fl.fName + ' (' + fl.bName + ')' : fl.fName;
+        h += '<option value="' + e(key) + '"' + (_curFloorKey === key ? ' selected' : '') + '>' + e(label) + '</option>';
+      });
+      h += '</select>';
+    }
     h += '</div>';
-    h += '<div class="mxrl-search-wrap">';
-    h += '<i class="fa-solid fa-magnifying-glass mxrl-search-ico"></i>';
-    h += '<input class="mxrl-search" type="text" placeholder="Rechercher une chambre, un étage, un bâtiment…" value="' + e(_search) + '" oninput="MX.Pages.MxRoomList._setSearch(this.value)">';
+    return h;
+  }
+
+  function _tplFilterPillsV2(floors) {
+    var st = { total: 0, fait: 0, ocp: 0, aucun: 0 };
+    if (_curFloorKey) {
+      var ref = _floorFromKey(_curFloorKey);
+      var f = _findFlr(ref.bId, ref.fId);
+      if (f) st = _calcFlrStats(f);
+    }
+    var pills = [
+      { key: 'all',       label: 'Toutes',    count: st.total },
+      { key: 'fait',      label: 'FAIT',      count: st.fait },
+      { key: 'ocp',       label: 'OCP',       count: st.ocp },
+      { key: 'restantes', label: 'Restantes', count: st.aucun },
+    ];
+    var h = '<div class="mxrl-v2-pills">';
+    pills.forEach(function (p) {
+      h += '<button class="mxrl-v2-pill mxrl-v2-pill--' + p.key + (_filterPill === p.key ? ' active' : '') + '" onclick="MX.Pages.MxRoomList._setFilter(\'' + p.key + '\')">'
+        + p.label + ' <span class="mxrl-v2-pill-cnt">' + p.count + '</span></button>';
+    });
     h += '</div>';
-    h += '<div class="mxrl-toolbar-r">';
-    h += '<div class="mxrl-filter-wrap">';
-    h += '<button class="mxrl-btn-outline" onclick="MX.Pages.MxRoomList._toggleFilter()"><i class="fa-solid fa-sliders"></i> Filtres</button>';
-    if (_filterOpen) {
-      h += '<div class="mxrl-filter-panel">';
-      h += '<div class="mxrl-filter-title">Afficher</div>';
-      STATUSES.forEach(function (s) {
-        h += '<label class="mxrl-filter-row"><input type="checkbox" ' + (_statusFilter[s.key] ? 'checked' : '') + ' data-sk="' + s.key + '" onchange="MX.Pages.MxRoomList._toggleStatusFilter(this.dataset.sk)"> ' + e(s.label) + '</label>';
+    return h;
+  }
+
+  function _tplRoomGridV2(floors) {
+    if (!_curFloorKey) {
+      if (!floors.length) return '<div class="mxrl-v2-empty"><i class="fa-solid fa-hotel"></i><p>Aucun étage défini.</p></div>';
+      return '<div class="mxrl-v2-empty"><i class="fa-solid fa-door-open"></i><p>Sélectionnez un étage ci-dessus.</p></div>';
+    }
+    var ref = _floorFromKey(_curFloorKey);
+    var f = _findFlr(ref.bId, ref.fId);
+    if (!f) return '<div class="mxrl-v2-empty"><i class="fa-solid fa-door-open"></i><p>Étage introuvable.</p></div>';
+    var allRooms = _sortedRooms((f.rooms || []).filter(function (r) { return !r.disabled; }));
+    var filtered = allRooms.filter(function (r) {
+      var s = r.status || 'aucun';
+      if (_filterPill === 'all')       return true;
+      if (_filterPill === 'fait')      return s === 'fait';
+      if (_filterPill === 'ocp')       return s === 'ocp';
+      if (_filterPill === 'restantes') return s !== 'fait' && s !== 'ocp';
+      return true;
+    });
+    var disabled = _isAdmin() ? _sortedRooms((f.rooms || []).filter(function (r) { return r.disabled; })) : [];
+    var e = _e;
+    var h = '<div class="mxrl-v2-body">';
+    if (!allRooms.length) {
+      h += '<div class="mxrl-v2-empty">'
+        + '<i class="fa-solid fa-door-open"></i>'
+        + '<p>Aucune chambre dans cet étage.</p>';
+      if (_isAdmin()) h += '<button class="mxrl-v2-import-btn" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(ref.bId) + '\',\'' + e(ref.fId) + '\')"><i class="fa-solid fa-file-import"></i> Importer</button>';
+      h += '</div>';
+    } else if (!filtered.length) {
+      h += '<div class="mxrl-v2-empty"><i class="fa-solid fa-filter"></i><p>Aucune chambre pour ce filtre.</p></div>';
+    } else {
+      h += '<div class="mxrl-v2-grid">';
+      filtered.forEach(function (r) {
+        h += _roomRowV2HTML(ref.bId, ref.fId, r, !!_expandedRoom[r.id]);
       });
       h += '</div>';
     }
-    h += '</div>';
-    h += '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._quickAdd()"><i class="fa-solid fa-plus"></i> Ajouter</button>';
-    h += '</div></div>';
-    return h;
-  }
-
-  // ── STATS BAR ─────────────────────────────────────────────────────────────
-  function _tplStatsBar(st, title) {
-    var e = _e;
-    var r = 28, circ = 2 * Math.PI * r;
-    var dash = (st.pct / 100) * circ;
-    var donut = '<svg class="mxrl-donut" viewBox="0 0 72 72">'
-      + '<circle cx="36" cy="36" r="' + r + '" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>'
-      + '<circle cx="36" cy="36" r="' + r + '" fill="none" stroke="#10B981" stroke-width="7"'
-      + ' stroke-dasharray="' + dash.toFixed(1) + ' ' + circ.toFixed(1) + '"'
-      + ' transform="rotate(-90 36 36)" stroke-linecap="round"/>'
-      + '<text x="36" y="36" text-anchor="middle" dominant-baseline="central" fill="#F1F5F9" font-size="13" font-weight="700">' + st.pct + '%</text>'
-      + '</svg>';
-
-    var h = '<div class="mxrl-stats-bar">';
-    h += '<div class="mxrl-stats-bar-l">';
-    h += '<button class="mxrl-back-btn" onclick="MX.Pages.MxRoomList._closeList()"><i class="fa-solid fa-arrow-left"></i></button>';
-    h += '<h2 class="mxrl-doc-title">' + e(title || 'Liste de chambres') + '</h2>';
-    h += '</div>';
-    h += '<div class="mxrl-stat-cards">';
-    h += '<div class="mxrl-stat-card mxrl-sc--total"><div class="mxrl-sc-n">' + st.total + '</div><div class="mxrl-sc-l">Total chambres</div></div>';
-    h += '<div class="mxrl-stat-card mxrl-sc--fait"><div class="mxrl-sc-n">' + st.fait + '</div><div class="mxrl-sc-pct">' + _pct(st.fait, st.total) + '%</div><div class="mxrl-sc-l">Faites</div></div>';
-    h += '<div class="mxrl-stat-card mxrl-sc--ocp"><div class="mxrl-sc-n">' + st.ocp + '</div><div class="mxrl-sc-pct">' + _pct(st.ocp, st.total) + '%</div><div class="mxrl-sc-l">OCP</div></div>';
-    h += '<div class="mxrl-stat-card mxrl-sc--pf"><div class="mxrl-sc-n">' + st.pas_fait + '</div><div class="mxrl-sc-pct">' + _pct(st.pas_fait, st.total) + '%</div><div class="mxrl-sc-l">Pas faites</div></div>';
-    h += '<div class="mxrl-stat-card mxrl-sc--aucun"><div class="mxrl-sc-n">' + st.aucun + '</div><div class="mxrl-sc-pct">' + _pct(st.aucun, st.total) + '%</div><div class="mxrl-sc-l">Sans statut</div></div>';
-    h += '<div class="mxrl-stat-card mxrl-sc--donut">' + donut + '<div class="mxrl-sc-l">Progression</div></div>';
-    h += '</div></div>';
-    return h;
-  }
-
-  // ── TREE ──────────────────────────────────────────────────────────────────
-  function _tplTree(list) {
-    var e = _e;
-    var h = '<div class="mxrl-tree">';
-    h += '<div class="mxrl-tree-hdr"><span>Structure de l\'hôtel</span>';
-    h += '<button class="mxrl-tree-add" onclick="MX.Pages.MxRoomList._addBuilding()" title="Ajouter un bâtiment"><i class="fa-solid fa-plus"></i></button></div>';
-    h += '<div class="mxrl-tree-body">';
-
-    var blds = _sortedBlds();
-    blds.forEach(function (b) {
-      var bs   = _calcStats([b]);
-      var isExp = !!_expanded[b.id];
-      var bSel  = _selNode.bId === b.id && !_selNode.fId;
-      h += '<div class="mxrl-tree-bld" data-bid="' + e(b.id) + '">';
-      h += '<div class="mxrl-tree-bld-row' + (bSel ? ' mxrl-sel' : '') + '"'
-        + ' onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')"'
-        + ' oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'bld\',\'' + e(b.id) + '\')">';
-      h += '<span class="mxrl-drag-handle" data-dtype="bld" data-bid="' + e(b.id) + '"'
-        + ' onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)"'
-        + ' onclick="event.stopPropagation()" title="Glisser pour réordonner"><i class="fa-solid fa-grip-vertical"></i></span>';
-      h += '<button class="mxrl-caret" onclick="event.stopPropagation();MX.Pages.MxRoomList._expand(\'' + e(b.id) + '\')">'
-        + '<i class="fa-solid fa-chevron-' + (isExp ? 'down' : 'right') + '"></i></button>';
-      h += '<i class="fa-solid fa-building mxrl-tree-ico"></i>';
-      h += '<span class="mxrl-tree-name">' + e(b.name) + '</span>';
-      h += '<span class="mxrl-tree-pct">' + bs.pct + '%</span>';
-      h += '<button class="mxrl-tree-add-fl" onclick="event.stopPropagation();MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')" title="Ajouter un étage"><i class="fa-solid fa-plus"></i></button>';
+    if (disabled.length) {
+      h += '<div class="mxrl-v2-disabled-sec">';
+      h += '<div class="mxrl-v2-disabled-hdr"><i class="fa-solid fa-ban"></i> Hors service (' + disabled.length + ')</div>';
+      disabled.forEach(function (r) {
+        h += '<div class="mxrl-v2-disabled-row">'
+          + '<span class="mxrl-v2-disabled-num">' + e(r.number || '—') + '</span>'
+          + '<button class="mxrl-v2-enable-btn" onclick="MX.Pages.MxRoomList._toggleDisableRoom(\'' + e(ref.bId) + '\',\'' + e(ref.fId) + '\',\'' + e(r.id) + '\')"><i class="fa-solid fa-rotate-left"></i> Réactiver</button>'
+          + '</div>';
+      });
       h += '</div>';
+    }
+    if (_isAdmin() && allRooms.length) {
+      h += '<div class="mxrl-v2-floor-acts">'
+        + '<button class="mxrl-v2-import-btn" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(ref.bId) + '\',\'' + e(ref.fId) + '\')"><i class="fa-solid fa-file-import"></i> Importer des chambres</button>'
+        + '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
 
+  function _roomRowV2HTML(bId, fId, r, isExp) {
+    var e  = _e;
+    var st = r.status || 'aucun';
+    var h  = '<div class="mxrl-v2-room' + (isExp ? ' expanded' : '') + '" data-mxrl-room="' + e(r.id) + '">';
+    // Main row — click anywhere except radios to toggle expand
+    h += '<div class="mxrl-v2-room-row" onclick="MX.Pages.MxRoomList._toggleRoom(\'' + e(r.id) + '\')">';
+    h += '<div class="mxrl-v2-room-num">' + e(r.number || '—');
+    if (r.name) h += '<span class="mxrl-v2-room-name">' + e(r.name) + '</span>';
+    h += '</div>';
+    h += '<div class="mxrl-v2-radios" onclick="event.stopPropagation()">';
+    h += '<button class="mxrl-v2-radio mxrl-v2-radio--fait' + (st === 'fait' ? ' active' : '') + '" data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '" onclick="MX.Pages.MxRoomList._setStatusBtn(this,\'fait\')">FAIT</button>';
+    h += '<button class="mxrl-v2-radio mxrl-v2-radio--ocp'  + (st === 'ocp'  ? ' active' : '') + '" data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '" onclick="MX.Pages.MxRoomList._setStatusBtn(this,\'ocp\')">OCP</button>';
+    h += '<button class="mxrl-v2-radio mxrl-v2-radio--def'  + (st !== 'fait' && st !== 'ocp' ? ' active' : '') + '" data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '" onclick="MX.Pages.MxRoomList._setStatusBtn(this,\'aucun\')">–</button>';
+    h += '</div>';
+    h += '<button class="mxrl-v2-chevron" onclick="event.stopPropagation();MX.Pages.MxRoomList._toggleRoom(\'' + e(r.id) + '\')"><i class="fa-solid fa-chevron-' + (isExp ? 'up' : 'down') + '"></i></button>';
+    h += '</div>';
+    if (isExp) {
+      h += '<div class="mxrl-v2-detail">';
+      if (r.changedBy) {
+        h += '<div class="mxrl-v2-meta"><i class="fa-solid fa-user-check"></i> ' + e(r.changedBy);
+        if (r.changedAt) h += ' · <span>' + e(r.changedAt) + '</span>';
+        if (r.date)      h += ' · <span>' + e(r.date) + '</span>';
+        h += '</div>';
+      }
+      h += '<div class="mxrl-v2-cmnt-wrap">';
+      h += '<label class="mxrl-v2-cmnt-lbl"><i class="fa-regular fa-comment"></i> Commentaire</label>';
+      h += '<textarea class="mxrl-v2-cmnt" placeholder="Ajouter un commentaire…" rows="2"'
+        + ' data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '"'
+        + ' oninput="MX.Pages.MxRoomList._onComment(this)">' + e(r.comment || '') + '</textarea>';
+      h += '</div>';
+      if (r.history && r.history.length) {
+        h += '<div class="mxrl-v2-history">';
+        h += '<div class="mxrl-v2-hist-title"><i class="fa-solid fa-clock-rotate-left"></i> Historique</div>';
+        var hist = r.history.slice().reverse();
+        hist.slice(0, 8).forEach(function (entry) {
+          var hs = entry.status || 'aucun';
+          h += '<div class="mxrl-v2-hist-row mxrl-v2-hist--' + e(hs) + '">'
+            + '<span class="mxrl-v2-hist-st">' + (hs === 'fait' ? 'FAIT' : hs === 'ocp' ? 'OCP' : '—') + '</span>'
+            + '<span class="mxrl-v2-hist-by">' + e(entry.changedBy || '') + '</span>'
+            + '<span class="mxrl-v2-hist-at">' + e(entry.changedAt || '') + (entry.date ? ' · ' + e(entry.date) : '') + '</span>'
+            + '</div>';
+        });
+        h += '</div>';
+      }
+      if (_isAdmin()) {
+        h += '<div class="mxrl-v2-room-admin">';
+        h += '<button class="mxrl-v2-act-btn" onclick="MX.Pages.MxRoomList._renameRoom(\'' + e(bId) + '\',\'' + e(fId) + '\',\'' + e(r.id) + '\')"><i class="fa-regular fa-pen-to-square"></i> Renommer</button>';
+        h += '<button class="mxrl-v2-act-btn mxrl-v2-act-btn--warn" onclick="MX.Pages.MxRoomList._toggleDisableRoom(\'' + e(bId) + '\',\'' + e(fId) + '\',\'' + e(r.id) + '\')"><i class="fa-solid fa-ban"></i> Hors service</button>';
+        h += '<button class="mxrl-v2-act-btn mxrl-v2-act-btn--danger" onclick="MX.Pages.MxRoomList._deleteRoom(\'' + e(bId) + '\',\'' + e(fId) + '\',\'' + e(r.id) + '\')"><i class="fa-regular fa-trash"></i> Supprimer</button>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // ── ADMIN STRUCTURE MODAL ─────────────────────────────────────────────────
+  function _tplAdminModal() {
+    var e    = _e;
+    var blds = _sortedBlds();
+    var h    = '<div class="mxrl-overlay" onclick="MX.Pages.MxRoomList._closeAdmin()">';
+    h += '<div class="mxrl-modal mxrl-modal--wide" onclick="event.stopPropagation()">';
+    h += '<div class="mxrl-modal-hdr"><h3><i class="fa-solid fa-sliders"></i> Gérer la structure</h3>'
+      + '<button class="mxrl-modal-x" onclick="MX.Pages.MxRoomList._closeAdmin()"><i class="fa-solid fa-xmark"></i></button></div>';
+    h += '<div class="mxrl-modal-body" style="max-height:60vh;overflow-y:auto">';
+    h += '<div class="mxrl-admin-tree">';
+    if (!blds.length) {
+      h += '<div class="mxrl-v2-empty" style="padding:24px"><i class="fa-solid fa-building"></i><p>Aucun bâtiment. Créez-en un ci-dessous.</p></div>';
+    }
+    blds.forEach(function (b) {
+      var isExp = !!_adminExpanded[b.id];
+      h += '<div class="mxrl-admin-bld" data-bid="' + e(b.id) + '">';
+      h += '<div class="mxrl-admin-bld-row" oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'bld\',\'' + e(b.id) + '\')">';
+      h += '<span class="mxrl-drag-handle mxrl-drag-handle--sm" data-dtype="bld" data-bid="' + e(b.id) + '" onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)" onclick="event.stopPropagation()"><i class="fa-solid fa-grip-vertical"></i></span>';
+      h += '<button class="mxrl-caret" onclick="MX.Pages.MxRoomList._toggleAdmin(\'' + e(b.id) + '\')"><i class="fa-solid fa-chevron-' + (isExp ? 'down' : 'right') + '"></i></button>';
+      h += '<i class="fa-solid fa-building mxrl-tree-ico"></i>';
+      h += '<span class="mxrl-admin-name">' + e(b.name) + '</span>';
+      h += '<div class="mxrl-admin-acts">'
+        + '<button class="mxrl-admin-act" onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')" title="Ajouter un étage"><i class="fa-solid fa-plus"></i></button>'
+        + '<button class="mxrl-admin-act mxrl-admin-act--del" onclick="MX.Pages.MxRoomList._deleteBuilding(\'' + e(b.id) + '\')" title="Supprimer"><i class="fa-regular fa-trash"></i></button>'
+        + '</div></div>';
       if (isExp) {
-        h += '<div class="mxrl-tree-floors">';
+        h += '<div class="mxrl-admin-floors">';
         var flrs = _sortedFlrs(b.id);
         flrs.forEach(function (f) {
-          var fs   = _calcFlrStats(f);
-          var fSel = _selNode.fId === f.id;
-          h += '<div class="mxrl-tree-flr' + (fSel ? ' mxrl-sel' : '') + '"'
-            + ' data-fid="' + e(f.id) + '"'
-            + ' onclick="MX.Pages.MxRoomList._selFlr(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"'
-            + ' oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'flr\',\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
-          h += '<span class="mxrl-drag-handle mxrl-drag-handle--sm" data-dtype="flr" data-bid="' + e(b.id) + '" data-fid="' + e(f.id) + '"'
-            + ' onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)"'
-            + ' onclick="event.stopPropagation()" title="Glisser pour réordonner"><i class="fa-solid fa-grip-vertical"></i></span>';
+          h += '<div class="mxrl-admin-flr" data-fid="' + e(f.id) + '" oncontextmenu="MX.Pages.MxRoomList._openCtx(event,\'flr\',\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
+          h += '<span class="mxrl-drag-handle mxrl-drag-handle--sm" data-dtype="flr" data-bid="' + e(b.id) + '" data-fid="' + e(f.id) + '" onpointerdown="MX.Pages.MxRoomList._dndDown(event,this)" onclick="event.stopPropagation()"><i class="fa-solid fa-grip-vertical"></i></span>';
           h += '<i class="fa-solid fa-layer-group mxrl-tree-ico-sm"></i>';
-          h += '<div class="mxrl-tree-flr-info"><span class="mxrl-tree-flr-name">' + e(f.name) + '</span><span class="mxrl-tree-flr-cnt">' + fs.total + ' ch.</span></div>';
-          h += '<span class="mxrl-tree-pct-sm">' + fs.pct + '%</span>';
-          h += '</div>';
+          h += '<span class="mxrl-admin-name mxrl-admin-name--flr">' + e(f.name) + '</span>';
+          h += '<span class="mxrl-admin-cnt">' + (f.rooms || []).length + ' ch.</span>';
+          h += '<div class="mxrl-admin-acts">'
+            + '<button class="mxrl-admin-act" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')" title="Importer chambres"><i class="fa-regular fa-clipboard"></i></button>'
+            + '<button class="mxrl-admin-act mxrl-admin-act--del" onclick="MX.Pages.MxRoomList._deleteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')" title="Supprimer étage"><i class="fa-regular fa-trash"></i></button>'
+            + '</div></div>';
         });
-        if (!flrs.length) {
-          h += '<div class="mxrl-tree-empty-flr">Aucun étage · <a onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')">Ajouter</a></div>';
-        }
+        if (!flrs.length) h += '<div class="mxrl-admin-empty">Aucun étage · <a onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')">Ajouter</a></div>';
         h += '</div>';
       }
       h += '</div>';
     });
-
-    if (!blds.length) {
-      h += '<div class="mxrl-tree-empty"><i class="fa-solid fa-building"></i><p>Aucun bâtiment.<br>Commencez par en créer un.</p></div>';
-    }
-    h += '</div>';
-
-    h += '<div class="mxrl-tree-import">';
-    h += '<div class="mxrl-tree-import-title"><i class="fa-solid fa-bolt"></i> Import rapide</div>';
-    h += '<button class="mxrl-tree-import-btn" onclick="MX.Pages.MxRoomList._openPaste()"><i class="fa-regular fa-clipboard"></i> Coller une liste</button>';
-    h += '<div class="mxrl-tree-astuce"><i class="fa-solid fa-lightbulb"></i><p>Collez simplement votre liste de chambres depuis Excel.</p></div>';
-    h += '</div>';
-    h += '</div>';
-    return h;
-  }
-
-  // ── CONTENT ───────────────────────────────────────────────────────────────
-  function _renderContent(list) {
-    if (_viewMode === 'etage') return _renderEtage(list);
-    var nd = _selNode;
-    if (nd.type === 'floor' && nd.bId && nd.fId) {
-      var b = _findBld(nd.bId); var f = _findFlr(nd.bId, nd.fId);
-      if (b && f) return _renderFloorRooms(b, f);
-    }
-    if (nd.type === 'building' && nd.bId) {
-      var bld = _findBld(nd.bId); if (bld) return _renderBldDetail(bld);
-    }
-    return _renderOverview(list);
-  }
-
-  function _renderOverview(list) {
-    var e = _e;
-    var blds = _sortedBlds();
-    var h = '<div class="mxrl-content">';
-    h += '<div class="mxrl-content-title"><i class="fa-solid fa-hotel"></i> Vue d\'ensemble</div>';
-    if (!blds.length) {
-      h += '<div class="mxrl-empty"><i class="fa-solid fa-hotel"></i><p>Commencez par ajouter un bâtiment dans le panneau de gauche.</p></div>';
-    } else {
-      h += '<div class="mxrl-bld-grid">';
-      blds.forEach(function (b) {
-        var bs = _calcStats([b]);
-        h += '<div class="mxrl-bld-card" onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')">';
-        h += '<div class="mxrl-bld-card-top">';
-        h += '<div class="mxrl-bld-card-ico"><i class="fa-solid fa-building"></i></div>';
-        h += '<div class="mxrl-bld-card-info"><div class="mxrl-bld-card-name">' + e(b.name) + '</div>';
-        h += '<div class="mxrl-bld-card-meta">' + bs.total + ' chambres · ' + (b.floors || []).length + ' étage' + ((b.floors || []).length !== 1 ? 's' : '') + '</div></div>';
-        h += '<div class="mxrl-bld-card-pct">' + bs.pct + '%</div>';
-        h += '</div>';
-        h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + bs.pct + '%"></div></div>';
-        h += '<div class="mxrl-bld-card-stats">';
-        h += '<span class="mxrl-s-fait"><i class="fa-solid fa-circle-check"></i> ' + bs.fait + '</span>';
-        h += '<span class="mxrl-s-ocp"><i class="fa-solid fa-triangle-exclamation"></i> ' + bs.ocp + '</span>';
-        h += '<span class="mxrl-s-pf"><i class="fa-solid fa-circle-xmark"></i> ' + bs.pas_fait + '</span>';
-        h += '<span class="mxrl-s-aucun"><i class="fa-regular fa-circle"></i> ' + bs.aucun + '</span>';
-        h += '</div></div>';
-      });
-      h += '</div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  function _renderBldDetail(b) {
-    var e = _e;
-    var bs  = _calcStats([b]);
-    var flrs = _sortedFlrs(b.id);
-    var h = '<div class="mxrl-content">';
-    h += '<div class="mxrl-bc"><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selNode(\'root\')">Vue d\'ensemble</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><span>' + e(b.name) + '</span></div>';
-    h += '<div class="mxrl-section-hdr">';
-    h += '<div><h3>' + e(b.name) + '</h3><span class="mxrl-section-meta">' + bs.total + ' chambres · ' + flrs.length + ' étage(s)</span></div>';
-    h += '<div class="mxrl-section-actions">';
-    h += _miniStats(bs);
-    h += '<button class="mxrl-btn-sm mxrl-btn-outline" onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')"><i class="fa-solid fa-plus"></i> Étage</button>';
-    h += '<button class="mxrl-btn-sm mxrl-btn-danger" onclick="MX.Pages.MxRoomList._deleteBuilding(\'' + e(b.id) + '\')"><i class="fa-regular fa-trash"></i></button>';
     h += '</div></div>';
-    h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + bs.pct + '%"></div></div>';
-    if (!flrs.length) {
-      h += '<div class="mxrl-empty"><i class="fa-solid fa-layer-group"></i><p>Aucun étage dans ce bâtiment.</p><button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._addFloor(\'' + e(b.id) + '\')"><i class="fa-solid fa-plus"></i> Ajouter un étage</button></div>';
-    } else {
-      h += '<div class="mxrl-floors-grid">';
-      flrs.forEach(function (f) {
-        var fs = _calcFlrStats(f);
-        h += '<div class="mxrl-floor-card" onclick="MX.Pages.MxRoomList._selFlr(\'' + e(b.id) + '\',\'' + e(f.id) + '\')">';
-        h += '<div class="mxrl-floor-card-hdr"><span class="mxrl-floor-card-name">' + e(f.name) + '</span><span class="mxrl-floor-card-pct">' + fs.pct + '%</span></div>';
-        h += '<div class="mxrl-floor-card-cnt">' + fs.total + ' chambre' + (fs.total !== 1 ? 's' : '') + '</div>';
-        h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + fs.pct + '%"></div></div>';
-        h += '<div class="mxrl-floor-card-stats">';
-        h += '<span class="mxrl-s-fait">' + fs.fait + '</span><span class="mxrl-s-ocp">' + fs.ocp + '</span><span class="mxrl-s-pf">' + fs.pas_fait + '</span><span class="mxrl-s-aucun">' + fs.aucun + '</span>';
-        h += '</div></div>';
-      });
-      h += '</div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  function _renderFloorRooms(b, f) {
-    var e = _e;
-    var fs    = _calcFlrStats(f);
-    var rooms = _filteredRooms(f.rooms || []);
-    var h = '<div class="mxrl-content">';
-    h += '<div class="mxrl-bc"><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selNode(\'root\')">Vue d\'ensemble</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><button class="mxrl-bc-btn" onclick="MX.Pages.MxRoomList._selBld(\'' + e(b.id) + '\')">' + e(b.name) + '</button><i class="fa-solid fa-chevron-right mxrl-bc-sep"></i><span>' + e(f.name) + '</span></div>';
-    h += '<div class="mxrl-section-hdr">';
-    h += '<div><h3>' + e(b.name) + ' <span class="mxrl-flr-sep">›</span> ' + e(f.name) + '</h3><span class="mxrl-section-meta">' + fs.total + ' chambres</span></div>';
-    h += '<div class="mxrl-section-actions">';
-    h += _miniStats(fs);
-    h += '<button class="mxrl-btn-sm mxrl-btn-outline" onclick="MX.Pages.MxRoomList._addRoom(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-solid fa-plus"></i> Chambre</button>';
-    h += '<button class="mxrl-btn-sm mxrl-btn-outline" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-regular fa-clipboard"></i> Coller</button>';
-    h += '<button class="mxrl-btn-sm mxrl-btn-danger" onclick="MX.Pages.MxRoomList._deleteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-regular fa-trash"></i></button>';
-    h += '</div></div>';
-    h += '<div class="mxrl-pbar"><div class="mxrl-pbar-fill" style="width:' + fs.pct + '%"></div></div>';
-    if (!rooms.length) {
-      h += '<div class="mxrl-empty"><i class="fa-solid fa-door-open"></i>';
-      if (_search) h += '<p>Aucune chambre ne correspond à la recherche.</p>';
-      else h += '<p>Aucune chambre dans cet étage.</p><div class="mxrl-empty-acts"><button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._addRoom(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-solid fa-plus"></i> Ajouter une chambre</button><button class="mxrl-btn-outline" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-regular fa-clipboard"></i> Ajouter par collage</button></div>';
-      h += '</div>';
-    } else {
-      h += '<div class="mxrl-room-table"><div class="mxrl-room-table-hdr"><span>Chambre</span><span>Statut</span><span class="mxrl-col-ico"><i class="fa-regular fa-comment"></i></span><span class="mxrl-col-ico"><i class="fa-regular fa-image"></i></span><span></span></div>';
-      h += '<div class="mxrl-room-table-body">';
-      rooms.forEach(function (r) { h += _roomRowHTML(b.id, f.id, r); });
-      h += '</div></div>';
-      h += '<div class="mxrl-floor-btns">';
-      h += '<button class="mxrl-btn-ghost" onclick="MX.Pages.MxRoomList._addRoom(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-solid fa-plus"></i> Ajouter une chambre</button>';
-      h += '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._openPasteFloor(\'' + e(b.id) + '\',\'' + e(f.id) + '\')"><i class="fa-regular fa-clipboard"></i> Ajouter par collage</button>';
-      h += '</div>';
-    }
-    h += '</div>';
-    return h;
-  }
-
-  function _miniStats(s) {
-    return '<div class="mxrl-mini-stats">'
-      + '<span class="mxrl-ms-fait"><i class="fa-solid fa-circle-check"></i> ' + s.fait + ' <em>' + _pct(s.fait, s.total) + '%</em></span>'
-      + '<span class="mxrl-ms-ocp"><i class="fa-solid fa-triangle-exclamation"></i> ' + s.ocp + ' <em>' + _pct(s.ocp, s.total) + '%</em></span>'
-      + '<span class="mxrl-ms-pf"><i class="fa-solid fa-circle-xmark"></i> ' + s.pas_fait + ' <em>' + _pct(s.pas_fait, s.total) + '%</em></span>'
-      + '<span class="mxrl-ms-aucun"><i class="fa-regular fa-circle"></i> ' + s.aucun + '</span>'
-      + '</div>';
-  }
-
-  function _filteredRooms(rooms) {
-    return rooms.filter(function (r) {
-      var st = r.status || 'aucun';
-      if (!_statusFilter[st]) return false;
-      if (!_search) return true;
-      var q = _search.toLowerCase();
-      return (r.number || '').toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q);
-    });
-  }
-
-  function _roomRowHTML(bId, fId, r) {
-    var e  = _e;
-    var st = STATUS_MAP[r.status || 'aucun'] || STATUS_MAP['aucun'];
-    return '<div class="mxrl-room-row" data-rl-room="' + e(r.id) + '">'
-      + '<div class="mxrl-room-num">' + e(r.number) + (r.name ? '<span class="mxrl-room-name-lbl">' + e(r.name) + '</span>' : '') + '</div>'
-      + '<div class="mxrl-room-st">'
-      + '<button class="mxrl-status mxrl-st-' + st.key + '" data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '" onclick="MX.Pages.MxRoomList._cycle(this.dataset.bid,this.dataset.fid,this.dataset.rid)">'
-      + '<i class="fa-solid ' + st.icon + '"></i> ' + st.label
-      + '</button></div>'
-      + '<div class="mxrl-col-ico">' + (r.comment ? '<span class="mxrl-has-cmnt" title="' + e(r.comment) + '"><i class="fa-solid fa-comment"></i></span>' : '<span class="mxrl-no-ico"><i class="fa-regular fa-comment"></i></span>') + '</div>'
-      + '<div class="mxrl-col-ico">' + (r.photos > 0 ? '<span class="mxrl-has-photo">' + r.photos + '</span>' : '<span class="mxrl-no-ico"><i class="fa-regular fa-image"></i></span>') + '</div>'
-      + '<div class="mxrl-room-acts"><button class="mxrl-room-del" data-bid="' + e(bId) + '" data-fid="' + e(fId) + '" data-rid="' + e(r.id) + '" onclick="MX.Pages.MxRoomList._delRoom(this.dataset.bid,this.dataset.fid,this.dataset.rid)" title="Supprimer"><i class="fa-regular fa-trash"></i></button></div>'
-      + '</div>';
-  }
-
-  // ── PAR ÉTAGE VIEW ────────────────────────────────────────────────────────
-  function _renderEtage(list) {
-    var e = _e;
-    var floorMap = {};
-    (list.buildings || []).forEach(function (b) {
-      (b.floors || []).forEach(function (f) {
-        if (!floorMap[f.name]) floorMap[f.name] = [];
-        floorMap[f.name].push({ b: b, f: f });
-      });
-    });
-    // Collect unique floor names and sort by smart key
-    var seen = {}, uniq = [];
-    Object.keys(floorMap).forEach(function (n) { if (!seen[n]) { seen[n] = true; uniq.push(n); } });
-    uniq.sort(function (a, b) { return _floorKey(a) - _floorKey(b); });
-
-    var h = '<div class="mxrl-content">';
-    h += '<div class="mxrl-content-title"><i class="fa-solid fa-layer-group"></i> Vue par étage</div>';
-    if (!uniq.length) {
-      h += '<div class="mxrl-empty"><i class="fa-solid fa-layer-group"></i><p>Aucun étage défini.</p></div>';
-    } else {
-      uniq.forEach(function (fname) {
-        var entries  = floorMap[fname];
-        var allRooms = [];
-        entries.forEach(function (en) { allRooms = allRooms.concat(en.f.rooms || []); });
-        var fs  = _calcFlrStats({ rooms: allRooms });
-        var key = 'etg_' + fname;
-        var isExp = !!_expanded[key];
-        h += '<div class="mxrl-etage-sec">';
-        h += '<div class="mxrl-etage-hdr" onclick="MX.Pages.MxRoomList._expandKey(\'' + e(key) + '\')">';
-        h += '<button class="mxrl-caret"><i class="fa-solid fa-chevron-' + (isExp ? 'down' : 'right') + '"></i></button>';
-        h += '<span class="mxrl-etage-name">' + e(fname) + '</span>';
-        h += '<span class="mxrl-etage-cnt">' + allRooms.length + ' chambres</span>';
-        h += _miniStats(fs);
-        h += '<span class="mxrl-etage-pct">' + fs.pct + '%</span>';
-        h += '</div>';
-        if (isExp) {
-          h += '<div class="mxrl-etage-body">';
-          entries.forEach(function (en) {
-            var rooms = _filteredRooms(en.f.rooms || []);
-            if (!rooms.length) return;
-            h += '<div class="mxrl-etage-bld-lbl"><i class="fa-solid fa-building"></i> ' + e(en.b.name) + '</div>';
-            h += '<div class="mxrl-room-table"><div class="mxrl-room-table-body">';
-            rooms.forEach(function (r) { h += _roomRowHTML(en.b.id, en.f.id, r); });
-            h += '</div></div>';
-          });
-          h += '</div>';
-        }
-        h += '</div>';
-      });
-    }
-    h += '</div>';
+    h += '<div class="mxrl-modal-foot">'
+      + '<button class="mxrl-btn-outline" onclick="MX.Pages.MxRoomList._addBuilding()"><i class="fa-solid fa-plus"></i> Bâtiment</button>'
+      + '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._closeAdmin()"><i class="fa-solid fa-check"></i> Fermer</button>'
+      + '</div></div></div>';
     return h;
   }
 
@@ -1055,33 +945,28 @@
     return '<div class="mxrl-overlay" onclick="MX.Pages.MxRoomList._hideCreate()">'
       + '<div class="mxrl-modal" onclick="event.stopPropagation()">'
       + '<div class="mxrl-modal-hdr"><h3><i class="fa-solid fa-hotel"></i> Nouvelle liste</h3><button class="mxrl-modal-x" onclick="MX.Pages.MxRoomList._hideCreate()"><i class="fa-solid fa-xmark"></i></button></div>'
-      + '<div class="mxrl-modal-body">'
-      + '<label class="mxrl-label">Nom du document</label>'
-      + '<input class="mxrl-input" type="text" placeholder="Ex: Liste chambres vierges" value="' + e(_createTitle) + '" oninput="MX.Pages.MxRoomList._setCreateTitle(this.value)" autofocus>'
-      + '</div>'
-      + '<div class="mxrl-modal-foot">'
-      + '<button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hideCreate()">Annuler</button>'
+      + '<div class="mxrl-modal-body"><label class="mxrl-label">Nom du document</label>'
+      + '<input class="mxrl-input" type="text" placeholder="Ex: Liste chambres vierges" value="' + e(_createTitle) + '" oninput="MX.Pages.MxRoomList._setCreateTitle(this.value)" autofocus></div>'
+      + '<div class="mxrl-modal-foot"><button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hideCreate()">Annuler</button>'
       + '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._confirmCreate()"><i class="fa-solid fa-check"></i> Créer</button>'
       + '</div></div></div>';
   }
 
   function _tplPasteModal() {
-    var e      = _e;
-    var target = _pasteTarget;
-    var b      = target && _findBld(target.bId);
-    var f      = target && _findFlr(target.bId, target.fId);
-    var dest   = (b && f) ? (e(b.name) + ' › ' + e(f.name)) : '';
+    var e    = _e;
+    var b    = _pasteTarget && _findBld(_pasteTarget.bId);
+    var f    = _pasteTarget && _findFlr(_pasteTarget.bId, _pasteTarget.fId);
+    var dest = (b && f) ? (e(b.name) + ' › ' + e(f.name)) : '';
     return '<div class="mxrl-overlay" onclick="MX.Pages.MxRoomList._hidePaste()">'
       + '<div class="mxrl-modal" onclick="event.stopPropagation()">'
-      + '<div class="mxrl-modal-hdr"><h3><i class="fa-regular fa-clipboard"></i> Coller une liste</h3><button class="mxrl-modal-x" onclick="MX.Pages.MxRoomList._hidePaste()"><i class="fa-solid fa-xmark"></i></button></div>'
+      + '<div class="mxrl-modal-hdr"><h3><i class="fa-regular fa-clipboard"></i> Importer des chambres</h3><button class="mxrl-modal-x" onclick="MX.Pages.MxRoomList._hidePaste()"><i class="fa-solid fa-xmark"></i></button></div>'
       + '<div class="mxrl-modal-body">'
       + (dest ? '<div class="mxrl-paste-dest"><i class="fa-solid fa-layer-group"></i> Destination : <strong>' + dest + '</strong></div>' : '')
       + '<label class="mxrl-label">Liste de chambres (une par ligne)</label>'
-      + '<textarea class="mxrl-textarea" placeholder="101&#10;102&#10;103&#10;104&#10;..." rows="10" oninput="MX.Pages.MxRoomList._setPasteText(this.value)">' + e(_pasteText) + '</textarea>'
-      + '<p class="mxrl-paste-hint"><i class="fa-solid fa-lightbulb"></i> Collez directement depuis Excel. Une ligne = une chambre.</p>'
+      + '<textarea class="mxrl-textarea" placeholder="101&#10;102&#10;103&#10;..." rows="10" oninput="MX.Pages.MxRoomList._setPasteText(this.value)">' + e(_pasteText) + '</textarea>'
+      + '<p class="mxrl-paste-hint"><i class="fa-solid fa-lightbulb"></i> Collez depuis Excel. Une ligne = une chambre.</p>'
       + '</div>'
-      + '<div class="mxrl-modal-foot">'
-      + '<button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hidePaste()">Annuler</button>'
+      + '<div class="mxrl-modal-foot"><button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hidePaste()">Annuler</button>'
       + '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._confirmPaste()"><i class="fa-solid fa-file-import"></i> Importer</button>'
       + '</div></div></div>';
   }
@@ -1101,77 +986,76 @@
       + '<div class="mxrl-modal-body">'
       + (src ? '<div class="mxrl-dup-src"><i class="fa-solid fa-hotel"></i> ' + e(src.title || 'Sans titre') + '</div>' : '')
       + '<label class="mxrl-label">Nom du nouveau document</label>'
-      + '<input class="mxrl-input" type="text" placeholder="Ex: Contrôle éclairage" value="' + e(_dupTitle) + '" oninput="MX.Pages.MxRoomList._setDupTitle(this.value)">'
+      + '<input class="mxrl-input" type="text" value="' + e(_dupTitle) + '" oninput="MX.Pages.MxRoomList._setDupTitle(this.value)">'
       + '<div class="mxrl-dup-opts">'
       + opts.map(function (o) {
         return '<label class="mxrl-dup-opt"><input type="checkbox" ' + (o.v ? 'checked' : '') + ' data-dk="' + o.k + '" onchange="MX.Pages.MxRoomList._setDupOpt(this.dataset.dk,this.checked)"> ' + e(o.l) + '</label>';
       }).join('')
       + '</div></div>'
-      + '<div class="mxrl-modal-foot">'
-      + '<button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hideDupModal()">Annuler</button>'
+      + '<div class="mxrl-modal-foot"><button class="mxrl-btn-cancel" onclick="MX.Pages.MxRoomList._hideDupModal()">Annuler</button>'
       + '<button class="mxrl-btn-primary" onclick="MX.Pages.MxRoomList._confirmDup()"><i class="fa-regular fa-copy"></i> Dupliquer</button>'
       + '</div></div></div>';
   }
 
-  // ── PUBLIC API (called from onclick) ──────────────────────────────────────
+  // ── PUBLIC API ────────────────────────────────────────────────────────────
   function _openById(id)   { _openList(id); }
   function _deleteById(id) { _deleteList(id); }
 
   function _closeList() {
     if (_listUnsub) { _listUnsub(); _listUnsub = null; }
     _curListId = null; _curList = null;
-    _selNode = { type: 'root' }; _expanded = {};
+    _curFloorKey = null; _filterPill = 'all'; _expandedRoom = {};
     _rerender();
   }
 
-  function _selNode(type, bId, fId) {
-    _selNode2(type, bId, fId);
-  }
-  function _selNode2(type, bId, fId) {
-    _selNode = { type: type, bId: bId || null, fId: fId || null };
-    _rerender();
-  }
-  function _selBld(bId) { _expanded[bId] = true; _selNode = { type: 'building', bId: bId, fId: null }; _rerender(); }
-  function _selFlr(bId, fId) { _expanded[bId] = true; _selNode = { type: 'floor', bId: bId, fId: fId }; _rerender(); }
-  function _expand(bId) { _expanded[bId] = !_expanded[bId]; _rerender(); }
-  function _expandKey(key) { _expanded[key] = !_expanded[key]; _rerender(); }
-  function _setView(mode) { _viewMode = mode; _selNode = { type: 'root' }; _rerender(); }
-  function _setSearch(q) { _search = q; _rerender(); }
-  function _toggleFilter() { _filterOpen = !_filterOpen; _rerender(); }
-  function _toggleStatusFilter(key) { _statusFilter[key] = !_statusFilter[key]; _rerender(); }
-  function _cycle(bId, fId, rId) { _cycleStatus(bId, fId, rId); }
-  function _delRoom(bId, fId, rId) { _deleteRoom(bId, fId, rId); }
+  function _selFloorKey(key) { _curFloorKey = key; _filterPill = 'all'; _expandedRoom = {}; _rerender(); }
+  function _setFilter(pill)  { _filterPill = pill; _rerender(); }
 
-  function _quickAdd() {
-    if (_selNode.type === 'floor' && _selNode.bId && _selNode.fId) {
-      _addRoom(_selNode.bId, _selNode.fId);
-    } else {
-      _notify('Sélectionnez d\'abord un étage dans l\'arborescence', true);
+  function _toggleRoom(rId) {
+    _expandedRoom[rId] = !_expandedRoom[rId];
+    if (_curFloorKey) {
+      var ref = _floorFromKey(_curFloorKey);
+      var r   = _findRoom(ref.bId, ref.fId, rId);
+      if (r) {
+        var rowEl = document.querySelector('[data-mxrl-room="' + rId + '"]');
+        if (rowEl) { rowEl.outerHTML = _roomRowV2HTML(ref.bId, ref.fId, r, !!_expandedRoom[rId]); return; }
+      }
     }
+    _rerender();
   }
 
-  function _showCreate() { _showCreate2(); }
+  function _setStatusBtn(btn, status) {
+    _setStatus(btn.dataset.bid, btn.dataset.fid, btn.dataset.rid, status);
+  }
+
+  function _onComment(el) {
+    _setComment(el.dataset.bid, el.dataset.fid, el.dataset.rid, el.value);
+  }
+
+  function _openAdmin()       { _showAdmin = true; _rerender(); }
+  function _closeAdmin()      { _showAdmin = false; _ctx = null; _rerender(); }
+  function _toggleAdmin(bId)  { _adminExpanded[bId] = !_adminExpanded[bId]; _rerender(); }
+
   function _showCreate2() { _showCreate = true; _rerender(); }
-  function _hideCreate() { _showCreate = false; _rerender(); }
+  function _hideCreate()  { _showCreate = false; _rerender(); }
   function _setCreateTitle(v) { _createTitle = v; }
   function _confirmCreate() {
     if (!_createTitle.trim()) { _notify('Saisissez un nom', true); return; }
     _createList(_createTitle);
   }
 
-  function _openPaste() {
-    _pasteTarget = (_selNode.type === 'floor' && _selNode.bId && _selNode.fId)
-      ? { bId: _selNode.bId, fId: _selNode.fId } : null;
-    _pasteText = ''; _showPaste = true; _rerender();
-  }
   function _openPasteFloor(bId, fId) { _pasteTarget = { bId: bId, fId: fId }; _pasteText = ''; _showPaste = true; _rerender(); }
-  function _hidePaste() { _showPaste = false; _pasteText = ''; _rerender(); }
+  function _hidePaste()    { _showPaste = false; _pasteText = ''; _rerender(); }
   function _setPasteText(v) { _pasteText = v; }
   function _confirmPaste() {
-    if (!_pasteTarget) { _notify('Sélectionnez un étage de destination d\'abord', true); return; }
+    if (!_pasteTarget) { _notify('Sélectionnez un étage de destination', true); return; }
     if (!_pasteText.trim()) { _notify('Collez au moins une chambre', true); return; }
     _addRooms(_pasteTarget.bId, _pasteTarget.fId, _pasteText);
     _showPaste = false; _pasteText = ''; _pasteTarget = null;
+  }
+
+  function _showDupCur() {
+    if (_curListId) _showDup(_curListId);
   }
 
   function _showDup(id) {
@@ -1179,16 +1063,15 @@
     var src = _lists.find(function (l) { return l.id === id; });
     _dupTitle = src ? (src.title + ' (copie)') : '';
     _dupKeepBlds = true; _dupKeepFloors = true; _dupKeepRooms = true; _dupResetStatus = true;
-    _showDup2();
+    _dupVisible = true; _rerender();
   }
-  function _showDup2() { _showDup = true; _rerender(); }
-  function _hideDupModal() { _showDup = false; _dupSrcId = null; _rerender(); }
+  function _hideDupModal() { _dupVisible = false; _dupSrcId = null; _rerender(); }
   function _setDupTitle(v) { _dupTitle = v; }
   function _setDupOpt(key, val) {
-    if (key === 'blds') _dupKeepBlds = val;
-    else if (key === 'floors') _dupKeepFloors = val;
-    else if (key === 'rooms') _dupKeepRooms = val;
-    else if (key === 'reset') _dupResetStatus = val;
+    if (key === 'blds')  _dupKeepBlds    = val;
+    else if (key === 'floors') _dupKeepFloors  = val;
+    else if (key === 'rooms')  _dupKeepRooms   = val;
+    else if (key === 'reset')  _dupResetStatus = val;
   }
   function _confirmDup() { _execDuplicate(); }
 
@@ -1211,47 +1094,41 @@
     _openById,
     _deleteById,
     _closeList,
-    _selNode: _selNode2,
-    _selBld,
-    _selFlr,
-    _expand,
-    _expandKey,
-    _setView,
-    _setSearch,
-    _toggleFilter,
-    _toggleStatusFilter,
-    _cycle,
-    _delRoom,
-    _quickAdd,
+    _selFloorKey,
+    _setFilter,
+    _toggleRoom,
+    _setStatusBtn,
+    _onComment,
+    _renameRoom,
+    _toggleDisableRoom,
     _addBuilding,
     _addFloor,
-    _addRoom,
     _deleteBuilding,
     _deleteFloor,
     _deleteRoom,
+    _openAdmin,
+    _closeAdmin,
+    _toggleAdmin,
     _showCreate: _showCreate2,
     _hideCreate,
     _setCreateTitle,
     _confirmCreate,
-    _openPaste,
     _openPasteFloor,
     _hidePaste,
     _setPasteText,
     _confirmPaste,
+    _showDupCur,
     _showDup,
     _hideDupModal,
     _setDupTitle,
     _setDupOpt,
     _confirmDup,
-    // DnD
     _dndDown,
-    // Context menu
     _openCtx,
     _closeCtx,
     _ctxUp,
     _ctxDown,
     _ctxRename,
-    _ctxDupFloor,
     _ctxDelete,
   };
 })();
