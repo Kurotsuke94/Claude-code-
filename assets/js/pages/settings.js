@@ -945,8 +945,8 @@
   }
 
   function _renderApropos() {
-    const ver   = (window.MX && MX.appVer) ? MX.appVer : (window.MX_VERSION || '1.0.34');
-    const build = window.MX_BUILD || 134;
+    const ver   = (window.MX && MX.appVer) ? MX.appVer : (window.MX_VERSION || '1.1.08');
+    const build = window.MX_BUILD || 208;
     const isOnline  = navigator.onLine;
     const users     = MX.state.users || [];
     const lastSync  = MX.state._lastSync ? new Date(MX.state._lastSync).toLocaleString('fr-FR') : 'Maintenant';

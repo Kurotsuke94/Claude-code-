@@ -1,19 +1,17 @@
 # Changelog — Maintix
 
-## v1.1.09 — 2026-09-03 🔧 Correctif vues responsable/admin (v1.1.08)
+## v1.1.08 — 2026-09-03 🔒📱 Check-lists personnelles + fiabilité mise à jour mobile
 
-- La v1.1.08 avait migré `state.checks` vers la nouvelle clé longue (technicien+date+…) mais 4 écrans responsable/admin lisaient encore l'ancienne clé courte pour la semaine en cours (via une variable locale `chk`, non détectée par la recherche initiale) : calendrier mensuel (`_renderMonthlyHtml`), cartes des 8 semaines (`_renderWeekSlotsHtml`), détail d'une semaine (`_renderWeekDayGrid`).
-- Conséquence : la semaine en cours s'affichait à 0 % dans ces 3 écrans même quand les techniciens avaient bien validé leurs tâches.
-- Corrigé : ces écrans lisent désormais la nouvelle clé (`MX.checkKey`/`MX.checkOwnerId`) pour la semaine en cours, et conservent l'ancienne clé courte pour les semaines archivées (format inchangé, non concerné).
-- Recherche exhaustive confirmée : plus aucune lecture de `state.checks` (semaine en cours) n'utilise l'ancien format de clé.
-
-## v1.1.08 — 2026-09-03 🔒 Correctif checklists partagées entre techniciens
-
+**Check-lists — validations propres à chaque technicien**
 - Les validations de tâches de la check-list du jour n'étaient identifiées que par jour de semaine + créneau + tâche (`lundi_matin_xyz`), sans technicien ni date réelle : une case cochée par un technicien apparaissait cochée pour tous, y compris les semaines suivantes.
-- Nouvelle clé de validation : technicien + année/semaine ISO + date + créneau + tâche (`MX.checkKey`/`MX.checkOwnerId`).
-- Chaque technicien démarre désormais sa journée avec des tâches non validées par défaut ; les validations restent propres à son compte et persistent après actualisation.
-- Sélectionner un créneau horaire ne valide plus aucune tâche automatiquement (vérifié : ce n'était déjà pas le cas).
-- Vue responsable/admin inchangée : elle continue d'afficher l'état de validation du technicien assigné à chaque tâche.
+- Nouvelle clé de validation : technicien + année/semaine ISO + date + créneau + tâche (`MX.checkKey`/`MX.checkOwnerId`), appliquée partout où les validations sont lues ou écrites (technicien, responsable/admin, missions, alertes, récompenses), y compris pour la semaine en cours dans les écrans responsable (calendrier mensuel, cartes des 8 semaines, détail d'une semaine).
+- Chaque technicien démarre sa journée avec des tâches non validées par défaut ; les validations restent propres à son compte et persistent après actualisation. Sélectionner un créneau ne valide plus aucune tâche automatiquement.
+- Les semaines archivées conservent leur ancien format de données, inchangé.
+
+**Mise à jour de l'application sur mobile (iOS/Android)**
+- Cause racine identifiée : les fichiers CSS/JS de `index.html` référençaient encore `?v=206`, gelé depuis plusieurs versions, alors que Firebase Hosting sert ces fichiers avec un cache d'un an — les téléphones ne récupéraient donc jamais les nouveaux fichiers tant que cette valeur ne changeait pas. `mx-room-list.js` était resté figé à `?v=1` depuis son introduction.
+- Toutes les références de version (`index.html`, `manifest.json`) sont réalignées sur le build courant à chaque publication.
+- Bandeau de mise à jour : message et bouton reformulés (« Une nouvelle version de Maintix est disponible. Rechargez l'application. » / « Mettre à jour maintenant »). Le mécanisme sous-jacent (détection, activation, rechargement sans déconnexion, anti-boucle) existait déjà et reste inchangé.
 
 ## v1.1.07 — 2026-07-07
 

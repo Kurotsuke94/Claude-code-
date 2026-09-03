@@ -952,6 +952,16 @@
   // ── CHANGELOG ──
   window.MX.CHANGELOG = [
     {
+      ver: '1.1.08', date: '2026-09-03', emoji: '🔒',
+      title: 'Check-lists personnelles & fiabilité des mises à jour mobile',
+      changes: [
+        'Check-lists : chaque technicien a désormais ses propres validations (plus de cases pré-cochées par un collègue ou une semaine précédente)',
+        'Sélectionner un créneau ne valide plus aucune tâche automatiquement',
+        'Correctif de la cause principale empêchant les téléphones de récupérer les nouveaux fichiers après une mise à jour',
+        'Bandeau de mise à jour reformulé pour être plus clair',
+      ]
+    },
+    {
       ver: '1.1.07', date: '2026-07-07', emoji: '🗓️',
       title: 'Redesign Planning & correctifs PMP',
       changes: [
@@ -1243,11 +1253,11 @@
       ]
     },
   ];
-  window.MX.appVer = window.MX_VERSION || "1.1.07";
+  window.MX.appVer = window.MX_VERSION || "1.1.08";
 
   // ── STATUS BAR ──
-  const _APP_VER   = window.MX_VERSION || "1.1.07";
-  const _APP_BUILD = window.MX_BUILD   || 207;
+  const _APP_VER   = window.MX_VERSION || "1.1.08";
+  const _APP_BUILD = window.MX_BUILD   || 208;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -2713,7 +2723,7 @@
         '<div class="mx-upd-top">'
       + '<div class="mx-upd-icon"><i class="fas fa-rocket"></i></div>'
       + '<div class="mx-upd-info">'
-      +   '<div class="mx-upd-title">Nouvelle version disponible</div>'
+      +   '<div class="mx-upd-title">Une nouvelle version de Maintix est disponible. Rechargez l\'application.</div>'
       +   '<div class="mx-upd-versions">'
       +     '<div class="mx-upd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--text3)"></i> Version actuelle : <b>' + MX.esc(String(currentVer || '?')) + '</b></div>'
       +     '<div class="mx-upd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--cyan)"></i> Nouvelle version : <b class="new">' + MX.esc(String(newVer || '?')) + '</b></div>'
@@ -2722,7 +2732,7 @@
       + '</div>'
       + '<div class="mx-upd-actions">'
       +   '<button class="mx-upd-btn-now" onclick="MX.UpdateManager.applyUpdate()">'
-      +     '<i class="fas fa-rotate"></i> Mettre à jour'
+      +     '<i class="fas fa-rotate"></i> Mettre à jour maintenant'
       +   '</button>'
       +   '<button class="mx-upd-btn-later" onclick="MX.UpdateManager.dismissUpdate()">'
       +     'Plus tard'
