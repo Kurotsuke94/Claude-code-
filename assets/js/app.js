@@ -380,8 +380,12 @@
         const isFav = _getFavs().some(f => f.id === favId);
         star = `<span class="sx-fav-star${isFav ? ' sx-fav-star--on' : ''}" onclick="event.stopPropagation();MX.toggleFav('${favId}','${favLabel || favId}')" title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}"><i class="fas fa-star"></i></span>`;
       }
+      // label may carry inline HTML (e.g. an alert-count badge) for the visible
+      // <span>, but an HTML attribute like title="" must never receive raw markup —
+      // its own quotes would break out of the attribute and leak as visible text.
+      const titleLabel = String(label).replace(/<[^>]*>/g, '');
       return `<div class="sx-group" data-group="${key}">
-    <button class="sx-group-hdr${open ? ' sx-group-hdr--open' : ''}" onclick="MX.${toggleFn}()" title="${label}">
+    <button class="sx-group-hdr${open ? ' sx-group-hdr--open' : ''}" onclick="MX.${toggleFn}()" title="${titleLabel}">
       <i class="fas fa-chevron-right sx-group-chev"></i>
       <span class="sx-group-ico ${icoCls}"><i class="fas ${icon}"></i></span>
       <span class="sx-group-lbl">${label}</span>
