@@ -44,7 +44,7 @@
   const PAGE_MAP = {
     mission: 'missions', checklist: 'checks', intervention: 'missions',
     planning: 'planning', stock: 'stock', message: 'messages',
-    counter: 'checks', absence: 'planning',
+    counter: 'consommations', absence: 'planning',
   };
 
   function _catColor(type) {

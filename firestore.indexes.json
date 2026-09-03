@@ -39,6 +39,15 @@
         { "fieldPath": "badgeId",   "order": "ASCENDING" },
         { "fieldPath": "userName",  "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "cso_readings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "meterId",   "order": "ASCENDING" },
+        { "fieldPath": "date",      "order": "DESCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

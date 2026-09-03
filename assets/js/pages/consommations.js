@@ -653,25 +653,10 @@
     const efIds  = _meters.filter(m => m.type === 'eau_froide').map(m => m.id);
     const ecIds  = _meters.filter(m => m.type === 'eau_chaude').map(m => m.id);
 
-    // Surconsommation vs 30-day avg
-    Object.entries(MT).forEach(([type, meta]) => {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
-      if (!ids.length) return;
-      const todayC = _readings.filter(r => ids.includes(r.meterId) && r.date === today)
-        .reduce((s, r) => s + (r.consumption || 0), 0);
-      if (!todayC) return;
-      let sum30 = 0, cnt = 0;
-      for (let i = 1; i <= 30; i++) {
-        const c = _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(i))
-          .reduce((s, r) => s + (r.consumption || 0), 0);
-        if (c > 0) { sum30 += c; cnt++; }
-      }
-      if (!cnt) return;
-      const avg = sum30 / cnt;
-      const ecart = Math.round((todayC - avg) / avg * 100);
-      if (ecart > 80) alerts.push({ type: 'surconsommation', level: 'critical', metric: type, title: `Surconsommation ${meta.label}`, msg: `+${ecart}% vs moyenne 30 jours (${_fmt(todayC)} vs ${_fmt(avg)} ${meta.unit})`, ecart });
-      else if (ecart > 30) alerts.push({ type: 'surconsommation', level: 'warning', metric: type, title: `Surconsommation ${meta.label}`, msg: `+${ecart}% vs moyenne 30 jours`, ecart });
-    });
+    // Surconsommation par compteur : détectée côté serveur (Cloud Function
+    // onReadingWritten, event-driven sur cso_readings) et persistée dans
+    // cso_energy_alerts — voir _csoAlerts / _meterRowHtml / _checkCriticalBanner.
+    // Volontairement retiré d'ici pour éviter un double calcul/double alerte.
 
     // Compteur sans relevé récent
     _meters.forEach(m => {
@@ -720,7 +705,8 @@
   function _stopBeep()  { if (_critBeepTimer) { clearInterval(_critBeepTimer); _critBeepTimer = null; } }
 
   function _checkCriticalBanner() {
-    const crits = _csoAlerts.filter(a => a.level === 'critical' && !a.acknowledged);
+    _updateTitleBadge();
+    const crits = _csoAlerts.filter(a => a.level === 'critical' && !a.acknowledged && a.status !== 'resolved');
     let banner = document.getElementById('cso-crit-banner');
     if (!crits.length) { _stopBeep(); if (banner) banner.remove(); _currentCritAlert = null; return; }
     const alert = crits[0];
@@ -741,8 +727,23 @@
   function _critDismiss(id) { _stopBeep(); const b = document.getElementById('cso-crit-banner'); if (b) b.remove(); _resolveAlert(id); }
 
   async function _resolveAlert(id) {
-    try { await CSO.alerts().doc(id).update({ acknowledged: true, acknowledgedAt: FV.serverTimestamp(), acknowledgedBy: _author() }); }
-    catch(e) { console.error(e); }
+    try {
+      await CSO.alerts().doc(id).update({
+        acknowledged: true, acknowledgedAt: FV.serverTimestamp(), acknowledgedBy: _author(),
+        status: 'resolved', resolvedAt: FV.serverTimestamp(), resolvedBy: _author(), resolvedReason: 'manual',
+      });
+    } catch(e) { console.error(e); }
+  }
+
+  // ── Live count of active meter anomalies, reflected in the page title ──
+  function _activeAnomalyCount() {
+    return _csoAlerts.filter(a => a.status === 'active').length;
+  }
+  function _updateTitleBadge() {
+    const el = document.getElementById('topbar-title');
+    if (!el || !MX.state || MX.state.currentPage !== 'consommations') return;
+    const n = _activeAnomalyCount();
+    el.innerHTML = n ? `Consommations <span class="cso-title-anomaly-badge">🚨 ${n}</span>` : 'Consommations';
   }
 
   async function _createIntFromAlert(id) {
@@ -840,6 +841,7 @@
         <i class="fas fa-camera"></i>
       </button>
     </div>`;
+    _updateTitleBadge();
   }
 
   // ── INTERACTIVE CHART INIT (v2) ──
@@ -1132,6 +1134,7 @@
     const ratio    = cli > 0 && selConso > 0 ? (isW ? selConso * 1000 / cli : selConso / cli) : null;
     const hasRdg   = !!lr;
     const resp     = _isResp();
+    const alert    = _csoAlerts.find(a => a.meterId === m.id && a.status === 'active');
     let valLine = '';
     if (lr) {
       valLine = `Index&thinsp;: <b>${_fmtIdx(lr.index)}&thinsp;${esc(unit)}</b>`;
@@ -1145,14 +1148,27 @@
         <span class="cso-mrow-acts-sep"></span>
         <button class="cso-ibtn amber" title="Archiver" onclick="MX.Pages.Conso._archiveMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-box-archive"></i></button>
         <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>` : '';
-    return `<div class="cso-mrow ${hasRdg ? 'done' : 'pending'}" onclick="MX.Pages.Conso._newReading('${m.id}')">
+    const alertBadge = alert
+      ? `<span class="cso-mrow-badge cso-mrow-badge--${alert.level}">${alert.level === 'critical' ? 'CRITIQUE' : 'IMPORTANTE'}</span>`
+      : `<span class="cso-mrow-badge ${hasRdg ? 'done' : 'pending'}">${hasRdg ? '✅ Relevé' : '🟠 En attente'}</span>`;
+    const alertBlock = alert ? `
+      <div class="cso-mrow-alert cso-mrow-alert--${alert.level}" onclick="event.stopPropagation()">
+        <span class="cso-beacon" aria-hidden="true"></span>
+        <div class="cso-mrow-alert-body">
+          <div class="cso-mrow-alert-ttl">🚨 SURCONSOMMATION DÉTECTÉE</div>
+          <div class="cso-mrow-alert-msg">${esc(alert.msg || '')}</div>
+        </div>
+        ${resp ? `<button class="cso-ibtn" title="Acquitter l'alerte" onclick="MX.Pages.Conso._resolveAlert('${esc(alert.id)}')"><i class="fas fa-check"></i></button>` : ''}
+      </div>` : '';
+    return `<div class="cso-mrow ${hasRdg ? 'done' : 'pending'}${alert ? ' cso-mrow--anomaly cso-mrow--' + alert.level : ''}" onclick="MX.Pages.Conso._newReading('${m.id}')">
       <div class="cso-mrow-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
       <div class="cso-mrow-info">
         <div class="cso-mrow-top">
           <span class="cso-mrow-name">${esc(m.name)}</span>
-          <span class="cso-mrow-badge ${hasRdg ? 'done' : 'pending'}">${hasRdg ? '✅ Relevé' : '🟠 En attente'}</span>
+          ${alertBadge}
         </div>
         <div class="cso-mrow-vals">${valLine}</div>
+        ${alertBlock}
       </div>
       <div class="cso-mrow-acts" onclick="event.stopPropagation()">
         <button class="cso-ibtn blue" title="Relevé" onclick="MX.Pages.Conso._newReading('${m.id}')"><i class="fas fa-camera"></i></button>
@@ -1513,7 +1529,7 @@
     const stTot = mainSeries.reduce((s,sr)=>s+sr.vals.reduce((a,b)=>a+b,0),0);
 
     // ── Alert panel (right sidebar) ──
-    const savedAlerts = _csoAlerts.filter(a=>!a.acknowledged&&(a.level==='critical'||a.level==='warning'));
+    const savedAlerts = _csoAlerts.filter(a=>!a.acknowledged&&a.status!=='resolved'&&(a.level==='critical'||a.level==='warning'));
     const allAlerts   = [...smartAlerts,...savedAlerts.slice(0,4)];
     const alertPanelHtml = allAlerts.slice(0,8).map(a => {
       const mt = MT[a.metric||a.type||''] || {};
@@ -3143,8 +3159,8 @@
     const smartAlerts = _detectAlerts();
     const nCrit = smartAlerts.filter(a => a.level === 'critical').length;
     const nWarn = smartAlerts.filter(a => a.level === 'warning').length;
-    const savedCrit = _csoAlerts.filter(a => a.level === 'critical' && !a.acknowledged).length;
-    const savedWarn = _csoAlerts.filter(a => a.level === 'warning' && !a.acknowledged).length;
+    const savedCrit = _csoAlerts.filter(a => a.level === 'critical' && !a.acknowledged && a.status !== 'resolved').length;
+    const savedWarn = _csoAlerts.filter(a => a.level === 'warning' && !a.acknowledged && a.status !== 'resolved').length;
     const totalCrit = nCrit + savedCrit;
     const totalWarn = nWarn + savedWarn;
 
@@ -3234,7 +3250,7 @@
       const meta = MT[a.metric] || {};
       tlItems.push({ ts: nowDt, level: a.level, title: a.title, msg: a.msg, icon: meta.icon||'⚡', zone: a.zone||'', isSmart: true, salIdx, id: null });
     });
-    _csoAlerts.filter(a => !a.acknowledged).forEach(a => {
+    _csoAlerts.filter(a => !a.acknowledged && a.status !== 'resolved').forEach(a => {
       const d = _tsDate(a.ts || a.createdAt);
       const meta = MT[a.type] || MT[a.metric] || {};
       tlItems.push({ ts: d || nowDt, level: a.level, title: a.title||a.type, msg: a.msg||a.message||'', icon: meta.icon||'⚡', zone: a.zone||'', isSmart: false, salIdx: null, id: a.id });
@@ -3457,6 +3473,18 @@
         <select id="cso-mt" class="fi">${opts}</select>
         <input id="cso-ml" class="fi" placeholder="Emplacement" value="${esc(m?.location||'')}" maxlength="60">
         <input id="cso-mu" class="fi" placeholder="Unité (laisser vide = défaut)" value="${esc(m?.unit||'')}" maxlength="10">
+        <div style="border-top:1px solid var(--border2);margin-top:4px;padding-top:10px;display:flex;flex-direction:column;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer">
+            <input type="checkbox" id="cso-mae" ${m?.alertEnabled === false ? '' : 'checked'}>
+            Détection de surconsommation active
+          </label>
+          <select id="cso-mam" class="fi">
+            <option value="auto"${m?.alertMode !== 'manual' ? ' selected' : ''}>Référence automatique (moyenne de l'historique)</option>
+            <option value="manual"${m?.alertMode === 'manual' ? ' selected' : ''}>Seuil manuel</option>
+          </select>
+          <input id="cso-mar" class="fi" type="number" step="0.01" min="0" placeholder="Seuil manuel (unité / 24h)" value="${m?.alertManualRef != null ? m.alertManualRef : ''}">
+          <input id="cso-mad" class="fi" type="number" step="1" min="3" placeholder="Jours d'historique pour la référence auto (défaut 30)" value="${m?.alertRefDays != null ? m.alertRefDays : ''}">
+        </div>
       </div>`,
       actions: [
         { label: m ? 'Enregistrer' : 'Créer', cls: 'confirm', fn: async () => {
@@ -3465,9 +3493,28 @@
           const loc  = document.getElementById('cso-ml')?.value?.trim();
           const unit = document.getElementById('cso-mu')?.value?.trim() || MT[type]?.unit || 'm³';
           if (!name) { MX.toast('Le nom est requis', true); return; }
-          const data = { name, type, location: loc || '', unit, updatedAt: FV.serverTimestamp() };
-          if (m) { await CSO.meters().doc(id).update(data); MX.toast('Compteur mis à jour'); }
-          else   { await CSO.meters().add({ ...data, createdAt: FV.serverTimestamp() }); MX.toast('Compteur créé'); }
+          const alertEnabled   = document.getElementById('cso-mae')?.checked !== false;
+          const alertMode      = document.getElementById('cso-mam')?.value === 'manual' ? 'manual' : 'auto';
+          const alertManualRaw = document.getElementById('cso-mar')?.value;
+          const alertDaysRaw   = document.getElementById('cso-mad')?.value;
+          const data = {
+            name, type, location: loc || '', unit, updatedAt: FV.serverTimestamp(),
+            alertEnabled, alertMode,
+            alertManualRef: alertManualRaw ? parseFloat(alertManualRaw) : null,
+            alertRefDays:   alertDaysRaw   ? parseInt(alertDaysRaw, 10) : null,
+          };
+          if (m) {
+            await CSO.meters().doc(id).update(data);
+            // Disabling detection turns the voyant off immediately — the server-side
+            // detector only re-evaluates on the next reading, which may not come soon.
+            if (!alertEnabled) {
+              await CSO.alerts().doc(`overconsumption_${id}`).set({
+                status: 'resolved', resolvedAt: FV.serverTimestamp(), resolvedBy: _author(), resolvedReason: 'disabled',
+              }, { merge: true }).catch(() => {});
+            }
+            MX.toast('Compteur mis à jour');
+          }
+          else { await CSO.meters().add({ ...data, createdAt: FV.serverTimestamp() }); MX.toast('Compteur créé'); }
         }},
         { label: 'Annuler', cls: 'cancel' }
       ]
