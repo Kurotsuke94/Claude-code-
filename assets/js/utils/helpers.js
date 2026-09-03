@@ -73,6 +73,50 @@
     return day && day.we ? ["soir"] : ["matin", "journee", "soir"];
   }
 
+  // ── CHECKLIST CHECK KEYS — per-technician, per-date, never global ──────────
+  // A checklist "check" must never be shared between technicians or between
+  // occurrences of the same weekday across different weeks. checkKey() builds
+  // a fully-qualified key (owner, year+week, date, slot, task) so that a fresh
+  // day/week for a given technician always starts unchecked, and one
+  // technician's validation can never appear pre-checked for another.
+  function checkDateForDay(dayId, refDate) {
+    const idx = DAYS.findIndex(d => d.id === dayId);
+    if (idx < 0) return (refDate || new Date()).toISOString().slice(0, 10);
+    const now = refDate || new Date();
+    const dow = now.getDay();
+    const mon = new Date(now); mon.setDate(now.getDate() - ((dow + 6) % 7)); mon.setHours(0, 0, 0, 0);
+    const d = new Date(mon); d.setDate(mon.getDate() + idx);
+    return d.toISOString().slice(0, 10);
+  }
+  function checkWeekOf(dateStr) {
+    const t = new Date(dateStr + "T12:00:00"); t.setHours(0, 0, 0, 0);
+    t.setDate(t.getDate() + 4 - (t.getDay() || 7));
+    const y0 = new Date(t.getFullYear(), 0, 1);
+    const wn = Math.ceil(((t - y0) / 86400000 + 1) / 7);
+    return t.getFullYear() + "_W" + String(wn).padStart(2, "0");
+  }
+  // Resolves WHO a task-instance's check belongs to: the per-task override,
+  // else whoever claimed/was assigned the slot that day, else 'unassigned'.
+  // This mirrors exactly the visibility filter technicians are already subject
+  // to (state.checks reads/writes always agree with what a tech can even see).
+  function checkOwnerId(dayId, slot, task) {
+    const state = window.MX && window.MX.state;
+    if (!state) return "unassigned";
+    const isToday = dayId === todayId();
+    const name = (task && task.assignedTo)
+      || (isToday && state.dailyClaims && state.dailyClaims[slot] && state.dailyClaims[slot].name)
+      || (state.assignments && state.assignments[dayId + "_" + slot])
+      || "";
+    if (!name) return "unassigned";
+    const u = (state.users || []).find(u => u.name === name);
+    return u ? u.id : ("name:" + name);
+  }
+  function checkKey(dayId, slot, taskId, ownerId) {
+    const dateStr = checkDateForDay(dayId);
+    const wk      = checkWeekOf(dateStr);
+    return (ownerId || "unassigned") + "_" + wk + "_" + dateStr + "_" + slot + "_" + taskId;
+  }
+
   function avatarBg(name) {
     const cols = ["#2D1B69","#0D2D5C","#052010","#3A1A00","#3B0A0A","#1E1400","#0A1628"];
     let h = 0;
@@ -302,6 +346,7 @@
   Object.assign(window.MX, {
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
+    checkKey, checkOwnerId, checkDateForDay, checkWeekOf,
     avatarBg, avatarFg, avatarTxt, chipHtml, userColors, userAvatarHtml, badgeTag, _contrastColor, progressClass, alertLevel, hashPin,
     toast, showModal, closeModal,
     ThemeManager

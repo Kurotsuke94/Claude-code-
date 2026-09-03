@@ -476,7 +476,7 @@
     MX.getDaySlots(todayId).forEach(sl => {
       (MX.state.tasks[`${todayId}_${sl}`] || []).forEach(t => {
         total++;
-        if (MX.state.checks[`${todayId}_${sl}_${t.id}`]) done++;
+        if (MX.state.checks[MX.checkKey(todayId, sl, t.id, MX.checkOwnerId(todayId, sl, t))]) done++;
       });
     });
     const complete = total > 0 && done === total;

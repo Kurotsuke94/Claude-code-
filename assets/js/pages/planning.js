@@ -153,8 +153,11 @@
   function _isTaskDone(dateStr, slot, taskId) {
     const dayId = _dayIdOf(dateStr);
     const wk    = _weekKeyOf(dateStr);
-    const key   = `${dayId}_${slot}_${taskId}`;
-    if (wk === _currentWeekKey()) return !!(MX.state.checks && MX.state.checks[key]);
+    if (wk === _currentWeekKey()) {
+      const task = (MX.state.tasks && MX.state.tasks[dayId + '_' + slot] || []).find(t => t.id === taskId);
+      return !!(MX.state.checks && MX.state.checks[MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task))]);
+    }
+    const key = `${dayId}_${slot}_${taskId}`;
     const doc = _weekDocCache[wk];
     return !!(doc && doc.checks && doc.checks[key]);
   }

@@ -738,7 +738,7 @@
       var tasks = state.tasks[todayId + '_' + slot] || [];
       total += tasks.length;
       tasks.forEach(function(t) {
-        if (state.checks[todayId + '_' + slot + '_' + t.id]) done++;
+        if (state.checks[MX.checkKey(todayId, slot, t.id, MX.checkOwnerId(todayId, slot, t))]) done++;
       });
     });
     const pct    = total ? Math.round(done / total * 100) : 0;
@@ -937,7 +937,7 @@
       getDaySlots(day.id).forEach(sl => {
         (state.tasks[`${day.id}_${sl}`] || []).forEach(task => {
           t++;
-          if (state.checks[`${day.id}_${sl}_${task.id}`]) d++;
+          if (state.checks[MX.checkKey(day.id, sl, task.id, MX.checkOwnerId(day.id, sl, task))]) d++;
         });
       });
       const pct = t ? Math.round(d / t * 100) : 0;

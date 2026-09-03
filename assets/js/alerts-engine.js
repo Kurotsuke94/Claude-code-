@@ -23,7 +23,7 @@
     const key   = `${dayId}_${slot}`;
     const tasks = (MX.state.tasks && MX.state.tasks[key]) || [];
     if (!tasks.length) return null;
-    const done  = tasks.filter(t => !!(MX.state.checks && MX.state.checks[`${key}_${t.id}`])).length;
+    const done  = tasks.filter(t => !!(MX.state.checks && MX.state.checks[MX.checkKey(dayId, slot, t.id, MX.checkOwnerId(dayId, slot, t))])).length;
     return Math.round((done / tasks.length) * 100);
   }
 
@@ -70,7 +70,7 @@
       return users.some(u => {
         const mine    = tasks.filter(t => t.assignedTo === u.name);
         if (!mine.length) return false;
-        const checked = mine.filter(t => !!(MX.state.checks && MX.state.checks[`${key}_${t.id}`])).length;
+        const checked = mine.filter(t => !!(MX.state.checks && MX.state.checks[MX.checkKey(dayId, slot, t.id, MX.checkOwnerId(dayId, slot, t))])).length;
         return checked === 0;
       });
     },

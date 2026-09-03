@@ -138,7 +138,7 @@
       getDaySlots(d.id).forEach(function(sl) {
         (state.tasks[d.id + '_' + sl] || []).forEach(function(t) {
           totalAll++;
-          if (state.checks[d.id + '_' + sl + '_' + t.id]) doneAll++;
+          if (state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))]) doneAll++;
         });
       });
     });
@@ -151,7 +151,7 @@
     todaySlots.forEach(function(sl) {
       (state.tasks[tid + '_' + sl] || []).forEach(function(t) {
         clTotal++;
-        if (state.checks[tid + '_' + sl + '_' + t.id]) clDone++;
+        if (state.checks[MX.checkKey(tid, sl, t.id, MX.checkOwnerId(tid, sl, t))]) clDone++;
       });
     });
 
@@ -269,7 +269,7 @@
     ];
     var slotStats = SLOT_INFO.map(function(si) {
       var tasks2 = state.tasks[tid + '_' + si.key] || [];
-      var done2  = tasks2.filter(function(t) { return state.checks[tid + '_' + si.key + '_' + t.id]; }).length;
+      var done2  = tasks2.filter(function(t) { return state.checks[MX.checkKey(tid, si.key, t.id, MX.checkOwnerId(tid, si.key, t))]; }).length;
       return { key: si.key, label: si.label, color: si.color, icon: si.icon, total: tasks2.length, done: done2 };
     });
 

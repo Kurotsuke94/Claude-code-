@@ -1,5 +1,13 @@
 # Changelog — Maintix
 
+## v1.1.08 — 2026-09-03 🔒 Correctif checklists partagées entre techniciens
+
+- Les validations de tâches de la check-list du jour n'étaient identifiées que par jour de semaine + créneau + tâche (`lundi_matin_xyz`), sans technicien ni date réelle : une case cochée par un technicien apparaissait cochée pour tous, y compris les semaines suivantes.
+- Nouvelle clé de validation : technicien + année/semaine ISO + date + créneau + tâche (`MX.checkKey`/`MX.checkOwnerId`).
+- Chaque technicien démarre désormais sa journée avec des tâches non validées par défaut ; les validations restent propres à son compte et persistent après actualisation.
+- Sélectionner un créneau horaire ne valide plus aucune tâche automatiquement (vérifié : ce n'était déjà pas le cas).
+- Vue responsable/admin inchangée : elle continue d'afficher l'état de validation du technicien assigné à chaque tâche.
+
 ## v1.1.07 — 2026-07-07
 
 - Redesign en cours du planning.

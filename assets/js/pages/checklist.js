@@ -30,7 +30,7 @@
       tasks.forEach(t => {
         if (canAll || !worker || asn === worker || t.assignedTo === worker) {
           total++;
-          if (state.checks[`${dayId}_${sl}_${t.id}`]) done++;
+          if (state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]) done++;
         }
       });
     });
@@ -102,7 +102,7 @@
           '</div></div>';
       });
       acceptedIn.forEach(function(tr) {
-        const isChk  = !!state.checks[tr.dayId + '_' + tr.slot + '_' + tr.taskId];
+        const isChk  = !!state.checks[MX.checkKey(tr.dayId, tr.slot, tr.taskId, cu ? cu.id : 'unassigned')];
         const slotObj = MX.SLOTS[tr.slot];
         h += '<div class="trow ' + (isChk ? 'done' : '') + '" id="trr_' + esc(tr.id) + '" onclick="MX.Pages.Checklist.toggleTransferred(\'' + esc(tr.dayId) + '\',\'' + esc(tr.slot) + '\',\'' + esc(tr.taskId) + '\',\'' + esc(tr.id) + '\')">' +
           '<div class="tcb ' + (isChk ? 'on' : '') + '"><i class="fas fa-check"></i></div>' +
@@ -132,7 +132,7 @@
         : slotTasks;
 
       let slDone = 0;
-      visTasks.forEach(function(t) { if (state.checks[dayId + '_' + sl + '_' + t.id]) slDone++; });
+      visTasks.forEach(function(t) { if (state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]) slDone++; });
       const slPct = visTasks.length ? Math.round(slDone / visTasks.length * 100) : 0;
       anyVisible = true;
 
@@ -180,7 +180,7 @@
         h += '<div class="cl-ws-sg-tasks">';
         visTasks.forEach(function(t) {
           const tKey    = dayId + '_' + sl + '_' + t.id;
-          const isChk   = !!state.checks[tKey];
+          const isChk   = !!state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))];
           const hasNote = !!((state.notes || {})[tKey]);
           const isSel   = _clWsSelKey === tKey;
           const hasAsgn = !!(t.assignedTo || slAsn);
@@ -304,7 +304,7 @@
       el.classList.toggle('cl-ws-tr--sel', el.id === 'cl-ws-tr-' + taskId);
     });
 
-    const isChecked = !!state.checks[key];
+    const isChecked = !!state.checks[MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task))];
     const note      = (state.notes || {})[key] || '';
     const day       = DAYS.find(function(d) { return d.id === dayId; });
     const s         = SLOTS[slot] || { l: slot, e: '', c: '', icon: '' };
@@ -395,7 +395,8 @@
   async function _clWsToggle(dayId, slot, taskId) {
     await toggle(dayId, slot, taskId);
     const key       = dayId + '_' + slot + '_' + taskId;
-    const isChecked = !!MX.state.checks[key];
+    const task      = (MX.state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
+    const isChecked = !!MX.state.checks[MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task))];
     // Update left panel row stripe + checkbox
     const row = document.getElementById('cl-ws-tr-' + taskId);
     if (row) {
@@ -457,8 +458,9 @@
   }
 
   async function toggle(dayId, slot, taskId) {
-    const key   = `${dayId}_${slot}_${taskId}`;
     const state = MX.state;
+    const task  = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
+    const key   = MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task));
     const val   = !state.checks[key];
 
     state.checks[key] = val;
@@ -471,7 +473,6 @@
 
     try {
       await MX.DB.setCheck(key, val);
-      const task      = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
       const cu        = state.currentUser;
       const actorName = cu ? cu.name : (state.adminUser ? state.adminUser.email : "inconnu");
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: task ? task.text : taskId, dayId, slot }).catch(() => {});
@@ -798,10 +799,10 @@
   }
 
   async function toggleTransferred(dayId, slot, taskId, transferId) {
-    const key   = `${dayId}_${slot}_${taskId}`;
     const state = MX.state;
-    const val   = !state.checks[key];
     const cu    = state.currentUser;
+    const key   = MX.checkKey(dayId, slot, taskId, cu ? cu.id : 'unassigned');
+    const val   = !state.checks[key];
 
     state.checks[key] = val;
     const row = document.getElementById("trr_" + transferId);
@@ -987,7 +988,7 @@
           tasks.forEach(t => {
             if (!cu || asn === cu.name || t.assignedTo === cu.name) {
               dt++;
-              if (state.checks[`${day.id}_${sl}_${t.id}`]) dd++;
+              if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) dd++;
             }
           });
         }
@@ -1234,7 +1235,7 @@
         getDaySlots(dayId).forEach(sl => {
           (state.tasks[`${dayId}_${sl}`] || []).forEach(t => {
             dt++;
-            if (state.checks[`${dayId}_${sl}_${t.id}`]) dd++;
+            if (state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]) dd++;
           });
         });
         const pct = dt ? Math.round(dd / dt * 100) : -1;
@@ -1570,7 +1571,9 @@
           tasksSnap[k] = (state.tasks[k] || []);
           (state.tasks[k] || []).forEach(t => {
             const ck = `${k}_${t.id}`;
-            if (state.checks[ck]) chksSnap[ck] = true;
+            // Archive keeps the coarse "was it done" boolean (not per-technician) —
+            // read from the live per-owner key, write under the archive's own short key.
+            if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) chksSnap[ck] = true;
           });
         });
       });
@@ -1690,7 +1693,7 @@
           const k = `${day.id}_${sl}`;
           (state.tasks[k] || []).forEach(t => {
             totalW++;
-            if (state.checks[`${k}_${t.id}`]) doneW++;
+            if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) doneW++;
           });
         });
       });
@@ -1705,7 +1708,7 @@
       const k = `${todayId}_${sl}`;
       (state.tasks[k] || []).forEach(t => {
         todayTotal++;
-        if (state.checks[`${k}_${t.id}`]) todayDone++;
+        if (state.checks[MX.checkKey(todayId, sl, t.id, MX.checkOwnerId(todayId, sl, t))]) todayDone++;
       });
     });
 
@@ -1735,7 +1738,7 @@
                     || (state.assignments && state.assignments[`${todayId}_${sd.key}`])
                     || '';
       const slTasks = state.tasks[`${todayId}_${sd.key}`] || [];
-      const slDone  = slTasks.filter(t => state.checks[`${todayId}_${sd.key}_${t.id}`]).length;
+      const slDone  = slTasks.filter(t => state.checks[MX.checkKey(todayId, sd.key, t.id, MX.checkOwnerId(todayId, sd.key, t))]).length;
       return `<div class="cl-v2-rp-slot">
           <span class="cl-v2-rp-slot-ico">${sd.icon}</span>
           <div class="cl-v2-rp-slot-info">
@@ -2369,7 +2372,9 @@
         tasksSnap[k] = state.tasks[k] || [];
         (state.tasks[k] || []).forEach(t => {
           const ck = `${k}_${t.id}`;
-          if (state.checks[ck]) chksSnap[ck] = true;
+          // Archive keeps the coarse "was it done" boolean (not per-technician) —
+          // read from the live per-owner key, write under the archive's own short key.
+          if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) chksSnap[ck] = true;
         });
       });
     });

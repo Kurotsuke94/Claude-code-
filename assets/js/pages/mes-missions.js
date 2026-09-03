@@ -222,7 +222,7 @@
           slot:        slot,
           dayId:       todayId,
           checkKey:    ck,
-          done:        !!(state.checks[ck]),
+          done:        !!(state.checks[MX.checkKey(todayId, slot, task.id, MX.checkOwnerId(todayId, slot, task))]),
           note:        (state.notes && state.notes[ck]) || '',
           fromUser:    null,
           mine:        mine,
@@ -245,8 +245,8 @@
       var si = SLOT_INFO[tr.slot] || { order: 9 };
       result.push({
         id: tr.taskId, text: tr.taskText || '', desc: '', priority: 'normale',
-        slot: tr.slot, dayId: tr.dayId, checkKey: ck,
-        done: !!(state.checks[ck]), note: '', fromUser: tr.fromUser,
+        slot: tr.slot, dayId: tr.dayId, checkKey: ck, transferId: tr.id,
+        done: !!(state.checks[MX.checkKey(tr.dayId, tr.slot, tr.taskId, cu.id)]), note: '', fromUser: tr.fromUser,
         mine: true, unassigned: false,
         missionType: 'checklist', accepted: true,
         dueDate: tr.dayId, sortOrder: si.order,
@@ -1489,13 +1489,19 @@
       _validateIntMission(t.id);
 
     } else {
-      // Checklist task (no _source) — toggle via Checklist module
-      var ck = t.checkKey || '';
-      var parts = ck.split('_');
-      if (parts.length >= 3) {
-        MX.Pages.Checklist.toggle(parts[0], parts[1], parts.slice(2).join('_'));
+      // Checklist task (no _source) — toggle via Checklist module.
+      // A transferred task must be validated under the *receiving* technician's
+      // own key (toggleTransferred), never the original assignee's (toggle).
+      if (t.fromUser) {
+        MX.Pages.Checklist.toggleTransferred(t.dayId, t.slot, t.id, t.transferId);
       } else {
-        MX.Pages.Checklist.toggle(t.dayId, t.slot, t.id);
+        var ck = t.checkKey || '';
+        var parts = ck.split('_');
+        if (parts.length >= 3) {
+          MX.Pages.Checklist.toggle(parts[0], parts[1], parts.slice(2).join('_'));
+        } else {
+          MX.Pages.Checklist.toggle(t.dayId, t.slot, t.id);
+        }
       }
       _animateCardDone(cardId);
     }

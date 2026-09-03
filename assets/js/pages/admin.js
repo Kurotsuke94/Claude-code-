@@ -1135,7 +1135,7 @@
       getDaySlots(d.id).forEach(sl => {
         (state.tasks[`${d.id}_${sl}`] || []).forEach(t => {
           totalAll++;
-          if (state.checks[`${d.id}_${sl}_${t.id}`]) doneAll++;
+          if (state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))]) doneAll++;
         });
       });
     });
@@ -1476,7 +1476,7 @@
       getDaySlots(d.id).forEach(sl => {
         (state.tasks[`${d.id}_${sl}`] || []).forEach(t => {
           dTotal++;
-          if (state.checks[`${d.id}_${sl}_${t.id}`]) dDone++;
+          if (state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))]) dDone++;
         });
       });
       totalAll += dTotal;
@@ -2048,7 +2048,7 @@
         if (!tasks.length) return;
         const s = SLOTS[sl];
         tasks.forEach(t => {
-          const checked = !!state.checks[`${d.id}_${sl}_${t.id}`];
+          const checked = !!state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))];
           const note    = (state.notes || {})[`${d.id}_${sl}_${t.id}`] || "";
           taskRows += `<tr class="${checked ? 'done' : ''}">
             <td>${d.l}</td><td>${s.l}</td>
