@@ -1120,7 +1120,10 @@
           const who = asn ? (asn[`${dayId}_${sl}`] || '') : '';
           (tsk[`${dayId}_${sl}`] || []).forEach(t => {
             mTotal++;
-            const done = !!(chk[`${dayId}_${sl}_${t.id}`]);
+            // Live week reads the new per-owner key; archived weeks keep the short key.
+            const done = !!(isCurr
+              ? state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]
+              : chk[`${dayId}_${sl}_${t.id}`]);
             if (done) mDone++;
             else if (date < today) mLate++;
             if (who) {
@@ -1192,7 +1195,11 @@
         getDaySlots(dayId).forEach(sl => {
           (tsk[`${dayId}_${sl}`] || []).forEach(t => {
             dt++;
-            if (chk[`${dayId}_${sl}_${t.id}`]) dd++;
+            // Live week reads the new per-owner key; archived weeks keep the short key.
+            const isDone = isCurr
+              ? state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]
+              : chk[`${dayId}_${sl}_${t.id}`];
+            if (isDone) dd++;
           });
         });
 
@@ -1811,7 +1818,10 @@
           const k = `${day.id}_${sl}`;
           (tsk[k] || []).forEach(t => {
             total++;
-            if (chk[`${k}_${t.id}`]) done++;
+            // Live week reads the new per-owner key; archived weeks keep the short key.
+            if (isCurr
+              ? state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]
+              : chk[`${k}_${t.id}`]) done++;
           });
         });
       });
@@ -1973,7 +1983,14 @@
       let dt = 0, dd = 0;
       (getDaySlots(day.id) || []).forEach(sl => {
         const k = `${day.id}_${sl}`;
-        (tsk[k] || []).forEach(t => { totalW++; dt++; if (chk[`${k}_${t.id}`]) { doneW++; dd++; } });
+        (tsk[k] || []).forEach(t => {
+          totalW++; dt++;
+          // Live week reads the new per-owner key; archived weeks keep the short key.
+          const isDone = isCurr
+            ? state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]
+            : chk[`${k}_${t.id}`];
+          if (isDone) { doneW++; dd++; }
+        });
       });
       return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : (isFuture ? -2 : -1) };
     });

@@ -1,5 +1,12 @@
 # Changelog — Maintix
 
+## v1.1.09 — 2026-09-03 🔧 Correctif vues responsable/admin (v1.1.08)
+
+- La v1.1.08 avait migré `state.checks` vers la nouvelle clé longue (technicien+date+…) mais 4 écrans responsable/admin lisaient encore l'ancienne clé courte pour la semaine en cours (via une variable locale `chk`, non détectée par la recherche initiale) : calendrier mensuel (`_renderMonthlyHtml`), cartes des 8 semaines (`_renderWeekSlotsHtml`), détail d'une semaine (`_renderWeekDayGrid`).
+- Conséquence : la semaine en cours s'affichait à 0 % dans ces 3 écrans même quand les techniciens avaient bien validé leurs tâches.
+- Corrigé : ces écrans lisent désormais la nouvelle clé (`MX.checkKey`/`MX.checkOwnerId`) pour la semaine en cours, et conservent l'ancienne clé courte pour les semaines archivées (format inchangé, non concerné).
+- Recherche exhaustive confirmée : plus aucune lecture de `state.checks` (semaine en cours) n'utilise l'ancien format de clé.
+
 ## v1.1.08 — 2026-09-03 🔒 Correctif checklists partagées entre techniciens
 
 - Les validations de tâches de la check-list du jour n'étaient identifiées que par jour de semaine + créneau + tâche (`lundi_matin_xyz`), sans technicien ni date réelle : une case cochée par un technicien apparaissait cochée pour tous, y compris les semaines suivantes.
