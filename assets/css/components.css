@@ -10526,6 +10526,7 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .sv-badge--crit { background:rgba(220,38,38,0.1); color:var(--red); border:1px solid rgba(220,38,38,0.25); }
 .sv-badge--warn { background:rgba(217,119,6,0.1); color:var(--orange); border:1px solid rgba(217,119,6,0.25); }
 .sv-badge--ok   { background:rgba(22,163,74,0.1); color:var(--green); border:1px solid rgba(22,163,74,0.25); }
+.sv-badge--na   { background:var(--bg4); color:var(--text3); border:1px solid var(--border); }
 
 /* ── Top row: score + energy grid ── */
 .sv-top-row { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }

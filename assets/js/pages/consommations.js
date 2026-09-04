@@ -1204,90 +1204,231 @@
   }
 
   // ── TAB: DASHBOARD ──
+  // ── TAB: DASHBOARD — Phase 2 : vue de synthèse "quelques secondes" ──────
+  // Toute la donnée passe par MX.CsoCalc (sumConsumptionByType, computeRatio,
+  // comparePeriods, average, statusFromDeviation, periodDates) + MT — aucune
+  // liste locale de types, aucun calcul parallèle. Les alertes affichées
+  // viennent uniquement de _csoAlerts (cso_energy_alerts, source de vérité
+  // persistée) : aucune nouvelle logique d'alerte n'est créée ici.
   function _tDashboard() {
     const today = _today();
-    const yest  = _daysAgo(1);
-    const cli   = _clients[today] || 0;
-    // Fenêtre courte (aujourd'hui/hier/7j) : couverte par le listener live
-    // dans l'immense majorité des cas ; l'appel reste défensif et gratuit
-    // si déjà couvert (retour immédiat dans _ensureReadingsFrom).
-    _ensureReadingsFrom(_daysAgo(6));
 
-    function _sumConso(type, date) {
-      return sumConsumptionByType(_readings, _meters, type, date);
+    // ── Période comparée (jour / mois en cours / 30 derniers jours) ──
+    // "Personnalisée" reste une capacité de periodDates('custom', ...) déjà
+    // disponible ; le Tableau de bord n'expose que 3 préréglages pour rester
+    // lisible "en quelques secondes" — l'exploration fine reste dans Analyses.
+    const period = window._csoDashPeriod || 'day';
+    let dates, prevDates, periodLbl, partialNote = '';
+    if (period === 'month-current') {
+      dates     = periodDates('month-current');
+      prevDates = periodDates('month-previous').slice(0, dates.length);
+      periodLbl = `Mois en cours · ${_dateLbl(dates[0])} → ${_dateLbl(today)}`;
+      partialNote = `Comparé aux ${dates.length} premier${dates.length > 1 ? 's' : ''} jour${dates.length > 1 ? 's' : ''} du mois précédent (mois non terminé)`;
+    } else if (period === 'last30') {
+      dates     = periodDates('last30');
+      prevDates = periodDates('custom', { start: _daysAgo(59), end: _daysAgo(30) });
+      periodLbl = `30 derniers jours · ${_dateLbl(dates[0])} → ${_dateLbl(today)}`;
+    } else {
+      dates     = [today];
+      prevDates = [_daysAgo(1)];
+      periodLbl = `Aujourd'hui · ${_dateLbl(today)}`;
+    }
+    const allNeeded = dates.concat(prevDates);
+    const minNeeded = allNeeded.reduce((m, d) => (!m || d < m) ? d : m, null);
+    // Non bloquant : complète l'historique en tâche de fond si besoin (voir
+    // _ensureReadingsFrom / _ensureClientsFrom, Phase 1B) — la page affichée
+    // se met à jour seule (_rerender) si des données arrivent après coup.
+    _ensureReadingsFrom(minNeeded);
+    _ensureClientsFrom(minNeeded);
+
+    const datesSet = new Set(dates);
+    const hasAnyReadingInPeriod = _readings.some(r => datesSet.has(r.date));
+
+    // ── A. En-tête ──
+    const lastReadingMs = _readings.reduce((m, r) => { const ms = _tsMs(r.createdAt); return ms > m ? ms : m; }, 0);
+    function _relTime(ms) {
+      if (!ms) return null;
+      const diffMin = Math.round((Date.now() - ms) / 60000);
+      if (diffMin < 1)  return "à l'instant";
+      if (diffMin < 60) return `il y a ${diffMin} min`;
+      const diffH = Math.round(diffMin / 60);
+      if (diffH < 24) return `il y a ${diffH} h`;
+      return `il y a ${Math.round(diffH / 24)} j`;
+    }
+    const lastUpdateLbl = _relTime(lastReadingMs);
+
+    const perBtns = [
+      { id: 'day',           l: "Aujourd'hui" },
+      { id: 'month-current', l: 'Mois en cours' },
+      { id: 'last30',        l: '30 derniers jours' },
+    ].map(p => `<button class="cso-per-btn${period === p.id ? ' active' : ''}" onclick="window._csoDashPeriod='${p.id}';MX.Pages.Conso._tab('dashboard')">${p.l}</button>`).join('');
+
+    // ── Cas limite : aucun compteur configuré ──
+    if (!_meters.length) {
+      return `<div class="cso-inner">
+        <div class="sv-header">
+          <div class="sv-header-left">
+            <i class="fas fa-gauge" style="color:var(--cyan);font-size:20px"></i>
+            <div><div class="sv-header-ttl">Tableau de bord énergétique</div>
+              <div class="sv-header-sub">Aucun compteur configuré</div></div>
+          </div>
+        </div>
+        <div class="cso-chart2-empty">
+          <i class="fas fa-gauge-high" style="font-size:28px;opacity:.25"></i><br>
+          Aucun compteur n'est encore configuré — impossible de calculer une consommation.<br>
+          <button class="cso-add-btn" onclick="MX.Pages.Conso._tab('compteurs')">Ajouter un compteur</button>
+        </div>
+      </div>`;
     }
 
-    // ── KPI cards ──
-    let kpiHtml = '';
+    // ── B/C. Données par type d'énergie (source unique : MT + MX.CsoCalc) ──
+    let worstTypeStatus = null; // null < 'ok' < 'warn' < 'crit' (ordre de gravité affiché)
+    const sevRank = { na: 0, ok: 1, warn: 2, crit: 3 };
+    let energyCardsHtml = '';
     Object.entries(MT).forEach(([type, meta]) => {
-      const val   = _sumConso(type, today);
-      const vY    = _sumConso(type, yest);
-      const ratio = val > 0 ? computeRatio(type, val, cli) : null;
-      const rUnit = _isLiterRatioType(type) ? 'L/client' : `${meta.unit}/client`;
-      let deltaHtml = '';
-      if (val > 0 && vY > 0) {
-        const pct = Math.round((val - vY) / vY * 100);
-        const cls = pct > 15 ? 'up' : pct < -5 ? 'dn' : 'eq';
-        deltaHtml = `<div class="cso-kpi-delta ${cls}">${pct > 0 ? '▲' : '▼'}&thinsp;${Math.abs(pct)}%&thinsp;vs&thinsp;hier</div>`;
-      }
-      kpiHtml += `<div class="cso-kpi-card" style="--kc:${meta.color};--kd:${meta.dim}">
-        <div class="cso-kpi-bar"></div>
-        <div class="cso-kpi-hd">
-          <span class="cso-kpi-emoji">${meta.icon}</span>
-          <span class="cso-kpi-nm">${meta.label}</span>
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      if (!ids.length) return; // aucun compteur de ce type : pas de carte (pas de "0" fictif)
+      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
+
+      const hasReading = _readings.some(r => ids.includes(r.meterId) && datesSet.has(r.date));
+      const total       = sumConsumptionByType(_readings, _meters, type, dates);
+      const prevTotal    = sumConsumptionByType(_readings, _meters, type, prevDates);
+      const { pct, trend } = comparePeriods(total, prevTotal);
+      const status = hasReading ? statusFromDeviation(pct) : 'na';
+      if (status !== 'na' && (!worstTypeStatus || sevRank[status] > sevRank[worstTypeStatus])) worstTypeStatus = status;
+
+      const dailyRatios = dates
+        .map(d => computeRatio(type, sumConsumptionByType(_readings, _meters, type, d), _clients[d] || 0))
+        .filter(v => v !== null);
+      const hasRatio = dailyRatios.length > 0;
+      const avgRatio = hasRatio ? average(dailyRatios) : null;
+      const rUnit = _isLiterRatioType(type) ? 'L/client' : `${unit}/client`;
+
+      const stColor = status === 'crit' ? 'var(--red)' : status === 'warn' ? 'var(--orange)' : status === 'ok' ? 'var(--green)' : 'var(--text3)';
+      // 'na' recouvre deux causes distinctes qu'il ne faut pas confondre à
+      // l'affichage : aucun relevé du tout, ou un relevé existe mais sans
+      // historique suffisant pour comparer (ex. rien sur la période
+      // précédente) — sans quoi une vraie donnée du jour serait présentée
+      // comme "Pas de relevé", ce qui serait faux.
+      const stLabel = status === 'crit' ? 'Dérive marquée' : status === 'warn' ? 'À surveiller' : status === 'ok' ? 'Normal'
+        : !hasReading ? 'Pas de relevé' : 'Historique insuffisant';
+      const trendIcon = pct === null ? 'fa-minus' : trend === 'up' ? 'fa-arrow-trend-up' : trend === 'down' ? 'fa-arrow-trend-down' : 'fa-minus';
+
+      energyCardsHtml += `<div class="sv-energy-card" style="--ec:${meta.color};--ed:${meta.dim}">
+        <div class="sv-energy-hd">
+          <span class="sv-energy-ico">${meta.icon}</span>
+          <div>
+            <div class="sv-energy-nm">${esc(meta.label)}</div>
+            <div class="sv-energy-status" style="color:${stColor}"><span class="sv-status-dot" style="background:${stColor}"></span>${stLabel}</div>
+          </div>
+          <div class="sv-energy-ecart" style="color:${stColor}"><i class="fas ${trendIcon}"></i> ${pct !== null ? `${pct > 0 ? '+' : ''}${Math.round(pct)}%` : '—'}</div>
         </div>
-        <div class="cso-kpi-v">${val > 0 ? _fmt(val) : '—'}<span class="cso-kpi-u">&thinsp;${meta.unit}</span></div>
-        ${deltaHtml}
-        <div class="cso-kpi-r">${ratio !== null ? `${_fmt(ratio, _isLiterRatioType(type) ? 0 : 2)}&thinsp;${rUnit}` : '<span style="color:var(--text3)">—</span>'}</div>
+        <div class="sv-energy-val">${hasReading ? _fmt(total) : '<span style="font-size:13px;color:var(--text3)">Aucun relevé</span>'}${hasReading ? `<span class="sv-energy-u"> ${esc(unit)}</span>` : ''}</div>
+        <div class="sv-energy-foot">${hasRatio ? `${_fmt(avgRatio, _isLiterRatioType(type) ? 0 : 2)} ${rUnit}` : 'Ratio non disponible'}</div>
       </div>`;
     });
 
-    // ── Mini 7-day bar chart ──
-    const days7 = Array.from({ length: 7 }, (_, i) => _daysAgo(6 - i));
-    const DOW   = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-    let chartHtml = '';
-    const firstEntry = Object.entries(MT).find(([type]) => {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
-      return ids.length && days7.some(ds => _readings.some(r => ids.includes(r.meterId) && r.date === ds && r.consumption > 0));
+    // ── E. Alertes prioritaires (source de vérité : cso_energy_alerts) ──
+    const activeAlerts = _csoAlerts.filter(a => a.status === 'active');
+    const critCount = activeAlerts.filter(a => a.level === 'critical').length;
+    const warnCount = activeAlerts.filter(a => a.level === 'warning').length;
+    const sortedAlerts = [...activeAlerts].sort((a, b) => {
+      if (a.level !== b.level) return a.level === 'critical' ? -1 : 1;
+      return _tsMs(b.ts) - _tsMs(a.ts);
     });
-    if (firstEntry) {
-      const [type, meta] = firstEntry;
-      const ids  = _meters.filter(m => m.type === type).map(m => m.id);
-      const vals = days7.map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds).reduce((s, r) => s + (r.consumption || 0), 0));
-      const maxV = Math.max(...vals, 0.001);
-      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
-      chartHtml = `<div class="cso-dash-chart">
-        <div class="cso-dash-chart-hd">
-          <span>${meta.icon} ${meta.label} — 7 derniers jours</span>
-          <span class="cso-dash-chart-tot">Total : <b>${_fmt(vals.reduce((a,b)=>a+b,0))} ${esc(unit)}</b></span>
-        </div>
-        <div class="cso-bars7">
-          ${days7.map((ds, i) => {
-            const pct = vals[i] > 0 ? Math.max(vals[i] / maxV * 100, 5) : 0;
-            const lbl = DOW[new Date(ds + 'T12:00').getDay()];
-            const isT = ds === today;
-            return `<div class="cso-bar7-col">
-              <div class="cso-bar7" style="height:${pct}%;background:${meta.color};opacity:${pct ? (isT ? 1 : 0.5) : 0.1}${isT ? ';box-shadow:0 0 8px '+meta.color+'80' : ''}"></div>
-              <div class="cso-bar7-lbl${isT ? ' today' : ''}">${lbl}</div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
+    let alertsHtml = '';
+    if (!sortedAlerts.length) {
+      alertsHtml = `<div class="cso-chart2-empty"><i class="fas fa-check-circle" style="color:var(--green);font-size:20px"></i><br>Aucune alerte active</div>`;
+    } else {
+      sortedAlerts.slice(0, 4).forEach(a => {
+        const meta = MT[a.metric] || {};
+        const lvlC = a.level === 'critical' ? 'var(--red)' : 'var(--orange)';
+        alertsHtml += `<div class="sv-tl-item sv-tl--${a.level}">
+          <div class="sv-tl-line"><span class="sv-tl-dot" style="background:${lvlC}"></span></div>
+          <div class="sv-tl-body">
+            <div class="sv-tl-ttl">${meta.icon || '⚡'} ${esc(a.title || a.type || 'Alerte')}</div>
+            <div class="sv-tl-msg">${esc(a.msg || a.message || '')}</div>
+          </div>
+          <div class="sv-tl-meta">
+            <div class="sv-tl-acts">
+              <button class="sv-tl-act" onclick="MX.Pages.Conso._createIntFromAlert('${esc(a.id)}')" title="Créer intervention"><i class="fas fa-screwdriver-wrench"></i></button>
+            </div>
+          </div>
+        </div>`;
+      });
+      if (sortedAlerts.length > 4) {
+        alertsHtml += `<button class="cso-add-btn" style="margin-top:8px" onclick="MX.Pages.Conso._tab('alertes')">Voir les ${sortedAlerts.length - 4} autre${sortedAlerts.length - 4 > 1 ? 's' : ''} — Supervision</button>`;
+      }
     }
+
+    // ── Situation globale : le pire signal entre déviation par type ET alertes persistées ──
+    let globalStatus = worstTypeStatus || 'na';
+    if (critCount > 0) globalStatus = 'crit';
+    else if (warnCount > 0 && sevRank[globalStatus] < sevRank.warn) globalStatus = 'warn';
+    const globalBadge = {
+      crit: { cls: 'sv-badge--crit', icon: 'fa-triangle-exclamation', lbl: 'Anomalie à traiter' },
+      warn: { cls: 'sv-badge--warn', icon: 'fa-exclamation-circle',  lbl: 'Vigilance recommandée' },
+      ok:   { cls: 'sv-badge--ok',   icon: 'fa-check-circle',        lbl: 'Situation normale' },
+      na:   { cls: 'sv-badge--na',   icon: 'fa-circle-question',     lbl: 'Données insuffisantes' },
+    }[globalStatus];
+
+    // ── Clients (widget opérationnel du jour — indépendant de la période d'analyse choisie) ──
+    const cliToday = _clients[today];
+    const hasCliToday = cliToday !== undefined;
 
     return `<div class="cso-inner">
+      <div class="sv-header">
+        <div class="sv-header-left">
+          <i class="fas fa-gauge" style="color:var(--cyan);font-size:20px"></i>
+          <div>
+            <div class="sv-header-ttl">Tableau de bord énergétique</div>
+            <div class="sv-header-sub">${periodLbl}${lastUpdateLbl ? ` · Dernier relevé ${lastUpdateLbl}` : ''}</div>
+          </div>
+        </div>
+        <div class="sv-header-badges">
+          <span class="sv-badge ${globalBadge.cls}"><i class="fas ${globalBadge.icon}"></i> ${globalBadge.lbl}</span>
+        </div>
+      </div>
+
+      <div class="cso-chart2-per">${perBtns}</div>
+      ${partialNote ? `<div class="cso-dash-chart-tot" style="padding:0 2px">${esc(partialNote)}</div>` : ''}
+
       <div class="cso-cli-bar">
         <div class="cso-cli-ico">👥</div>
         <div class="cso-cli-info">
-          <div class="cso-cli-val">${cli > 0 ? cli : '—'}</div>
+          <div class="cso-cli-val">${hasCliToday ? cliToday : '<span style="color:var(--text3);font-size:14px">Non renseigné</span>'}</div>
           <div class="cso-cli-lbl">Clients présents · ${_dateLbl(today)}</div>
         </div>
-        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${cli})">
-          <i class="fas fa-pen"></i> Modifier
+        <button class="cso-cli-btn" onclick="MX.Pages.Conso._editCli('${today}',${hasCliToday ? cliToday : 0})">
+          <i class="fas fa-pen"></i> ${hasCliToday ? 'Modifier' : 'Renseigner'}
         </button>
       </div>
-      <div class="cso-kpi-grid">${kpiHtml}</div>
-      ${chartHtml}
+
+      <div class="cso-kpi-grid">
+        <div class="cso-kpi-card" style="--kc:var(--cyan);--kd:rgba(139,92,246,0.15)">
+          <div class="cso-kpi-bar"></div>
+          <div class="cso-kpi-hd"><span class="cso-kpi-emoji"><i class="fas fa-gauge-high"></i></span><span class="cso-kpi-nm">Compteurs actifs</span></div>
+          <div class="cso-kpi-v">${_meters.length}</div>
+        </div>
+        <div class="cso-kpi-card" style="--kc:${critCount > 0 ? '#EF4444' : warnCount > 0 ? '#F97316' : '#22C55E'};--kd:rgba(239,68,68,0.15)">
+          <div class="cso-kpi-bar"></div>
+          <div class="cso-kpi-hd"><span class="cso-kpi-emoji"><i class="fas fa-bell"></i></span><span class="cso-kpi-nm">Alertes actives</span></div>
+          <div class="cso-kpi-v">${activeAlerts.length}</div>
+          ${activeAlerts.length ? `<div class="cso-kpi-delta up">${critCount} critique${critCount !== 1 ? 's' : ''} · ${warnCount} attention${warnCount !== 1 ? 's' : ''}</div>` : ''}
+        </div>
+      </div>
+
+      ${!hasAnyReadingInPeriod
+        ? `<div class="cso-chart2-empty"><i class="fas fa-camera" style="font-size:26px;opacity:.25"></i><br>Aucun relevé enregistré sur cette période.<br>
+            <button class="cso-add-btn" onclick="MX.Pages.Conso._newReading(null)">Faire un relevé</button></div>`
+        : `<div class="sv-energy-grid">${energyCardsHtml}</div>`
+      }
+
+      <div class="sv-timeline">
+        <div class="sv-section-ttl"><i class="fas fa-list-check"></i> Alertes prioritaires <span class="sv-cnt">${activeAlerts.length}</span></div>
+        ${alertsHtml}
+      </div>
+
       <button class="cso-fab-btn" onclick="MX.Pages.Conso._newReading(null)">
         <i class="fas fa-camera"></i> Nouveau relevé
       </button>
