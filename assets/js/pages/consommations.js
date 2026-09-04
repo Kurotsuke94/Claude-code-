@@ -27,6 +27,23 @@
   let _readingIndexCache = {};      // docId → last known index value (to detect external modifications)
   let _perfCfg   = { thresholds: {}, classes: {}, ref_meters: {}, objectifs: {}, justifications: {}, alert_rules: {} }; // Performance config from Firestore
 
+  // ── PHASE 1B : chargement complémentaire par plage de dates ──────────────
+  // Le listener live de cso_readings est plafonné à 500 docs (tous compteurs
+  // confondus, triés par createdAt desc) pour rester léger en temps réel.
+  // Au-delà de ce plafond, l'historique le plus ancien peut manquer pour les
+  // périodes longues (3 mois / 1 an). _ensureReadingsFrom() complète alors
+  // ce cache par une requête ponctuelle (pas un listener) filtrée sur `date`,
+  // fusionnée dans _readings (marquée `_ext:true`) sans jamais toucher aux
+  // ~15 fonctions qui lisent déjà _readings directement (Phase 1).
+  const _readingsLiveCap      = 500;  // seule source de vérité : réutilisé tel quel dans le .limit() du listener _load()
+  let _extReadingsFrom        = null; // date la plus ancienne déjà couverte par une requête complémentaire
+  let _extReadingsFetching    = null; // Promise en vol (évite les requêtes dupliquées)
+  // Idem pour cso_clients (plafond du listener live : 90 jours).
+  const _clientsLiveCap       = 90;   // seule source de vérité : réutilisé tel quel dans le .limit() du listener _load()
+  let _clientsLiveMinDate     = null; // date la plus ancienne du dernier snapshot live ; null = live < plafond → tout est chargé
+  const _clientsExtDates      = new Set(); // dates chargées hors fenêtre live (à préserver lors des rafraîchissements du listener)
+  let _extClientsFetching     = null;
+
   // ── FIRESTORE ERROR HANDLER ──
   function _fsErr(coll) {
     return function (err) {
@@ -904,7 +921,7 @@
       _archivedMeters = all.filter(m =>  m.archived);
       _rerender();
     }, _fsErr('cso_meters'));
-    _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(500).onSnapshot(snap => {
+    _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(_readingsLiveCap).onSnapshot(snap => {
       // Detect index changes to trigger recalculation for multi-session modifications.
       // _recalcMeter only writes `consumption` (not `index`), so cache mismatches on
       // `index` exclusively detect real user edits — no infinite recalc loop possible.
@@ -921,13 +938,24 @@
           delete _readingIndexCache[id];
         }
       });
-      _readings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Fusionne (ne remplace pas) : préserve les relevés complémentaires
+      // chargés par _ensureReadingsFrom (marqués _ext), hors de la fenêtre
+      // live, tout en rafraîchissant intégralement la fenêtre live elle-même.
+      const liveDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const liveIds  = new Set(liveDocs.map(d => d.id));
+      _readings = liveDocs.concat(_readings.filter(r => r._ext && !liveIds.has(r.id)));
       changedMeterIds.forEach(mid => recalculateConsumption(mid).catch(() => {}));
       _rerender();
     }, _fsErr('cso_readings'));
-    _unsubCso.clients = CSO.clients().orderBy('date', 'desc').limit(90).onSnapshot(snap => {
-      _clients = {};
-      snap.docs.forEach(d => { _clients[d.id] = d.data().count; });
+    _unsubCso.clients = CSO.clients().orderBy('date', 'desc').limit(_clientsLiveCap).onSnapshot(snap => {
+      // Fusionne : préserve les dates complémentaires chargées par
+      // _ensureClientsFrom / saisies via _editCli hors de la fenêtre live.
+      const liveDates = new Set();
+      snap.docs.forEach(d => { _clients[d.id] = d.data().count; liveDates.add(d.id); });
+      Object.keys(_clients).forEach(d => {
+        if (!liveDates.has(d) && !_clientsExtDates.has(d)) delete _clients[d];
+      });
+      _clientsLiveMinDate = snap.size === _clientsLiveCap ? [...liveDates].sort()[0] : null;
       _rerender();
     }, _fsErr('cso_clients'));
     _unsubCso.alerts = CSO.alerts().orderBy('ts', 'desc').limit(100).onSnapshot(snap => {
@@ -947,6 +975,86 @@
       });
       _rerender();
     }, _fsErr('cso_perf_config'));
+  }
+
+  // ── CHARGEMENT COMPLÉMENTAIRE PAR PLAGE DE DATES (Phase 1B) ─────────────
+  // Ces fonctions sont volontairement séparées du listener live : une seule
+  // requête ponctuelle (`.get()`, pas `.onSnapshot()`) par plage manquante,
+  // jamais une deuxième souscription temps réel — le volume de lecture reste
+  // borné à ce qui est réellement demandé par la page ouverte, pas à un flux
+  // continu supplémentaire.
+
+  // Date la plus ancienne garantie couverte par le SEUL listener live (hors
+  // relevés complémentaires `_ext`). `null` = le listener n'a pas atteint son
+  // plafond → il contient tout l'historique, aucune requête n'est jamais utile.
+  function _liveGuaranteedFrom() {
+    const live = _readings.filter(r => !r._ext);
+    if (live.length < _readingsLiveCap) return null;
+    let min = null;
+    live.forEach(r => { if (r.date && (!min || r.date < min)) min = r.date; });
+    return min;
+  }
+
+  // Garantit que _readings couvre au moins depuis `minDateNeeded` jusqu'à
+  // aujourd'hui. Ne bloque jamais le rendu en cours : si la donnée manque,
+  // une requête ponctuelle part en tâche de fond et déclenche _rerender() à
+  // son retour — la page affichée se complète alors d'elle-même, exactement
+  // comme le fait déjà un listener live qui reçoit une mise à jour.
+  function _ensureReadingsFrom(minDateNeeded) {
+    if (!minDateNeeded) return;
+    const guaranteedFrom = _extReadingsFrom || _liveGuaranteedFrom();
+    if (guaranteedFrom === null) return;       // tout l'historique est déjà en mémoire
+    if (minDateNeeded >= guaranteedFrom) return; // déjà couvert
+    if (_extReadingsFetching) return;          // une requête est déjà en vol ; son _rerender() re-testera
+    _extReadingsFetching = CSO.readings()
+      .where('date', '>=', minDateNeeded)
+      .where('date', '<',  guaranteedFrom)
+      .get()
+      .then(snap => {
+        const known = new Set(_readings.map(r => r.id));
+        snap.docs.forEach(d => {
+          if (!known.has(d.id)) _readings.push({ id: d.id, ...d.data(), _ext: true });
+        });
+        _extReadingsFrom = minDateNeeded;
+        _rerender();
+      })
+      .catch(_fsErr('cso_readings (plage complémentaire)'))
+      .finally(() => { _extReadingsFetching = null; });
+  }
+
+  // Purge les relevés complémentaires d'UN compteur après un recalcul —
+  // leur `consumption` peut être devenu obsolète (le recalcul réécrit tous
+  // les relevés du compteur, pas seulement le plus récent) et, hors de la
+  // fenêtre live, rien ne les aurait rafraîchis automatiquement. Réinitialise
+  // aussi le marqueur global : plus simple et plus sûr qu'un recalcul fin de
+  // "quelles plages restent valides", au prix d'une re-requête un peu plus
+  // large au prochain besoin (rare : uniquement après écriture d'un relevé).
+  function _invalidateExtReadings(meterId) {
+    if (_extReadingsFrom === null) return;
+    _readings = _readings.filter(r => !(r._ext && r.meterId === meterId));
+    _extReadingsFrom = null;
+  }
+
+  // Équivalent de _ensureReadingsFrom pour cso_clients (plafond du listener
+  // live : _clientsLiveCap jours). Pas de mécanisme d'invalidation séparé :
+  // _editCli met à jour _clients[date] en local immédiatement après écriture
+  // (donnée connue avec certitude, jamais besoin de la rafraîchir).
+  function _ensureClientsFrom(minDateNeeded) {
+    if (!minDateNeeded) return;
+    const guaranteedFrom = _clientsLiveMinDate;
+    if (guaranteedFrom === null) return;
+    if (minDateNeeded >= guaranteedFrom) return;
+    if (_extClientsFetching) return;
+    _extClientsFetching = CSO.clients()
+      .where('date', '>=', minDateNeeded)
+      .where('date', '<',  guaranteedFrom)
+      .get()
+      .then(snap => {
+        snap.docs.forEach(d => { _clients[d.id] = d.data().count; _clientsExtDates.add(d.id); });
+        _rerender();
+      })
+      .catch(_fsErr('cso_clients (plage complémentaire)'))
+      .finally(() => { _extClientsFetching = null; });
   }
 
   // ── RENDER ──
@@ -1047,7 +1155,10 @@
   }
 
   function _getCsoState() {
-    return { meters: _meters, readings: _readings, clients: _clients, loaded: _loaded };
+    return {
+      meters: _meters, readings: _readings, clients: _clients, loaded: _loaded,
+      extReadingsFrom: _extReadingsFrom, clientsLiveMinDate: _clientsLiveMinDate,
+    };
   }
 
   function _tab(id) {
@@ -1097,6 +1208,10 @@
     const today = _today();
     const yest  = _daysAgo(1);
     const cli   = _clients[today] || 0;
+    // Fenêtre courte (aujourd'hui/hier/7j) : couverte par le listener live
+    // dans l'immense majorité des cas ; l'appel reste défensif et gratuit
+    // si déjà couvert (retour immédiat dans _ensureReadingsFrom).
+    _ensureReadingsFrom(_daysAgo(6));
 
     function _sumConso(type, date) {
       return sumConsumptionByType(_readings, _meters, type, date);
@@ -1306,6 +1421,9 @@
     const selDate = _csoSelDate || today;
     const isToday = selDate === today;
     const cli     = _clients[selDate] || 0;
+    // Navigation par jour (_csoDatePrev) pouvant remonter arbitrairement loin.
+    _ensureReadingsFrom(selDate);
+    _ensureClientsFrom(selDate);
     const prevDs  = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
     const nextDs  = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() + 1); const n = d.toISOString().slice(0, 10); return n <= today ? n : null; })();
 
@@ -1496,6 +1614,15 @@
     const days = parseInt(per);
     const today = _today();
     const dates = Array.from({length: days}, (_, i) => _daysAgo(days - 1 - i));
+    // Complète en tâche de fond (si besoin) l'historique nécessaire à cette
+    // période : la comparaison "vs période précédente" remonte jusqu'à
+    // days*2 jours, et la moyenne de référence jusqu'à 30 jours — le plus
+    // ancien des deux fixe la date à garantir. Ne bloque pas le rendu : si
+    // des données manquent, la page s'affiche avec ce qui est déjà en
+    // mémoire puis se met à jour seule (_rerender) une fois la requête
+    // complémentaire terminée — même comportement que les listeners live.
+    _ensureReadingsFrom(_daysAgo(Math.max(days * 2 - 1, 29)));
+    _ensureClientsFrom(_daysAgo(Math.max(days * 2 - 1, 29)));
     const ratioZone = window._csoRatioZone || 'all';
     const zones   = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
     const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.zone || '') === ratioZone);
@@ -2075,6 +2202,12 @@
     const c        = _perfC();
     const t        = _perfT();
     const isW      = _isLiterRatioType;
+    // Le tableau historique va jusqu'à 90 jours et la navigation par jour
+    // (_peDatePrev) peut remonter arbitrairement loin dans le passé : on
+    // garantit le chargement du plus ancien des deux besoins. Non bloquant
+    // (voir commentaire équivalent dans _tAnalyses).
+    _ensureReadingsFrom(peDate < _daysAgo(89) ? peDate : _daysAgo(89));
+    _ensureClientsFrom(peDate < _daysAgo(89) ? peDate : _daysAgo(89));
 
     // ── Comparison dates ──
     const d_hier   = _daysAgo(peDate === today ? 1 : Math.ceil((new Date(today)-new Date(peDate))/86400000)+1);
@@ -3562,7 +3695,14 @@
           const v = parseInt(document.getElementById('cso-cli-inp')?.value || '');
           if (isNaN(v) || v < 0) return;
           await CSO.clients().doc(date).set({ date, count: v, updatedAt: FV.serverTimestamp() });
+          // Mise à jour locale immédiate : la valeur vient d'être écrite avec
+          // certitude, inutile d'attendre un éventuel rafraîchissement — et
+          // nécessaire si `date` est hors de la fenêtre du listener live
+          // (_clientsLiveCap jours), sans quoi elle resterait invisible tant
+          // qu'aucune requête complémentaire n'est déclenchée.
+          _clients[date] = v; _clientsExtDates.add(date);
           MX.toast('Clients mis à jour');
+          _rerender();
         }},
         { label: 'Annuler', cls: 'cancel' }
       ]
@@ -3896,6 +4036,7 @@
     _recalcLocks.add(meterId);
     return _recalcMeter(meterId)
       .then(() => {
+        _invalidateExtReadings(meterId);
         // Flush waiters only when there is no pending re-run queued — otherwise
         // the pending re-run will flush them once it completes.
         if (!_recalcPending.has(meterId)) _flushRecalcWaiters(meterId);
@@ -4196,6 +4337,7 @@
     _allMeters, _csv, _pdf,
     _csoDateSet, _csoDatePrev, _csoDateNext,
     _getCsoState, _load,
+    _ensureReadingsFrom, _ensureClientsFrom,
     _csoSetSearch, _csoSetFilter, _toggleZone, _releverZone,
     _resolveAlert, _createIntFromAlert, _critDismiss, _supView,
     _salCreateInt, _salSave,
