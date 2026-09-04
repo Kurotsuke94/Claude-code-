@@ -13,6 +13,21 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db   = firebase.firestore();
 const auth = firebase.auth();
 
+// Connexion anonyme Firebase Auth — nécessaire car les techniciens et
+// responsables s'authentifient uniquement par PIN Firestore (jamais via
+// Firebase Auth). Sans ceci, request.auth est TOUJOURS null pour eux côté
+// règles Firestore, qui ne peuvent alors plus distinguer "session app" de
+// "requête anonyme sur Internet" sans ouvrir complètement l'écriture.
+// Cette connexion anonyme ne donne AUCUN droit admin : voir isAdmin() dans
+// firestore.rules, qui exclut explicitement le provider "anonymous".
+auth.onAuthStateChanged(function(user) {
+  if (!user) {
+    auth.signInAnonymously().catch(function(e) {
+      console.error('[Auth] Échec de la connexion anonyme Firebase :', e);
+    });
+  }
+});
+
 // Storage — guarded init (fails silently if SDK not loaded on some iOS/browsers)
 let storage = null;
 try {

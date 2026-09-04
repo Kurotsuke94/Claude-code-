@@ -26,8 +26,25 @@ service cloud.firestore {
 
     // ────────────────────────────────────────────────────────────────────────
     // HELPER : Administrateur Firebase Auth
+    // Exclut explicitement le provider "anonymous" : depuis l'ajout de la
+    // connexion anonyme (bootstrap client pour les techniciens/responsables
+    // PIN, voir firebase-config.js), request.auth != null seul ne suffit
+    // plus à identifier un Administrateur — il faut vérifier qu'il s'agit
+    // d'une vraie session e-mail/mot de passe.
     // ────────────────────────────────────────────────────────────────────────
     function isAdmin() {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : session applicative authentifiée (Admin OU PIN via bootstrap
+    // anonyme). Ne prouve PAS l'identité du technicien/responsable (le PIN
+    // lui-même n'est vérifié que côté client), mais exige un vrai jeton
+    // Firebase Auth — ce qui exclut toute requête faite sans jamais passer
+    // par le SDK/l'app (ex. appel REST direct sans authentification).
+    // ────────────────────────────────────────────────────────────────────────
+    function isAuthenticated() {
       return request.auth != null;
     }
 
@@ -62,18 +79,25 @@ service cloud.firestore {
     // Firebase Auth uniquement" ci-dessus. Ce sont des documents OPÉRATIONNELS
     // (état des cases cochées / notes de tâche des check-lists), écrits en
     // continu par les techniciens ET les responsables — qui s'authentifient
-    // tous les deux par PIN Firestore (request.auth == null), jamais par
-    // Firebase Auth. Le isAdmin() ci-dessus bloquait donc TOUTE validation de
-    // tâche pour ces deux rôles ("Erreur de connexion" au clic sur Valider).
+    // par PIN Firestore, jamais par un compte e-mail/mot de passe. Le
+    // isAdmin() ci-dessus bloquait donc TOUTE validation de tâche pour ces
+    // deux rôles ("Erreur de connexion" au clic sur Valider).
+    // Écriture réservée à isAuthenticated() (PAS "if true") : le client
+    // (firebase-config.js) ouvre désormais une session Firebase Auth anonyme
+    // au chargement pour TOUTE l'app, y compris les utilisateurs PIN. Un
+    // appel direct à l'API Firestore sans jamais passer par le SDK Firebase
+    // Auth (donc sans jeton) reste refusé ; ceci ne remplace pas une vraie
+    // vérification d'identité par technicien (le PIN n'est validé que côté
+    // client), qui nécessiterait une Cloud Function + jetons personnalisés.
     // Ce chemin plus précis prend le pas sur /config/{docId} pour ces deux
     // documents uniquement — le reste de /config/* reste Admin-only.
     match /config/checks {
       allow read: if true;
-      allow create, update: if true;
+      allow create, update: if isAuthenticated();
     }
     match /config/notes {
       allow read: if true;
-      allow create, update: if true;
+      allow create, update: if isAuthenticated();
     }
 
     // ── USERS ────────────────────────────────────────────────────────────────
