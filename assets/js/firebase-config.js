@@ -83,6 +83,7 @@ window.MX.state = {
   rewardsHistory:[],
   rewardsUsers:  {},
   dailyClaims:        {},
+  csoAlerts:          [],
   todayDateStr:       new Date().toISOString().slice(0, 10),
   todayPlanSuggestions: {}
 };

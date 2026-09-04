@@ -539,7 +539,7 @@
         aItems += _tabBtn("superadmin",   "fa-hotel",           "Hôtels & Config");
         aItems += _tabBtn("pin",          "fa-key",             "Codes PIN & Accès");
       }
-      const _alertCnt = (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
+      const _alertCnt = window.MX.Alerts ? MX.Alerts.activeCount() : (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
       h += _group("fa-crosshairs", "sx-group-ico--cyan", "Centre de Pilotage" + _alertBadge, "adm", "toggleNavAdmin", _adminOpen, aItems, "utilisateurs", "Centre de Pilotage");
       _dbgAdd("[Groupe] Centre de Pilotage");
@@ -758,9 +758,6 @@
     const pmpsActive = pmps.filter(m => !m.done);
     const pmpsDone  = pmps.length - pmpsActive.length;
 
-    // ── Alerts ──
-    const alerts = (state.triggeredAlerts || []).filter(a => !a.acknowledged);
-
     // ── Stock critique ──
     const critStock = (state.products || []).filter(p =>
       p.quantity !== undefined && p.minStock !== undefined && Number(p.quantity) <= Number(p.minStock)
@@ -857,22 +854,8 @@
     }
     h += '</div>';
 
-    // ── Alertes ──
-    if (alerts.length > 0) {
-      h += '<div class="dxp-section dxp-section--alert">'
-        + '<div class="dxp-hd"><i class="fas fa-triangle-exclamation dxp-ico" style="color:#ef4444"></i>'
-        + '<span>Alertes actives</span>'
-        + '<span class="dxp-badge dxp-badge--red">' + alerts.length + '</span>'
-        + '</div><div class="dxp-list">';
-      alerts.slice(0, 3).forEach(function(a) {
-        h += '<div class="dxp-item">'
-          + '<div class="dxp-item-dot" style="background:#ef4444"></div>'
-          + '<div class="dxp-item-info"><div class="dxp-item-ttl">' + e(a.label || a.type || 'Alerte') + '</div></div>'
-          + '</div>';
-      });
-      if (alerts.length > 3) h += '<div class="dxp-more">+' + (alerts.length - 3) + ' de plus</div>';
-      h += '</div></div>';
-    }
+    // ── Alertes — voir alerts-ui.js pour le détail/normalisation ──
+    if (window.MX.Alerts) h += MX.Alerts.renderDashboardSection();
 
     // ── Stock critique ──
     if (critStock.length > 0) {
@@ -899,7 +882,7 @@
 
   function _updAlertBadge() {
     const alerts = MX.state.triggeredAlerts || [];
-    const cnt    = alerts.filter(a => !a.acknowledged).length;
+    const cnt    = window.MX.Alerts ? MX.Alerts.activeCount() : alerts.filter(a => !a.acknowledged).length;
     const el     = document.getElementById('sxdb_alert-badge');
     if (el) { el.textContent = cnt || ''; el.style.display = cnt ? '' : 'none'; }
     MX.Notifs && MX.Notifs.checkNewAlerts && MX.Notifs.checkNewAlerts(alerts);
@@ -1618,9 +1601,18 @@
     DB.listenTriggeredAlerts(state.todayDateStr, list => {
       state.triggeredAlerts = list;
       _updAlertBadge();
+      buildDxPanel();
       if (state.currentPage === 'utilisateurs' || state.currentPage === 'admin') {
         MX.Pages.Admin && MX.Pages.Admin.render();
       }
+    });
+
+    // CSO meter-overconsumption alerts — loaded globally so the dashboard and
+    // "toutes les alertes" view show them even without visiting Compteurs & Relevés.
+    DB.listenCsoAlerts(list => {
+      state.csoAlerts = list;
+      _updAlertBadge();
+      buildDxPanel();
     });
 
     DB.listenLogs(list => {

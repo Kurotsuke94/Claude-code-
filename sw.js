@@ -124,6 +124,7 @@ const SHELL = [
   "/assets/js/pages/pmp.js"                  + V,
   "/assets/js/pages/ios-diag.js"             + V,
   "/assets/js/alerts-engine.js"              + V,
+  "/assets/js/alerts-ui.js"                  + V,
   "/assets/js/app.js"                        + V,
 ];
 

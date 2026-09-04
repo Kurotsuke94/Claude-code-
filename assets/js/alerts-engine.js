@@ -127,6 +127,27 @@
     });
   }
 
+  // ── Presentation metadata — baked into the alert doc at fire time so the
+  // dashboard/notification UI never has to re-look-up a rule that may since
+  // have been edited or deleted. ──
+  const SLOT_LABELS = { matin: 'Matin', journee: 'Après-midi', soir: 'Soir' };
+  function _kindOf(condType) {
+    if (!condType) return 'generic';
+    if (condType.indexOf('checklist_') === 0) return 'checklist';
+    if (condType.indexOf('planning_') === 0)  return 'planning';
+    if (condType.indexOf('missions_') === 0)  return 'missions';
+    if (condType.indexOf('tech_') === 0)      return 'tech';
+    return 'generic';
+  }
+  function _presentation(rule) {
+    const conds = rule.conditions || [];
+    const first = conds[0] || {};
+    const kind  = _kindOf(first.type);
+    const slotCond = conds.find(c => c.slot);
+    const location = slotCond ? (SLOT_LABELS[slotCond.slot] || slotCond.slot) : '';
+    return { kind, location };
+  }
+
   function _buildMessage(rule) {
     let msg = rule.message || rule.name || 'Alerte déclenchée';
     // Simple interpolation: replace {progress} with actual value
@@ -140,25 +161,39 @@
 
   function _shouldFire(rule) {
     const today    = _todayStr();
-    const existing = (MX.state.triggeredAlerts || []).filter(a => a.ruleId === rule.id && a.dateKey === today);
-    if (!existing.length) return true;
+    // One stable doc per rule per day — see createTriggeredAlert().
+    const existing = (MX.state.triggeredAlerts || []).find(a => a.ruleId === rule.id && a.dateKey === today);
+    if (!existing) return true;
+    if (existing.status === 'resolved') return true; // condition cleared then reappeared — new occurrence, fire now
     const cooldown = (rule.cooldownMin || 60) * 60000;
-    const lastMs   = Math.max(...existing.map(a => {
-      const ts = a.ts && a.ts.seconds ? a.ts.seconds * 1000 : (a.ts || 0);
-      return typeof ts === 'number' ? ts : 0;
-    }));
-    return (Date.now() - lastMs) > cooldown;
+    const ts = existing.ts && existing.ts.seconds ? existing.ts.seconds * 1000 : (existing.ts || 0);
+    return (Date.now() - ts) > cooldown;
+  }
+
+  // Rule condition no longer true but today's alert for it is still 'active' —
+  // mark it resolved so the dashboard/counter stop treating it as ongoing.
+  function _resolveIfActive(rule) {
+    const today    = _todayStr();
+    const existing = (MX.state.triggeredAlerts || []).find(a => a.ruleId === rule.id && a.dateKey === today);
+    if (existing && existing.status !== 'resolved') {
+      MX.DB.resolveTriggeredAlert(rule.id, today).catch(function(e) {
+        console.error('[AlertsEngine] Erreur resolveTriggeredAlert :', e);
+      });
+    }
   }
 
   function _fire(rule) {
     const today   = _todayStr();
     const message = _buildMessage(rule);
+    const pres    = _presentation(rule);
 
     MX.DB.createTriggeredAlert({
       ruleId:    rule.id,
       ruleName:  rule.name,
       level:     rule.level || 'warning',
       message,
+      kind:      pres.kind,
+      location:  pres.location,
       dateKey:   today,
       acknowledged: false,
     }).catch(function(e) {
@@ -189,7 +224,11 @@
   function _check() {
     const rules = MX.state.alertRules || [];
     rules.filter(r => r.active !== false).forEach(rule => {
-      if (_shouldFire(rule) && _evalRule(rule)) _fire(rule);
+      if (_evalRule(rule)) {
+        if (_shouldFire(rule)) _fire(rule);
+      } else {
+        _resolveIfActive(rule);
+      }
     });
   }
 

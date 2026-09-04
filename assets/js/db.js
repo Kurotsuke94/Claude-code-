@@ -1086,8 +1086,17 @@
     }, _fsError('triggered_alerts'));
   }
 
+  // One stable document per rule per day (doc id = `${ruleId}_${dateKey}`) — a rule
+  // re-firing within its cooldown window updates the SAME document instead of
+  // creating a new one, so a recurring condition never piles up duplicate alerts.
   async function createTriggeredAlert(data) {
-    return R_TRIG().add({ ...data, ts: FV.serverTimestamp() });
+    const key = `${data.ruleId}_${data.dateKey}`;
+    return R_TRIG().doc(key).set({ ...data, status: 'active', ts: FV.serverTimestamp() }, { merge: true });
+  }
+
+  async function resolveTriggeredAlert(ruleId, dateKey) {
+    const key = `${ruleId}_${dateKey}`;
+    await R_TRIG().doc(key).update({ status: 'resolved', resolvedAt: FV.serverTimestamp() }).catch(() => {});
   }
 
   async function acknowledgeAlert(id) {
@@ -1099,6 +1108,17 @@
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
     return batch.commit();
+  }
+
+  // ── CSO ENERGY ALERTS (meter overconsumption — cso_energy_alerts) ──
+  // Exposed globally (not just inside consommations.js) so the dashboard and
+  // notification center can show these alerts even if nobody opened the
+  // Compteurs & Relevés page this session.
+  const R_CSO_ALERTS = () => db.collection('cso_energy_alerts');
+  function listenCsoAlerts(cb) {
+    return R_CSO_ALERTS().orderBy('ts', 'desc').limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('cso_energy_alerts'));
   }
 
   // ── WEEKLY CHECKS (historical archive per week) ──
@@ -1180,7 +1200,8 @@
     deleteNotification, archiveNotification,
     listenRoles, addRole, updateRole, deleteRole,
     listenAlertRules, addAlertRule, updateAlertRule, deleteAlertRule,
-    listenTriggeredAlerts, createTriggeredAlert, acknowledgeAlert, clearTodayAlerts,
+    listenTriggeredAlerts, createTriggeredAlert, resolveTriggeredAlert, acknowledgeAlert, clearTodayAlerts,
+    listenCsoAlerts,
     getWeeklyChecks, saveWeeklyChecks, deleteWeeklyChecks, updateWeeklyTasks, promoteWeeklyToActive,
   };
 })();
