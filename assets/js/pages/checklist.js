@@ -440,6 +440,8 @@
       await MX.DB.setNote(key, newNote);
       MX.toast('Mission signalée ✓');
     } catch(e) {
+      console.error("[Checklist] _clWsConfirmBlock() — échec écriture Firestore config/notes —",
+        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
       MX.toast('Erreur', true);
     }
     // Add note icon to left panel row if not already there
@@ -478,6 +480,8 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: task ? task.text : taskId, dayId, slot }).catch(() => {});
     } catch (e) {
       state.checks[key] = !val;
+      console.error("[Checklist] toggle() — échec écriture Firestore config/checks —",
+        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
       MX.toast("Erreur de connexion", true);
     }
   }
@@ -819,6 +823,8 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: tr ? tr.taskText : taskId, dayId, slot }).catch(() => {});
     } catch(e) {
       state.checks[key] = !val;
+      console.error("[Checklist] toggleTransferred() — échec écriture Firestore config/checks —",
+        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
       MX.toast("Erreur de connexion", true);
     }
   }
@@ -855,6 +861,8 @@
       await MX.DB.setNote(key, text);
       MX.toast(text ? "Note enregistrée ✓" : "Note supprimée");
     } catch(e) {
+      console.error("[Checklist] saveNote() — échec écriture Firestore config/notes —",
+        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
       MX.toast("Erreur", true);
     }
   }

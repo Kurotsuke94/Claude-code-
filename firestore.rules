@@ -58,6 +58,24 @@ service cloud.firestore {
       }
     }
 
+    // config/checks & config/notes : exceptions à la règle "config = Admin
+    // Firebase Auth uniquement" ci-dessus. Ce sont des documents OPÉRATIONNELS
+    // (état des cases cochées / notes de tâche des check-lists), écrits en
+    // continu par les techniciens ET les responsables — qui s'authentifient
+    // tous les deux par PIN Firestore (request.auth == null), jamais par
+    // Firebase Auth. Le isAdmin() ci-dessus bloquait donc TOUTE validation de
+    // tâche pour ces deux rôles ("Erreur de connexion" au clic sur Valider).
+    // Ce chemin plus précis prend le pas sur /config/{docId} pour ces deux
+    // documents uniquement — le reste de /config/* reste Admin-only.
+    match /config/checks {
+      allow read: if true;
+      allow create, update: if true;
+    }
+    match /config/notes {
+      allow read: if true;
+      allow create, update: if true;
+    }
+
     // ── USERS ────────────────────────────────────────────────────────────────
     // Lecture   : libre (auth.js lit les utilisateurs pour valider le PIN)
     // Création  : Admin uniquement
