@@ -55,13 +55,20 @@
     log:      () => db.collection('cso_activity_log'),
   };
 
+  // literRatio: true  → ratio par client affiché en L/client (× 1000, unité de
+  // base m³→L). C'est la SEULE définition de "type eau" du fichier — avant
+  // cette refonte, cette liste était recopiée à 6 endroits différents avec
+  // des divergences (eau_glacee oubliée par endroits, gaz inclus à tort par
+  // ailleurs via un test sur l'unité 'm³' au lieu du type). Toute nouvelle
+  // fonction de calcul doit lire ce flag via _isLiterRatioType(type), jamais
+  // recopier une liste de noms de type.
   const MT = {
-    eau_froide:  { icon: '💧', label: 'Eau froide',  unit: 'm³',  color: '#3B82F6', dim: 'rgba(59,130,246,0.15)'  },
-    eau_chaude:  { icon: '🔥', label: 'Eau chaude',  unit: 'm³',  color: '#F97316', dim: 'rgba(249,115,22,0.15)'  },
-    electricite: { icon: '⚡', label: 'Électricité', unit: 'kWh', color: '#F59E0B', dim: 'rgba(245,158,11,0.15)'  },
+    eau_froide:  { icon: '💧', label: 'Eau froide',  unit: 'm³',  color: '#3B82F6', dim: 'rgba(59,130,246,0.15)', literRatio: true  },
+    eau_chaude:  { icon: '🔥', label: 'Eau chaude',  unit: 'm³',  color: '#F97316', dim: 'rgba(249,115,22,0.15)', literRatio: true  },
+    electricite: { icon: '⚡', label: 'Électricité', unit: 'kWh', color: '#F59E0B', dim: 'rgba(245,158,11,0.15)' },
     gaz:         { icon: '🌬', label: 'Gaz',         unit: 'm³',  color: '#A78BFA', dim: 'rgba(167,139,250,0.15)' },
     vapeur:      { icon: '♨️', label: 'Vapeur',      unit: 'kg',  color: '#EC4899', dim: 'rgba(236,72,153,0.15)'  },
-    eau_glacee:  { icon: '🧊', label: 'Eau glacée',  unit: 'm³',  color: '#06B6D4', dim: 'rgba(6,182,212,0.15)'   },
+    eau_glacee:  { icon: '🧊', label: 'Eau glacée',  unit: 'm³',  color: '#06B6D4', dim: 'rgba(6,182,212,0.15)', literRatio: true  },
     chauffage:   { icon: '🏢', label: 'Chauffage (ADP)', unit: 'MWh', color: '#EF4444', dim: 'rgba(239,68,68,0.15)' },
   };
 
@@ -136,20 +143,16 @@
   function _perfRatio(type, date) {
     const ids  = _refMeterIds(type);
     if (!ids.length) return null;
-    const val  = _readings.filter(r => ids.includes(r.meterId) && r.date === date)
-                          .reduce((s, r) => s + (r.consumption || 0), 0);
+    const val  = sumConsumption(_readings, ids, date);
     if (!val) return null;
     const cli  = _clients[date] || 0;
-    if (!cli) return null;
-    const isW  = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
-    return isW ? val * 1000 / cli : val / cli;
+    return computeRatio(type, val, cli);
   }
 
   // Per-type raw consumption for a date (uses ref meters only)
   function _perfConso(type, date) {
     const ids = _refMeterIds(type);
-    return _readings.filter(r => ids.includes(r.meterId) && r.date === date)
-                    .reduce((s, r) => s + (r.consumption || 0), 0) || null;
+    return sumConsumption(_readings, ids, date) || null;
   }
 
   // Global score from today's ratios (based on configurable thresholds)
@@ -200,6 +203,137 @@
     return 0;
   }
   function _tsDate(ts) { const ms = _tsMs(ts); return ms ? new Date(ms) : null; }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // MOTEUR DE CALCUL COMMUN — MX.CsoCalc
+  // Fonctions pures (aucun accès Firestore, aucune lecture de l'état module
+  // _meters/_readings/_clients) utilisées par TOUS les onglets — Dashboard,
+  // Compteurs, Performance, Analyses, Supervision — pour que consommation,
+  // ratio, moyenne, comparaison de périodes et statut soient calculés une
+  // seule fois, de la même façon, partout. Exposées aussi sur
+  // window.MX.CsoCalc (cf. bloc EXPOSE en fin de fichier) pour rester
+  // testables indépendamment du reste du fichier et réutilisables si les
+  // pages sont un jour scindées en plusieurs fichiers (pas fait ici).
+  // ════════════════════════════════════════════════════════════════════════
+
+  // Un type d'énergie doit-il être exprimé en L/client (× 1000, m³→L) dans
+  // les ratios ? SOURCE UNIQUE : le flag literRatio de MT[type] (voir plus
+  // haut). Remplace les listes de noms de type ('eau_froide','eau_chaude',
+  // 'eau_glacee'...) recopiées à 6 endroits différents du fichier, dont
+  // certaines oubliaient eau_glacee et une autre testait l'unité 'm³' — ce
+  // qui incluait à tort le gaz (également en m³) dans la conversion litres.
+  function _isLiterRatioType(type) {
+    return !!(MT[type] && MT[type].literRatio);
+  }
+
+  // Consommation totale (somme du champ `consumption`) pour un ensemble de
+  // compteurs, sur une date ('YYYY-MM-DD') ou un tableau de dates.
+  function sumConsumption(readings, meterIds, dateOrDates) {
+    const dates = new Set(Array.isArray(dateOrDates) ? dateOrDates : [dateOrDates]);
+    const ids   = new Set(meterIds || []);
+    let total = 0;
+    for (let i = 0; i < readings.length; i++) {
+      const r = readings[i];
+      if (ids.has(r.meterId) && dates.has(r.date)) total += (r.consumption || 0);
+    }
+    return total;
+  }
+
+  // Consommation totale pour un type d'énergie (résout les compteurs de ce
+  // type parmi `meters`), sur une date ou un tableau de dates.
+  function sumConsumptionByType(readings, meters, type, dateOrDates) {
+    const ids = meters.filter(m => m.type === type).map(m => m.id);
+    return sumConsumption(readings, ids, dateOrDates);
+  }
+
+  // Ratio par client pour une valeur de consommation donnée. `value === 0`
+  // reste un ratio de 0 (donnée valide) — seul un nombre de clients nul/
+  // absent ou une valeur non numérique donnent `null` ("pas de ratio").
+  // C'est à l'appelant de décider si une consommation nulle doit être
+  // affichée comme "—" (comme le fait le Dashboard) ou comme 0 dans une
+  // série (comme le fait Analyses) : ce choix ne doit pas être figé ici.
+  function computeRatio(type, value, clientCount) {
+    if (!clientCount || isNaN(clientCount)) return null;
+    if (value === null || value === undefined || isNaN(value)) return null;
+    return _isLiterRatioType(type) ? (value * 1000 / clientCount) : (value / clientCount);
+  }
+
+  // Moyenne arithmétique d'un tableau de valeurs (ignore null/undefined/NaN).
+  // Retourne 0 sur un tableau vide (comportement déjà attendu par l'existant
+  // pour les moyennes 30 jours — évite d'introduire des `null` en cascade).
+  function average(arr) {
+    const vals = (arr || []).filter(v => v !== null && v !== undefined && !isNaN(v));
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  }
+
+  // Minimum et maximum d'un tableau de valeurs strictement positives (les
+  // relevés à 0/absents ne sont pas des mesures — même convention que le
+  // filtre `nonZero` déjà utilisé dans l'onglet Analyses).
+  function minMax(arr) {
+    const vals = (arr || []).filter(v => v !== null && v !== undefined && !isNaN(v) && v > 0);
+    return vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : { min: 0, max: 0 };
+  }
+
+  // Compare deux totaux de périodes consécutives (période courante vs
+  // période précédente de même durée). `pct` est `null` si la période de
+  // référence est nulle/absente (rien à comparer), sinon l'écart en %.
+  function comparePeriods(currentTotal, previousTotal) {
+    if (!previousTotal) return { pct: null, trend: 'na' };
+    const pct = (currentTotal - previousTotal) / previousTotal * 100;
+    return { pct, trend: pct > 5 ? 'up' : pct < -5 ? 'down' : 'stable' };
+  }
+
+  // Tendance d'une valeur ponctuelle (ex : consommation du jour) par rapport
+  // à une valeur de référence (ex : moyenne 30 jours). Même forme de retour
+  // que comparePeriods — les deux partagent la même notion de tendance.
+  function trendFromDeviation(value, reference) {
+    if (!reference) return { pct: null, trend: 'na' };
+    const pct = (value - reference) / reference * 100;
+    return { pct, trend: pct > 5 ? 'up' : pct < -5 ? 'down' : 'stable' };
+  }
+
+  // Statut normal / attention / critique à partir d'un écart en %. Clés
+  // ('ok'/'warn'/'crit'/'na') identiques à celles déjà utilisées par les
+  // templates (stCol/stLbl de l'onglet Analyses) : aucun changement visuel,
+  // seule la logique de seuil est désormais centralisée ici.
+  function statusFromDeviation(pct, opts) {
+    const warnAt = (opts && opts.warnAt != null) ? opts.warnAt : 10;
+    const critAt = (opts && opts.critAt != null) ? opts.critAt : 50;
+    if (pct === null || pct === undefined || isNaN(pct)) return 'na';
+    if (pct > critAt) return 'crit';
+    if (pct > warnAt) return 'warn';
+    return 'ok';
+  }
+
+  // ── Périodes ──────────────────────────────────────────────────────────
+  // Construit un tableau de dates 'YYYY-MM-DD' pour un type de période.
+  // Phase 1 : moteur seul, PAS ENCORE branché sur un sélecteur d'interface
+  // (aucun nouvel onglet, aucune UI ajoutée ici). Sert de base commune pour
+  // qu'une future page utilise exactement le même découpage de dates pour
+  // la consommation ET pour le nombre de clients (même périmètre garanti,
+  // car les deux lectures partageront le même tableau `dates`).
+  function periodDates(kind, opts) {
+    const o   = opts || {};
+    const ref = o.refDate ? new Date(o.refDate + 'T12:00:00') : new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const toStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const range = (start, end) => {
+      const out = []; const cur = new Date(start);
+      while (cur <= end) { out.push(toStr(cur)); cur.setDate(cur.getDate() + 1); }
+      return out;
+    };
+    switch (kind) {
+      case 'day':           return [toStr(ref)];
+      case 'last30':        return Array.from({ length: 30 }, (_, i) => _daysAgo(29 - i));
+      case 'month-current':  return range(new Date(ref.getFullYear(), ref.getMonth(), 1), ref);
+      case 'month-previous': return range(new Date(ref.getFullYear(), ref.getMonth() - 1, 1), new Date(ref.getFullYear(), ref.getMonth(), 0));
+      case 'custom':
+        if (!o.start || !o.end) return [];
+        return range(new Date(o.start + 'T12:00:00'), new Date(o.end + 'T12:00:00'));
+      default: return [];
+    }
+  }
+
   function _author() {
     const cu = MX.state.currentUser, ad = MX.state.adminUser;
     return cu ? cu.name : (ad ? (ad.email || 'Admin').split('@')[0] : 'Anonyme');
@@ -625,20 +759,13 @@
     const today = _today();
     let deduct = 0, checked = 0;
     ['eau_froide', 'eau_chaude', 'electricite'].forEach(type => {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
-      if (!ids.length) return;
-      const todayC = _readings.filter(r => ids.includes(r.meterId) && r.date === today)
-        .reduce((s, r) => s + (r.consumption || 0), 0);
+      const todayC = sumConsumptionByType(_readings, _meters, type, today);
       if (!todayC) return;
       checked++;
-      let sum30 = 0, cnt = 0;
-      for (let i = 1; i <= 30; i++) {
-        const c = _readings.filter(r => ids.includes(r.meterId) && r.date === _daysAgo(i))
-          .reduce((s, r) => s + (r.consumption || 0), 0);
-        if (c > 0) { sum30 += c; cnt++; }
-      }
-      if (!cnt) return;
-      const ecart = (todayC - sum30 / cnt) / (sum30 / cnt) * 100;
+      const past30 = Array.from({ length: 30 }, (_, i) => sumConsumptionByType(_readings, _meters, type, _daysAgo(i + 1)))
+        .filter(v => v > 0);
+      if (!past30.length) return;
+      const { pct: ecart } = trendFromDeviation(todayC, average(past30));
       if (ecart > 50) deduct += 20;
       else if (ecart > 25) deduct += 10;
       else if (ecart > 10) deduct += 5;
@@ -680,8 +807,8 @@
 
     // ECS excessive (eau chaude ≥ 70% eau froide)
     if (efIds.length && ecIds.length) {
-      const ef = _readings.filter(r => efIds.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
-      const ec = _readings.filter(r => ecIds.includes(r.meterId) && r.date === today).reduce((s, r) => s + (r.consumption || 0), 0);
+      const ef = sumConsumption(_readings, efIds, today);
+      const ec = sumConsumption(_readings, ecIds, today);
       if (ef > 0 && ec >= ef * 0.7) alerts.push({ type: 'ecs_excessive', level: 'warning', metric: 'eau_chaude', title: 'ECS excessive', msg: `Eau chaude (${_fmt(ec)} m³) ≥ 70% de l'eau froide (${_fmt(ef)} m³)` });
     }
 
@@ -884,9 +1011,8 @@
         const evo  = v != null && prev != null && prev > 0 ? ((v - prev) / prev * 100) : null;
         const ec   = evo !== null ? `<span style="color:${evo>5?'var(--red)':evo<-5?'var(--green)':'var(--text3)'};margin-left:4px;font-size:9px">${evo>0?'↑ +':'↓ '}${Math.abs(evo).toFixed(0)}%</span>` : '';
         const valStr = v != null && v > 0 ? `<b>${fmtN(v)}</b> ${s.unit}` : `<span style="color:var(--text3)">—</span>`;
-        const isW = s.unit === 'm³' || s.unit === 'L';
-        const ratio = v != null && v > 0 && cli > 0 ? (isW ? v * 1000 / cli : v / cli) : null;
-        const ratioStr = ratio !== null ? `<span class="an2-tt-sub">${fmtN(ratio)} ${isW ? 'L' : s.unit}/client</span>` : '';
+        const ratio = v != null && v > 0 && cli > 0 ? computeRatio(s.type, v, cli) : null;
+        const ratioStr = ratio !== null ? `<span class="an2-tt-sub">${fmtN(ratio)} ${_isLiterRatioType(s.type) ? 'L' : s.unit}/client</span>` : '';
         const avg30 = s.avg30 ?? null;
         const avgStr = avg30 != null && avg30 > 0 ? `<span class="an2-tt-sub">moy.30j : ${fmtN(avg30)} ${s.unit}</span>` : '';
         html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${s.label}</span><span class="an2-tt-val">${valStr}${ec}</span></div>`;
@@ -973,9 +1099,7 @@
     const cli   = _clients[today] || 0;
 
     function _sumConso(type, date) {
-      const ids = _meters.filter(m => m.type === type).map(m => m.id);
-      return _readings.filter(r => ids.includes(r.meterId) && r.date === date)
-        .reduce((s, r) => s + (r.consumption || 0), 0);
+      return sumConsumptionByType(_readings, _meters, type, date);
     }
 
     // ── KPI cards ──
@@ -983,9 +1107,8 @@
     Object.entries(MT).forEach(([type, meta]) => {
       const val   = _sumConso(type, today);
       const vY    = _sumConso(type, yest);
-      const isW   = type === 'eau_froide' || type === 'eau_chaude';
-      const ratio = cli > 0 && val > 0 ? (isW ? val * 1000 / cli : val / cli) : null;
-      const rUnit = isW ? 'L/client' : `${meta.unit}/client`;
+      const ratio = val > 0 ? computeRatio(type, val, cli) : null;
+      const rUnit = _isLiterRatioType(type) ? 'L/client' : `${meta.unit}/client`;
       let deltaHtml = '';
       if (val > 0 && vY > 0) {
         const pct = Math.round((val - vY) / vY * 100);
@@ -1000,7 +1123,7 @@
         </div>
         <div class="cso-kpi-v">${val > 0 ? _fmt(val) : '—'}<span class="cso-kpi-u">&thinsp;${meta.unit}</span></div>
         ${deltaHtml}
-        <div class="cso-kpi-r">${ratio !== null ? `${_fmt(ratio, isW ? 0 : 2)}&thinsp;${rUnit}` : '<span style="color:var(--text3)">—</span>'}</div>
+        <div class="cso-kpi-r">${ratio !== null ? `${_fmt(ratio, _isLiterRatioType(type) ? 0 : 2)}&thinsp;${rUnit}` : '<span style="color:var(--text3)">—</span>'}</div>
       </div>`;
     });
 
@@ -1127,11 +1250,10 @@
   function _meterRowHtml(m, selDate, cli, isToday) {
     const meta     = MT[m.type] || MT.eau_froide;
     const unit     = m.unit || meta.unit;
-    const isW      = m.type === 'eau_froide' || m.type === 'eau_chaude';
     const dateRdgs = _readings.filter(r => r.meterId === m.id && r.date === selDate);
     const lr       = dateRdgs[0];
     const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
-    const ratio    = cli > 0 && selConso > 0 ? (isW ? selConso * 1000 / cli : selConso / cli) : null;
+    const ratio    = selConso > 0 ? computeRatio(m.type, selConso, cli) : null;
     const hasRdg   = !!lr;
     const resp     = _isResp();
     const alert    = _csoAlerts.find(a => a.meterId === m.id && a.status === 'active');
@@ -1139,7 +1261,7 @@
     if (lr) {
       valLine = `Index&thinsp;: <b>${_fmtIdx(lr.index)}&thinsp;${esc(unit)}</b>`;
       if (selConso) valLine += ` &middot; Conso&thinsp;: +<b>${_fmtIdx(selConso)}</b>`;
-      if (ratio !== null) valLine += ` &middot; R&thinsp;: <b>${_fmt(ratio, isW ? 0 : 2)}</b>`;
+      if (ratio !== null) valLine += ` &middot; R&thinsp;: <b>${_fmt(ratio, _isLiterRatioType(m.type) ? 0 : 2)}</b>`;
     } else {
       valLine = `<span class="cso-mrow-empty"><i class="fas fa-circle-minus"></i> Aucun relevé${isToday ? '' : ' ce jour'}</span>`;
     }
@@ -1390,47 +1512,36 @@
       const ids  = fMeters.filter(m => m.type === type).map(m => m.id);
       if (!ids.length) return;
       const unit = fMeters.find(m => m.type === type)?.unit || meta.unit;
-      const daily = dates.map(ds =>
-        _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
-          .reduce((s, r) => s + (r.consumption || 0), 0)
-      );
+      const daily = dates.map(ds => sumConsumption(_readings, ids, ds));
       const total = daily.reduce((a, b) => a + b, 0);
       const prevDates = Array.from({length: days}, (_, i) => _daysAgo(days * 2 - 1 - i));
-      const prevTotal = prevDates.map(ds =>
-        _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
-          .reduce((s, r) => s + (r.consumption || 0), 0)
-      ).reduce((a, b) => a + b, 0);
-      const evoPct = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
-      const todayVal = _readings.filter(r => ids.includes(r.meterId) && r.date === today)
-        .reduce((s, r) => s + (r.consumption || 0), 0);
+      const prevTotal = prevDates.reduce((s, ds) => s + sumConsumption(_readings, ids, ds), 0);
+      const { pct: evoPct } = comparePeriods(total, prevTotal);
+      const todayVal = sumConsumption(_readings, ids, today);
       const avg30Arr = Array.from({length: 30}, (_, i) => _daysAgo(30 - 1 - i))
-        .map(ds => _readings.filter(r => ids.includes(r.meterId) && r.date === ds)
-          .reduce((s, r) => s + (r.consumption || 0), 0))
+        .map(ds => sumConsumption(_readings, ids, ds))
         .filter(v => v > 0);
-      const avg30Val   = avg30Arr.length ? avg30Arr.reduce((a, b) => a + b, 0) / avg30Arr.length : 0;
-      const todayEcart = avg30Val > 0 ? (todayVal - avg30Val) / avg30Val * 100 : null;
-      const lvl = todayEcart === null ? 'na' : todayEcart > 50 ? 'crit' : todayEcart > 10 ? 'warn' : 'ok';
+      const avg30Val   = average(avg30Arr);
+      const { pct: todayEcart } = trendFromDeviation(todayVal, avg30Val);
+      const lvl = statusFromDeviation(todayEcart);
       const nonZero = daily.filter(v => v > 0);
-      const minV = nonZero.length ? Math.min(...nonZero) : 0;
-      const maxV = nonZero.length ? Math.max(...nonZero) : 0;
-      const avgV = nonZero.length ? nonZero.reduce((a,b)=>a+b,0)/nonZero.length : 0;
+      const { min: minV, max: maxV } = minMax(daily);
+      const avgV = average(nonZero);
       const sorted = [...nonZero].sort((a,b)=>a-b);
       const medV = sorted.length ? (sorted.length%2===0?(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2:sorted[Math.floor(sorted.length/2)]) : 0;
       const stdV = nonZero.length>1 ? Math.sqrt(nonZero.reduce((s,v)=>s+(v-avgV)**2,0)/nonZero.length) : 0;
       // Forecast = avg daily * days in month
       const last7 = daily.slice(-7).filter(v=>v>0);
-      const dailyAvg7 = last7.length ? last7.reduce((a,b)=>a+b,0)/last7.length : avgV;
+      const dailyAvg7 = last7.length ? average(last7) : avgV;
       const todayDt = new Date(today);
       const daysInMonth = new Date(todayDt.getFullYear(), todayDt.getMonth()+1, 0).getDate();
       const forecastTotal = dailyAvg7 * daysInMonth;
-      const isW = ['eau_froide','eau_chaude','eau_glacee'].includes(type);
-      const dailyRatios = dates.map((ds,i)=>{
-        const c=_clients[ds]||0; return c>0?(isW?daily[i]*1000/c:daily[i]/c):null;
-      }).filter(v=>v!==null);
-      const avgRatio = dailyRatios.length?dailyRatios.reduce((a,b)=>a+b,0)/dailyRatios.length:0;
+      const dailyRatios = dates.map((ds,i) => computeRatio(type, daily[i], _clients[ds] || 0))
+        .filter(v => v !== null);
+      const avgRatio = average(dailyRatios);
       typeData[type] = {
         meta, unit, daily, total, prevTotal, evoPct, todayVal, avg30Val,
-        todayEcart, lvl, avgRatio, rUnit: isW?'L/client':`${unit}/client`,
+        todayEcart, lvl, avgRatio, rUnit: _isLiterRatioType(type) ? 'L/client' : `${unit}/client`,
         spark: daily.slice(-14), minV, maxV, avgV, medV, stdV, forecastTotal, dailyAvg7
       };
     });
@@ -1903,7 +2014,6 @@
     const analyses = [];
     types.forEach(type => {
       const meta = MT[type];
-      const isW  = ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
       const data = [];
       for (let i = 1; i <= 14; i++) {
         const d = _daysAgo(i);
@@ -1964,7 +2074,7 @@
     const e        = MX.esc || (s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
     const c        = _perfC();
     const t        = _perfT();
-    const isW      = type => ['eau_froide','eau_chaude','eau_glacee'].includes(type);
+    const isW      = _isLiterRatioType;
 
     // ── Comparison dates ──
     const d_hier   = _daysAgo(peDate === today ? 1 : Math.ceil((new Date(today)-new Date(peDate))/86400000)+1);
@@ -2754,7 +2864,7 @@
     const esc = MX.esc || (s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
     const c   = _perfC();
     const TYPES = ['eau_froide', 'eau_chaude', 'electricite', 'chauffage'];
-    const isW   = type => ['eau_froide', 'eau_chaude', 'eau_glacee'].includes(type);
+    const isW   = _isLiterRatioType;
     const cliRaw = _clients[date];
     const cliN   = typeof cliRaw === 'object' ? (cliRaw && cliRaw.count || 0) : (cliRaw || 0);
     const justif  = (_perfCfg.justifications && _perfCfg.justifications[date]) || '';
@@ -4068,6 +4178,16 @@
   // ── EXPOSE ──
   window.MX       = window.MX       || {};
   window.MX.Pages = window.MX.Pages || {};
+  // Moteur de calcul commun (phase 1 de la refonte énergétique) — fonctions
+  // pures, sans dépendance à l'état du module. Toujours utilisées ci-dessus
+  // en interne (dashboard/performance/analyses/alertes) ; exposées ici pour
+  // rester vérifiables indépendamment et réutilisables par une future page.
+  window.MX.CsoCalc = {
+    isLiterRatioType: _isLiterRatioType,
+    sumConsumption, sumConsumptionByType, computeRatio,
+    average, minMax, comparePeriods, trendFromDeviation, statusFromDeviation,
+    periodDates,
+  };
   window.MX.Pages.Conso = {
     render,
     _tab, _editCli, _meterForm, _delMeter, _delReading,
