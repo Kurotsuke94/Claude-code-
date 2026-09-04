@@ -440,7 +440,7 @@
       await MX.DB.setNote(key, newNote);
       MX.toast('Mission signalée ✓');
     } catch(e) {
-      _handleWriteError(e, "_clWsConfirmBlock", "config/notes", key);
+      _handleWriteError(e, "_clWsConfirmBlock", "config/notes", key, { taskId, slot, dayId });
     }
     // Add note icon to left panel row if not already there
     const row = document.getElementById('cl-ws-tr-' + taskId);
@@ -459,34 +459,58 @@
 
   // ── TEMPORARY DIAGNOSTIC — DO NOT LEAVE IN PRODUCTION ──────────────────────
   // Shows the real Firestore error (never masked as "Erreur de connexion")
-  // for a failed checklist write. Uses a modal instead of the .toast pill:
-  // .toast is `white-space:nowrap` with no max-width, so a 5-line diagnostic
-  // would be clipped off-screen on a phone — a modal is guaranteed readable
-  // and scrollable on mobile, which is the whole point of this diagnostic.
-  function _handleWriteError(e, fnName, firestorePath, key) {
+  // for a failed checklist write, plus the raw ownerId/date/semaine/taskId
+  // that produced the key — so a mismatch between what PC and mobile actually
+  // send is visible directly on screen, not just the composed key string.
+  // Two surfaces on purpose: a one-line toast (matches "Erreur validation :
+  // CODE — chemin : ...") for a quick glance, and a modal for the full detail
+  // — .toast is `white-space:nowrap` with no max-width, so the full 7-field
+  // dump would be clipped off-screen on a phone; the modal is guaranteed
+  // readable and scrollable there.
+  function _handleWriteError(e, fnName, firestorePath, key, details) {
     const code    = (e && e.code)    || "(aucun code)";
     const message = (e && e.message) || "(aucun message)";
+    const name    = (e && e.name)    || "(inconnu)";
     const version = (window.MX_VERSION || "?") + " / build " + (window.MX_BUILD || "?");
+    const d       = details || {};
 
+    // Raw error object first — DevTools expands it with every own property,
+    // in case code/message are empty because this isn't a Firestore error at all.
+    console.error("[Checklist] ERREUR VALIDATION — objet brut :", e);
     console.error(
-      "ERREUR FIRESTORE\n" +
+      "[Checklist] ERREUR VALIDATION\n" +
       "  Code : " + code + "\n" +
       "  Message : " + message + "\n" +
+      "  Nom (e.name) : " + name + "\n" +
       "  Fonction : " + fnName + "\n" +
-      "  Chemin : " + firestorePath + "\n" +
-      "  Clé : " + key + "\n" +
+      "  Chemin Firestore : " + firestorePath + "\n" +
+      "  Clé complète : " + key + "\n" +
+      "  ownerId : " + (d.ownerId != null ? d.ownerId : "(n/a)") + "\n" +
+      "  date : " + (d.dateStr != null ? d.dateStr : "(n/a)") + "\n" +
+      "  semaine : " + (d.weekKey != null ? d.weekKey : "(n/a)") + "\n" +
+      "  créneau : " + (d.slot != null ? d.slot : "(n/a)") + "\n" +
+      "  taskId : " + (d.taskId != null ? d.taskId : "(n/a)") + "\n" +
       "  Version : " + version
     );
 
+    MX.toast("Erreur validation : " + code + " — chemin : " + firestorePath, true);
+
     MX.showModal({
-      title: "⚠️ ERREUR FIRESTORE",
+      title: "⚠️ ERREUR VALIDATION",
       sub: "Diagnostic temporaire — montrez cet écran au support",
       body: '<div style="font-family:var(--ffm,monospace);font-size:12.5px;line-height:1.9;text-align:left;word-break:break-word;color:var(--text1)">'
         + "<div><b>Code :</b> " + MX.esc(code) + "</div>"
         + "<div><b>Message :</b> " + MX.esc(message) + "</div>"
+        + "<div><b>Nom (e.name) :</b> " + MX.esc(name) + "</div>"
         + "<div><b>Fonction :</b> " + MX.esc(fnName) + "</div>"
-        + "<div><b>Chemin :</b> " + MX.esc(firestorePath) + "</div>"
-        + "<div><b>Version :</b> " + MX.esc(version) + "</div>"
+        + "<div><b>Chemin Firestore :</b> " + MX.esc(firestorePath) + "</div>"
+        + "<div style=\"margin-top:8px;padding-top:8px;border-top:1px solid var(--border2)\"><b>Clé complète :</b><br>" + MX.esc(key) + "</div>"
+        + "<div><b>ownerId :</b> " + MX.esc(String(d.ownerId != null ? d.ownerId : "(n/a)")) + "</div>"
+        + "<div><b>date :</b> " + MX.esc(String(d.dateStr != null ? d.dateStr : "(n/a)")) + "</div>"
+        + "<div><b>semaine :</b> " + MX.esc(String(d.weekKey != null ? d.weekKey : "(n/a)")) + "</div>"
+        + "<div><b>créneau :</b> " + MX.esc(String(d.slot != null ? d.slot : "(n/a)")) + "</div>"
+        + "<div><b>taskId :</b> " + MX.esc(String(d.taskId != null ? d.taskId : "(n/a)")) + "</div>"
+        + "<div style=\"margin-top:8px;padding-top:8px;border-top:1px solid var(--border2)\"><b>Version :</b> " + MX.esc(version) + "</div>"
         + "</div>",
       actions: [{ label: "Fermer", cls: "cancel" }],
     });
@@ -494,9 +518,10 @@
 
   async function toggle(dayId, slot, taskId) {
     const state = MX.state;
-    const task  = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
-    const key   = MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task));
-    const val   = !state.checks[key];
+    const task     = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
+    const ownerId  = MX.checkOwnerId(dayId, slot, task);
+    const key      = MX.checkKey(dayId, slot, taskId, ownerId);
+    const val      = !state.checks[key];
 
     state.checks[key] = val;
     const row = document.getElementById("tr_" + taskId);
@@ -513,7 +538,11 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: task ? task.text : taskId, dayId, slot }).catch(() => {});
     } catch (e) {
       state.checks[key] = !val;
-      _handleWriteError(e, "toggle", "config/checks", key);
+      _handleWriteError(e, "toggle", "config/checks", key, {
+        ownerId, taskId, slot, dayId,
+        dateStr: MX.checkDateForDay(dayId),
+        weekKey: MX.checkWeekOf(MX.checkDateForDay(dayId)),
+      });
     }
   }
 
@@ -834,10 +863,11 @@
   }
 
   async function toggleTransferred(dayId, slot, taskId, transferId) {
-    const state = MX.state;
-    const cu    = state.currentUser;
-    const key   = MX.checkKey(dayId, slot, taskId, cu ? cu.id : 'unassigned');
-    const val   = !state.checks[key];
+    const state   = MX.state;
+    const cu      = state.currentUser;
+    const ownerId = cu ? cu.id : 'unassigned';
+    const key     = MX.checkKey(dayId, slot, taskId, ownerId);
+    const val     = !state.checks[key];
 
     state.checks[key] = val;
     const row = document.getElementById("trr_" + transferId);
@@ -854,7 +884,11 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: tr ? tr.taskText : taskId, dayId, slot }).catch(() => {});
     } catch(e) {
       state.checks[key] = !val;
-      _handleWriteError(e, "toggleTransferred", "config/checks", key);
+      _handleWriteError(e, "toggleTransferred", "config/checks", key, {
+        ownerId, taskId, slot, dayId, transferId,
+        dateStr: MX.checkDateForDay(dayId),
+        weekKey: MX.checkWeekOf(MX.checkDateForDay(dayId)),
+      });
     }
   }
 
@@ -890,7 +924,12 @@
       await MX.DB.setNote(key, text);
       MX.toast(text ? "Note enregistrée ✓" : "Note supprimée");
     } catch(e) {
-      _handleWriteError(e, "saveNote", "config/notes", key);
+      // key is the note's short dayId_slot_taskId — best-effort split for
+      // display only (notes were never migrated to the long checks key).
+      const parts = key.split('_');
+      _handleWriteError(e, "saveNote", "config/notes", key, {
+        dayId: parts[0], slot: parts[1], taskId: parts.slice(2).join('_'),
+      });
     }
   }
 
