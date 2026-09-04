@@ -440,9 +440,7 @@
       await MX.DB.setNote(key, newNote);
       MX.toast('Mission signalée ✓');
     } catch(e) {
-      console.error("[Checklist] _clWsConfirmBlock() — échec écriture Firestore config/notes —",
-        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
-      MX.toast('Erreur', true);
+      _handleWriteError(e, "_clWsConfirmBlock", "config/notes", key);
     }
     // Add note icon to left panel row if not already there
     const row = document.getElementById('cl-ws-tr-' + taskId);
@@ -457,6 +455,28 @@
     }
     // Refresh workspace panel
     if (_clWsSelKey === key) _clWsOpen(dayId, slot, taskId, false);
+  }
+
+  // Shared diagnostic for a failed checklist write. A device stuck on an old
+  // cached JS bundle/Service Worker is the most common real-world reason the
+  // exact same write succeeds on one device and fails on another — this is
+  // surfaced as a distinct, actionable message instead of the generic toast
+  // whenever MX.UpdateManager confirms the running build is behind the server.
+  function _handleWriteError(e, fnName, firestorePath, key) {
+    console.error(
+      "[Checklist] " + fnName + "() — échec écriture Firestore\n" +
+      "  path: " + firestorePath + "\n" +
+      "  code: " + (e && e.code) + "\n" +
+      "  message: " + (e && e.message) + "\n" +
+      "  key: " + key + "\n" +
+      "  app: " + (window.MX_VERSION || "?") + " / build " + (window.MX_BUILD || "?")
+    );
+    const st = window.MX && MX.UpdateManager && MX.UpdateManager.getStatus && MX.UpdateManager.getStatus();
+    if (st && (st.hasWaiting || (st.serverBuild > 0 && !st.upToDate))) {
+      MX.toast("Mise à jour requise — rechargez l'application", true);
+    } else {
+      MX.toast("Erreur de connexion", true);
+    }
   }
 
   async function toggle(dayId, slot, taskId) {
@@ -480,9 +500,7 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: task ? task.text : taskId, dayId, slot }).catch(() => {});
     } catch (e) {
       state.checks[key] = !val;
-      console.error("[Checklist] toggle() — échec écriture Firestore config/checks —",
-        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
-      MX.toast("Erreur de connexion", true);
+      _handleWriteError(e, "toggle", "config/checks", key);
     }
   }
 
@@ -823,9 +841,7 @@
       MX.DB.addLog({ workerName: actorName, action: val ? "check" : "uncheck", taskText: tr ? tr.taskText : taskId, dayId, slot }).catch(() => {});
     } catch(e) {
       state.checks[key] = !val;
-      console.error("[Checklist] toggleTransferred() — échec écriture Firestore config/checks —",
-        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
-      MX.toast("Erreur de connexion", true);
+      _handleWriteError(e, "toggleTransferred", "config/checks", key);
     }
   }
 
@@ -861,9 +877,7 @@
       await MX.DB.setNote(key, text);
       MX.toast(text ? "Note enregistrée ✓" : "Note supprimée");
     } catch(e) {
-      console.error("[Checklist] saveNote() — échec écriture Firestore config/notes —",
-        "code:", e && e.code, "| message:", e && e.message, "| key:", key);
-      MX.toast("Erreur", true);
+      _handleWriteError(e, "saveNote", "config/notes", key);
     }
   }
 
