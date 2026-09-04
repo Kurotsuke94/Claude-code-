@@ -457,26 +457,39 @@
     if (_clWsSelKey === key) _clWsOpen(dayId, slot, taskId, false);
   }
 
-  // Shared diagnostic for a failed checklist write. A device stuck on an old
-  // cached JS bundle/Service Worker is the most common real-world reason the
-  // exact same write succeeds on one device and fails on another — this is
-  // surfaced as a distinct, actionable message instead of the generic toast
-  // whenever MX.UpdateManager confirms the running build is behind the server.
+  // ── TEMPORARY DIAGNOSTIC — DO NOT LEAVE IN PRODUCTION ──────────────────────
+  // Shows the real Firestore error (never masked as "Erreur de connexion")
+  // for a failed checklist write. Uses a modal instead of the .toast pill:
+  // .toast is `white-space:nowrap` with no max-width, so a 5-line diagnostic
+  // would be clipped off-screen on a phone — a modal is guaranteed readable
+  // and scrollable on mobile, which is the whole point of this diagnostic.
   function _handleWriteError(e, fnName, firestorePath, key) {
+    const code    = (e && e.code)    || "(aucun code)";
+    const message = (e && e.message) || "(aucun message)";
+    const version = (window.MX_VERSION || "?") + " / build " + (window.MX_BUILD || "?");
+
     console.error(
-      "[Checklist] " + fnName + "() — échec écriture Firestore\n" +
-      "  path: " + firestorePath + "\n" +
-      "  code: " + (e && e.code) + "\n" +
-      "  message: " + (e && e.message) + "\n" +
-      "  key: " + key + "\n" +
-      "  app: " + (window.MX_VERSION || "?") + " / build " + (window.MX_BUILD || "?")
+      "ERREUR FIRESTORE\n" +
+      "  Code : " + code + "\n" +
+      "  Message : " + message + "\n" +
+      "  Fonction : " + fnName + "\n" +
+      "  Chemin : " + firestorePath + "\n" +
+      "  Clé : " + key + "\n" +
+      "  Version : " + version
     );
-    const st = window.MX && MX.UpdateManager && MX.UpdateManager.getStatus && MX.UpdateManager.getStatus();
-    if (st && (st.hasWaiting || (st.serverBuild > 0 && !st.upToDate))) {
-      MX.toast("Mise à jour requise — rechargez l'application", true);
-    } else {
-      MX.toast("Erreur de connexion", true);
-    }
+
+    MX.showModal({
+      title: "⚠️ ERREUR FIRESTORE",
+      sub: "Diagnostic temporaire — montrez cet écran au support",
+      body: '<div style="font-family:var(--ffm,monospace);font-size:12.5px;line-height:1.9;text-align:left;word-break:break-word;color:var(--text1)">'
+        + "<div><b>Code :</b> " + MX.esc(code) + "</div>"
+        + "<div><b>Message :</b> " + MX.esc(message) + "</div>"
+        + "<div><b>Fonction :</b> " + MX.esc(fnName) + "</div>"
+        + "<div><b>Chemin :</b> " + MX.esc(firestorePath) + "</div>"
+        + "<div><b>Version :</b> " + MX.esc(version) + "</div>"
+        + "</div>",
+      actions: [{ label: "Fermer", cls: "cancel" }],
+    });
   }
 
   async function toggle(dayId, slot, taskId) {
