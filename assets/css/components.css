@@ -17564,6 +17564,32 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pe-v4-breakdown { flex: 1; min-width: 0; }
 .pe-v4-energy-grid { display: flex; flex-direction: column; gap: 8px; }
 
+/* ── PHASE 8 : carte "Score énergétique" — widget "Ratio réel" (mensuel,
+   cumul mois) + liste simplifiée Eau froide/Eau chaude/Chauffage. Remplace
+   l'ancien affichage score/100 + lettre de classe pour cette carte
+   uniquement (le score /100 reste affiché ailleurs : en-tête, "Score
+   global" en barre latérale — classes .pe-score-ring/.pe-score-class-badge/
+   .pe-score-lbl/.pe-v4-score-inner/.pe-v4-breakdown inchangées). ── */
+.pe-sc-body { display: flex; flex-direction: column; align-items: center; gap: 14px; min-width: 0; }
+.pe-sc-ratio-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.pe-sc-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pe-sc-ratio-txt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; padding: 0 6px; }
+.pe-sc-ratio-lbl { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; }
+.pe-sc-ratio-val { font-size: 22px; font-weight: 800; font-family: 'Space Mono', monospace; color: var(--text1); line-height: 1.15; }
+.pe-sc-ratio-val--msg { font-size: 10px; font-weight: 600; font-family: inherit; color: var(--text3); line-height: 1.3; }
+.pe-sc-ratio-unit { font-size: 13px; font-weight: 700; margin-left: 2px; }
+.pe-sc-ratio-sub { font-size: 9px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; }
+
+.pe-sc-bd-list { width: 100%; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pe-sc-bd-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; min-width: 0; padding: 2px 0; border-bottom: 1px solid var(--border, rgba(0,0,0,.05)); }
+.pe-sc-bd-row:last-child { border-bottom: none; }
+.pe-sc-bd-lbl { font-size: 12px; color: var(--text2); flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; }
+.pe-sc-bd-val { font-size: 11px; font-weight: 600; color: var(--text1); text-align: right; font-family: 'Space Mono', monospace; white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 620px) {
+  .pe-sc-ratio-wrap { width: 84px; height: 84px; }
+  .pe-sc-ratio-val { font-size: 19px; }
+}
+
 /* Energy cards */
 .pe-v4-ec {
   background: var(--bg2); border: 1px solid var(--border);

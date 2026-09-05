@@ -2485,6 +2485,42 @@
       <text x="50" y="57" text-anchor="middle" fill="${scoreCol}" font-size="9" font-weight="600" font-family="sans-serif">/100</text>
     </svg>`;
 
+    // ── PHASE 8 : widget "Ratio réel" de la carte "Score énergétique" ──────
+    // Remplace l'affichage du score /100 (lettre + libellé) par le ratio réel
+    // MENSUEL cumulé du mois en cours — jamais le ratio du jour. Réutilise
+    // exclusivement _monthlyRealRatio (Phase 3C, définie plus bas dans cette
+    // même fonction, inchangée) : aucun nouveau calcul, même source que le
+    // bloc "Ratio réel mensuel" affiché plus bas sur la page. Le type choisi
+    // (eau_froide) est celui déjà mis en avant partout ailleurs (1er type de
+    // MT, 1er bloc du "Ratio réel mensuel").
+    const scMonthKey  = today.slice(0, 7);
+    const scRatioRes  = _monthlyRealRatio('eau_froide', scMonthKey);
+    const scRatio     = scRatioRes.ratio;
+    // Mêmes messages, dans le même ordre, que blockFor() dans
+    // _buildMonthlyRatioNav() plus bas — jamais un message inventé ici.
+    const scMessage   = scRatio !== null ? null
+      : scRatioRes.consoStatus === 'no_meter'     ? 'Compteur général non configuré'
+      : scRatioRes.consoStatus === 'insufficient' ? 'Données insuffisantes'
+      : scRatioRes.consoStatus === 'incoherent'   ? 'Consommation incohérente'
+      : scRatioRes.clients === null               ? 'Clients indisponibles'
+      : 'Ratio indisponible';
+    const scGrade = scRatio !== null ? _getGrade('eau_froide', scRatio) : null;
+    // Anneau purement décoratif : ni score/100 ni lettre de classe affichés
+    // dedans (aucun <text>). Couleur/remplissage neutres si le ratio est
+    // indisponible — jamais un repère chiffré inventé.
+    const scCol = (scGrade && scGrade.key !== 'na') ? scGrade.color : '#f59e0b';
+    const scPct = (scGrade && scGrade.key !== 'na') ? (scGrade.scoreCenter || 0) : 65;
+    const scArc = (scPct / 100 * circ).toFixed(1);
+    const scRingSVG = `<svg class="pe-score-ring pe-sc-ring" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--bg3)" stroke-width="9"/>
+      <circle cx="50" cy="50" r="${r}" fill="none" stroke="${scCol}" stroke-width="9"
+        stroke-dasharray="${scArc} ${circ.toFixed(1)}" stroke-linecap="round"
+        transform="rotate(-90 50 50)"/>
+    </svg>`;
+    const scValueHtml = scRatio !== null
+      ? `${_fmt(scRatio, 0)}<span class="pe-sc-ratio-unit">L</span>`
+      : `<span class="pe-sc-ratio-msg">${e(scMessage)}</span>`;
+
     // ── Données par type (source unique : MT + compteurs existants) ──
     // typeBreakdown reste la base de la synthèse (B), du forecast et de la
     // grille de ratios déjà existante (v4EnergyCards) ; refIds/refNames y
@@ -2503,17 +2539,16 @@
       typeBreakdown.push({ type, meta, conso, ratio, rUnit, grade, refIds, refNames });
     });
 
-    // ── Per-type score breakdown ──
+    // ── Per-type score breakdown (PHASE 8 : lignes simplifiées libellé/valeur,
+    // sans barre ni badge, pour ne plus déborder du cadre de la carte "Score
+    // énergétique"). Réutilise typeBreakdown tel quel — ni _perfRatio ni
+    // _perfConso ne sont dupliqués ou recalculés ici. ──
     let breakdownHtml = '';
-    typeBreakdown.forEach(({ type, meta, ratio, rUnit, grade }) => {
-      const g = c[grade.key] || {};
-      const pct = grade.key !== 'na' ? (grade.scoreCenter || 0) : 0;
-      breakdownHtml += `<div class="pe-breakdown-row">
-        <span class="pe-bd-ico">${meta.icon}</span>
-        <span class="pe-bd-lbl">${meta.label}</span>
-        <span class="pe-bd-val">${ratio !== null ? `${_fmt(ratio, isW(type)?0:2)} ${rUnit}` : '—'}</span>
-        <div class="pe-bd-bar-wrap"><div class="pe-bd-bar" style="width:${pct}%;background:${g.color || '#64748b'}"></div></div>
-        ${gradeBadge(grade.key)}
+    typeBreakdown.forEach(({ type, meta, ratio, rUnit }) => {
+      const valStr = ratio !== null ? `${_fmt(ratio, isW(type) ? 0 : 2)} ${rUnit}` : '—';
+      breakdownHtml += `<div class="pe-sc-bd-row">
+        <span class="pe-sc-bd-lbl">${meta.icon} ${meta.label}</span>
+        <span class="pe-sc-bd-val">${valStr}</span>
       </div>`;
     });
 
@@ -3142,13 +3177,16 @@
           '<div class="pe-v4-row2">' +
             '<div class="pe-v4-card pe-v4-score-sec">' +
               '<div class="pe-v4-card-hd"><i class="fas fa-star"></i> Score énergétique</div>' +
-              '<div class="pe-v4-score-inner">' +
-                '<div class="pe-score-ring-wrap">' +
-                  scoreSVG +
-                  '<div class="pe-score-class-badge" style="color:' + scoreCol + '">' + scoreLetter + '</div>' +
-                  '<div class="pe-score-lbl" style="color:' + scoreCol + '">' + scoreLbl + '</div>' +
+              '<div class="pe-sc-body">' +
+                '<div class="pe-sc-ratio-wrap">' +
+                  scRingSVG +
+                  '<div class="pe-sc-ratio-txt">' +
+                    '<div class="pe-sc-ratio-lbl">Ratio réel</div>' +
+                    '<div class="pe-sc-ratio-val' + (scRatio === null ? ' pe-sc-ratio-val--msg' : '') + '">' + scValueHtml + '</div>' +
+                    (scRatio !== null ? '<div class="pe-sc-ratio-sub">cumul mois</div>' : '') +
+                  '</div>' +
                 '</div>' +
-                '<div class="pe-v4-breakdown">' + (breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>') + '</div>' +
+                '<div class="pe-sc-bd-list">' + (breakdownHtml || '<div class="pe-bd-empty">Relevés manquants</div>') + '</div>' +
               '</div>' +
             '</div>' +
             '<div class="pe-v4-card pe-v4-energy-sec">' +
