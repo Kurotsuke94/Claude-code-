@@ -3218,8 +3218,19 @@
   }
 
   // Date navigation for performance tab
+  // PHASE 6 — bug corrigé : ces deux fonctions ancraient le Date sur minuit
+  // local ('T00:00:00'). new Date(str + 'T00:00:00') est interprété en heure
+  // LOCALE, mais .toISOString() restitue le jour calendaire UTC : pour tout
+  // fuseau à décalage positif (ex. Europe/Paris, UTC+2 l'été), minuit local
+  // correspond à la veille en UTC, donc chaque aller-retour perdait un jour
+  // (et le bouton "suivant" pouvait sembler bloqué). _csoDatePrev/
+  // _csoDateNext (onglet Compteurs) évitent déjà ce piège en ancrant sur
+  // midi local ('T12:00') — un décalage de fuseau réaliste (< 12h) ne fait
+  // alors jamais changer le jour UTC obtenu. Même correctif appliqué ici :
+  // aucun mélange heure locale/UTC, comparaison toujours en chaîne
+  // YYYY-MM-DD (window._peSelDate / _today()), inchangée par ailleurs.
   function _peDatePrev() {
-    const d = new Date((window._peSelDate || _today()) + 'T00:00:00');
+    const d = new Date((window._peSelDate || _today()) + 'T12:00:00');
     d.setDate(d.getDate() - 1);
     window._peSelDate = d.toISOString().slice(0, 10);
     _rerender();
@@ -3227,7 +3238,7 @@
   function _peDateNext() {
     const today = _today();
     if (!window._peSelDate || window._peSelDate >= today) return;
-    const d = new Date(window._peSelDate + 'T00:00:00');
+    const d = new Date(window._peSelDate + 'T12:00:00');
     d.setDate(d.getDate() + 1);
     window._peSelDate = d.toISOString().slice(0, 10);
     if (window._peSelDate >= today) window._peSelDate = '';
