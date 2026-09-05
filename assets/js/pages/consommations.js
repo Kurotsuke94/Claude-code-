@@ -3926,7 +3926,16 @@
     _csoAlerts.filter(a => !a.acknowledged && a.status !== 'resolved').forEach(a => {
       const d = _tsDate(a.ts || a.createdAt);
       const meta = MT[a.type] || MT[a.metric] || {};
-      tlItems.push({ ts: d || nowDt, level: a.level, title: a.title||a.type, msg: a.msg||a.message||'', icon: meta.icon||'⚡', zone: a.zone||'', isSmart: false, salIdx: null, id: a.id });
+      const isRatioClient = a.category === 'ratio_client';
+      tlItems.push({
+        ts: d || nowDt, level: a.level, title: a.title||a.type, msg: a.msg||a.message||'',
+        icon: meta.icon||'⚡', zone: a.zone||'', isSmart: false, salIdx: null, id: a.id,
+        // PHASE 9.1 (Supervision) : champs additionnels transportés uniquement pour
+        // l'affichage détaillé des alertes ratio_client — n'affecte aucune alerte
+        // technique (isRatioClient reste false et ces champs ne sont jamais lus).
+        isRatioClient, meterName: a.meterName||'', energyLabel: meta.label||a.metric||'',
+        ratio: a.ratio, target: a.target, warnThreshold: a.warnThreshold, critThreshold: a.critThreshold, unit: a.unit||'',
+      });
     });
     tlItems.sort((a, b) => b.ts - a.ts);
     let tlHtml = '';
@@ -3938,11 +3947,29 @@
         ? `<button class="sv-tl-act" onclick="MX.Pages.Conso._salSave(${item.salIdx})" title="Sauvegarder"><i class="fas fa-floppy-disk"></i></button>
            <button class="sv-tl-act" onclick="MX.Pages.Conso._salCreateInt(${item.salIdx})" title="Créer intervention"><i class="fas fa-screwdriver-wrench"></i></button>`
         : `<button class="sv-tl-act" onclick="MX.Pages.Conso._resolveAlert('${esc(item.id)}')" title="Résoudre"><i class="fas fa-check"></i></button>`;
+      // PHASE 9.1 : étiquette Ratio client / Technique — uniquement pour les alertes
+      // persistées (jamais sur les alertes locales _detectAlerts, qui ne sont pas
+      // persistées dans cso_energy_alerts et n'ont donc pas de "catégorie").
+      const catBadge = item.isSmart ? '' : `<span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;vertical-align:middle;background:${item.isRatioClient ? 'rgba(6,182,212,0.15)' : 'rgba(148,163,184,0.15)'};color:${item.isRatioClient ? '#06B6D4' : 'var(--text3)'}">${item.isRatioClient ? 'Ratio client' : 'Technique'}</span>`;
+      // Pour ratio_client, msg contient déjà nom/ratio/objectif/écart en texte : on
+      // remplace ce texte par un bloc structuré équivalent (jamais les deux à la
+      // fois) pour ne rien répéter inutilement.
+      const bodyHtml = item.isRatioClient
+        ? `<div class="sv-tl-meter">${esc(item.meterName)}</div>
+           <div class="sv-tl-ratio-details" style="display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--text3);margin-top:2px">
+             <span>${esc(item.energyLabel)}</span>
+             <span>Ratio : <strong style="color:var(--text2)">${_fmt(item.ratio)} ${esc(item.unit)}/client</strong></span>
+             <span>Objectif : ${_fmt(item.target)} ${esc(item.unit)}/client</span>
+             <span>Seuil attention : ${_fmt(item.warnThreshold)} ${esc(item.unit)}/client</span>
+             <span>Seuil critique : ${_fmt(item.critThreshold)} ${esc(item.unit)}/client</span>
+             <span style="color:${lvlC};font-weight:600">${item.level === 'critical' ? 'Critique' : 'Attention'}</span>
+           </div>`
+        : `<div class="sv-tl-msg">${esc(item.msg)}</div>`;
       tlHtml += `<div class="sv-tl-item sv-tl--${item.level}">
         <div class="sv-tl-line"><span class="sv-tl-dot" style="background:${lvlC}"></span></div>
         <div class="sv-tl-body">
-          <div class="sv-tl-ttl">${item.icon} ${esc(item.title)}</div>
-          <div class="sv-tl-msg">${esc(item.msg)}</div>
+          <div class="sv-tl-ttl">${item.icon} ${esc(item.title)}${catBadge}</div>
+          ${bodyHtml}
           ${item.zone ? `<div class="sv-tl-zone"><i class="fas fa-location-dot"></i> ${esc(item.zone)}</div>` : ''}
         </div>
         <div class="sv-tl-meta">
@@ -3995,10 +4022,28 @@
       const ds = d ? d.toLocaleDateString('fr-FR', {day:'2-digit',month:'2-digit'}) : '—';
       const meta = MT[a.type] || MT[a.metric] || {};
       const lvlC = a.level === 'critical' ? '#f87171' : a.level === 'warning' ? '#f59e0b' : '#34d399';
+      const isRatioClient = a.category === 'ratio_client';
+      // PHASE 9.1 : même étiquette Ratio client / Technique que la chronologie
+      // ci-dessus, sur les mêmes critères (a.category).
+      const catBadge = `<span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:600;vertical-align:middle;background:${isRatioClient ? 'rgba(6,182,212,0.15)' : 'rgba(148,163,184,0.15)'};color:${isRatioClient ? '#06B6D4' : 'var(--text3)'}">${isRatioClient ? 'Ratio client' : 'Technique'}</span>`;
+      // L'historique n'affichait déjà aucun "msg" (seulement titre + zone) : le
+      // détail structuré ci-dessous s'ajoute donc sans rien répéter.
+      const ratioDetails = isRatioClient
+        ? `<div class="sv-hist-ratio-details" style="display:flex;flex-wrap:wrap;gap:3px 10px;font-size:11px;color:var(--text3);margin-top:2px">
+             <span>${esc(a.meterName||'')}</span>
+             <span>${esc(meta.label||a.metric||'')}</span>
+             <span>Ratio : <strong style="color:var(--text2)">${_fmt(a.ratio)} ${esc(a.unit||'')}/client</strong></span>
+             <span>Objectif : ${_fmt(a.target)} ${esc(a.unit||'')}/client</span>
+             <span>Seuil attention : ${_fmt(a.warnThreshold)} ${esc(a.unit||'')}/client</span>
+             <span>Seuil critique : ${_fmt(a.critThreshold)} ${esc(a.unit||'')}/client</span>
+             <span style="color:${lvlC};font-weight:600">${a.level === 'critical' ? 'Critique' : 'Attention'}</span>
+           </div>`
+        : '';
       histRows += `<div class="sv-hist-row${a.acknowledged ? ' sv-hist-ack' : ''}">
         <span class="sv-hist-ico" style="color:${meta.color||lvlC}">${meta.icon||'⚡'}</span>
         <div class="sv-hist-body">
-          <div class="sv-hist-ttl">${esc(a.title||a.type||'')}</div>
+          <div class="sv-hist-ttl">${esc(a.title||a.type||'')}${catBadge}</div>
+          ${ratioDetails}
           ${a.zone ? `<div class="sv-hist-zone"><i class="fas fa-location-dot"></i> ${esc(a.zone)}</div>` : ''}
         </div>
         <div class="sv-hist-right">
