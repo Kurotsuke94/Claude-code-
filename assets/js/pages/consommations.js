@@ -99,7 +99,13 @@
     { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',            mob: 'Relevés'   },
     { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',           mob: 'Analyses'  },
     { id: 'alertes',   icon: 'fa-shield-halved', l: 'Supervision',        mob: 'Superv.'   },
-    { id: 'performance', icon: 'fa-bolt-lightning', l: 'Performance', mob: 'Perf.' },
+    // Phase 5 : le bouton visible "Performance" est retiré de cette barre
+    // (doublon avec "Accueil", qui rend déjà _tPerformance() depuis la
+    // Phase 4). L'id 'performance' lui-même N'EST PAS supprimé : _body()
+    // garde `case 'performance': return _tPerformance();` pour que tout
+    // code encore en dehors de cette barre (menu latéral "Analyses",
+    // window._csoStartTab='performance', _rerender()) continue de
+    // fonctionner à l'identique.
     { id: 'exports',   icon: 'fa-file-export',  l: 'Exports',            mob: 'Exports'   },
   ];
 
