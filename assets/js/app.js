@@ -455,7 +455,7 @@
     if (_see('counters') || _see('consumption')) {
       let anlyItems = "";
       [
-        { tab: "dashboard",   icon: "fa-gauge",          l: "Tableau de bord" },
+        { tab: "dashboard",   icon: "fa-gauge",          l: "Accueil" },
         { tab: "releves",     icon: "fa-camera",         l: "Relevés" },
         { tab: "performance", icon: "fa-bolt-lightning",  l: "Performance" },
         { tab: "analyses",    icon: "fa-percent",        l: "Ratios" },

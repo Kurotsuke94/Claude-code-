@@ -90,7 +90,11 @@
   };
 
   const TABS = [
-    { id: 'dashboard', icon: 'fa-gauge',        l: 'Tableau de bord',    mob: 'Dashboard' },
+    // Phase 4 : cet onglet garde son id historique 'dashboard' (référencé
+    // depuis app.js et alerts-ui.js) mais rend désormais _tPerformance() —
+    // voir _body() plus bas. Seul le libellé change ; ce n'est plus
+    // l'ancien "Tableau de bord énergétique".
+    { id: 'dashboard', icon: 'fa-gauge',        l: 'Accueil',            mob: 'Accueil' },
     { id: 'compteurs', icon: 'fa-gauge-high',   l: 'Compteurs & Ratios', mob: 'Compteurs' },
     { id: 'releves',   icon: 'fa-camera',       l: 'Relevés',            mob: 'Relevés'   },
     { id: 'analyses',  icon: 'fa-chart-bar',    l: 'Analyses',           mob: 'Analyses'  },
@@ -1148,7 +1152,9 @@
     if (el) el.innerHTML = _body();
     _checkCriticalBanner();
     if (_curTab === 'analyses') setTimeout(_anInit, 30);
-    if (_curTab === 'performance') setTimeout(_peInitAnimations, 60);
+    // 'dashboard' rend désormais le même contenu que 'performance' (Phase 4) —
+    // les deux doivent déclencher les mêmes animations d'entrée.
+    if (_curTab === 'performance' || _curTab === 'dashboard') setTimeout(_peInitAnimations, 60);
     if (MX.state && MX.state.currentPage === 'home') {
       MX.Pages && MX.Pages.Home && MX.Pages.Home.render();
     }
@@ -1167,6 +1173,15 @@
     _rerender();
   }
 
+  // Recharge le contenu de l'onglet courant sans en changer l'identité.
+  // Utilisé par les boutons internes de Performance (période, navigation
+  // mois/jour...) qui ont besoin de rafraîchir l'affichage : appeler
+  // _tab('performance') directement forcerait _curTab sur 'performance' même
+  // quand l'utilisateur se trouve sur l'onglet 'dashboard' (Phase 4 : les
+  // deux affichent la même page), ce qui ferait sauter l'onglet actif à
+  // chaque clic sur une pagination interne.
+  function _peRefresh() { _rerender(); }
+
   function _body() {
     switch (_curTab) {
       case 'compteurs': return _tCompteurs();
@@ -1175,7 +1190,13 @@
       case 'analyses':  return _tAnalyses();
       case 'alertes':   return _tAlertes();
       case 'exports':   return _tExports();
-      default:          return _tDashboard();
+      // Phase 4 : l'ancien "Tableau de bord" (_tDashboard) est remplacé par
+      // la page Performance — source de vérité unique (_tPerformance), pas
+      // de copie. _tDashboard() est volontairement conservée plus bas,
+      // inutilisée, en cas de retour arrière ; aucun autre code n'y fait
+      // référence (voir _rerender et les handlers _pe* ci-dessous).
+      case 'dashboard': return _tPerformance();
+      default:          return _tPerformance();
     }
   }
 
@@ -1203,7 +1224,12 @@
     _rerender();
   }
 
-  // ── TAB: DASHBOARD ──
+  // ── TAB: DASHBOARD (Phase 4 : NON APPELÉE) ──────────────────────────────
+  // _body() ne route plus aucun onglet vers cette fonction — l'onglet
+  // 'dashboard' (renommé "Accueil") rend désormais _tPerformance(), seule
+  // page conservée. Fonction volontairement gardée intacte (non supprimée)
+  // pour permettre un retour en arrière rapide ; à retirer dans une phase
+  // ultérieure une fois la bascule confirmée stable.
   // ── TAB: DASHBOARD — Phase 2 : vue de synthèse "quelques secondes" ──────
   // Toute la donnée passe par MX.CsoCalc (sumConsumptionByType, computeRatio,
   // comparePeriods, average, statusFromDeviation, periodDates) + MT — aucune
@@ -2517,7 +2543,7 @@
       { id: 'day',           l: peDate === today ? "Aujourd'hui" : _dateLbl(peDate) },
       { id: 'week',          l: '7 jours' },
       { id: 'month-current', l: 'Mois en cours' },
-    ].map(p => `<button class="cso-per-btn${compPeriod === p.id ? ' active' : ''}" onclick="window._peCompPeriod='${p.id}';MX.Pages.Conso._tab('performance')">${p.l}</button>`).join('');
+    ].map(p => `<button class="cso-per-btn${compPeriod === p.id ? ' active' : ''}" onclick="window._peCompPeriod='${p.id}';MX.Pages.Conso._peRefresh()">${p.l}</button>`).join('');
 
     // ── Prévisions fin de mois ──
     const todayDt    = new Date(today);
@@ -2618,7 +2644,7 @@
     ];
     var quickNav = '<div class="pe-hist-nav">' +
       PERIOD_BTNS.map(function(b) {
-        return '<button class="pe-hist-nav-btn' + (pePeriod === b.key ? ' pe-hist-nav-btn--active' : '') + '" onclick="window._pePeriod=\'' + b.key + '\';MX.Pages.Conso._tab(\'performance\')">' + b.l + '</button>';
+        return '<button class="pe-hist-nav-btn' + (pePeriod === b.key ? ' pe-hist-nav-btn--active' : '') + '" onclick="window._pePeriod=\'' + b.key + '\';MX.Pages.Conso._peRefresh()">' + b.l + '</button>';
       }).join('') +
     '</div>';
 
@@ -3190,7 +3216,7 @@
     const d = new Date((window._peSelDate || _today()) + 'T00:00:00');
     d.setDate(d.getDate() - 1);
     window._peSelDate = d.toISOString().slice(0, 10);
-    MX.Pages.Conso._tab('performance');
+    _rerender();
   }
   function _peDateNext() {
     const today = _today();
@@ -3199,7 +3225,7 @@
     d.setDate(d.getDate() + 1);
     window._peSelDate = d.toISOString().slice(0, 10);
     if (window._peSelDate >= today) window._peSelDate = '';
-    MX.Pages.Conso._tab('performance');
+    _rerender();
   }
   // Navigation mois par mois pour le bloc "Ratio réel mensuel" — état
   // indépendant de peDate/_peSelDate (celui-ci navigue jour par jour pour
@@ -3209,7 +3235,7 @@
     const [y, m] = cur.split('-').map(Number);
     const d = new Date(y, m - 2, 1);
     window._peRatioMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    MX.Pages.Conso._tab('performance');
+    _rerender();
   }
   function _peRatioMonthNext() {
     const curMonthKey = _today().slice(0, 7);
@@ -3218,7 +3244,7 @@
     const [y, m] = cur.split('-').map(Number);
     const d = new Date(y, m, 1);
     window._peRatioMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    MX.Pages.Conso._tab('performance');
+    _rerender();
   }
   function _editCliDate(date) {
     window._csoSelDate = date || _today();
@@ -4653,7 +4679,7 @@
     _resolveAlert, _createIntFromAlert, _critDismiss, _supView,
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
-    _peDatePrev, _peDateNext, _editCliDate,
+    _peDatePrev, _peDateNext, _editCliDate, _peRefresh,
     _peRatioMonthPrev, _peRatioMonthNext,
     _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig, _peOpenGeneralMetersConfig,
   };
