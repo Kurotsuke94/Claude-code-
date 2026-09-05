@@ -1282,8 +1282,13 @@
     }
 
     // ── B/C. Données par type d'énergie (source unique : MT + MX.CsoCalc) ──
-    let worstTypeStatus = null; // null < 'ok' < 'warn' < 'crit' (ordre de gravité affiché)
-    const sevRank = { na: 0, ok: 1, warn: 2, crit: 3 };
+    // Le statut par type (ok/warn/crit/na) reste une lecture LOCALE de
+    // l'écart vs période précédente (comparePeriods/statusFromDeviation,
+    // Phase 1) — affichée uniquement dans sa propre carte, jamais qualifiée
+    // d'« alerte ». Elle n'alimente PAS le badge « Situation globale »
+    // ci-dessous : celui-ci doit rester fondé uniquement sur les alertes
+    // persistées (cso_energy_alerts), pour ne jamais laisser croire qu'un
+    // simple écart de consommation local est une alerte enregistrée.
     let energyCardsHtml = '';
     Object.entries(MT).forEach(([type, meta]) => {
       const ids = _meters.filter(m => m.type === type).map(m => m.id);
@@ -1295,7 +1300,6 @@
       const prevTotal    = sumConsumptionByType(_readings, _meters, type, prevDates);
       const { pct, trend } = comparePeriods(total, prevTotal);
       const status = hasReading ? statusFromDeviation(pct) : 'na';
-      if (status !== 'na' && (!worstTypeStatus || sevRank[status] > sevRank[worstTypeStatus])) worstTypeStatus = status;
 
       const dailyRatios = dates
         .map(d => computeRatio(type, sumConsumptionByType(_readings, _meters, type, d), _clients[d] || 0))
@@ -1361,13 +1365,24 @@
       }
     }
 
-    // ── Situation globale : le pire signal entre déviation par type ET alertes persistées ──
-    let globalStatus = worstTypeStatus || 'na';
+    // ── Situation globale : fondée UNIQUEMENT sur les alertes persistées ──
+    // (cso_energy_alerts, source de vérité — même principe que le badge
+    // d'en-tête de l'onglet Supervision). Ne dépend jamais du statut par
+    // type ci-dessus : un écart de consommation local sans alerte
+    // enregistrée reste visible dans sa propre carte, mais n'affiche
+    // jamais "Anomalie"/"Alerte" en en-tête — cela laisserait croire à
+    // une alerte persistée qui n'existe pas. Une alerte critique reste
+    // affichée telle quelle même si la consommation est repassée à la
+    // normale entre-temps : c'est à l'alerte d'être résolue (Supervision),
+    // pas au Tableau de bord de la masquer de sa propre initiative.
+    let globalStatus;
     if (critCount > 0) globalStatus = 'crit';
-    else if (warnCount > 0 && sevRank[globalStatus] < sevRank.warn) globalStatus = 'warn';
+    else if (warnCount > 0) globalStatus = 'warn';
+    else if (!hasAnyReadingInPeriod) globalStatus = 'na';
+    else globalStatus = 'ok';
     const globalBadge = {
-      crit: { cls: 'sv-badge--crit', icon: 'fa-triangle-exclamation', lbl: 'Anomalie à traiter' },
-      warn: { cls: 'sv-badge--warn', icon: 'fa-exclamation-circle',  lbl: 'Vigilance recommandée' },
+      crit: { cls: 'sv-badge--crit', icon: 'fa-triangle-exclamation', lbl: 'Alerte critique active' },
+      warn: { cls: 'sv-badge--warn', icon: 'fa-exclamation-circle',  lbl: 'Alerte active à surveiller' },
       ok:   { cls: 'sv-badge--ok',   icon: 'fa-check-circle',        lbl: 'Situation normale' },
       na:   { cls: 'sv-badge--na',   icon: 'fa-circle-question',     lbl: 'Données insuffisantes' },
     }[globalStatus];
