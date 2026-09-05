@@ -2658,24 +2658,50 @@
       });
       return found ? total : null;
     }
+    // Résout les compteurs GÉNÉRAUX configurés pour un type — jamais le
+    // fallback de _refMeterIds() (qui renverrait tous les compteurs du
+    // type si rien n'est configuré). Revérifie aussi le type réel de
+    // chaque compteur référencé : si la config pointe vers un compteur
+    // dont le type a changé/été supprimé, il est exclu plutôt que de
+    // mélanger des unités incompatibles.
+    function _generalMeterIds(type) {
+      const cfg = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
+      if (!Array.isArray(cfg) || !cfg.length) return [];
+      return cfg.filter(id => {
+        const m = _meters.find(x => x.id === id);
+        return m && m.type === type;
+      });
+    }
     // Index de début = dernier relevé STRICTEMENT avant le 1er du mois ;
     // index de fin = dernier relevé au plus tard le dernier jour du mois.
-    // Ni l'un ni l'autre n'exige un relevé daté DANS le mois lui-même.
-    function _monthlyRealRatio(type, monthKey) {
-      const refIds = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
-      if (!Array.isArray(refIds) || !refIds.length) return { status: 'no_meter' };
+    // Ni l'un ni l'autre n'exige un relevé daté DANS le mois lui-même —
+    // jamais une somme des champs `consumption` du mois (sumConsumption*
+    // est volontairement écarté ici, cf. commentaire de _buildMonthlyRatioNav).
+    // Statuts renvoyés : no_meter / insufficient / incoherent / ok.
+    function _monthlyConsoStatus(type, monthKey) {
+      const ids = _generalMeterIds(type);
+      if (!ids.length) return { status: 'no_meter' };
       const { start, end } = _monthBounds(monthKey);
       let total = 0;
-      for (const id of refIds) {
+      for (const id of ids) {
         const startIdx = _lastIndexAt(id, start, true);
         const endIdx   = _lastIndexAt(id, end, false);
-        if (startIdx === null || endIdx === null || endIdx < startIdx) return { status: 'insufficient' };
-        total += (endIdx - startIdx);
+        if (startIdx === null || endIdx === null) return { status: 'insufficient' };
+        const delta = endIdx - startIdx;
+        if (delta < 0) return { status: 'incoherent' };
+        total += delta;
       }
-      total = Math.round(total * 1000) / 1000;
-      const clients = _monthlyClientsTotal(monthKey);
-      if (clients === null) return { status: 'no_clients', conso: total };
-      return { status: 'ok', conso: total, clients, ratio: computeRatio(type, total, clients) };
+      return { status: 'ok', conso: Math.round(total * 1000) / 1000 };
+    }
+    // Clients et consommation sont calculés indépendamment l'un de l'autre
+    // (l'absence de clients ne doit pas masquer une consommation réelle
+    // disponible, et inversement) ; seul le ratio final dépend des deux.
+    function _monthlyRealRatio(type, monthKey) {
+      const consoRes = _monthlyConsoStatus(type, monthKey);
+      const clients  = _monthlyClientsTotal(monthKey);
+      const ratio = (consoRes.status === 'ok' && clients !== null)
+        ? computeRatio(type, consoRes.conso, clients) : null;
+      return { consoStatus: consoRes.status, conso: consoRes.conso ?? null, clients, ratio };
     }
     const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
     function _monthLabel(monthKey) {
@@ -2701,42 +2727,62 @@
       function blockFor(type, meta) {
         const res  = _monthlyRealRatio(type, ratioMonth);
         const unit = (_meters.find(m => m.type === type) || {}).unit || meta.unit;
-        let consoLine, clientsLine, ratioLine;
-        if (res.status === 'no_meter') {
-          consoLine = clientsLine = ratioLine = 'Compteur général non configuré';
-        } else if (res.status === 'insufficient') {
-          consoLine = 'Données insuffisantes';
-          clientsLine = 'Données insuffisantes';
-          ratioLine = '—';
-        } else {
-          consoLine = `${_fmt(res.conso, 1)} ${e(unit)}`;
-          if (res.status === 'no_clients') {
-            clientsLine = 'Clients indisponibles';
-            ratioLine = '—';
-          } else {
-            clientsLine = res.clients.toLocaleString('fr-FR');
-            ratioLine = res.ratio !== null ? `${_fmt(res.ratio, isW(type) ? 0 : 2)} ${isW(type) ? 'L' : e(unit)}/client` : '—';
+        const rUnit = isW(type) ? 'L' : e(unit);
+
+        // Chaque ligne reflète sa PROPRE cause d'indisponibilité — jamais
+        // un message générique masquant les autres, jamais un faux zéro.
+        const consoLine = res.consoStatus === 'no_meter'    ? 'Compteur général non configuré'
+                         : res.consoStatus === 'insufficient' ? 'Données insuffisantes'
+                         : res.consoStatus === 'incoherent'   ? 'Consommation incohérente'
+                         : `${_fmt(res.conso, 1)} ${e(unit)}`; // res.conso peut valoir 0 : donnée réelle, jamais masquée
+        const clientsLine = res.clients === null ? 'Clients indisponibles' : res.clients.toLocaleString('fr-FR');
+        const ratioLine = res.ratio !== null
+          ? `${_fmt(res.ratio, isW(type) ? 0 : 2)} ${rUnit}/client`
+          : 'Ratio indisponible';
+
+        // ── Objectif / statut (optionnel, cf. section 7) ──────────────────
+        // Réutilise la configuration déjà existante (cso_perf_config/
+        // objectifs) et _getGrade (seuils déjà configurés) — rien n'est
+        // inventé, "Non configuré" si l'objectif n'existe pas pour ce type.
+        const obj = _perfCfg.objectifs && _perfCfg.objectifs[type];
+        let objLine = 'Non configuré', statusBadge = '';
+        if (obj && obj.target) {
+          const target = parseFloat(obj.target);
+          objLine = `${_fmt(target, isW(type) ? 0 : 2)} ${rUnit}/client`;
+          if (res.ratio !== null && target > 0) {
+            const ecart = (res.ratio - target) / target * 100;
+            objLine += ` <span class="pe-obj-pct">(${ecart > 0 ? '+' : ''}${_fmt(ecart, 1)}%)</span>`;
           }
         }
+        if (res.ratio !== null) {
+          const grade = _getGrade(type, res.ratio);
+          statusBadge = gradeBadge(grade.key);
+        }
+
         return `<div class="pe-v4-card">
-          <div class="pe-v4-card-hd">${meta.icon} ${e(meta.label)} — ${e(monthLbl)}</div>
+          <div class="pe-v4-card-hd">${meta.icon} ${e(meta.label)} — ${e(monthLbl)}${statusBadge ? ' ' + statusBadge : ''}</div>
           <div class="pe-day-ef-summary">
             <div class="pe-day-ef-row"><span class="pe-day-ef-nm">Consommation ${monthShort}</span><span class="pe-day-ef-v">${consoLine}</span></div>
             <div class="pe-day-ef-row"><span class="pe-day-ef-nm">Clients ${monthShort}</span><span class="pe-day-ef-v">${clientsLine}</span></div>
             <div class="pe-day-ef-total"><span class="pe-day-ef-nm"><strong>Ratio réel</strong></span><span class="pe-day-ef-v">${ratioLine}</span></div>
+            <div class="pe-day-ef-row"><span class="pe-day-ef-nm">Objectif</span><span class="pe-day-ef-v">${objLine}</span></div>
           </div>
         </div>`;
       }
 
       const blocksHtml = ['eau_froide', 'eau_chaude'].map(t => blockFor(t, MT[t])).join('');
+      const partialNote = atCurrent
+        ? '<div class="pe-hist-nd" style="padding:6px 2px 0">Mois en cours — période partielle (jusqu\'à aujourd\'hui)</div>'
+        : '';
 
       return `<div class="pe-section pe-section--chart">
         <div class="pe-section-head"><i class="fas fa-calendar-days"></i> Ratio réel mensuel</div>
         <div class="pe-date-row">
-          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthPrev()"><i class="fas fa-chevron-left"></i></button>
+          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthPrev()" title="Mois précédent"><i class="fas fa-chevron-left"></i></button>
           <span class="pe-date-lbl">${e(monthLbl)}</span>
-          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthNext()"${atCurrent ? ' disabled' : ''}><i class="fas fa-chevron-right"></i></button>
+          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthNext()" title="Mois suivant"${atCurrent ? ' disabled' : ''}><i class="fas fa-chevron-right"></i></button>
         </div>
+        ${partialNote}
         <div class="pe-v4-row2">${blocksHtml}</div>
       </div>`;
     }
