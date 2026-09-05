@@ -3529,8 +3529,13 @@
       eau_chaude:  { label: 'Eau chaude',  unit: 'L/client',   icon: '🔥' },
       electricite: { label: 'Électricité', unit: 'kWh/client', icon: '⚡' },
       gaz:         { label: 'Gaz',         unit: 'kWh/client', icon: '🌬' },
+      // PHASE 9.1 : ajout du chauffage (MT.chauffage, déjà existant) au
+      // tableau "Objectifs & seuils" — nécessaire pour que la nouvelle
+      // catégorie d'alerte ratio_client puisse comparer le chauffage à un
+      // objectif réel plutôt que d'afficher indéfiniment "Non configuré".
+      chauffage:   { label: 'Chauffage (ADP)', unit: 'MWh/client', icon: '🏢' },
     };
-    var OBJ_TYPES2 = ['eau_froide','eau_chaude','electricite'];
+    var OBJ_TYPES2 = ['eau_froide','eau_chaude','electricite','chauffage'];
     var cfgRef2 = _perfCfg.ref_meters || {};
 
     // ── Compteurs de référence ──
@@ -3750,7 +3755,14 @@
     // reste de cette fonction (liste des compteurs par type, aucune case
     // cochée par défaut, message "non configuré") est déjà générique et ne
     // change pas pour eau_froide/eau_chaude.
-    var GM_TYPES = ['eau_froide', 'eau_chaude', 'chauffage'];
+    // PHASE 9.1 : ajout de "electricite" — nécessaire pour que la nouvelle
+    // catégorie d'alerte ratio_client (compteurs généraux + objectif
+    // kWh/client) sache quels compteurs électriques sont des compteurs
+    // généraux, sans jamais retomber sur le repli de _refMeterIds(). Cet
+    // ajout n'affecte PAS le bloc "Ratio réel mensuel" (_buildMonthlyRatioNav
+    // itère sa propre liste ['eau_froide','eau_chaude','chauffage'], non
+    // modifiée) — uniquement ce tiroir de sélection.
+    var GM_TYPES = ['eau_froide', 'eau_chaude', 'chauffage', 'electricite'];
     var cfgRef3 = _perfCfg.ref_meters || {};
 
     var secHtml = GM_TYPES.map(function(type) {
@@ -3780,7 +3792,7 @@
         '</div>' +
         '<div class="pe-cfg-body">' +
           '<div class="pe-cfg-section">' +
-          '<p class="pe-ref-intro">Cochez uniquement les compteurs généraux (jamais un sous-compteur) à utiliser pour le calcul du ratio réel mensuel (Eau froide, Eau chaude et Chauffage (ADP)). Ces réglages sont indépendants de la sélection ci-dessus utilisée pour le score énergétique global — bien qu\'ils partagent la même configuration enregistrée.</p>' +
+          '<p class="pe-ref-intro">Cochez uniquement les compteurs généraux (jamais un sous-compteur) à utiliser pour le ratio réel mensuel (Eau froide, Eau chaude, Chauffage (ADP)) et pour les alertes automatiques par ratio client (également Électricité). Ces réglages sont indépendants de la sélection ci-dessus utilisée pour le score énergétique global — bien qu\'ils partagent la même configuration enregistrée.</p>' +
           secHtml +
           '</div>' +
         '</div>' +
@@ -3796,7 +3808,7 @@
     window._peGmSave = function() {
       var saveBtn = document.querySelector('.pe-gm-save-btn');
       if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
-      var gmData = { eau_froide: [], eau_chaude: [], chauffage: [] };
+      var gmData = { eau_froide: [], eau_chaude: [], chauffage: [], electricite: [] };
       document.querySelectorAll('.pe-gm-cb').forEach(function(cb) {
         if (cb.checked) gmData[cb.dataset.type].push(cb.dataset.id);
       });

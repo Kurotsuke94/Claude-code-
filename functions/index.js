@@ -343,3 +343,148 @@ exports.onReadingWritten = onDocumentWritten(
     return _cso_notifyOverconsumption(db, meter, meterId, level, msg);
   }
 );
+
+// ── RATIO-PAR-CLIENT ALERT DETECTOR (Phase 9.1) ─────────────────────────────
+// Catégorie NOUVELLE et SÉPARÉE ('ratio_client'), totalement indépendante du
+// détecteur ci-dessus (catégorie 'surconsommation'/'anomalie_compteur',
+// volume brut normalisé/24h) : trigger distinct sur le même document
+// cso_readings, mais ID de doc déterministe différent
+// (ratio_client_{meterId} vs overconsumption_{meterId}) — aucun des deux ne
+// peut jamais écraser l'autre.
+//
+// Ne surveille QUE les compteurs explicitement listés dans
+// cso_perf_config/ref_meters[type] (compteurs généraux sélectionnés dans
+// Performance) — jamais un repli sur "tous les compteurs du type" (même
+// principe strict que _generalMeterIds() côté client, jamais celui, permissif,
+// de _refMeterIds()). Réutilise l'objectif + la tolérance déjà configurés
+// dans cso_perf_config/objectifs — aucune nouvelle configuration créée.
+//
+// Le ratio est calculé avec la même formule déjà validée que
+// _monthlyRealRatio() côté client (index de fin de mois − index de début de
+// mois, ÷ clients de la même période) — réimplémentée ici en Node car une
+// Cloud Function ne peut pas importer consommations.js (dépendant du DOM).
+// Aucun nouvel index Firestore composite requis : la requête cso_readings
+// ci-dessous (une seule égalité meterId + un seul orderBy) reproduit
+// exactement la forme déjà utilisée en production par le mode "auto" du
+// détecteur ci-dessus ; la requête cso_clients n'utilise qu'un encadrement
+// sur un unique champ (date), sans index composite nécessaire non plus.
+const CSO_LITER_RATIO_TYPES = new Set(["eau_froide", "eau_chaude"]); // reflète MT[type].literRatio côté client
+
+function _cso_monthBounds(now) {
+  const y = now.getFullYear(), m = now.getMonth();
+  const mm = String(m + 1).padStart(2, "0");
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(lastDay).padStart(2, "0")}` };
+}
+
+// Même algorithme que consommations.js _lastIndexAt, appliqué à une liste de
+// relevés déjà récupérée (au lieu du tableau _readings en mémoire du client).
+function _cso_lastIndexAt(readings, dateBound, strictBefore) {
+  let best = null;
+  for (const r of readings) {
+    if (r.index == null || !r.date) continue;
+    const ok = strictBefore ? r.date < dateBound : r.date <= dateBound;
+    if (!ok) continue;
+    if (!best || r.date > best.date || (r.date === best.date && _tsToMs(r.createdAt) > _tsToMs(best.createdAt))) best = r;
+  }
+  return best ? best.index : null;
+}
+
+exports.onReadingWrittenRatioClient = onDocumentWritten(
+  { document: "cso_readings/{readingId}", region: REGION },
+  async event => {
+    const after  = event.data.after;
+    const before = event.data.before;
+    const data   = (after && after.exists) ? after.data() : ((before && before.exists) ? before.data() : null);
+    const meterId = data && data.meterId;
+    if (!meterId) return null;
+
+    const db = admin.firestore();
+    const meterSnap = await db.collection("cso_meters").doc(meterId).get();
+    if (!meterSnap.exists) return null;
+    const meter = meterSnap.data();
+    const type  = meter.type;
+
+    const alertRef = db.collection("cso_energy_alerts").doc(`ratio_client_${meterId}`);
+
+    // Compteur non désigné "compteur général" pour ce type -> jamais évalué
+    // (exclut les sous-compteurs par défaut, sans exception).
+    const refSnap = await db.collection("cso_perf_config").doc("ref_meters").get();
+    const refIds  = (refSnap.exists && Array.isArray(refSnap.data()[type])) ? refSnap.data()[type] : [];
+    if (!refIds.includes(meterId)) return _cso_resolveIfActive(alertRef);
+
+    // Objectif & tolérance déjà configurés dans Performance (cso_perf_config/
+    // objectifs) — jamais une valeur inventée si absente pour ce type.
+    const objSnap = await db.collection("cso_perf_config").doc("objectifs").get();
+    const obj = objSnap.exists ? objSnap.data()[type] : null;
+    const target = obj && Number(obj.target) > 0 ? Number(obj.target) : null;
+    if (!target) return _cso_resolveIfActive(alertRef); // "Objectif non configuré"
+    const tolerance = (obj.tolerance != null && !isNaN(Number(obj.tolerance))) ? Number(obj.tolerance) : 10;
+
+    const now = new Date();
+    const { start, end } = _cso_monthBounds(now);
+    const monthKey = start.slice(0, 7);
+
+    const readingsSnap = await db.collection("cso_readings")
+      .where("meterId", "==", meterId)
+      .orderBy("date", "desc")
+      .limit(500)
+      .get();
+    const readings = readingsSnap.docs.map(d => d.data());
+
+    const startIdx = _cso_lastIndexAt(readings, start, true);
+    const endIdx   = _cso_lastIndexAt(readings, end, false);
+    if (startIdx === null || endIdx === null) return _cso_resolveIfActive(alertRef); // "Données insuffisantes"
+    const delta = endIdx - startIdx;
+    if (delta < 0) return _cso_resolveIfActive(alertRef); // "Consommation incohérente" — jamais un ratio négatif
+
+    const clientsSnap = await db.collection("cso_clients")
+      .where("date", ">=", start)
+      .where("date", "<=", end)
+      .get();
+    let clients = 0, hasClients = false;
+    clientsSnap.docs.forEach(d => {
+      const v = d.data().count;
+      if (typeof v === "number" && v > 0) { clients += v; hasClients = true; }
+    });
+    if (!hasClients) return _cso_resolveIfActive(alertRef); // "Clients indisponibles" — jamais de ratio inventé
+
+    const ratio = CSO_LITER_RATIO_TYPES.has(type) ? (delta * 1000 / clients) : (delta / clients);
+
+    // Seuils dérivés automatiquement de l'objectif + tolérance déjà
+    // configurés — aucun seuil fixe compteur par compteur.
+    const warnThreshold = target * (1 + tolerance / 100);
+    const critThreshold = target * (1 + 2 * tolerance / 100);
+    let level = null;
+    if (ratio > critThreshold) level = "critical";
+    else if (ratio > warnThreshold) level = "warning";
+    if (!level) return _cso_resolveIfActive(alertRef); // dans l'objectif ou la tolérance -> pas d'alerte / clôture
+
+    const existingSnap = await alertRef.get();
+    const existing  = existingSnap.exists ? existingSnap.data() : null;
+    const wasActive = !!(existing && existing.status === "active");
+    const ts = admin.firestore.FieldValue.serverTimestamp();
+    const ecartPct = Math.round((ratio - target) / target * 100);
+    const rUnit = CSO_LITER_RATIO_TYPES.has(type) ? "L" : (meter.unit || "");
+
+    const payload = {
+      category: "ratio_client", type: "ratio_client", level, status: "active",
+      meterId, meterName: meter.name || "", metric: type, zone: meter.location || "",
+      title: "Ratio par client au-dessus de l'objectif",
+      msg: `${meter.name || "Compteur"} — ${Math.round(ratio * 100) / 100} ${rUnit}/client vs objectif ${target} ${rUnit}/client (+${ecartPct}%)`,
+      ratio: Math.round(ratio * 1000) / 1000, target, tolerance,
+      warnThreshold: Math.round(warnThreshold * 1000) / 1000,
+      critThreshold: Math.round(critThreshold * 1000) / 1000,
+      ecart: ecartPct, unit: rUnit, clients, period: monthKey,
+      ts, lastTriggeredAt: ts,
+    };
+    if (!wasActive) {
+      payload.firstTriggeredAt = ts;
+      payload.acknowledged     = false;
+      payload.acknowledgedAt   = admin.firestore.FieldValue.delete();
+      payload.acknowledgedBy   = admin.firestore.FieldValue.delete();
+      payload.resolvedAt       = admin.firestore.FieldValue.delete();
+    }
+    return alertRef.set(payload, { merge: true });
+  }
+);
