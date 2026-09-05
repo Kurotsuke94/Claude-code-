@@ -2816,7 +2816,10 @@
         const consoLine = res.consoStatus === 'no_meter'    ? 'Compteur général non configuré'
                          : res.consoStatus === 'insufficient' ? 'Données insuffisantes'
                          : res.consoStatus === 'incoherent'   ? 'Consommation incohérente'
-                         : `${_fmt(res.conso, 1)} ${e(unit)}`; // res.conso peut valoir 0 : donnée réelle, jamais masquée
+                         // PHASE 6.1 : 1 décimale pour l'eau (inchangé — isW(type)=true pour
+                         // eau_froide/eau_chaude), 2 décimales pour le chauffage (MWh, valeurs
+                         // typiquement plus petites) — même convention que ratioLine ci-dessous.
+                         : `${_fmt(res.conso, isW(type) ? 1 : 2)} ${e(unit)}`; // res.conso peut valoir 0 : donnée réelle, jamais masquée
         const clientsLine = res.clients === null ? 'Clients indisponibles' : res.clients.toLocaleString('fr-FR');
         const ratioLine = res.ratio !== null
           ? `${_fmt(res.ratio, isW(type) ? 0 : 2)} ${rUnit}/client`
@@ -2852,7 +2855,11 @@
         </div>`;
       }
 
-      const blocksHtml = ['eau_froide', 'eau_chaude'].map(t => blockFor(t, MT[t])).join('');
+      // PHASE 6.1 : ajout du 3e type "chauffage" (MT.chauffage, déjà existant —
+      // aucun nouveau type de compteur créé). blockFor() est déjà générique
+      // (type-agnostique) : aucune modification de sa logique n'est nécessaire,
+      // _monthlyRealRatio/_generalMeterIds/computeRatio le sont déjà aussi.
+      const blocksHtml = ['eau_froide', 'eau_chaude', 'chauffage'].map(t => blockFor(t, MT[t])).join('');
       const partialNote = atCurrent
         ? '<div class="pe-hist-nd" style="padding:6px 2px 0">Mois en cours — période partielle (jusqu\'à aujourd\'hui)</div>'
         : '';
@@ -2867,7 +2874,7 @@
           <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthNext()" title="Mois suivant"${atCurrent ? ' disabled' : ''}><i class="fas fa-chevron-right"></i></button>
         </div>
         ${partialNote}
-        <div class="pe-v4-row2">${blocksHtml}</div>
+        <div class="pe-ratio-row3">${blocksHtml}</div>
       </div>`;
     }
 
@@ -3731,7 +3738,7 @@
   // reste vide en base ⇒ _generalMeterIds() renvoie [] ⇒ "Compteur général
   // non configuré" (déjà géré par _monthlyConsoStatus). Les deux partagent
   // volontairement le même document Firestore cso_perf_config/ref_meters et
-  // les mêmes clés eau_froide/eau_chaude — aucune nouvelle source de vérité —
+  // les mêmes clés eau_froide/eau_chaude/chauffage — aucune nouvelle source de vérité —
   // seule cette UI est nouvelle et dédiée, pour être visible directement à
   // côté du bloc "Ratio réel mensuel" plutôt que noyée dans la configuration
   // générale de Performance.
@@ -3739,7 +3746,11 @@
     var ex = document.getElementById('pe-genmeter-drawer');
     if (ex) { ex.remove(); return; }
     var esc3 = MX.esc || function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-    var GM_TYPES = ['eau_froide', 'eau_chaude'];
+    // PHASE 6.1 : ajout de "chauffage" (MT.chauffage, déjà existant) — le
+    // reste de cette fonction (liste des compteurs par type, aucune case
+    // cochée par défaut, message "non configuré") est déjà générique et ne
+    // change pas pour eau_froide/eau_chaude.
+    var GM_TYPES = ['eau_froide', 'eau_chaude', 'chauffage'];
     var cfgRef3 = _perfCfg.ref_meters || {};
 
     var secHtml = GM_TYPES.map(function(type) {
@@ -3769,7 +3780,7 @@
         '</div>' +
         '<div class="pe-cfg-body">' +
           '<div class="pe-cfg-section">' +
-          '<p class="pe-ref-intro">Cochez uniquement les compteurs généraux (jamais un sous-compteur) à utiliser pour le calcul du ratio réel mensuel (Eau froide et Eau chaude). Ces réglages sont indépendants de la sélection ci-dessus utilisée pour le score énergétique global — bien qu\'ils partagent la même configuration enregistrée.</p>' +
+          '<p class="pe-ref-intro">Cochez uniquement les compteurs généraux (jamais un sous-compteur) à utiliser pour le calcul du ratio réel mensuel (Eau froide, Eau chaude et Chauffage (ADP)). Ces réglages sont indépendants de la sélection ci-dessus utilisée pour le score énergétique global — bien qu\'ils partagent la même configuration enregistrée.</p>' +
           secHtml +
           '</div>' +
         '</div>' +
@@ -3785,7 +3796,7 @@
     window._peGmSave = function() {
       var saveBtn = document.querySelector('.pe-gm-save-btn');
       if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
-      var gmData = { eau_froide: [], eau_chaude: [] };
+      var gmData = { eau_froide: [], eau_chaude: [], chauffage: [] };
       document.querySelectorAll('.pe-gm-cb').forEach(function(cb) {
         if (cb.checked) gmData[cb.dataset.type].push(cb.dataset.id);
       });

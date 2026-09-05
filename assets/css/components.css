@@ -17546,6 +17546,20 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 /* ── Row 2: score + energy ──────────────────────────────────────────── */
 .pe-v4-row2 { display: grid; grid-template-columns: 320px 1fr; gap: 14px; }
 
+/* ── PHASE 6.1 : ligne des 3 blocs "Ratio réel mensuel" (Eau froide / Eau
+   chaude / Chauffage) — classe dédiée, indépendante de .pe-v4-row2 (qui
+   reste 320px/1fr pour la carte "Score énergétique" + "Ratios par énergie",
+   inchangée). Trois colonnes de largeur égale, même style de carte
+   (.pe-v4-card réutilisée telle quelle). ── */
+.pe-ratio-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.pe-ratio-row3 > .pe-v4-card { min-width: 0; }
+@media (max-width: 900px) {
+  .pe-ratio-row3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .pe-ratio-row3 { grid-template-columns: 1fr; }
+}
+
 /* Generic card */
 .pe-v4-card {
   background: var(--bg); border: 1px solid var(--border);
