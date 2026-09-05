@@ -2358,35 +2358,57 @@
     const c        = _perfC();
     const t        = _perfT();
     const isW      = _isLiterRatioType;
-    // Le tableau historique va jusqu'à 90 jours et la navigation par jour
-    // (_peDatePrev) peut remonter arbitrairement loin dans le passé : on
-    // garantit le chargement du plus ancien des deux besoins. Non bloquant
-    // (voir commentaire équivalent dans _tAnalyses).
-    _ensureReadingsFrom(peDate < _daysAgo(89) ? peDate : _daysAgo(89));
-    _ensureClientsFrom(peDate < _daysAgo(89) ? peDate : _daysAgo(89));
 
     // ── Comparison dates ──
     const d_hier   = _daysAgo(peDate === today ? 1 : Math.ceil((new Date(today)-new Date(peDate))/86400000)+1);
-    const d_s7     = _daysAgo(7);
-    const d_m1     = _daysAgo(30);
-    const d_a1     = _daysAgo(365);
+
+    // ── A. Sélecteur de période (comparaison réellement comparable) ──
+    // Ancré sur peDate (le jour navigable existant, _peDatePrev/_peDateNext)
+    // plutôt que sur "aujourd'hui" : Performance permet d'investiguer une
+    // date passée, la comparaison de période doit suivre la même ancre.
+    // Construit uniquement avec MX.CsoCalc.periodDates('custom', ...) —
+    // aucune énumération de dates recréée à la main.
+    function _daysBefore(dateStr, n) {
+      const d = new Date(dateStr + 'T12:00:00');
+      d.setDate(d.getDate() - n);
+      return d.toISOString().slice(0, 10);
+    }
+    const compPeriod = window._peCompPeriod || 'day';
+    let cDates, cPrevDates, cPeriodLbl, cPartialNote = '';
+    if (compPeriod === 'week') {
+      cDates     = periodDates('custom', { start: _daysBefore(peDate, 6), end: peDate });
+      cPrevDates = periodDates('custom', { start: _daysBefore(peDate, 13), end: _daysBefore(peDate, 7) });
+      cPeriodLbl = `7 jours · ${_dateLbl(cDates[0])} → ${_dateLbl(peDate)}`;
+    } else if (compPeriod === 'month-current') {
+      const peD = new Date(peDate + 'T12:00:00');
+      const monthStart = new Date(peD.getFullYear(), peD.getMonth(), 1).toISOString().slice(0, 10);
+      cDates = periodDates('custom', { start: monthStart, end: peDate });
+      const prevStart = new Date(peD.getFullYear(), peD.getMonth() - 1, 1);
+      const prevEnd   = new Date(prevStart); prevEnd.setDate(prevEnd.getDate() + cDates.length - 1);
+      cPrevDates = periodDates('custom', { start: prevStart.toISOString().slice(0, 10), end: prevEnd.toISOString().slice(0, 10) });
+      cPeriodLbl = `Mois en cours · ${_dateLbl(cDates[0])} → ${_dateLbl(peDate)}`;
+      cPartialNote = `Comparé aux ${cDates.length} premier${cDates.length > 1 ? 's' : ''} jour${cDates.length > 1 ? 's' : ''} du mois précédent (mois non terminé)`;
+    } else {
+      cDates     = [peDate];
+      cPrevDates = [d_hier];
+      cPeriodLbl = peDate === today ? "Aujourd'hui" : _dateLbl(peDate);
+    }
+    const cDatesSet = new Set(cDates);
+
+    // Le tableau historique va jusqu'à 90 jours, la navigation par jour
+    // (_peDatePrev) peut remonter arbitrairement loin, et la comparaison de
+    // période ci-dessus peut demander plus loin encore (mois précédent) :
+    // on garantit le chargement du plus ancien des trois besoins. Non
+    // bloquant (voir commentaire équivalent dans _tAnalyses).
+    const perfMinDate = [peDate, cDates[0], cPrevDates[0], _daysAgo(89)].reduce((m, d) => (!m || d < m) ? d : m, null);
+    _ensureReadingsFrom(perfMinDate);
+    _ensureClientsFrom(perfMinDate);
 
     // ── Grade badge HTML ──
     function gradeBadge(key) {
       if (!key || key === 'na') return '<span class="pe-grade pe-grade--na">—</span>';
       const g = c[key] || {};
       return `<span class="pe-grade" style="background:${g.color}20;color:${g.color};border:1px solid ${g.color}50">${g.l || key}</span>`;
-    }
-
-    // ── Delta chip HTML ──
-    function deltaBadge(curr, prev) {
-      if (curr === null || prev === null || prev === 0) return '<span class="pe-delta pe-delta--na">—</span>';
-      const pct = (curr - prev) / prev * 100;
-      const abs = Math.abs(pct);
-      const up  = pct > 0;
-      const col = up ? '#ef4444' : '#22c55e'; // for energy: up = bad
-      const ico = up ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
-      return `<span class="pe-delta" style="color:${col}"><i class="fas ${ico}"></i> ${up?'+':''}${_fmt(pct,1)}%</span>`;
     }
 
     // ── Global performance score ──
@@ -2416,58 +2438,23 @@
       <text x="50" y="57" text-anchor="middle" fill="${scoreCol}" font-size="9" font-weight="600" font-family="sans-serif">/100</text>
     </svg>`;
 
-    // ── Ratio cards per type ──
-    const TYPES = ['eau_froide','eau_chaude','electricite','gaz','vapeur','eau_glacee'];
-    let ratioCards = '';
+    // ── Données par type (source unique : MT + compteurs existants) ──
+    // typeBreakdown reste la base de la synthèse (B), du forecast et de la
+    // grille de ratios déjà existante (v4EnergyCards) ; refIds/refNames y
+    // sont ajoutés pour la section D (compteurs de référence déjà
+    // configurés via _refMeterIds — aucune nouvelle source de vérité).
     const typeBreakdown = [];
-
-    TYPES.forEach(type => {
+    Object.keys(MT).forEach(type => {
       if (!_meters.some(m => m.type === type)) return;
       const meta   = MT[type];
       const conso  = _perfConso(type, peDate);
       const ratio  = _perfRatio(type, peDate);
       const grade  = _getGrade(type, ratio);
       const rUnit  = isW(type) ? 'L/client' : `${meta.unit}/client`;
-      const ratioFmt = ratio !== null ? `${_fmt(ratio, isW(type) ? 0 : 2)} ${rUnit}` : '—';
-      const consoFmt = conso !== null ? `${_fmt(conso)} ${meta.unit}` : '—';
-
-      const ratioHier = _perfRatio(type, d_hier);
-      const delta     = deltaBadge(ratio, ratioHier);
-
-      // Threshold info: next class up/down
-      const thresh = t[type] || {};
-      const threshKeys = Object.keys(thresh);
-      let seuilHtml = '';
-      if (grade.key !== 'na' && threshKeys.length) {
-        const excellent_max = thresh.excellent || '—';
-        seuilHtml = `<div class="pe-card-seuil">Seuil Excellent : ≤ ${excellent_max} ${rUnit}</div>`;
-      }
-
       const refIds   = _refMeterIds(type);
       const refNames = refIds.map(id => { const m = _meters.find(x => x.id === id); return m ? e(m.name) : null; }).filter(Boolean);
-      const refBadge = refNames.length ? '<div class="pe-ref-badge"><i class="fas fa-crosshairs"></i> ' + refNames.join(', ') + '</div>' : '';
-      typeBreakdown.push({ type, meta, ratio, rUnit, grade });
-
-      ratioCards += `<div class="pe-ratio-card" style="--type-col:${meta.color}">
-        <div class="pe-ratio-card-head">
-          <span class="pe-ratio-ico">${meta.icon}</span>
-          <span class="pe-ratio-lbl">${meta.label}</span>
-          ${gradeBadge(grade.key)}
-        </div>
-        <div class="pe-ratio-body">
-          <div class="pe-ratio-val">${consoFmt}</div>
-          <div class="pe-ratio-cli">${cli > 0 ? `${cli} clients` : 'Clients non renseignés'}</div>
-          ${cli > 0 && ratio !== null ? `<div class="pe-ratio-result">= <strong>${ratioFmt}</strong></div>` : ''}
-          ${cli === 0 ? '<div class="pe-ratio-warn"><i class="fas fa-triangle-exclamation"></i> Renseigner le nombre de clients</div>' : ''}
-          <div class="pe-ratio-delta">${delta} vs hier</div>
-        </div>
-        ${seuilHtml}${refBadge}
-      </div>`;
+      typeBreakdown.push({ type, meta, conso, ratio, rUnit, grade, refIds, refNames });
     });
-
-    if (!ratioCards) {
-      ratioCards = '<div class="cso-empty-state"><i class="fas fa-bolt-lightning" style="font-size:32px;opacity:.2"></i><p>Aucun compteur configuré</p></div>';
-    }
 
     // ── Per-type score breakdown ──
     let breakdownHtml = '';
@@ -2483,29 +2470,54 @@
       </div>`;
     });
 
-    // ── Comparison table ──
-    const compDates = [
-      { lbl: "Aujourd'hui", d: peDate },
-      { lbl: 'Hier',        d: d_hier },
-      { lbl: '7 jours',     d: d_s7  },
-      { lbl: '30 jours',    d: d_m1  },
-      { lbl: '1 an',        d: d_a1  },
-    ];
-    const compTypes = typeBreakdown.slice(0, 4);
-    let compHead = '<tr><th>Période</th>';
-    compTypes.forEach(({meta}) => { compHead += `<th>${meta.icon} ${meta.label}</th>`; });
-    compHead += '</tr>';
-    let compBody = '';
-    compDates.forEach(({lbl, d}) => {
-      compBody += `<tr><td class="pe-comp-per">${lbl}</td>`;
-      compTypes.forEach(({type, rUnit}) => {
-        const r = _perfRatio(type, d);
-        const g = r !== null ? _getGrade(type, r) : { key: 'na' };
-        const col = (c[g.key] || {}).color || '#64748b';
-        compBody += `<td style="color:${col}">${r !== null ? `${_fmt(r, isW(type)?0:2)} ${rUnit}` : '—'}</td>`;
-      });
-      compBody += '</tr>';
+    // ── C. Comparaison par type : période sélectionnée vs période précédente ──
+    // Réutilise exclusivement sumConsumptionByType/comparePeriods/computeRatio/
+    // average/statusFromDeviation (MX.CsoCalc, Phase 1) — aucun calcul de
+    // consommation ou de ratio recréé ici. Jamais d'addition entre types :
+    // chaque ligne garde sa propre unité.
+    const cPrevDatesSet = new Set(cPrevDates);
+    function statusPill(status) {
+      const map = {
+        crit: { l: 'Critique',  col: '#ef4444' },
+        warn: { l: 'À surveiller', col: '#f59e0b' },
+        ok:   { l: 'Normal',    col: '#22c55e' },
+        na:   { l: '—',         col: '#64748b' },
+      }[status] || { l: '—', col: '#64748b' };
+      return `<span class="pe-grade" style="background:${map.col}20;color:${map.col};border:1px solid ${map.col}50">${map.l}</span>`;
+    }
+    let compRows = '';
+    Object.entries(MT).forEach(([type, meta]) => {
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      if (!ids.length) return;
+      const unit = _meters.find(m => m.type === type)?.unit || meta.unit;
+      const hasReading     = _readings.some(r => ids.includes(r.meterId) && cDatesSet.has(r.date));
+      const hasPrevReading = _readings.some(r => ids.includes(r.meterId) && cPrevDatesSet.has(r.date));
+      const total     = sumConsumptionByType(_readings, _meters, type, cDates);
+      const prevTotal = sumConsumptionByType(_readings, _meters, type, cPrevDates);
+      const { pct } = comparePeriods(total, prevTotal);
+      const status  = hasReading ? statusFromDeviation(pct) : 'na';
+      const absDelta = (hasReading && hasPrevReading) ? (total - prevTotal) : null;
+      const dailyRatios = cDates
+        .map(d => computeRatio(type, sumConsumptionByType(_readings, _meters, type, d), _clients[d] || 0))
+        .filter(v => v !== null);
+      const hasRatio = dailyRatios.length > 0;
+      const avgRatio = hasRatio ? average(dailyRatios) : null;
+      const rUnit = isW(type) ? 'L/client' : `${unit}/client`;
+      compRows += `<tr>
+        <td class="pe-comp-per">${meta.icon} ${e(meta.label)}</td>
+        <td>${hasReading ? `${_fmt(total)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
+        <td>${hasPrevReading ? `${_fmt(prevTotal)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
+        <td>${absDelta !== null ? `${absDelta >= 0 ? '+' : ''}${_fmt(absDelta)} ${e(unit)}` : '—'}</td>
+        <td>${pct !== null ? `${pct > 0 ? '+' : ''}${_fmt(pct, 1)}%` : '—'}</td>
+        <td>${hasRatio ? `${_fmt(avgRatio, isW(type) ? 0 : 2)} ${rUnit}` : '—'}</td>
+        <td>${statusPill(status)}</td>
+      </tr>`;
     });
+    const perfPerBtns = [
+      { id: 'day',           l: peDate === today ? "Aujourd'hui" : _dateLbl(peDate) },
+      { id: 'week',          l: '7 jours' },
+      { id: 'month-current', l: 'Mois en cours' },
+    ].map(p => `<button class="cso-per-btn${compPeriod === p.id ? ' active' : ''}" onclick="window._peCompPeriod='${p.id}';MX.Pages.Conso._tab('performance')">${p.l}</button>`).join('');
 
     // ── Prévisions fin de mois ──
     const todayDt    = new Date(today);
@@ -2529,34 +2541,35 @@
       </div>`;
     });
 
-    // ── Alertes intelligentes ──
-    let alertsHtml = '';
-    const ALERT_CHECKS = [
-      { l: 'Fuite possible', t: 'eau_froide', msg: 'Consommation d\'eau froide anormalement élevée. Vérifier : fuites, robinets ouverts, remplissage piscine.' },
-      { l: 'ECS excessive',  t: 'eau_chaude', msg: 'Consommation d\'eau chaude anormalement élevée. Vérifier : thermostat chauffe-eau, pertes sur le réseau.' },
-      { l: 'Surconso élec',  t: 'electricite', msg: 'Consommation électrique anormalement élevée. Vérifier : climatisation, éclairage laissé allumé, équipements défaillants.' },
-    ];
-    ALERT_CHECKS.forEach(({l, t, msg}) => {
-      const ratio    = _perfRatio(t, peDate);
-      if (ratio === null) return;
-      const grade    = _getGrade(t, ratio);
-      if (!['moyen','mauvais','critique'].includes(grade.key)) return;
-      const col      = (c[grade.key]||{}).color || '#ef4444';
-      const last30   = Array.from({length:30},(_,i)=>_perfRatio(t,_daysAgo(i+1))).filter(v=>v!==null);
-      const avg30    = last30.length ? last30.reduce((a,b)=>a+b,0)/last30.length : null;
-      const pct      = avg30 ? Math.round((ratio-avg30)/avg30*100) : null;
-      const meta     = MT[t];
-      alertsHtml += `<div class="pe-alert-card" style="border-left:3px solid ${col}">
-        <div class="pe-alert-head"><i class="fas fa-triangle-exclamation" style="color:${col}"></i> <strong>${l}</strong></div>
-        <div class="pe-alert-body">
-          <span class="pe-alert-cur">${meta.icon} ${_fmt(ratio, isW(t)?0:2)} ${isW(t)?'L':meta.unit}/client</span>
-          ${avg30 !== null ? `<span class="pe-alert-avg">Moy. : ${_fmt(avg30, isW(t)?0:2)}</span>` : ''}
-          ${pct !== null ? `<span class="pe-alert-pct" style="color:${col}">${pct>0?'+':''}${pct}%</span>` : ''}
-        </div>
-        <div class="pe-alert-msg">${msg}</div>
-      </div>`;
+    // ── D. Analyse des compteurs — types/compteurs à investiguer ──
+    // Réutilise les statuts déjà calculés en C et les compteurs de
+    // référence déjà configurés (_refMeterIds, typeBreakdown) : aucune
+    // nouvelle source de vérité, aucun nouveau moteur d'alerte — seulement
+    // une lecture croisée "statut dégradé" + "relevé manquant".
+    let investigateHtml = '';
+    typeBreakdown.forEach(({ type, meta, refNames }) => {
+      const ids = _meters.filter(m => m.type === type).map(m => m.id);
+      const hasReading = _readings.some(r => ids.includes(r.meterId) && cDatesSet.has(r.date));
+      const total     = sumConsumptionByType(_readings, _meters, type, cDates);
+      const prevTotal = sumConsumptionByType(_readings, _meters, type, cPrevDates);
+      const { pct } = comparePeriods(total, prevTotal);
+      const status = hasReading ? statusFromDeviation(pct) : 'na';
+      if (status === 'crit' || status === 'warn') {
+        const col = status === 'crit' ? '#ef4444' : '#f59e0b';
+        investigateHtml += `<div class="pe-alert-card" style="border-left-color:${col}">
+          <div class="pe-alert-head"><i class="fas fa-magnifying-glass" style="color:${col}"></i> <strong>${meta.icon} ${e(meta.label)}</strong></div>
+          <div class="pe-alert-msg">${status === 'crit' ? 'Écart important' : 'Écart notable'} vs période précédente (${pct > 0 ? '+' : ''}${_fmt(pct, 1)}%)${refNames.length ? ' — référence : ' + refNames.join(', ') : ''}.</div>
+        </div>`;
+      }
+      const missingMeters = _meters.filter(m => m.type === type && !_readings.some(r => r.meterId === m.id && cDatesSet.has(r.date)));
+      if (missingMeters.length) {
+        investigateHtml += `<div class="pe-alert-card" style="border-left-color:#64748b">
+          <div class="pe-alert-head"><i class="fas fa-camera" style="color:#64748b"></i> <strong>${meta.icon} ${e(meta.label)}</strong></div>
+          <div class="pe-alert-msg">${missingMeters.length} compteur${missingMeters.length > 1 ? 's' : ''} sans relevé sur la période : ${missingMeters.map(m => e(m.name)).join(', ')}.</div>
+        </div>`;
+      }
     });
-    if (!alertsHtml) alertsHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Aucune alerte — Consommations dans les normes</div>';
+    if (!investigateHtml) investigateHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Rien à investiguer sur cette période</div>';
 
     // ── Helper: client count for a date ──
     function _cliForDate(d) {
@@ -2609,75 +2622,6 @@
       }).join('') +
     '</div>';
 
-    // ── KPI: Clients du mois ──
-    function _buildClientsKPI() {
-      var now2 = new Date(today + 'T00:00:00');
-      var y2 = now2.getFullYear(), mo2 = now2.getMonth();
-      var total = 0, cnt2 = 0, maxC = null, minC = null;
-      var prevMo2 = mo2 === 0 ? 11 : mo2 - 1, prevYr2 = mo2 === 0 ? y2 - 1 : y2;
-      var prevTotal = 0;
-      var MN = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-      Object.keys(_clients).forEach(function(d2) {
-        var dd2 = new Date(d2 + 'T00:00:00');
-        var cli2 = _cliForDate(d2);
-        if (dd2.getFullYear() === y2 && dd2.getMonth() === mo2 && cli2 > 0) {
-          total += cli2; cnt2++;
-          if (maxC === null || cli2 > maxC) maxC = cli2;
-          if (minC === null || cli2 < minC) minC = cli2;
-        } else if (dd2.getFullYear() === prevYr2 && dd2.getMonth() === prevMo2 && cli2 > 0) {
-          prevTotal += cli2;
-        }
-      });
-      var avg2 = cnt2 ? Math.round(total / cnt2) : null;
-      var evol2 = prevTotal > 0 ? (total - prevTotal) / prevTotal * 100 : null;
-      var evolCol2 = evol2 === null ? '#64748b' : (evol2 >= 0 ? '#22c55e' : '#ef4444');
-      var evolIco2 = evol2 === null ? '' : (evol2 >= 0 ? '<i class="fas fa-arrow-trend-up"></i> ' : '<i class="fas fa-arrow-trend-down"></i> ');
-      return '<div class="pe-kpi-card">' +
-        '<div class="pe-kpi-lbl">Clients du mois</div>' +
-        '<div class="pe-kpi-month">' + MN[mo2] + '</div>' +
-        '<div class="pe-kpi-main">' + (total > 0 ? total.toLocaleString('fr-FR') : '—') + '</div>' +
-        '<div class="pe-kpi-subs">' +
-          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Moyenne / jour</span><span class="pe-kpi-sub-val">' + (avg2 !== null ? avg2.toLocaleString('fr-FR') : '—') + '</span></div>' +
-          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Maximum</span><span class="pe-kpi-sub-val">' + (maxC !== null ? maxC.toLocaleString('fr-FR') : '—') + '</span></div>' +
-          '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Minimum</span><span class="pe-kpi-sub-val">' + (minC !== null ? minC.toLocaleString('fr-FR') : '—') + '</span></div>' +
-          (evol2 !== null ? '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">vs mois préc.</span><span class="pe-kpi-sub-val" style="color:' + evolCol2 + '">' + evolIco2 + (evol2 > 0 ? '+' : '') + _fmt(evol2, 1) + '%</span></div>' : '') +
-        '</div>' +
-      '</div>';
-    }
-
-    // ── KPI: Consommation moyenne ──
-    function _buildConsoKPI() {
-      var ratioTd2 = _perfRatio('eau_froide', today);
-      var ratioMo2 = _monthAvgRatio('eau_froide');
-      var now2b = new Date(today + 'T00:00:00');
-      var y2b = now2b.getFullYear();
-      var yrSum2 = 0, yrCnt2 = 0;
-      for (var mo3a = 0; mo3a <= now2b.getMonth(); mo3a++) {
-        var dIM2 = new Date(y2b, mo3a + 1, 0).getDate();
-        for (var dda = 1; dda <= dIM2; dda++) {
-          if (mo3a === now2b.getMonth() && dda > now2b.getDate()) break;
-          var dsa = new Date(y2b, mo3a, dda).toISOString().slice(0, 10);
-          var rra = _perfRatio('eau_froide', dsa);
-          if (rra !== null) { yrSum2 += rra; yrCnt2++; }
-        }
-      }
-      var ratioYr2 = yrCnt2 ? yrSum2 / yrCnt2 : null;
-      var objEF2 = (_perfCfg.objectifs && _perfCfg.objectifs.eau_froide) ? parseFloat(_perfCfg.objectifs.eau_froide.target) : null;
-      function cmpCol3(v2) {
-        if (v2 === null || objEF2 === null || isNaN(objEF2)) return '#64748b';
-        return v2 <= objEF2 ? '#22c55e' : (v2 <= objEF2 * 1.1 ? '#f59e0b' : '#ef4444');
-      }
-      return '<div class="pe-kpi-card">' +
-        '<div class="pe-kpi-lbl">Consommation moyenne</div>' +
-        '<div class="pe-kpi-month">Eau froide · L/client</div>' +
-        '<div class="pe-kpi-subs pe-kpi-subs--conso">' +
-          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Aujourd\'hui</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioTd2 !== null ? Math.round(ratioTd2) : null) + '">' + (ratioTd2 !== null ? Math.round(ratioTd2) + ' L/cl.' : '—') + '</span></div>' +
-          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Ce mois</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioMo2 !== null ? Math.round(ratioMo2) : null) + '">' + (ratioMo2 !== null ? Math.round(ratioMo2) + ' L/cl.' : '—') + '</span></div>' +
-          '<div class="pe-kpi-sub pe-kpi-sub--lg"><span class="pe-kpi-sub-lbl">Cette année</span><span class="pe-kpi-sub-val" style="color:' + cmpCol3(ratioYr2 !== null ? Math.round(ratioYr2) : null) + '">' + (ratioYr2 !== null ? Math.round(ratioYr2) + ' L/cl.' : '—') + '</span></div>' +
-          (objEF2 !== null && !isNaN(objEF2) ? '<div class="pe-kpi-sub"><span class="pe-kpi-sub-lbl">Objectif</span><span class="pe-kpi-sub-val" style="color:#22c55e">' + objEF2 + ' L/cl.</span></div>' : '') +
-        '</div>' +
-      '</div>';
-    }
 
     // ── Monthly evolution chart (SVG bar) ──
     function _buildMonthlyChart() {
@@ -2847,9 +2791,13 @@
       '<tbody>' + (histBody || '<tr><td colspan="' + histColSpan + '" class="pe-hist-nd" style="text-align:center;padding:20px">Aucune donnée</td></tr>') + '</tbody>' +
       '</table></div></div>';
 
-    // ── Objectifs énergétiques — tableau de bord complet ──
-    const objCfg   = _perfCfg.objectifs || {};
-    const OBJ_TYPES = ['eau_froide', 'eau_chaude', 'electricite'];
+    // ── E. Objectifs et seuils ──
+    // "Objectif" (target/tolerance, cso_perf_config/objectifs) et "seuils"
+    // (excellent→critique, cso_perf_config/thresholds via _getGrade) sont
+    // deux configurations RÉELLES et déjà distinctes : on les affiche côte
+    // à côte sans en inventer une troisième. Un type sans objectif configuré
+    // affiche "Non configuré" — jamais une valeur par défaut inventée.
+    const objCfg = _perfCfg.objectifs || {};
     // Compute monthly average ratios (current month, days 1 to today)
     function _monthAvgRatio(type) {
       const now = new Date(today + 'T00:00:00');
@@ -2864,18 +2812,29 @@
       return cnt ? sum / cnt : null;
     }
     let objRows = '';
-    OBJ_TYPES.forEach(function(ot) {
-      const obj = objCfg[ot]; if (!obj || !obj.target) return;
-      const mt = MT[ot]; if (!mt) return;
+    typeBreakdown.forEach(function({ type: ot, meta: mt, ratio: ratioToday, grade: gradeToday }) {
+      const obj = objCfg[ot];
+      const isWater = isW(ot);
+      const unit    = isWater ? 'L/client' : e(mt.unit) + '/client';
+      const ratioMonth = _monthAvgRatio(ot);
+      function fmtR(v) { return v !== null ? _fmt(v, isWater ? 0 : 2) : '—'; }
+      const classCell = '<td class="pe-obj-class-cell">' + gradeBadge(gradeToday.key) + '</td>';
+      if (!obj || !obj.target) {
+        objRows += '<tr class="pe-obj-tr">' +
+          '<td><span class="pe-obj-type-lbl">' + mt.icon + ' ' + e(mt.label) + '</span></td>' +
+          '<td class="pe-obj-target-cell"><span class="pe-hist-nd">Non configuré</span></td>' +
+          '<td class="pe-obj-today-cell">' + fmtR(ratioToday) + '</td>' +
+          '<td class="pe-obj-month-cell">' + fmtR(ratioMonth) + '</td>' +
+          classCell +
+          '<td class="pe-obj-ach-cell"><span class="pe-hist-nd">—</span></td>' +
+          '</tr>';
+        return;
+      }
       const target  = parseFloat(obj.target);
       const tol     = parseFloat(obj.tolerance || 10);
       const upper   = target * (1 + tol / 100);
-      const ratioToday = _perfRatio(ot, peDate);
-      const ratioMonth = _monthAvgRatio(ot);
-      const isWater    = isW(ot);
-      const unit       = isWater ? 'L/client' : e(mt.unit) + '/client';
-      function fmtR(v) { return v !== null ? _fmt(v, isWater ? 0 : 2) : '—'; }
-      // Status: compare today vs target
+      // Statut "objectif" (target/tolérance) — distinct de la classe par
+      // seuils (colonne précédente, excellent→critique via _getGrade).
       let todayStatus = 'na', todayCol = '#64748b';
       if (ratioToday !== null) {
         if (ratioToday <= target)       { todayStatus = 'ok';   todayCol = '#22c55e'; }
@@ -2883,13 +2842,6 @@
         else                            { todayStatus = 'over'; todayCol = '#ef4444'; }
       }
       const todayPct = ratioToday !== null && target > 0 ? (ratioToday - target) / target * 100 : null;
-      // Status: compare month vs target
-      let monthStatus = 'na', monthCol = '#64748b';
-      if (ratioMonth !== null) {
-        if (ratioMonth <= target)       { monthStatus = 'ok';   monthCol = '#22c55e'; }
-        else if (ratioMonth <= upper)   { monthStatus = 'warn'; monthCol = '#f59e0b'; }
-        else                            { monthStatus = 'over'; monthCol = '#ef4444'; }
-      }
       // Objectif atteint (today)
       const achieved = ratioToday !== null ? todayStatus !== 'over' : null;
       objRows += '<tr class="pe-obj-tr">' +
@@ -2897,19 +2849,14 @@
         '<td class="pe-obj-target-cell">' + fmtR(target) + ' <small>' + unit + '</small></td>' +
         '<td class="pe-obj-today-cell" style="color:' + todayCol + ';font-weight:700">' + fmtR(ratioToday) +
           (todayPct !== null ? ' <span class="pe-obj-pct">(' + (todayPct > 0 ? '+' : '') + _fmt(todayPct, 1) + '%)</span>' : '') + '</td>' +
-        '<td class="pe-obj-month-cell" style="color:' + monthCol + '">' + fmtR(ratioMonth) + '</td>' +
+        '<td class="pe-obj-month-cell">' + fmtR(ratioMonth) + '</td>' +
+        classCell +
         '<td class="pe-obj-ach-cell">' + (achieved === null ? '<span class="pe-hist-nd">—</span>' :
           achieved ? '<span class="pe-obj-ach pe-obj-ach--yes"><i class="fas fa-check-circle"></i> Oui</span>'
                    : '<span class="pe-obj-ach pe-obj-ach--no"><i class="fas fa-times-circle"></i> Non</span>') +
           '<small class="pe-obj-tol">±' + tol + '%</small></td>' +
         '</tr>';
     });
-    const objHtml = objRows ? '<div class="pe-section pe-section--obj">' +
-      '<div class="pe-section-head"><i class="fas fa-bullseye"></i> Objectifs énergétiques</div>' +
-      '<div class="pe-obj-table-wrap"><table class="pe-obj-table">' +
-      '<thead><tr><th>Énergie</th><th>Objectif</th><th>Aujourd\'hui</th><th>Mois en cours</th><th>Atteint</th></tr></thead>' +
-      '<tbody>' + objRows + '</tbody>' +
-      '</table></div></div>' : '';
 
     // ── Date selector ──
     const dateSel = '<div class="pe-date-row">' +
@@ -2924,8 +2871,6 @@
 
     var monthlyChart = _buildMonthlyChart();
     var monthlyTable = _buildMonthlyTable();
-    // keep legacy KPI builders available for fallback but V4 uses its own strip
-    var _kpiLegacy = _buildClientsKPI() + _buildConsoKPI();
 
     // ── V4: extra KPI data for strip ──
     var v4Now = new Date(today + 'T00:00:00');
@@ -3060,6 +3005,16 @@
             '</div>' +
           '</div>' +
 
+          '<div class="pe-v4-card pe-v4-sec--comp">' +
+            '<div class="pe-v4-card-hd"><i class="fas fa-arrows-left-right"></i> Comparaison par type <span class="pe-v4-card-sub">' + e(cPeriodLbl) + '</span></div>' +
+            '<div class="cso-chart2-per">' + perfPerBtns + '</div>' +
+            (cPartialNote ? '<div class="pe-hist-nd" style="padding:6px 2px 2px">' + e(cPartialNote) + '</div>' : '') +
+            '<div class="pe-comp-table-wrap"><table class="pe-comp-table">' +
+            '<thead><tr><th>Type</th><th>Période</th><th>Période préc.</th><th>Écart abs.</th><th>Évolution</th><th>Ratio/client</th><th>Statut</th></tr></thead>' +
+            '<tbody>' + (compRows || '<tr><td colspan="7" style="text-align:center;padding:16px" class="pe-hist-nd">Aucun compteur configuré</td></tr>') + '</tbody>' +
+            '</table></div>' +
+          '</div>' +
+
           '<div class="pe-v4-card pe-v4-sec--ai">' +
             '<div class="pe-v4-card-hd"><i class="fas fa-robot"></i> Analyse automatique <span class="pe-v4-card-sub">14 derniers jours</span></div>' +
             '<div class="pe-v4-ai-timeline">' + _iaAnalysisHtml() + '</div>' +
@@ -3088,20 +3043,15 @@
           '</div>' +
 
           '<div class="pe-v4-sw">' +
-            '<div class="pe-v4-sw-hd"><i class="fas fa-triangle-exclamation"></i> Alertes</div>' +
-            alertsHtml +
-          '</div>' +
-
-          '<div class="pe-v4-sw">' +
-            '<div class="pe-v4-sw-hd"><i class="fas fa-arrows-left-right"></i> Comparaisons</div>' +
-            '<div class="pe-v4-sw-tbl-wrap"><table class="pe-comp-table"><thead>' + compHead + '</thead><tbody>' + compBody + '</tbody></table></div>' +
+            '<div class="pe-v4-sw-hd"><i class="fas fa-magnifying-glass"></i> À investiguer</div>' +
+            investigateHtml +
           '</div>' +
 
           (objRows ?
             '<div class="pe-v4-sw">' +
               '<div class="pe-v4-sw-hd"><i class="fas fa-bullseye"></i> Objectifs</div>' +
               '<div class="pe-v4-sw-tbl-wrap"><table class="pe-obj-table">' +
-              '<thead><tr><th>Type</th><th>Obj.</th><th>Auj.</th><th>Mois</th><th>OK</th></tr></thead>' +
+              '<thead><tr><th>Type</th><th>Obj.</th><th>Auj.</th><th>Mois</th><th>Classe</th><th>OK</th></tr></thead>' +
               '<tbody>' + objRows + '</tbody>' +
               '</table></div>' +
             '</div>' : '') +
