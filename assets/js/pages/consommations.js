@@ -2776,7 +2776,9 @@
         : '';
 
       return `<div class="pe-section pe-section--chart">
-        <div class="pe-section-head"><i class="fas fa-calendar-days"></i> Ratio réel mensuel</div>
+        <div class="pe-section-head"><i class="fas fa-calendar-days"></i> Ratio réel mensuel
+          <button class="pe-cfg-btn" onclick="MX.Pages.Conso._peOpenGeneralMetersConfig()"><i class="fas fa-crosshairs"></i> Compteurs généraux</button>
+        </div>
         <div class="pe-date-row">
           <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthPrev()" title="Mois précédent"><i class="fas fa-chevron-left"></i></button>
           <span class="pe-date-lbl">${e(monthLbl)}</span>
@@ -3621,6 +3623,85 @@
       });
       window._peCfgRulesArr = [];
       window._peCfgRenderRules();
+    };
+  }
+
+  // ── Configuration dédiée : compteurs GÉNÉRAUX pour le ratio réel mensuel ──
+  // Section indépendante de "Compteurs de référence" (_peOpenConfig ci-dessus) :
+  // celle-ci alimente _refMeterIds() (repli sur tous les compteurs du type si
+  // rien n'est configuré, utilisé par le score énergétique — logique non
+  // modifiée ici). Cette configuration-ci n'a AUCUN repli : une case non
+  // cochée = compteur exclu, et si rien n'est coché pour un type, la case
+  // reste vide en base ⇒ _generalMeterIds() renvoie [] ⇒ "Compteur général
+  // non configuré" (déjà géré par _monthlyConsoStatus). Les deux partagent
+  // volontairement le même document Firestore cso_perf_config/ref_meters et
+  // les mêmes clés eau_froide/eau_chaude — aucune nouvelle source de vérité —
+  // seule cette UI est nouvelle et dédiée, pour être visible directement à
+  // côté du bloc "Ratio réel mensuel" plutôt que noyée dans la configuration
+  // générale de Performance.
+  function _peOpenGeneralMetersConfig() {
+    var ex = document.getElementById('pe-genmeter-drawer');
+    if (ex) { ex.remove(); return; }
+    var esc3 = MX.esc || function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    var GM_TYPES = ['eau_froide', 'eau_chaude'];
+    var cfgRef3 = _perfCfg.ref_meters || {};
+
+    var secHtml = GM_TYPES.map(function(type) {
+      var mt = MT[type];
+      var typeMeters = _meters.filter(function(m) { return m.type === type; });
+      var selIds = Array.isArray(cfgRef3[type]) ? cfgRef3[type] : [];
+      var listHtml = typeMeters.length
+        ? typeMeters.map(function(m) {
+            var checked = selIds.indexOf(m.id) !== -1;
+            return '<label class="pe-cfg-meter-item"><input type="checkbox" class="pe-gm-cb" data-type="' + type + '" data-id="' + esc3(m.id) + '"' + (checked ? ' checked' : '') + '> ' +
+              esc3(m.name) + ' <small style="color:var(--text3)">(' + esc3(m.id) + ')</small></label>';
+          }).join('')
+        : '<div class="pe-hist-nd" style="padding:4px 0;font-size:12px">Aucun compteur ' + esc3(mt.label.toLowerCase()) + ' n\'existe pour le moment.</div>';
+      return '<div class="pe-cfg-type-block">' +
+        '<div class="pe-cfg-type-hd">' + mt.icon + ' ' + esc3(mt.label) + '</div>' +
+        '<div class="pe-cfg-meter-list">' + listHtml + '</div>' +
+        (typeMeters.length && !selIds.length ? '<div class="pe-hist-nd" style="padding:4px 0 0;font-size:11px">Aucun compteur coché : le ratio ' + esc3(mt.label.toLowerCase()) + ' affichera « Compteur général non configuré ».</div>' : '') +
+      '</div>';
+    }).join('');
+
+    var drawerHtml = '<div id="pe-genmeter-drawer" class="pe-cfg-drawer">' +
+      '<div class="pe-cfg-backdrop" onclick="document.getElementById(\'pe-genmeter-drawer\').remove()"></div>' +
+      '<div class="pe-cfg-panel">' +
+        '<div class="pe-cfg-hd">' +
+          '<span class="pe-cfg-ttl"><i class="fas fa-crosshairs"></i> Compteurs généraux utilisés pour le ratio</span>' +
+          '<button class="cso-ibtn pe-cfg-close" onclick="document.getElementById(\'pe-genmeter-drawer\').remove()"><i class="fas fa-times"></i></button>' +
+        '</div>' +
+        '<div class="pe-cfg-body">' +
+          '<div class="pe-cfg-section">' +
+          '<p class="pe-ref-intro">Cochez uniquement les compteurs généraux (jamais un sous-compteur) à utiliser pour le calcul du ratio réel mensuel (Eau froide et Eau chaude). Ces réglages sont indépendants de la sélection ci-dessus utilisée pour le score énergétique global — bien qu\'ils partagent la même configuration enregistrée.</p>' +
+          secHtml +
+          '</div>' +
+        '</div>' +
+        '<div class="pe-cfg-footer">' +
+          '<button class="cso-ibtn" onclick="document.getElementById(\'pe-genmeter-drawer\').remove()">Annuler</button>' +
+          '<button class="cso-ibtn cso-ibtn--primary pe-gm-save-btn" onclick="window._peGmSave()"><i class="fas fa-save"></i> Sauvegarder</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    document.body.insertAdjacentHTML('beforeend', drawerHtml);
+
+    window._peGmSave = function() {
+      var saveBtn = document.querySelector('.pe-gm-save-btn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+      var gmData = { eau_froide: [], eau_chaude: [] };
+      document.querySelectorAll('.pe-gm-cb').forEach(function(cb) {
+        if (cb.checked) gmData[cb.dataset.type].push(cb.dataset.id);
+      });
+      firebase.firestore().collection('cso_perf_config').doc('ref_meters').set(gmData, { merge: true })
+        .then(function() {
+          var d = document.getElementById('pe-genmeter-drawer'); if (d) d.remove();
+          if (MX.toast) MX.toast('Compteurs généraux enregistrés');
+        })
+        .catch(function(err) {
+          if (MX.toast) MX.toast('Erreur : ' + err.message, true);
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Sauvegarder'; }
+        });
     };
   }
 
@@ -4574,6 +4655,6 @@
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
     _peDatePrev, _peDateNext, _editCliDate,
     _peRatioMonthPrev, _peRatioMonthNext,
-    _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig,
+    _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig, _peOpenGeneralMetersConfig,
   };
 })();
