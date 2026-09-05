@@ -203,8 +203,23 @@
 
 
   // ── HELPERS ──
-  function _today()     { return new Date().toISOString().slice(0, 10); }
-  function _daysAgo(n)  { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
+  // PHASE 7 — _today()/_daysAgo() renvoyaient auparavant new Date().toISOString()
+  // .slice(0,10), c'est-à-dire le jour calendaire UTC, pas le jour local du
+  // navigateur : autour de minuit dans un fuseau à décalage positif (France,
+  // UTC+1/+2), l'app pouvait afficher/comparer la mauvaise journée. _ymdLocal
+  // formate un objet Date en YYYY-MM-DD à partir de ses champs LOCAUX
+  // (getFullYear/getMonth/getDate) — jamais de passage par toISOString/UTC.
+  // setDate()/getDate() opèrent déjà sur le calendrier local et gèrent
+  // correctement les changements de mois/année et les passages heure d'été
+  // ↔ heure d'hiver (vérifié par la suite de tests Phase 7) : aucun ancrage
+  // à midi n'est nécessaire ici, contrairement au correctif Phase 6 qui,
+  // lui, devait survivre à un aller-retour chaîne → Date → chaîne via
+  // toISOString (ce n'est pas le cas ici, donc pas concerné par ce risque).
+  function _ymdLocal(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function _today()     { return _ymdLocal(new Date()); }
+  function _daysAgo(n)  { const d = new Date(); d.setDate(d.getDate() - n); return _ymdLocal(d); }
   function _fmt(n, dec) {
     if (n === null || n === undefined || isNaN(n)) return '—';
     const d = dec !== undefined ? dec : (Math.abs(n) >= 100 ? 1 : 2);
