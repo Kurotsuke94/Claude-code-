@@ -2624,62 +2624,121 @@
 
 
     // ── Monthly evolution chart (SVG bar) ──
-    function _buildMonthlyChart() {
-      var now2c = new Date(today + 'T00:00:00');
-      var y2c = now2c.getFullYear();
-      var MLBL = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
-      var objEF3 = (_perfCfg.objectifs && _perfCfg.objectifs.eau_froide) ? parseFloat(_perfCfg.objectifs.eau_froide.target) : null;
-      var months3 = [];
-      for (var mo3c = 0; mo3c <= now2c.getMonth(); mo3c++) {
-        var dIM3 = new Date(y2c, mo3c + 1, 0).getDate();
-        var mSum3 = 0, mCnt3 = 0;
-        for (var ddc = 1; ddc <= dIM3; ddc++) {
-          if (mo3c === now2c.getMonth() && ddc > now2c.getDate()) break;
-          var dsc = new Date(y2c, mo3c, ddc).toISOString().slice(0, 10);
-          var rrc = _perfRatio('eau_froide', dsc);
-          if (rrc !== null) { mSum3 += rrc; mCnt3++; }
-        }
-        months3.push({ lbl: MLBL[mo3c], val: mCnt3 ? Math.round(mSum3 / mCnt3) : null });
-      }
-      if (!months3.some(function(m3){ return m3.val !== null; })) return '';
-      var vals3 = months3.map(function(m3){ return m3.val || 0; });
-      var allVals = vals3.concat((objEF3 && !isNaN(objEF3)) ? [objEF3] : []).concat([50]);
-      var maxV3 = Math.max.apply(null, allVals);
-      var W3 = 560, H3 = 150, PL = 36, PR = 50, PB = 24, PT = 14;
-      var cW3 = W3 - PL - PR, cH3 = H3 - PT - PB;
-      var colW3 = cW3 / months3.length;
-      var barW3 = Math.min(30, colW3 - 4);
-      var bars3 = '', gridY3 = '';
-      for (var gi = 1; gi <= 4; gi++) {
-        var gy3 = (PT + cH3 - (gi / 4) * cH3).toFixed(0);
-        var gv3 = Math.round((gi / 4) * maxV3);
-        gridY3 += '<line x1="' + (PL-3) + '" y1="' + gy3 + '" x2="' + (W3-PR) + '" y2="' + gy3 + '" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>';
-        gridY3 += '<text x="' + (PL-5) + '" y="' + (+gy3+3) + '" text-anchor="end" font-size="7" fill="var(--text3)">' + gv3 + '</text>';
-      }
-      months3.forEach(function(m3, i3) {
-        if (m3.val === null) return;
-        var bh3 = Math.max(2, Math.round((m3.val / maxV3) * cH3));
-        var bx3 = (PL + i3 * colW3 + (colW3 - barW3) / 2).toFixed(1);
-        var by3 = (PT + cH3 - bh3).toFixed(1);
-        var grade3c = _getGrade('eau_froide', m3.val);
-        var col3c = (c[grade3c.key] || {}).color || '#3b82f6';
-        bars3 += '<rect x="' + bx3 + '" y="' + by3 + '" width="' + barW3 + '" height="' + bh3 + '" rx="3" fill="' + col3c + '" opacity="0.85"/>';
-        bars3 += '<text x="' + (+bx3 + barW3/2).toFixed(1) + '" y="' + (+by3-3).toFixed(1) + '" text-anchor="middle" font-size="8" fill="' + col3c + '" font-weight="700">' + m3.val + '</text>';
-        bars3 += '<text x="' + (+bx3 + barW3/2).toFixed(1) + '" y="' + (H3-6).toFixed(1) + '" text-anchor="middle" font-size="8" fill="var(--text3)">' + m3.lbl + '</text>';
+    // ── Ratio réel mensuel — navigation mois par mois ──────────────────────
+    // Remplace l'ancien graphique SVG. Calcul explicitement demandé :
+    // index de fin de mois − index de début de mois (jamais une moyenne de
+    // ratios journaliers/mensuels), sur les compteurs généraux CONFIGURÉS
+    // uniquement (_perfCfg.ref_meters — même source que _refMeterIds,
+    // aucune nouvelle source de vérité). "Non configuré" si rien n'est
+    // sélectionné pour ce type — jamais de repli silencieux sur un autre
+    // compteur. Le ratio final réutilise computeRatio (MX.CsoCalc).
+    function _lastIndexAt(meterId, dateBound, strictBefore) {
+      let best = null;
+      _readings.forEach(r => {
+        if (r.meterId !== meterId || r.index == null) return;
+        const ok = strictBefore ? r.date < dateBound : r.date <= dateBound;
+        if (!ok) return;
+        if (!best || r.date > best.date || (r.date === best.date && _tsMs(r.createdAt) > _tsMs(best.createdAt))) best = r;
       });
-      var objLine3 = '';
-      if (objEF3 !== null && !isNaN(objEF3)) {
-        var oy3 = (PT + cH3 - Math.round((objEF3 / maxV3) * cH3)).toFixed(0);
-        objLine3 = '<line x1="' + PL + '" y1="' + oy3 + '" x2="' + (W3-PR) + '" y2="' + oy3 + '" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.8"/>' +
-          '<text x="' + (W3-PR+3) + '" y="' + (+oy3+4) + '" font-size="8" fill="#22c55e">Obj. ' + objEF3 + '</text>';
+      return best ? best.index : null;
+    }
+    function _monthBounds(monthKey) {
+      const [y, m] = monthKey.split('-').map(Number);
+      const start = monthKey + '-01';
+      const end   = monthKey + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
+      return { start, end };
+    }
+    function _monthlyClientsTotal(monthKey) {
+      let total = 0, found = false;
+      Object.keys(_clients).forEach(d => {
+        if (d.indexOf(monthKey) === 0) {
+          const v = _cliForDate(d);
+          if (v > 0) { total += v; found = true; }
+        }
+      });
+      return found ? total : null;
+    }
+    // Index de début = dernier relevé STRICTEMENT avant le 1er du mois ;
+    // index de fin = dernier relevé au plus tard le dernier jour du mois.
+    // Ni l'un ni l'autre n'exige un relevé daté DANS le mois lui-même.
+    function _monthlyRealRatio(type, monthKey) {
+      const refIds = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
+      if (!Array.isArray(refIds) || !refIds.length) return { status: 'no_meter' };
+      const { start, end } = _monthBounds(monthKey);
+      let total = 0;
+      for (const id of refIds) {
+        const startIdx = _lastIndexAt(id, start, true);
+        const endIdx   = _lastIndexAt(id, end, false);
+        if (startIdx === null || endIdx === null || endIdx < startIdx) return { status: 'insufficient' };
+        total += (endIdx - startIdx);
       }
-      return '<div class="pe-section pe-section--chart">' +
-        '<div class="pe-section-head"><i class="fas fa-chart-bar"></i> Évolution mensuelle — Eau froide (L/client)</div>' +
-        '<div class="pe-monthly-chart-wrap"><svg class="pe-monthly-chart" viewBox="0 0 ' + W3 + ' ' + H3 + '" preserveAspectRatio="xMidYMid meet">' +
-          '<line x1="' + PL + '" y1="' + PT + '" x2="' + PL + '" y2="' + (PT+cH3) + '" stroke="var(--border)" stroke-width="1"/>' +
-          '<line x1="' + PL + '" y1="' + (PT+cH3) + '" x2="' + (W3-PR) + '" y2="' + (PT+cH3) + '" stroke="var(--border)" stroke-width="1"/>' +
-          gridY3 + bars3 + objLine3 +
-        '</svg></div></div>';
+      total = Math.round(total * 1000) / 1000;
+      const clients = _monthlyClientsTotal(monthKey);
+      if (clients === null) return { status: 'no_clients', conso: total };
+      return { status: 'ok', conso: total, clients, ratio: computeRatio(type, total, clients) };
+    }
+    const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+    function _monthLabel(monthKey) {
+      const [y, m] = monthKey.split('-').map(Number);
+      const n = MOIS_FR[m - 1];
+      return n.charAt(0).toUpperCase() + n.slice(1) + ' ' + y;
+    }
+    function _buildMonthlyRatioNav() {
+      const curMonthKey = today.slice(0, 7);
+      const ratioMonth  = window._peRatioMonth || curMonthKey;
+      const { start }   = _monthBounds(ratioMonth);
+      // Charge l'historique nécessaire au calcul par index (marge de 60j
+      // avant le mois pour retrouver l'index de départ même sans relevé
+      // récent). Non bloquant (Phase 1B) : la page se complète seule si
+      // la requête complémentaire ramène des données après coup.
+      _ensureReadingsFrom(_daysBefore(start, 60));
+      _ensureClientsFrom(_daysBefore(start, 31));
+
+      const monthLbl   = _monthLabel(ratioMonth);
+      const monthShort = MOIS_FR[parseInt(ratioMonth.slice(5, 7), 10) - 1];
+      const atCurrent  = ratioMonth >= curMonthKey;
+
+      function blockFor(type, meta) {
+        const res  = _monthlyRealRatio(type, ratioMonth);
+        const unit = (_meters.find(m => m.type === type) || {}).unit || meta.unit;
+        let consoLine, clientsLine, ratioLine;
+        if (res.status === 'no_meter') {
+          consoLine = clientsLine = ratioLine = 'Compteur général non configuré';
+        } else if (res.status === 'insufficient') {
+          consoLine = 'Données insuffisantes';
+          clientsLine = 'Données insuffisantes';
+          ratioLine = '—';
+        } else {
+          consoLine = `${_fmt(res.conso, 1)} ${e(unit)}`;
+          if (res.status === 'no_clients') {
+            clientsLine = 'Clients indisponibles';
+            ratioLine = '—';
+          } else {
+            clientsLine = res.clients.toLocaleString('fr-FR');
+            ratioLine = res.ratio !== null ? `${_fmt(res.ratio, isW(type) ? 0 : 2)} ${isW(type) ? 'L' : e(unit)}/client` : '—';
+          }
+        }
+        return `<div class="pe-v4-card">
+          <div class="pe-v4-card-hd">${meta.icon} ${e(meta.label)} — ${e(monthLbl)}</div>
+          <div class="pe-day-ef-summary">
+            <div class="pe-day-ef-row"><span class="pe-day-ef-nm">Consommation ${monthShort}</span><span class="pe-day-ef-v">${consoLine}</span></div>
+            <div class="pe-day-ef-row"><span class="pe-day-ef-nm">Clients ${monthShort}</span><span class="pe-day-ef-v">${clientsLine}</span></div>
+            <div class="pe-day-ef-total"><span class="pe-day-ef-nm"><strong>Ratio réel</strong></span><span class="pe-day-ef-v">${ratioLine}</span></div>
+          </div>
+        </div>`;
+      }
+
+      const blocksHtml = ['eau_froide', 'eau_chaude'].map(t => blockFor(t, MT[t])).join('');
+
+      return `<div class="pe-section pe-section--chart">
+        <div class="pe-section-head"><i class="fas fa-calendar-days"></i> Ratio réel mensuel</div>
+        <div class="pe-date-row">
+          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthPrev()"><i class="fas fa-chevron-left"></i></button>
+          <span class="pe-date-lbl">${e(monthLbl)}</span>
+          <button class="cso-ibtn" onclick="MX.Pages.Conso._peRatioMonthNext()"${atCurrent ? ' disabled' : ''}><i class="fas fa-chevron-right"></i></button>
+        </div>
+        <div class="pe-v4-row2">${blocksHtml}</div>
+      </div>`;
     }
 
     // ── Monthly bilan table ──
@@ -2869,7 +2928,7 @@
       ? '<div class="pe-nocli-banner"><i class="fas fa-users"></i> Nombre de clients non renseigné pour le ' + peDate + ' — <button class="pe-nocli-btn" onclick="MX.Pages.Conso._editCliDate(\'' + peDate + '\')">Renseigner</button></div>'
       : '';
 
-    var monthlyChart = _buildMonthlyChart();
+    var monthlyRatioNav = _buildMonthlyRatioNav();
     var monthlyTable = _buildMonthlyTable();
 
     // ── V4: extra KPI data for strip ──
@@ -3020,7 +3079,7 @@
             '<div class="pe-v4-ai-timeline">' + _iaAnalysisHtml() + '</div>' +
           '</div>' +
 
-          monthlyChart +
+          monthlyRatioNav +
           monthlyTable +
           histTable +
 
@@ -3092,6 +3151,25 @@
     d.setDate(d.getDate() + 1);
     window._peSelDate = d.toISOString().slice(0, 10);
     if (window._peSelDate >= today) window._peSelDate = '';
+    MX.Pages.Conso._tab('performance');
+  }
+  // Navigation mois par mois pour le bloc "Ratio réel mensuel" — état
+  // indépendant de peDate/_peSelDate (celui-ci navigue jour par jour pour
+  // l'historique/le detail-modal). Jamais de mois futur.
+  function _peRatioMonthPrev() {
+    const cur  = window._peRatioMonth || _today().slice(0, 7);
+    const [y, m] = cur.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    window._peRatioMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    MX.Pages.Conso._tab('performance');
+  }
+  function _peRatioMonthNext() {
+    const curMonthKey = _today().slice(0, 7);
+    const cur = window._peRatioMonth || curMonthKey;
+    if (cur >= curMonthKey) return;
+    const [y, m] = cur.split('-').map(Number);
+    const d = new Date(y, m, 1);
+    window._peRatioMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
     MX.Pages.Conso._tab('performance');
   }
   function _editCliDate(date) {
@@ -4449,6 +4527,7 @@
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
     _peDatePrev, _peDateNext, _editCliDate,
+    _peRatioMonthPrev, _peRatioMonthNext,
     _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig,
   };
 })();
