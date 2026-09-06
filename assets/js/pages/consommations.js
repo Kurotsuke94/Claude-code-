@@ -51,6 +51,19 @@
   // "Compteurs affichés".
   let _anHiddenInChart  = new Set();
   let _anShowClients    = false; // "Afficher les clients" : off par défaut (ne pas surcharger le graphique)
+  // ── CONSTRUCTEUR DE GRAPHIQUES PERSONNALISÉS (Phase 1 — local uniquement) ──
+  // `_anCharts` : configurations créées par l'utilisateur (jamais les
+  // données de consommation elles-mêmes — toujours relues depuis
+  // _meters/_readings/_clients au moment du rendu, voir _anBuildCustomChartCard).
+  // Persistance localStorage uniquement pour cette phase : aucun appel
+  // Firestore pour cette fonctionnalité tant que la Phase 2 (cloud) n'est
+  // pas validée séparément. `scope` (toujours 'local' ici) et le préfixe
+  // d'id 'local_' préparent cette Phase 2 sans l'activer.
+  const AN_CHARTS_KEY   = 'mx_an_charts_local_v1';
+  let _anCharts         = []; // { id, name, meterIds, showClients, period, displayType, scope, createdBy, createdAt, updatedAt, order }
+  let _anChartsLoaded   = false; // true une fois _anCharts chargé depuis localStorage OU les graphiques par défaut semés
+  let _anChartFormState = null;  // état du formulaire Créer/Modifier en cours (voir _anOpenChartForm)
+  let _anEditingChartId = null;  // id du graphique en cours de modification, ou null = création
   const _recalcLocks   = new Set(); // meters currently being recalculated
   const _recalcPending = new Set(); // meters waiting for a re-run once current lock releases
   const _recalcWaiters = new Map(); // meterId → [{resolve,reject}] Promises waiting for recalc to finish
@@ -1921,6 +1934,400 @@
     return `#${[mix(r), mix(g), mix(b)].map(c => c.toString(16).padStart(2, '0')).join('')}`;
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // CONSTRUCTEUR DE GRAPHIQUES PERSONNALISÉS — PHASE 1 (local uniquement)
+  // Aucun appel Firestore ici : persistance localStorage exclusivement.
+  // `scope` et le préfixe d'id 'local_' préparent la Phase 2 (partage
+  // cloud) sans l'activer.
+  // ══════════════════════════════════════════════════════════════════════
+
+  function _anLoadLocalCharts() {
+    try {
+      const raw = localStorage.getItem(AN_CHARTS_KEY);
+      return raw != null ? JSON.parse(raw) : null;
+    } catch (e) { return null; } // quota dépassé / navigation privée : non bloquant
+  }
+  function _anSaveLocalCharts() {
+    try { localStorage.setItem(AN_CHARTS_KEY, JSON.stringify(_anCharts)); } catch (e) { /* non bloquant */ }
+  }
+
+  // Graphiques par défaut au tout premier lancement (une config = tous les
+  // compteurs du type concerné, disponibles au moment du semis + Clients).
+  // L'utilisateur peut ensuite les modifier/dupliquer/supprimer librement —
+  // ce ne sont que des _anCharts ordinaires une fois créés.
+  function _anBuildDefaultCharts() {
+    const now = Date.now();
+    const defs = [
+      { type: 'eau_froide', name: 'Eau froide + Clients' },
+      { type: 'eau_chaude', name: 'Eau chaude + Clients' },
+      { type: 'chauffage',  name: 'Chauffage + Clients' },
+    ];
+    return defs.map((d, i) => ({
+      id: 'local_' + now + '_' + i,
+      name: d.name,
+      meterIds: _meters.filter(m => m.type === d.type).map(m => m.id),
+      showClients: true,
+      period: { mode: '30', start: null, end: null },
+      displayType: 'line',
+      scope: 'local',
+      createdBy: _author(),
+      createdAt: now,
+      updatedAt: now,
+      order: i,
+    }));
+  }
+
+  // Charge _anCharts depuis localStorage UNE SEULE FOIS par session de page.
+  // Si la clé localStorage n'existe pas du tout (tout premier lancement —
+  // jamais une liste vidée volontairement par l'utilisateur, qui elle reste
+  // un tableau vide mais PRÉSENT en localStorage), sème les 3 graphiques par
+  // défaut dès que _meters est disponible, puis persiste immédiatement afin
+  // de ne plus jamais les recréer aux rechargements suivants.
+  function _anEnsureChartsLoaded() {
+    if (_anChartsLoaded) return;
+    const stored = _anLoadLocalCharts();
+    if (stored != null) {
+      _anCharts = Array.isArray(stored) ? stored : [];
+      _anChartsLoaded = true;
+      return;
+    }
+    if (!_meters.length) return; // attend que les compteurs soient chargés avant de semer les graphiques par défaut
+    _anCharts = _anBuildDefaultCharts();
+    _anSaveLocalCharts();
+    _anChartsLoaded = true;
+  }
+
+  // ── Formulaire Créer/Modifier ──────────────────────────────────────────
+  // `_anChartFormState` porte l'état en cours d'édition (relu/écrit à
+  // chaque interaction dans la modale, voir _anChartFormSync) ; la modale
+  // elle-même est reconstruite à chaque changement de période via
+  // MX.showModal (pas de re-render partiel de modale dans cette app).
+  window._anOpenChartForm = function(chartId) {
+    _anEditingChartId = chartId || null;
+    const chart = chartId ? _anCharts.find(c => c.id === chartId) : null;
+    _anChartFormState = {
+      name: chart ? chart.name : '',
+      meterIds: new Set(chart ? chart.meterIds : []),
+      showClients: chart ? !!chart.showClients : false,
+      period: chart ? { ...chart.period } : { mode: '30', start: null, end: null },
+    };
+    _anRenderChartForm();
+  };
+
+  // Relit les champs actuellement affichés dans la modale vers
+  // `_anChartFormState`, avant toute reconstruction de celle-ci (changement
+  // de période) ou son enregistrement — pour ne jamais perdre une saisie en
+  // cours (nom, compteurs cochés, case Clients).
+  function _anChartFormSync() {
+    const st = _anChartFormState;
+    if (!st) return;
+    const nameEl = document.getElementById('an2-cf-name');
+    if (nameEl) st.name = nameEl.value;
+    const newSel = new Set();
+    _meters.forEach(m => {
+      const el = document.getElementById('an2-cf-meter-' + m.id);
+      if (el && el.checked) newSel.add(m.id);
+    });
+    st.meterIds = newSel;
+    const clientsEl = document.getElementById('an2-cf-clients');
+    if (clientsEl) st.showClients = !!clientsEl.checked;
+    if (st.period.mode === 'custom') {
+      const s = document.getElementById('an2-cf-start');
+      const e = document.getElementById('an2-cf-end');
+      if (s && s.value) st.period.start = s.value;
+      if (e && e.value) st.period.end = e.value;
+    }
+  }
+
+  window._anCfSetPeriodMode = function(mode) {
+    _anChartFormSync();
+    _anChartFormState.period = { mode, start: _anChartFormState.period.start || null, end: _anChartFormState.period.end || null };
+    _anRenderChartForm();
+  };
+  window._anCfSetPeriodDate = function(which, val) {
+    _anChartFormSync();
+    _anChartFormState.period.mode = 'custom';
+    _anChartFormState.period[which] = val;
+    _anRenderChartForm();
+  };
+
+  function _anRenderChartForm() {
+    const st = _anChartFormState;
+    if (!st) return;
+    const chart = _anEditingChartId ? _anCharts.find(c => c.id === _anEditingChartId) : null;
+
+    // Tous les compteurs, groupés par type — un graphique personnalisé n'est
+    // JAMAIS limité aux 3 types de "Filtres détaillés" (eau/chauffage) : il
+    // peut mélanger n'importe quel type, la séparation par unité se fait au
+    // rendu (voir _anBuildCustomChartCard), jamais à la sélection.
+    const metersByType = {};
+    _meters.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach(m => {
+      (metersByType[m.type] = metersByType[m.type] || []).push(m);
+    });
+    const metersHtml = Object.keys(metersByType).length
+      ? Object.entries(metersByType).map(([type, ms]) => {
+          const meta = MT[type] || {};
+          const rows = ms.map(m => `<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 2px;cursor:pointer">
+            <input type="checkbox" id="an2-cf-meter-${esc(m.id)}" ${st.meterIds.has(m.id)?'checked':''}>
+            <span>${meta.icon||''} ${esc(m.name || m.id)} <small style="color:var(--text-3)">(${esc(m.unit||meta.unit||'')})</small></span>
+          </label>`).join('');
+          return `<div style="margin-bottom:8px">
+            <div style="font-weight:600;font-size:12px;color:${meta.color||'var(--text2)'};margin-bottom:4px">${meta.icon||''} ${esc(meta.label||type)}</div>
+            ${rows}
+          </div>`;
+        }).join('')
+      : '<div style="font-size:12px;color:var(--text-3)">Aucun compteur configuré.</div>';
+
+    const perOpts = [
+      { mode: '7', lbl: '7 jours' }, { mode: '30', lbl: '30 jours' },
+      { mode: 'month', lbl: 'Mois en cours' }, { mode: 'custom', lbl: 'Personnalisé' },
+    ].map(p => `<button type="button" class="an2-rb${st.period.mode===p.mode?' an2-rb--act':''}" onclick="window._anCfSetPeriodMode('${p.mode}')">${p.lbl}</button>`).join('');
+    const customDatesHtml = st.period.mode === 'custom'
+      ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px">
+          <input type="date" id="an2-cf-start" value="${esc(st.period.start||'')}" max="${esc(_today())}" onchange="window._anCfSetPeriodDate('start',this.value)">
+          <span>→</span>
+          <input type="date" id="an2-cf-end" value="${esc(st.period.end||'')}" max="${esc(_today())}" onchange="window._anCfSetPeriodDate('end',this.value)">
+        </div>`
+      : '';
+
+    MX.showModal({
+      title: chart ? 'Modifier le graphique' : 'Créer un graphique',
+      sub: '',
+      body: `<div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;max-height:60vh;overflow:auto">
+        <input id="an2-cf-name" class="fi" placeholder="Nom du graphique *" value="${esc(st.name)}" maxlength="60">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Compteurs</div>
+          <div style="max-height:220px;overflow:auto;border:1px solid var(--border2);border-radius:8px;padding:8px">${metersHtml}</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="an2-cf-clients" ${st.showClients?'checked':''}> Courbe Clients
+        </label>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Période</div>
+          <div class="an2-rb-group">${perOpts}</div>
+          ${customDatesHtml}
+        </div>
+      </div>`,
+      actions: [
+        { label: chart ? 'Enregistrer' : 'Créer', cls: 'confirm', fn: () => window._anSaveChartForm() },
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+    setTimeout(() => document.getElementById('an2-cf-name')?.focus(), 80);
+  }
+
+  window._anSaveChartForm = function() {
+    _anChartFormSync();
+    const st = _anChartFormState;
+    if (!st) return;
+    const name = (st.name || '').trim();
+    if (!name) { MX.toast('Le nom est requis', true); return; }
+    if (!st.meterIds.size && !st.showClients) { MX.toast('Sélectionnez au moins un compteur ou activez Clients', true); return; }
+    const now = Date.now();
+    if (_anEditingChartId) {
+      const chart = _anCharts.find(c => c.id === _anEditingChartId);
+      if (chart) {
+        chart.name = name;
+        chart.meterIds = Array.from(st.meterIds);
+        chart.showClients = !!st.showClients;
+        chart.period = { ...st.period };
+        chart.updatedAt = now;
+      }
+      MX.toast('Graphique mis à jour');
+    } else {
+      const order = _anCharts.length ? Math.max(..._anCharts.map(c => c.order || 0)) + 1 : 0;
+      _anCharts.push({
+        id: 'local_' + now + '_' + Math.random().toString(36).slice(2, 7),
+        name, meterIds: Array.from(st.meterIds), showClients: !!st.showClients,
+        period: { ...st.period }, displayType: 'line', scope: 'local',
+        createdBy: _author(), createdAt: now, updatedAt: now, order,
+      });
+      MX.toast('Graphique créé');
+    }
+    _anSaveLocalCharts();
+    _anChartFormState = null;
+    _anEditingChartId = null;
+    MX.Pages.Conso._tab('analyses');
+  };
+
+  window._anDuplicateChart = function(id) {
+    const chart = _anCharts.find(c => c.id === id);
+    if (!chart) return;
+    const now = Date.now();
+    const order = _anCharts.length ? Math.max(..._anCharts.map(c => c.order || 0)) + 1 : 0;
+    _anCharts.push({
+      ...chart,
+      id: 'local_' + now + '_' + Math.random().toString(36).slice(2, 7),
+      name: chart.name + ' (copie)',
+      meterIds: chart.meterIds.slice(),
+      period: { ...chart.period },
+      createdBy: _author(),
+      createdAt: now,
+      updatedAt: now,
+      order,
+    });
+    _anSaveLocalCharts();
+    MX.toast('Graphique dupliqué');
+    MX.Pages.Conso._tab('analyses');
+  };
+
+  window._anDeleteChart = function(id) {
+    const chart = _anCharts.find(c => c.id === id);
+    if (!chart) return;
+    MX.showModal('Supprimer ce graphique ?', `« ${esc(chart.name)} » sera définitivement supprimé de ce navigateur.`, [
+      { label: 'Supprimer', cls: 'danger', fn: () => {
+        _anCharts = _anCharts.filter(c => c.id !== id);
+        _anSaveLocalCharts();
+        MX.toast('Graphique supprimé');
+        MX.Pages.Conso._tab('analyses');
+      }},
+      { label: 'Annuler', cls: 'cancel' },
+    ]);
+  };
+
+  // ── Rendu ────────────────────────────────────────────────────────────
+  // Panneau générique (titre + légende statique + SVG + stats + trous),
+  // paramétré par `dates` (propre à CHAQUE graphique personnalisé) — à la
+  // différence de `buildPanel` (interne à _tAnalyses, encore utilisé par les
+  // panneaux automatiques existants), qui partage `anDates` unique à tout
+  // l'onglet. Duplication volontaire : ne touche pas à `buildPanel`, dont le
+  // comportement déjà testé ne doit pas changer pendant cette phase.
+  function _anBuildPanelHtml(domId, titleHtml, allSeries, dates, opts) {
+    opts = opts || {};
+    const connectGaps = !!opts.connectGaps;
+    const noDataLabel = opts.noDataLabel || 'Aucun relevé';
+    const gapNoun = opts.gapNoun || 'jour(s) sans relevé';
+    const chartSVG = allSeries.length
+      ? _anMainSVG(allSeries, dates, domId, { connectGaps, noDataLabel })
+      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucune série à afficher</div>';
+    const legendHtml = allSeries.map(s => {
+      const hasData = s.vals.some(v => v != null);
+      return `<span class="an2-ck" style="cursor:default" title="${hasData?'':'Aucune donnée sur la période'}">
+        <span class="an2-ck-dot" style="background:${s.color};border-color:${s.color}"></span>
+        <span>${s.icon||''} ${esc(s.name)} <small style="color:var(--text-3)">(${esc(s.unit)})</small>${hasData?'':' — sans donnée'}</span>
+      </span>`;
+    }).join('');
+    const vals = allSeries.flatMap(s => s.vals.filter(v => v != null));
+    const pMin = vals.length?Math.min(...vals):0;
+    const pMax = vals.length?Math.max(...vals):0;
+    const pAvg = vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
+    const pTot = vals.reduce((s,v)=>s+v,0);
+    const gapSummary = allSeries
+      .map(s => ({ s, gaps: s.vals.filter(v => v == null).length }))
+      .filter(({ s, gaps }) => gaps > 0 && gaps < s.vals.length)
+      .map(({ s, gaps }) => `${s.icon||''} ${esc(s.name)} : ${gaps} ${esc(gapNoun)}`)
+      .join(' · ');
+    return `<div class="an2-chart-panel" style="margin-bottom:10px">
+      <div class="an2-chart-hdr"><span class="an2-chart-ttl">${titleHtml}</span></div>
+      <div class="an2-ck-group" style="padding:4px 0 8px;flex-wrap:wrap">${legendHtml}</div>
+      <div class="an2-chart-wrap" id="an2-chart-wrap-${domId}">
+        ${chartSVG}
+        <div class="an2-tooltip" id="an2-tooltip-${domId}" style="display:none"></div>
+      </div>
+      <div class="an2-chart-stats">
+        <span><b>Min</b> ${_fmt(pMin,pMin>=100?0:1)}</span>
+        <span><b>Max</b> ${_fmt(pMax,pMax>=100?0:1)}</span>
+        <span><b>Moy.</b> ${_fmt(pAvg,pAvg>=100?1:2)}</span>
+        <span><b>Total</b> ${_fmt(pTot,pTot>=1000?0:1)}</span>
+      </div>
+      ${gapSummary ? `<div class="an2-chart-gaps" style="font-size:11px;color:var(--text-3);margin-top:4px">${gapSummary}</div>` : ''}
+    </div>`;
+  }
+
+  // Construit une carte de graphique personnalisé complète à partir de sa
+  // config : résout sa PROPRE période (indépendante des autres graphiques),
+  // ignore silencieusement tout meterId qui ne correspond plus à un
+  // compteur existant (compteur supprimé depuis), et sépare automatiquement
+  // les séries en un sous-panneau par unité RÉELLE (jamais d'échelle
+  // normalisée 0-100, jamais de mélange m³/MWh/Clients dans un même panneau).
+  function _anBuildCustomChartCard(chart) {
+    const bounds = _anResolvePeriodBounds(chart.period || { mode: '30', start: null, end: null });
+    _ensureReadingsFrom(bounds.start);
+    _ensureClientsFrom(bounds.start);
+    const dates = _anDateRange(bounds.start, bounds.end);
+
+    const validMeters = (chart.meterIds || []).map(id => _meters.find(m => m.id === id)).filter(Boolean);
+    const missingCount = (chart.meterIds || []).length - validMeters.length;
+
+    // Couleur stable PROPRE À CE GRAPHIQUE — un graphique personnalisé peut
+    // mélanger n'importe quel type de compteur, il ne peut donc pas
+    // réutiliser `anMeterColor` (scopée aux 3 types de "Filtres détaillés").
+    const colorCount = {};
+    const meterColor = new Map();
+    validMeters.forEach(m => {
+      const meta = MT[m.type] || {};
+      const idx = colorCount[m.type] || 0; colorCount[m.type] = idx + 1;
+      meterColor.set(m.id, idx === 0 ? (meta.color || '#64748B') : _anShade(meta.color || '#64748B', Math.min(0.65, idx * 0.28)));
+    });
+
+    const byMeterDate = new Map();
+    _readings.forEach(r => {
+      if (!validMeters.some(m => m.id === r.meterId)) return;
+      if (!byMeterDate.has(r.meterId)) byMeterDate.set(r.meterId, new Map());
+      const byDate = byMeterDate.get(r.meterId);
+      byDate.set(r.date, (byDate.get(r.date) || 0) + (r.consumption || 0));
+    });
+
+    const meterSeries = validMeters.map(m => {
+      const meta = MT[m.type] || {};
+      const byDate = byMeterDate.get(m.id);
+      const vals = dates.map(d => (byDate && byDate.has(d)) ? byDate.get(d) : null);
+      return { id: m.id, name: m.name || m.id, type: m.type, icon: meta.icon || '', label: meta.label || m.type, color: meterColor.get(m.id), unit: m.unit || meta.unit || '', vals };
+    });
+
+    const unitOrder = [];
+    const unitGroups = new Map();
+    meterSeries.forEach(s => {
+      if (!unitGroups.has(s.unit)) { unitGroups.set(s.unit, []); unitOrder.push(s.unit); }
+      unitGroups.get(s.unit).push(s);
+    });
+
+    let panelsHtml = '';
+    const domIds = [];
+    if (!meterSeries.length && !chart.showClients) {
+      panelsHtml = '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun compteur ni courbe Clients sélectionné.</div>';
+    } else {
+      unitOrder.forEach((unit, i) => {
+        const group = unitGroups.get(unit);
+        const domId = 'chart-' + chart.id + '-u' + i;
+        domIds.push(domId);
+        const typeLabels = [...new Set(group.map(s => s.label))].join(' / ');
+        panelsHtml += _anBuildPanelHtml(domId, `<i class="fas fa-chart-line"></i> ${esc(typeLabels)} (${esc(unit)})`, group, dates, {
+          connectGaps: true, noDataLabel: 'Aucun relevé', gapNoun: 'jour(s) sans relevé',
+        });
+      });
+      if (chart.showClients) {
+        const clientsVals = dates.map(d => (_clients[d] != null ? _clients[d] : null));
+        const clientsSeries = [{ id: 'clients', name: 'Clients', icon: '👥', unit: 'clients', color: '#94a3b8', vals: clientsVals }];
+        const domId = 'chart-' + chart.id + '-clients';
+        domIds.push(domId);
+        panelsHtml += _anBuildPanelHtml(domId, '<i class="fas fa-users"></i> Nombre de clients', clientsSeries, dates, {
+          connectGaps: false, noDataLabel: 'Aucun décompte clients', gapNoun: 'jour(s) sans décompte clients',
+        });
+      }
+    }
+
+    const missingNote = missingCount > 0
+      ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px"><i class="fas fa-triangle-exclamation"></i> ${missingCount} compteur${missingCount>1?'s':''} supprimé${missingCount>1?'s':''} (retiré${missingCount>1?'s':''} de ce graphique)</div>`
+      : '';
+
+    window._anChartDomIds = (window._anChartDomIds || []).concat(domIds);
+
+    return `<div class="an2-card" style="margin-bottom:0" data-chart-id="${esc(chart.id)}">
+      <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
+        <span>${esc(chart.name)}</span>
+        <span class="an2-bdg" style="background:rgba(148,163,184,0.15);color:#64748b;border:1px solid rgba(148,163,184,0.4)"><i class="fas fa-desktop"></i> Local</span>
+      </div>
+      <div style="margin-top:8px">${panelsHtml}</div>
+      ${missingNote}
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="an2-rb" onclick="window._anOpenChartForm('${esc(chart.id)}')"><i class="fas fa-pen"></i> Modifier</button>
+        <button class="an2-rb" onclick="window._anDuplicateChart('${esc(chart.id)}')"><i class="fas fa-copy"></i> Dupliquer</button>
+        <button class="an2-rb" onclick="window._anDeleteChart('${esc(chart.id)}')"><i class="fas fa-trash"></i> Supprimer</button>
+      </div>
+    </div>`;
+  }
+
   // ── TAB: ANALYSES — Dashboard supervision énergétique V2 ──
   function _tAnalyses() {
     const per  = window._csoPer || '30';
@@ -1971,6 +2378,12 @@
       _anFilterMeters = new Set(anFilterableMeters.map(m => m.id));
       _anMetersInitialized = true;
     }
+
+    // CONSTRUCTEUR DE GRAPHIQUES (Phase 1) : charge les graphiques locaux
+    // (ou sème les graphiques par défaut au tout premier lancement) — voir
+    // _anEnsureChartsLoaded. N'a aucun effet sur _anFilterMeters ni sur les
+    // panneaux automatiques ci-dessus/ci-dessous.
+    _anEnsureChartsLoaded();
 
     window._anSetFilterPeriod = function(mode) {
       _anFilterPeriod.mode = mode;
@@ -2603,6 +3016,22 @@
       <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">${anMeterCardsHtml}${anClientsCardHtml}</div>
     </div>`;
 
+    // ── CONSTRUCTEUR DE GRAPHIQUES PERSONNALISÉS (Phase 1 — local) ──────────
+    // Section additive : ne remplace ni ne modifie les panneaux automatiques
+    // ci-dessous (anChartPanelsHtml) — les deux coexistent pendant cette
+    // phase, la suppression des anciens panneaux étant réservée à une phase
+    // ultérieure validée séparément.
+    const anCustomChartsHtml = _anCharts.length
+      ? _anCharts.slice().sort((a, b) => (a.order||0) - (b.order||0)).map(_anBuildCustomChartCard).join('')
+      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun graphique personnalisé pour le moment. Cliquez sur « + Créer un graphique ».</div>';
+    const anChartsBuilderHtml = `<div class="an2-card" style="margin-bottom:14px">
+      <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
+        <span><i class="fas fa-chart-line"></i> Mes graphiques</span>
+        <button class="an2-rb an2-rb--act" onclick="window._anOpenChartForm(null)"><i class="fas fa-plus"></i> Créer un graphique</button>
+      </div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:14px">${anCustomChartsHtml}</div>
+    </div>`;
+
     return `<div class="cso-inner an2-page">
       <!-- Toolbar -->
       <div class="an2-toolbar">
@@ -2610,6 +3039,9 @@
         <div class="an2-rb-group">${perBtns}</div>
         ${zoneSelect?`<div class="an2-zone-wrap"><i class="fas fa-filter"></i>${zoneSelect}</div>`:''}
       </div>
+
+      <!-- Constructeur de graphiques personnalisés (Phase 1 — local) -->
+      ${anChartsBuilderHtml}
 
       <!-- Barre de filtres détaillée (période / types / clients) -->
       ${anFilterBarHtml}
