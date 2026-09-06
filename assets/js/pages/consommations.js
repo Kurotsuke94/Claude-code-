@@ -697,18 +697,32 @@
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rects}${rowLbls}${colLbls}</svg></div>`;
   }
 
-  // ── INTERACTIVE MAIN CHART SVG (v4 — correctif ergonomie) ────────────────
+  // ── INTERACTIVE MAIN CHART SVG (v5 — courbes reliées eau/chauffage) ──────
   // Trace une série par COMPTEUR, en valeurs réelles, sur une échelle Y
   // PARTAGÉE — mais l'appelant (_tAnalyses) ne passe désormais QUE des
   // séries de la MÊME unité à un appel donné (un panneau par unité, jamais
   // un mélange m³/MWh) : l'échelle reste donc toujours honnête. `s.vals[i]`
-  // peut valoir `null` (aucun relevé ce jour) : le tracé est interrompu,
-  // jamais une valeur 0 inventée. Rendu volontairement sobre : trait fin,
-  // aucun remplissage, aucune moyenne mobile (retirés du correctif
-  // ergonomie pour réduire le chevauchement visuel). `domId` distingue
-  // plusieurs graphiques empilés sur la même page (ids DOM uniques,
-  // plusieurs instances de _anInitChart peuvent coexister).
-  function _anMainSVG(series, dates, domId) {
+  // peut valoir `null` (aucun relevé ce jour) : AUCUNE valeur n'est jamais
+  // créée pour un jour sans donnée — seule la façon de TRACER la ligne varie
+  // selon `opts.connectGaps` :
+  //   - false (défaut, utilisé pour Clients) : la ligne s'interrompt à
+  //     chaque `null` (comportement d'origine, un vrai trou visuel).
+  //   - true (utilisé pour l'eau/le chauffage) : les points réels sont
+  //     reliés directement entre eux, même séparés de plusieurs jours sans
+  //     relevé — la pente entre deux points ne représente jamais une
+  //     consommation quotidienne interpolée, seulement une ligne reliant
+  //     deux mesures réelles (voir la mention ajoutée sous le graphique
+  //     dans _tAnalyses).
+  // Rendu volontairement sobre : trait fin, aucun remplissage, aucune
+  // moyenne mobile. `domId` distingue plusieurs graphiques empilés sur la
+  // même page (ids DOM uniques, plusieurs instances de _anInitChart
+  // peuvent coexister). `opts.noDataLabel` est le texte affiché dans le
+  // tooltip pour un jour sans donnée (adapté par l'appelant : "Aucun
+  // relevé" pour les compteurs, "Aucun décompte clients" pour Clients).
+  function _anMainSVG(series, dates, domId, opts) {
+    opts = opts || {};
+    const connectGaps = !!opts.connectGaps;
+    const noDataLabel = opts.noDataLabel || 'Aucun relevé';
     const W = 700, H = 168, PADl = 52, PADr = 12, PADt = 14, PADb = 30;
     const cW = W - PADl - PADr, cH = H - PADt - PADb;
     const N = dates.length;
@@ -759,6 +773,7 @@
 
     // Découpe un tableau de valeurs (avec `null` = trou) en segments
     // contigus — un `null` interrompt la ligne au lieu d'être tracé comme 0.
+    // Utilisé quand connectGaps=false (Clients) : chaque trou reste visible.
     function buildSegments(vals, yFn) {
       const segs = []; let cur = [];
       vals.forEach((v, i) => {
@@ -767,6 +782,16 @@
       });
       if (cur.length) segs.push(cur);
       return segs;
+    }
+    // Relie directement tous les points RÉELS entre eux (aucune valeur créée
+    // aux jours `null` intermédiaires — ils sont simplement ignorés, jamais
+    // interpolés) en un seul segment continu. Utilisé quand connectGaps=true
+    // (eau/chauffage) : deux relevés séparés de plusieurs jours sont reliés
+    // par une ligne, sans qu'aucun point n'existe pour les jours sautés.
+    function buildConnected(vals, yFn) {
+      const pts = [];
+      vals.forEach((v, i) => { if (v != null) pts.push({ x: px(i), y: yFn(v) }); });
+      return pts.length ? [pts] : [];
     }
     function smoothPath(pts) {
       let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
@@ -778,7 +803,7 @@
     }
 
     series.forEach(s => {
-      const segments = buildSegments(s.vals, py);
+      const segments = connectGaps ? buildConnected(s.vals, py) : buildSegments(s.vals, py);
       if (!segments.length) return; // compteur sans le moindre relevé sur la période
       segments.forEach(pts => {
         const d = smoothPath(pts);
@@ -799,7 +824,7 @@
     // graphique empilé (domId), jamais partagées entre panneaux d'unités
     // différentes.
     window._anChartData = window._anChartData || {};
-    window._anChartData[domId] = { dates, series, W, PADl, PADr, cW, N };
+    window._anChartData[domId] = { dates, series, W, PADl, PADr, cW, N, noDataLabel };
 
     return `<div class="ra-svg-wrap an2-chart-svg-wrap">
       <svg id="an2-svg-${domId}" width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
@@ -1155,7 +1180,8 @@
     const wrap = document.getElementById('an2-chart-wrap-' + domId);
     const data = window._anChartData && window._anChartData[domId];
     if (!svg || !tip || !wrap || !data || !data.dates.length) return;
-    const { W, PADl, PADr, cW, N, dates, series } = data;
+    const { W, PADl, PADr, cW, N, dates, series, noDataLabel } = data;
+    const noDataText = noDataLabel || 'Aucun relevé';
 
     function fmtN(n) { if (n == null) return '—'; if (n === 0) return '0'; return n >= 1000 ? n.toFixed(0) : n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
     function getIdx(e) {
@@ -1183,12 +1209,12 @@
       let hasAny = false;
       series.forEach(s => {
         const v = s.vals[idx];
-        const valStr = v != null ? `<b>${fmtN(v)}</b> ${esc(s.unit)}` : `<span style="color:var(--text3)">Aucun relevé</span>`;
+        const valStr = v != null ? `<b>${fmtN(v)}</b> ${esc(s.unit)}` : `<span style="color:var(--text3)">${esc(noDataText)}</span>`;
         html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${esc(s.name)}</span><span class="an2-tt-val">${valStr}</span></div>`;
         if (s.label) html += `<div class="an2-tt-subs" style="color:var(--text3);font-size:10px">${esc(s.label)}</div>`;
         if (v != null) hasAny = true;
       });
-      if (!hasAny) html += `<div class="an2-tt-row" style="color:var(--text3);font-size:10px;justify-content:center">Aucun relevé ce jour</div>`;
+      if (!hasAny) html += `<div class="an2-tt-row" style="color:var(--text3);font-size:10px;justify-content:center">${esc(noDataText)}</div>`;
 
       tip.innerHTML = html;
       tip.style.display = 'block';
@@ -2160,10 +2186,18 @@
     // Construit un panneau complet (titre + légende cliquable + graphique +
     // stats) pour un jeu de séries partageant la même unité. `domId` unique
     // par panneau -> plusieurs _anMainSVG/_anInitChart peuvent coexister.
-    function buildPanel(domId, titleHtml, allSeries) {
+    // `opts.connectGaps` / `opts.noDataLabel` : voir _anMainSVG. `opts.gapNoun`
+    // : libellé du décompte de trous ("jour(s) sans relevé" / "jour(s) sans
+    // décompte clients"). `opts.caption` : mention affichée sous le
+    // graphique (uniquement pour l'eau/le chauffage — jamais pour Clients).
+    function buildPanel(domId, titleHtml, allSeries, opts) {
+      opts = opts || {};
+      const connectGaps = !!opts.connectGaps;
+      const noDataLabel = opts.noDataLabel || 'Aucun relevé';
+      const gapNoun = opts.gapNoun || 'jour(s) sans relevé';
       const visibleSeries = allSeries.filter(s => !_anHiddenInChart.has(s.id));
       const chartSVG = visibleSeries.length
-        ? _anMainSVG(visibleSeries, anDates, domId)
+        ? _anMainSVG(visibleSeries, anDates, domId, { connectGaps, noDataLabel })
         : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Toutes les séries de ce graphique sont masquées</div>';
       const legendHtml = allSeries.map(s => {
         const hidden = _anHiddenInChart.has(s.id);
@@ -2179,6 +2213,17 @@
       const pMax = visVals.length?Math.max(...visVals):0;
       const pAvg = visVals.length?visVals.reduce((a,b)=>a+b,0)/visVals.length:0;
       const pTot = visVals.reduce((s,v)=>s+v,0);
+      // Indicateur "jours sans relevé/décompte" — par série, uniquement pour
+      // celles qui ont au moins une donnée sur la période (une série 100%
+      // vide est déjà signalée "— sans donnée" dans la légende ci-dessus).
+      const gapSummary = allSeries
+        .map(s => ({ s, gaps: s.vals.filter(v => v == null).length }))
+        .filter(({ s, gaps }) => gaps > 0 && gaps < s.vals.length)
+        .map(({ s, gaps }) => `${s.icon} ${esc(s.name)} : ${gaps} ${esc(gapNoun)}`)
+        .join(' · ');
+      const captionHtml = opts.caption
+        ? `<div class="an2-chart-caption" style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic">${esc(opts.caption)}</div>`
+        : '';
       return `<div class="an2-chart-panel" style="margin-bottom:14px">
         <div class="an2-chart-hdr">
           <span class="an2-chart-ttl">${titleHtml}</span>
@@ -2194,6 +2239,8 @@
           <span><b>Moy.</b> ${_fmt(pAvg,pAvg>=100?1:2)}</span>
           <span><b>Total</b> ${_fmt(pTot,pTot>=1000?0:1)}</span>
         </div>
+        ${gapSummary ? `<div class="an2-chart-gaps" style="font-size:11px;color:var(--text-3);margin-top:4px">${gapSummary}</div>` : ''}
+        ${captionHtml}
       </div>`;
     }
 
@@ -2207,7 +2254,12 @@
         const domId = 'unit' + i;
         window._anChartDomIds.push(domId);
         const typeLabels = [...new Set(group.map(s => s.label))].join(' / ');
-        anChartPanelsHtml += buildPanel(domId, `<i class="fas fa-chart-line"></i> Consommation ${esc(typeLabels)} (${esc(unit)})`, group);
+        anChartPanelsHtml += buildPanel(domId, `<i class="fas fa-chart-line"></i> Consommation ${esc(typeLabels)} (${esc(unit)})`, group, {
+          connectGaps: true,
+          noDataLabel: 'Aucun relevé',
+          gapNoun: 'jour(s) sans relevé',
+          caption: 'La ligne relie les relevés réels : elle ne représente pas une consommation quotidienne interpolée.',
+        });
       });
     }
     // Panneau Clients — séparé, jamais mélangé aux consommations, activable
@@ -2218,7 +2270,14 @@
       const clientsSeries = [{ id: 'clients', name: 'Clients', type: '', icon: '👥', label: '', color: '#94a3b8', unit: 'clients', vals: clientsVals }];
       const domId = 'clients';
       window._anChartDomIds.push(domId);
-      anChartPanelsHtml += buildPanel(domId, '<i class="fas fa-users"></i> Nombre de clients', clientsSeries);
+      // connectGaps volontairement absent (false) : contrairement aux
+      // compteurs, un décompte clients ne doit jamais être relié/reporté
+      // d'un jour sur l'autre — chaque trou reste un vrai trou visuel.
+      anChartPanelsHtml += buildPanel(domId, '<i class="fas fa-users"></i> Nombre de clients', clientsSeries, {
+        connectGaps: false,
+        noDataLabel: 'Aucun décompte clients',
+        gapNoun: 'jour(s) sans décompte clients',
+      });
     }
 
     // ── Alert panel (right sidebar) ──
