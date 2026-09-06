@@ -456,7 +456,7 @@
       let anlyItems = "";
       [
         { tab: "dashboard",   icon: "fa-gauge",          l: "Accueil" },
-        { tab: "compteurs",   icon: "fa-camera",         l: "Compteurs" },
+        { tab: "compteurs",   icon: "fa-camera",         l: "Relevés" },
         { tab: "analyses",    icon: "fa-percent",        l: "Analyses" },
         { tab: "alertes",     icon: "fa-bell",           l: "Alertes" },
         { tab: "exports",     icon: "fa-file-export",    l: "Exportations" },
