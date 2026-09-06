@@ -20,17 +20,20 @@
   let _critBeepTimer = null;
   let _currentCritAlert = null;
   let _lastSmartAlerts  = [];
-  let _anHiddenTypes    = new Set();
-  // PHASE A (refonte Analyses) : état de la future barre de filtres détaillée
-  // (période / types / compteurs). Volontairement séparé de `window._csoPer`
-  // (boutons période déjà existants, toujours utilisés par le graphique et la
-  // carte thermique actuels) et de `_anHiddenTypes` (légende déjà existante,
-  // qui masque/affiche une série du graphique) : ces nouveaux filtres ne
-  // pilotent encore aucun calcul ni le graphique — ils préparent seulement
-  // l'état que la Phase B réutilisera. `let`/`Set` au même niveau que
-  // `_anHiddenTypes` : survivent aux rerenders (_rerender()/_tab()) et aux
-  // changements d'onglet exactement comme la légende existante, sans code de
+  // PHASE A (refonte Analyses) : état de la barre de filtres détaillée
+  // (période / types / compteurs), volontairement séparé de `window._csoPer`
+  // (boutons période "historiques", toujours utilisés par la carte thermique
+  // et les KPI/heatmap/donut/hebdo, tous inchangés). `let`/`Set` au même
+  // niveau que le reste de l'état module : survivent aux rerenders
+  // (_rerender()/_tab()) et aux changements d'onglet, sans code de
   // persistance supplémentaire.
+  // PHASE B : ces filtres pilotent désormais réellement le graphique
+  // principal (_anMainSVG) — voir _tAnalyses(). L'ancienne légende
+  // "_anHiddenTypes"/"window._anToggle" (qui masquait une série AGRÉGÉE PAR
+  // TYPE de l'ancien graphique) est retirée : le nouveau graphique trace une
+  // série par COMPTEUR sélectionné ci-dessous, un mécanisme de masquage par
+  // type n'aurait plus de sens univoque (un type peut désormais correspondre
+  // à plusieurs compteurs affichés séparément).
   let _anFilterPeriod   = { mode: '30', start: null, end: null }; // mode: '7' | '30' | 'month' | 'custom'
   let _anFilterTypes    = new Set(['eau_froide', 'eau_chaude', 'chauffage']);
   let _anFilterMeters   = new Set(); // ids sélectionnés individuellement ; vide = aucun filtre compteur
@@ -680,27 +683,46 @@
     return `<div class="ra-svg-wrap"><svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block" preserveAspectRatio="xMidYMid meet">${rects}${rowLbls}${colLbls}</svg></div>`;
   }
 
-  // ── INTERACTIVE MAIN CHART SVG (v2) ──
-  function _anMainSVG(series, dates, clients) {
-    const W = 700, H = 188, PADl = 56, PADr = 12, PADt = 16, PADb = 36;
+  // ── INTERACTIVE MAIN CHART SVG (v3 — Phase B) ────────────────────────────
+  // Trace une série par COMPTEUR (jamais par type agrégé), en valeurs
+  // réelles (m³/MWh/kWh selon le compteur) sur une échelle Y PARTAGÉE — plus
+  // de normalisation individuelle à 0-100% (chaque courbe reste comparable
+  // aux autres en valeur réelle). `s.vals[i]` peut valoir `null` (aucun
+  // relevé ce jour-là pour ce compteur) : le tracé est alors interrompu
+  // (jamais une valeur 0 inventée) — voir les segments contigus ci-dessous.
+  // `clientsVals` (optionnel) ajoute une courbe Clients sur un second axe Y
+  // (à droite), à sa propre échelle, sans jamais toucher à celle de gauche.
+  function _anMainSVG(series, dates, clientsVals) {
+    const W = 700, H = 188, PADl = 56, PADr = clientsVals ? 46 : 12, PADt = 16, PADb = 36;
     const cW = W - PADl - PADr, cH = H - PADt - PADb;
     const N = dates.length;
     if (!series.length || !N) return '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucune donnée sur la période</div>';
+    const anyValue = series.some(s => s.vals.some(v => v != null));
+    if (!anyValue) return '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun relevé sur cette période pour les compteurs sélectionnés</div>';
     const px = i => PADl + (i / Math.max(N - 1, 1)) * cW;
-    const py = v => PADt + cH - (v / 100) * cH;
 
-    // Normalize each series individually to 0-100, keep real max
-    const normSeries = series.map(s => {
-      const mx = Math.max(...s.vals, 0.001);
-      return { ...s, normVals: s.vals.map(v => v / mx * 100), mx };
-    });
+    // Échelle Y de gauche (valeurs réelles) : partagée par TOUTES les séries
+    // affichées — jamais une échelle par série. Si les compteurs
+    // sélectionnés n'ont pas tous la même unité (ex. eau + chauffage
+    // ensemble), l'axe reste en valeur brute et chaque série garde sa
+    // propre unité dans la légende/l'infobulle (limitation assumée, voir
+    // rapport Phase B).
+    const allVals = series.flatMap(s => s.vals.filter(v => v != null));
+    const yMax = allVals.length ? Math.max(...allVals) * 1.08 || 1 : 1;
+    const py = v => PADt + cH - (v / yMax) * cH;
 
-    // Primary series = first visible one → drives Y-axis labels
-    const primary = normSeries[0];
+    // Échelle Y de droite (clients), totalement indépendante.
+    const hasClients = Array.isArray(clientsVals) && clientsVals.some(v => v != null);
+    const clientsMax = hasClients ? (Math.max(...clientsVals.filter(v => v != null)) * 1.15 || 1) : 1;
+    const pyClients = v => PADt + cH - (v / clientsMax) * cH;
 
-    function fmtAxisVal(v, unit) {
+    // Une seule unité affichée sur l'axe si tous les compteurs partagent la
+    // même — sinon axe en valeur brute (nombre seul).
+    const units = new Set(series.map(s => s.unit));
+    const axisUnit = units.size === 1 ? [...units][0] : '';
+
+    function fmtAxisVal(v) {
       if (v === 0) return '0';
-      if (unit === 'kWh' && v >= 1000) return `${(v/1000).toFixed(v>=10000?0:1).replace(/\.0$/,'')} MWh`;
       if (v >= 10000) return `${Math.round(v/1000)}k`;
       if (v >= 1000) return `${(v/1000).toFixed(1).replace(/\.0$/,'')}k`;
       if (v >= 100) return Math.round(v).toString();
@@ -708,22 +730,23 @@
       return v.toFixed(2).replace(/\.?0+$/,'');
     }
 
-    let defs = '', grid = '', areas = '', maLines = '', lines = '', dots = '', xlbls = '';
+    let defs = '', grid = '', areas = '', maLines = '', lines = '', xlbls = '', clientsPath = '';
 
-    // Grid + Y-axis labels (real values from primary series)
+    // Grille + libellés Y (gauche = valeurs réelles, droite = clients)
     for (let g = 0; g <= 4; g++) {
       const y = PADt + (g / 4) * cH;
-      const realVal = primary ? primary.mx * (1 - g / 4) : 0;
-      const lbl = primary ? fmtAxisVal(realVal, primary.unit) : '';
+      const realVal = yMax * (1 - g / 4);
       grid += `<line x1="${PADl}" y1="${y.toFixed(1)}" x2="${W-PADr}" y2="${y.toFixed(1)}" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>`;
-      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" class="an2-axis-lbl">${lbl}</text>`;
+      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="end" class="an2-axis-lbl">${fmtAxisVal(realVal)}</text>`;
+      if (hasClients) {
+        const clientsVal = clientsMax * (1 - g / 4);
+        grid += `<text x="${(W-PADr+4).toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="start" class="an2-axis-lbl" fill="#94a3b8">${Math.round(clientsVal)}</text>`;
+      }
     }
-    // Unit label above Y-axis
-    if (primary) {
-      grid += `<text x="${(PADl-4).toFixed(1)}" y="${(PADt-4).toFixed(1)}" text-anchor="end" class="an2-axis-unit">${primary.unit}</text>`;
-    }
+    if (axisUnit) grid += `<text x="${(PADl-4).toFixed(1)}" y="${(PADt-4).toFixed(1)}" text-anchor="end" class="an2-axis-unit">${axisUnit}</text>`;
+    if (hasClients) grid += `<text x="${(W-PADr+4).toFixed(1)}" y="${(PADt-4).toFixed(1)}" text-anchor="start" class="an2-axis-unit" fill="#94a3b8">clients</text>`;
 
-    // X-axis date labels
+    // Libellés X (dates)
     const MONTHS = ['jan','fév','mar','avr','mai','jui','jul','aoû','sep','oct','nov','déc'];
     const DAYS   = ['dim','lun','mar','mer','jeu','ven','sam'];
     const step = N <= 7 ? 1 : N <= 30 ? 5 : N <= 90 ? 14 : 30;
@@ -737,50 +760,78 @@
       xlbls += `<text x="${px(i).toFixed(1)}" y="${(H - PADb + 16).toFixed(1)}" text-anchor="middle" class="an2-axis-lbl">${lbl}</text>`;
     });
 
-    normSeries.forEach(ds => {
-      if (!ds.normVals.some(v => v > 0)) return;
-      const pts = ds.normVals.map((v, i) => ({ x: px(i), y: py(v) }));
+    // Découpe un tableau de valeurs (avec `null` = trou) en segments
+    // contigus de points {x,y} — un `null` interrompt la ligne au lieu
+    // d'être tracé comme une valeur 0.
+    function buildSegments(vals, yFn) {
+      const segs = []; let cur = [];
+      vals.forEach((v, i) => {
+        if (v == null) { if (cur.length) { segs.push(cur); cur = []; } return; }
+        cur.push({ x: px(i), y: yFn(v) });
+      });
+      if (cur.length) segs.push(cur);
+      return segs;
+    }
+    function smoothPath(pts) {
       let d = `M ${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
       for (let i = 1; i < pts.length; i++) {
         const p0 = pts[i-1], p1 = pts[i], cpx = (p0.x + p1.x) / 2;
         d += ` C ${cpx.toFixed(1)},${p0.y.toFixed(1)} ${cpx.toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
       }
+      return d;
+    }
+
+    series.forEach(s => {
+      const segments = buildSegments(s.vals, py);
+      if (!segments.length) return; // compteur sans le moindre relevé sur la période
       const bY = (PADt + cH).toFixed(1);
-      const gId = 'mc' + ds.color.replace('#', '');
-      defs += `<linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${ds.color}" stop-opacity="0.18"/><stop offset="100%" stop-color="${ds.color}" stop-opacity="0.01"/></linearGradient>`;
-      areas += `<path d="${d} L ${pts[pts.length-1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
-      lines += `<path d="${d}" fill="none" stroke="${ds.color}" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>`;
-      // 7-day moving average
+      const gId = 'mc' + s.color.replace('#', '') + s.id.replace(/[^a-zA-Z0-9]/g, '');
+      defs += `<linearGradient id="${gId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${s.color}" stop-opacity="0.16"/><stop offset="100%" stop-color="${s.color}" stop-opacity="0.01"/></linearGradient>`;
+      segments.forEach(pts => {
+        const d = smoothPath(pts);
+        // Une aire de dégradé seulement pour les segments d'au moins 2 points
+        // (un point isolé n'a pas de "sous la courbe" à remplir).
+        if (pts.length > 1) areas += `<path d="${d} L ${pts[pts.length-1].x.toFixed(1)},${bY} L ${pts[0].x.toFixed(1)},${bY} Z" fill="url(#${gId})"/>`;
+        lines += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>`;
+        if (pts.length === 1) lines += `<circle cx="${pts[0].x.toFixed(1)}" cy="${pts[0].y.toFixed(1)}" r="2.2" fill="${s.color}"/>`;
+      });
+      // Moyenne mobile 7 jours (ignore les trous, sur les valeurs réelles).
       const MA = 7;
       let maD = '';
-      ds.normVals.forEach((_, i) => {
-        const sl = ds.normVals.slice(Math.max(0, i - MA + 1), i + 1).filter(v => v > 0);
+      s.vals.forEach((_, i) => {
+        const sl = s.vals.slice(Math.max(0, i - MA + 1), i + 1).filter(v => v != null);
         if (!sl.length) return;
         const avg = sl.reduce((a, b) => a + b, 0) / sl.length;
         maD += maD ? ` L ${px(i).toFixed(1)},${py(avg).toFixed(1)}` : `M ${px(i).toFixed(1)},${py(avg).toFixed(1)}`;
       });
-      if (maD) maLines += `<path d="${maD}" fill="none" stroke="${ds.color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.35"/>`;
-      // Anomaly dots
-      ds.normVals.forEach((v, i) => {
-        if (v > 108) dots += `<circle cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="3.5" fill="#ef4444" opacity="0.85" stroke="white" stroke-width="1"/>`;
-      });
-      // Last point
-      const last = pts[pts.length-1];
-      lines += `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.8" fill="${ds.color}" stroke="white" stroke-width="1.2"/>`;
+      if (maD) maLines += `<path d="${maD}" fill="none" stroke="${s.color}" stroke-width="1" stroke-dasharray="3,3" opacity="0.35"/>`;
+      // Dernier point réel (pas forcément le dernier jour, si trou en fin de période).
+      const lastSeg = segments[segments.length - 1];
+      const last = lastSeg[lastSeg.length - 1];
+      lines += `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.8" fill="${s.color}" stroke="white" stroke-width="1.2"/>`;
     });
+
+    // Courbe Clients (axe secondaire), en pointillés neutres — préparatoire
+    // Phase C (aucun seuil/ratio calculé ici, juste l'effectif affiché).
+    if (hasClients) {
+      const cSegs = buildSegments(clientsVals, pyClients);
+      cSegs.forEach(pts => { clientsPath += `<path d="${smoothPath(pts)}" fill="none" stroke="#94a3b8" stroke-width="1.3" stroke-dasharray="4,3" opacity="0.7"/>`; });
+    }
 
     const baseY = (PADt + cH).toFixed(1);
     const overlay = `<rect id="an2-overlay" x="${PADl}" y="${PADt}" width="${cW}" height="${cH}" fill="transparent" style="cursor:crosshair"/>`;
     const vcursor = `<line id="an2-vcursor" x1="${PADl}" y1="${PADt}" x2="${PADl}" y2="${PADt+cH}" stroke="rgba(0,0,0,0.18)" stroke-width="1" stroke-dasharray="3,2" display="none"/>`;
 
-    // Store data for JS interactivity
-    window._anChartData = { dates, series, W, PADl, PADr, cW, N, clients: clients || {} };
+    // Données pour l'interactivité JS (_anInit) — série par compteur, plus
+    // un tableau `clientsVals` aligné sur `dates` (déjà résolu ici, jamais
+    // recalculé dans _anInit).
+    window._anChartData = { dates, series, W, PADl, PADr, cW, N, clientsVals: clientsVals || null };
 
     return `<div class="ra-svg-wrap an2-chart-svg-wrap">
       <svg id="an2-svg" width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible" preserveAspectRatio="xMidYMid meet">
         <defs>${defs}</defs>
         <line x1="${PADl}" y1="${baseY}" x2="${W-PADr}" y2="${baseY}" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
-        ${grid}${areas}${maLines}${lines}${dots}${xlbls}${overlay}${vcursor}
+        ${grid}${areas}${maLines}${clientsPath}${lines}${xlbls}${overlay}${vcursor}
       </svg>
     </div>`;
   }
@@ -1118,15 +1169,20 @@
   }
 
   // ── INTERACTIVE CHART INIT (v2) ──
+  // PHASE B : infobulle par COMPTEUR (nom exact, type, consommation réelle +
+  // unité, clients du jour si disponibles) — plus de ratio/objectif affiché
+  // ici (item explicitement différé à la Phase C). `v == null` = aucun
+  // relevé ce jour pour ce compteur ("Aucun relevé"), distinct de `v === 0`
+  // (relevé réel à zéro, affiché "0").
   function _anInit() {
     const svg  = document.getElementById('an2-svg');
     const tip  = document.getElementById('an2-tooltip');
     const wrap = document.getElementById('an2-chart-wrap');
     const data = window._anChartData;
     if (!svg || !tip || !data || !data.dates.length) return;
-    const { W, PADl, PADr, cW, N, dates, series, clients } = data;
+    const { W, PADl, PADr, cW, N, dates, series, clientsVals } = data;
 
-    function fmtN(n) { if (n == null || n === 0) return '0'; return n >= 1000 ? n.toFixed(0) : n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
+    function fmtN(n) { if (n == null) return '—'; if (n === 0) return '0'; return n >= 1000 ? n.toFixed(0) : n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2); }
     function getIdx(e) {
       const rect = svg.getBoundingClientRect();
       const vbX = (e.clientX - rect.left) / rect.width * W;
@@ -1148,24 +1204,17 @@
       const cx   = Math.max(PADl, Math.min(W - PADr, vbX));
       if (vcursor) { vcursor.setAttribute('x1', cx.toFixed(1)); vcursor.setAttribute('x2', cx.toFixed(1)); vcursor.removeAttribute('display'); }
 
-      const cli = (clients && clients[date]) || 0;
-      let html = `<div class="an2-tt-date">${dateFull(date)}${cli > 0 ? `<span class="an2-tt-cli">👥 ${cli} clients</span>` : ''}</div>`;
+      const cli = (clientsVals && clientsVals[idx] != null) ? clientsVals[idx] : null;
+      let html = `<div class="an2-tt-date">${dateFull(date)}${cli != null ? `<span class="an2-tt-cli">👥 ${cli} clients</span>` : ''}</div>`;
       let hasAny = false;
       series.forEach(s => {
-        const v = s.vals[idx] ?? null;
-        const prev = idx > 0 ? (s.vals[idx-1] ?? null) : null;
-        const evo  = v != null && prev != null && prev > 0 ? ((v - prev) / prev * 100) : null;
-        const ec   = evo !== null ? `<span style="color:${evo>5?'var(--red)':evo<-5?'var(--green)':'var(--text3)'};margin-left:4px;font-size:9px">${evo>0?'↑ +':'↓ '}${Math.abs(evo).toFixed(0)}%</span>` : '';
-        const valStr = v != null && v > 0 ? `<b>${fmtN(v)}</b> ${s.unit}` : `<span style="color:var(--text3)">—</span>`;
-        const ratio = v != null && v > 0 && cli > 0 ? computeRatio(s.type, v, cli) : null;
-        const ratioStr = ratio !== null ? `<span class="an2-tt-sub">${fmtN(ratio)} ${_isLiterRatioType(s.type) ? 'L' : s.unit}/client</span>` : '';
-        const avg30 = s.avg30 ?? null;
-        const avgStr = avg30 != null && avg30 > 0 ? `<span class="an2-tt-sub">moy.30j : ${fmtN(avg30)} ${s.unit}</span>` : '';
-        html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${s.label}</span><span class="an2-tt-val">${valStr}${ec}</span></div>`;
-        if (ratioStr || avgStr) html += `<div class="an2-tt-subs">${avgStr}${ratioStr}</div>`;
-        if (v != null && v > 0) hasAny = true;
+        const v = s.vals[idx];
+        const valStr = v != null ? `<b>${fmtN(v)}</b> ${esc(s.unit)}` : `<span style="color:var(--text3)">Aucun relevé</span>`;
+        html += `<div class="an2-tt-row"><span style="color:${s.color}">${s.icon} ${esc(s.name)}</span><span class="an2-tt-val">${valStr}</span></div>`;
+        html += `<div class="an2-tt-subs" style="color:var(--text3);font-size:10px">${esc(s.label)}</div>`;
+        if (v != null) hasAny = true;
       });
-      if (!hasAny) html += `<div class="an2-tt-row" style="color:var(--text3);font-size:10px;justify-content:center">Aucune donnée ce jour</div>`;
+      if (!hasAny) html += `<div class="an2-tt-row" style="color:var(--text3);font-size:10px;justify-content:center">Aucun relevé ce jour</div>`;
 
       tip.innerHTML = html;
       tip.style.display = 'block';
@@ -1843,6 +1892,32 @@
     return { start: _daysAgo(29), end: todayStr }; // repli 30 jours (ex. "personnalisé" pas encore renseigné)
   }
 
+  // PHASE B : liste de dates ('YYYY-MM-DD') entre `start` et `end` inclus,
+  // en dates LOCALES (jamais UTC/ISO) — utilise _ymdLocal comme tout le
+  // reste du fichier. Pure utilitaire de dates, pas un moteur de calcul :
+  // ne produit aucune consommation ni ratio, seulement l'axe des jours que
+  // le nouveau graphique doit parcourir (indépendant de `dates`/`days` plus
+  // haut, qui restent dédiés aux KPI/carte thermique/donut, inchangés).
+  function _anDateRange(start, end) {
+    const out = [];
+    let d = new Date(start + 'T00:00:00');
+    const endD = new Date(end + 'T00:00:00');
+    let guard = 0;
+    while (d <= endD && guard < 3660) { out.push(_ymdLocal(d)); d.setDate(d.getDate() + 1); guard++; }
+    return out;
+  }
+
+  // PHASE B : éclaircit une couleur hex vers le blanc de `pct` (0-1) — sert
+  // uniquement à distinguer visuellement plusieurs compteurs d'un même type
+  // (même couleur de base MT[type].color, nuances différentes), jamais à
+  // calculer quoi que ce soit.
+  function _anShade(hex, pct) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const mix = (c) => Math.round(c + (255 - c) * pct);
+    return `#${[mix(r), mix(g), mix(b)].map(c => c.toString(16).padStart(2, '0')).join('')}`;
+  }
+
   // ── TAB: ANALYSES — Dashboard supervision énergétique V2 ──
   function _tAnalyses() {
     const per  = window._csoPer || '30';
@@ -1865,10 +1940,11 @@
     const zones   = [...new Set(_meters.map(m => m.location).filter(Boolean))].sort();
     const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.location || '') === ratioZone);
 
-    // PHASE A (refonte Analyses) : nouvelle barre de filtres détaillée —
-    // résout uniquement l'état/l'affichage, ne touche à aucun calcul du
-    // graphique/carte thermique existants (qui continuent d'utiliser `per`/
-    // `ratioZone`/`_anHiddenTypes` ci-dessus, inchangés).
+    // PHASE A/B (refonte Analyses) : barre de filtres détaillée — pilote
+    // désormais le graphique principal ci-dessous (voir anEffectiveMeters/
+    // anMeterSeries), mais ne touche à aucun autre calcul de cette fonction
+    // (KPI/carte thermique/donut/hebdo continuent d'utiliser `per`/
+    // `ratioZone`/`typeData` ci-dessus, inchangés).
     const anPeriodBounds = _anResolvePeriodBounds(_anFilterPeriod);
     // Précharge en tâche de fond (comme ci-dessus) la plage couverte par le
     // nouveau sélecteur, pour que la Phase B n'ait pas de délai de chargement
@@ -1905,12 +1981,6 @@
     };
     window._anClearFilterMeters = function() {
       _anFilterMeters.clear();
-      MX.Pages.Conso._tab('analyses');
-    };
-
-    window._anToggle = function(type) {
-      if (_anHiddenTypes.has(type)) _anHiddenTypes.delete(type);
-      else _anHiddenTypes.add(type);
       MX.Pages.Conso._tab('analyses');
     };
 
@@ -2019,33 +2089,68 @@
       </div>`;
     }).filter(Boolean).join('');
 
-    // ── Main chart: visible series (legend-filtered) ──
-    const mainSeries = Object.entries(typeData)
-      .filter(([t,d]) => !_anHiddenTypes.has(t) && d.daily.some(v=>v>0))
-      .map(([t,d]) => ({ type:t, icon:d.meta.icon, label:d.meta.label, color:d.meta.color, unit:d.unit, vals:d.daily, avg30:d.avg30Val }));
+    // ── PHASE B : graphique principal — une série RÉELLE par compteur ────────
+    // Piloté par les filtres Phase A (anPeriodBounds/anFilterableMeters/
+    // _anFilterMeters), jamais par `dates`/`per`/typeData ci-dessus (qui
+    // restent réservés aux KPI/carte thermique/donut/hebdo, inchangés).
+    // "Aucun compteur sélectionné" (_anFilterMeters vide) affiche TOUS les
+    // compteurs des types cochés — même convention que le tiroir de
+    // sélection de la Phase A ("(tous)").
+    const anEffectiveMeters = anFilterableMeters.filter(m => !_anFilterMeters.size || _anFilterMeters.has(m.id));
+    const anDates = _anDateRange(anPeriodBounds.start, anPeriodBounds.end);
 
-    const legendHtml = Object.entries(typeData)
-      .filter(([,d]) => d.daily.some(v=>v>0))
-      .map(([type,d]) => {
-        const off = _anHiddenTypes.has(type);
-        return `<label class="an2-ck${off?' an2-ck--off':''}">
-          <input type="checkbox" ${off?'':'checked'} onchange="window._anToggle('${type}')">
-          <span class="an2-ck-dot" style="background:${off?'transparent':d.meta.color};border-color:${d.meta.color}"></span>
-          <span>${esc(d.meta.label)}</span>
-        </label>`;
-      }).join('');
+    // Regroupe les relevés par meterId puis par date locale, une seule
+    // passe sur _readings (plutôt qu'un .filter() répété par compteur×jour) —
+    // seule optimisation, ne recalcule rien de plus que ce que `consumption`
+    // contient déjà (jamais un recalcul d'index indépendant).
+    const anReadingsByMeter = new Map();
+    _readings.forEach(r => {
+      if (!anEffectiveMeters.some(m => m.id === r.meterId)) return;
+      if (!anReadingsByMeter.has(r.meterId)) anReadingsByMeter.set(r.meterId, new Map());
+      const byDate = anReadingsByMeter.get(r.meterId);
+      // Plusieurs relevés le même jour pour un même compteur (rare) : somme,
+      // même convention que sumConsumption().
+      byDate.set(r.date, (byDate.get(r.date) || 0) + (r.consumption || 0));
+    });
 
-    const mainChartSVG = _anMainSVG(mainSeries, dates, _clients);
+    // Nuances de couleur pour distinguer plusieurs compteurs d'un même type
+    // (même couleur de base MT[type].color) — jamais recalculé, juste un
+    // décalage visuel déterministe par index au sein du type.
+    const anTypeCounters = {};
+    const anMeterSeries = anEffectiveMeters.map(m => {
+      const meta = MT[m.type] || {};
+      const idx = anTypeCounters[m.type] || 0;
+      anTypeCounters[m.type] = idx + 1;
+      const color = idx === 0 ? meta.color : _anShade(meta.color || '#64748B', Math.min(0.65, idx * 0.28));
+      const byDate = anReadingsByMeter.get(m.id);
+      // `null` = AUCUN relevé ce jour pour ce compteur (jamais une valeur 0
+      // inventée) ; une valeur (y compris 0) = relevé réel présent.
+      const vals = anDates.map(d => (byDate && byDate.has(d)) ? byDate.get(d) : null);
+      return { id: m.id, name: m.name || m.id, type: m.type, icon: meta.icon || '', label: meta.label || m.type, color, unit: m.unit || meta.unit || '', vals };
+    });
 
-    // Main chart stats
-    const allVals = mainSeries.flatMap(s=>s.vals.filter(v=>v>0));
+    const anMainChartSVG = anEffectiveMeters.length
+      ? _anMainSVG(anMeterSeries, anDates, anDates.map(d => (_clients[d] != null ? _clients[d] : null)))
+      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Sélectionnez au moins un compteur dans les filtres ci-dessus</div>';
+
+    const anLegendHtml = anMeterSeries.map(s => {
+      const hasData = s.vals.some(v => v != null);
+      return `<span class="an2-ck${hasData?'':' an2-ck--off'}" style="cursor:default">
+        <span class="an2-ck-dot" style="background:${s.color};border-color:${s.color}"></span>
+        <span>${s.icon} ${esc(s.name)}${hasData?'':' (aucune donnée)'}</span>
+      </span>`;
+    }).join('') || '<span style="font-size:11px;color:var(--text-3)">Aucun compteur sélectionné</span>';
+
+    // Stats du graphique — sur les valeurs RÉELLES (jamais normalisées),
+    // tous compteurs affichés confondus, en ignorant les trous (`null`).
+    const allVals = anMeterSeries.flatMap(s => s.vals.filter(v => v != null));
     const stMin = allVals.length?Math.min(...allVals):0;
     const stMax = allVals.length?Math.max(...allVals):0;
     const stAvg = allVals.length?allVals.reduce((a,b)=>a+b,0)/allVals.length:0;
     const stS = [...allVals].sort((a,b)=>a-b);
     const stMed = stS.length?(stS.length%2===0?(stS[stS.length/2-1]+stS[stS.length/2])/2:stS[Math.floor(stS.length/2)]):0;
     const stStd = allVals.length>1?Math.sqrt(allVals.reduce((s,v)=>s+(v-stAvg)**2,0)/allVals.length):0;
-    const stTot = mainSeries.reduce((s,sr)=>s+sr.vals.reduce((a,b)=>a+b,0),0);
+    const stTot = allVals.reduce((s,v)=>s+v,0);
 
     // ── Alert panel (right sidebar) ──
     const savedAlerts = _csoAlerts.filter(a=>!a.acknowledged&&a.status!=='resolved'&&(a.level==='critical'||a.level==='warning'));
@@ -2353,15 +2458,15 @@
       <div class="an2-main-row">
         <div class="an2-chart-panel">
           <div class="an2-chart-hdr">
-            <span class="an2-chart-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations</span>
-            <div class="an2-ck-group">${legendHtml}</div>
+            <span class="an2-chart-ttl"><i class="fas fa-chart-line"></i> Évolution des consommations (par compteur)</span>
+            <div class="an2-ck-group">${anLegendHtml}</div>
             <div class="an2-chart-acts">
               ${critCount?`<span class="an2-bdg an2-bdg--crit">${critCount} crit.</span>`:''}
               ${warnCount?`<span class="an2-bdg an2-bdg--warn">${warnCount} att.</span>`:''}
             </div>
           </div>
           <div class="an2-chart-wrap" id="an2-chart-wrap">
-            ${mainChartSVG}
+            ${anMainChartSVG}
             <div class="an2-tooltip" id="an2-tooltip" style="display:none"></div>
           </div>
           <div class="an2-chart-stats">
