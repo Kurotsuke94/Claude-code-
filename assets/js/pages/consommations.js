@@ -1993,13 +1993,16 @@
     };
     // "Tout sélectionner" / "Tout désélectionner" : agissent sur les
     // compteurs actuellement éligibles (types cochés ci-dessus), jamais sur
-    // un compteur masqué par le filtre de type.
+    // un compteur masqué par le filtre de type — et sur Clients, désormais
+    // intégré au même panneau "Compteurs affichés" (plus de case séparée).
     window._anSelectAllMeters = function() {
       _anFilterMeters = new Set(anFilterableMeters.map(m => m.id));
+      _anShowClients = true;
       MX.Pages.Conso._tab('analyses');
     };
     window._anClearFilterMeters = function() {
       _anFilterMeters.clear();
+      _anShowClients = false;
       MX.Pages.Conso._tab('analyses');
     };
     // "Réinitialiser" : remet toute la barre de filtres à son état par
@@ -2244,6 +2247,13 @@
       </div>`;
     }
 
+    // Réinitialisation explicite avant reconstruction : la position des
+    // panneaux (unit0/unit1/…) dépend de l'unité des compteurs SÉLECTIONNÉS
+    // et peut donc se décaler d'un rendu à l'autre (ex. décocher le seul
+    // compteur eau fait passer le chauffage de "unit1" à "unit0"). Repartir
+    // d'un objet vide garantit qu'aucun ancien domId ne conserve les
+    // données d'un panneau qui n'existe plus dans ce rendu.
+    window._anChartData = {};
     window._anChartDomIds = [];
     let anChartPanelsHtml = '';
     if (!anEffectiveMeters.length) {
@@ -2263,8 +2273,9 @@
       });
     }
     // Panneau Clients — séparé, jamais mélangé aux consommations, activable
-    // via l'interrupteur "Afficher les clients" (off par défaut). Échelle et
-    // couleur propres (neutre), jamais confondu avec une série de conso.
+    // via la case "Clients" du panneau "Compteurs affichés" (off par défaut,
+    // plus de case dupliquée ailleurs). Échelle et couleur propres (neutre),
+    // jamais confondu avec une série de conso.
     if (_anShowClients) {
       const clientsVals = anDates.map(d => (_clients[d] != null ? _clients[d] : null));
       const clientsSeries = [{ id: 'clients', name: 'Clients', type: '', icon: '👥', label: '', color: '#94a3b8', unit: 'clients', vals: clientsVals }];
@@ -2527,6 +2538,9 @@
       </label>`;
     }).join('');
 
+    // Plus de case "Afficher les clients" isolée ici (retirée pour éviter un
+    // doublon de sélection) : Clients se coche désormais uniquement dans le
+    // panneau "Compteurs affichés" ci-dessous, comme un groupe à part entière.
     const anFilterBarHtml = `<div class="an2-toolbar" style="flex-direction:column;align-items:stretch;gap:10px">
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
         <span class="an2-toolbar-ttl"><i class="fas fa-sliders"></i> Filtres détaillés</span>
@@ -2535,10 +2549,6 @@
       </div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px">
         <div class="an2-ck-group" style="display:flex;flex-wrap:wrap;gap:10px">${anTypeChipsHtml}</div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer">
-          <input type="checkbox" ${_anShowClients?'checked':''} onchange="window._anToggleShowClients()">
-          <i class="fas fa-users" style="color:#94a3b8"></i> Afficher les clients
-        </label>
       </div>
     </div>`;
 
@@ -2568,6 +2578,19 @@
         </div>`;
       }).filter(Boolean).join('') || '<div style="font-size:12px;color:var(--text-3)">Aucun compteur pour les types cochés dans les filtres.</div>';
 
+    // Groupe Clients — même panneau, même mécanique de case à cocher que les
+    // compteurs (une seule zone de sélection, plus de doublon avec l'ancienne
+    // case "Afficher les clients"). Reste une case toujours visible, cochée
+    // ou non, pour pouvoir être recochée à tout moment.
+    const anClientsCardHtml = `<div style="flex:1;min-width:220px;border-radius:10px;padding:10px 12px;background:rgba(148,163,184,0.10);border:1px solid rgba(148,163,184,0.3)">
+      <div style="font-weight:600;font-size:13px;color:#94a3b8;margin-bottom:6px">👥 Clients</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 2px;cursor:pointer">
+        <input type="checkbox" ${_anShowClients?'checked':''} onchange="window._anToggleShowClients()">
+        <span style="width:9px;height:9px;border-radius:50%;flex:none;display:inline-block;background:${_anShowClients?'#94a3b8':'transparent'};border:2px solid #94a3b8"></span>
+        <span>Nombre de clients par jour</span>
+      </label>
+    </div>`;
+
     const anMetersPanelHtml = `<div class="an2-card" style="margin-bottom:14px">
       <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
         <span><i class="fas fa-filter"></i> Compteurs affichés</span>
@@ -2577,7 +2600,7 @@
           <button class="an2-rb" onclick="window._anResetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
         </div>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">${anMeterCardsHtml}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">${anMeterCardsHtml}${anClientsCardHtml}</div>
     </div>`;
 
     return `<div class="cso-inner an2-page">
