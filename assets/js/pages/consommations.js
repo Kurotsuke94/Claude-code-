@@ -60,10 +60,15 @@
   // pas validée séparément. `scope` (toujours 'local' ici) et le préfixe
   // d'id 'local_' préparent cette Phase 2 sans l'activer.
   const AN_CHARTS_KEY   = 'mx_an_charts_local_v1';
-  let _anCharts         = []; // { id, name, meterIds, showClients, period, displayType, scope, createdBy, createdAt, updatedAt, order }
+  let _anCharts         = []; // LOCAL (localStorage) : { id, name, meterIds, displayType, createdBy, createdAt, updatedAt, order }
   let _anChartsLoaded   = false; // true une fois _anCharts chargé depuis localStorage OU les graphiques par défaut semés
+  // PARTAGÉ (Firestore, cso_charts) : même forme que _anCharts (voir CSO.charts
+  // plus bas), alimenté en temps réel par le listener _unsubCso.charts dans
+  // _load() — jamais écrit dans localStorage, jamais mélangé à _anCharts.
+  let _anSharedCharts   = [];
   let _anChartFormState = null;  // état du formulaire Créer/Modifier en cours (voir _anOpenChartForm)
   let _anEditingChartId = null;  // id du graphique en cours de modification, ou null = création
+  let _anEditingScope   = 'local'; // 'local' | 'shared' — détermine où _anSaveChartForm/_anDuplicateChart/_anDeleteChart écrivent
   const _recalcLocks   = new Set(); // meters currently being recalculated
   const _recalcPending = new Set(); // meters waiting for a re-run once current lock releases
   const _recalcWaiters = new Map(); // meterId → [{resolve,reject}] Promises waiting for recalc to finish
@@ -113,6 +118,10 @@
     alerts:   () => db.collection('cso_energy_alerts'),
     perfConfig: () => db.collection('cso_perf_config'),
     log:      () => db.collection('cso_activity_log'),
+    // Graphiques personnalisés PARTAGÉS (Analyses) — collection dédiée,
+    // distincte de _anCharts (localStorage). Voir firestore.rules : règle
+    // provisoire (isAuthenticated() uniquement, ne distingue pas les rôles).
+    charts:   () => db.collection('cso_charts'),
   };
 
   // literRatio: true  → ratio par client affiché en L/client (× 1000, unité de
@@ -1075,6 +1084,15 @@
       });
       _rerender();
     }, _fsErr('cso_perf_config'));
+    // Graphiques personnalisés PARTAGÉS — même mécanique que les listeners
+    // ci-dessus (temps réel, aucun filtre/tri composé donc aucun index
+    // composite requis, tri par `order` fait côté client). Une écriture
+    // d'un poste (créer/modifier/renommer/dupliquer/supprimer) redéclenche
+    // ce listener sur tous les autres postes ouverts sur l'onglet Analyses.
+    _unsubCso.charts = CSO.charts().onSnapshot(snap => {
+      _anSharedCharts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _rerender();
+    }, _fsErr('cso_charts'));
   }
 
   // ── CHARGEMENT COMPLÉMENTAIRE PAR PLAGE DE DATES (Phase 1B) ─────────────
@@ -1997,14 +2015,21 @@
     _anChartsLoaded = true;
   }
 
+  // Store en mémoire correspondant à un `scope` — jamais mélangés,
+  // jamais de repli implicite de l'un vers l'autre.
+  function _anStoreFor(scope) { return scope === 'shared' ? _anSharedCharts : _anCharts; }
+
   // ── Formulaire Créer/Modifier ──────────────────────────────────────────
   // `_anChartFormState` porte l'état en cours d'édition (relu/écrit à
   // chaque interaction dans la modale, voir _anChartFormSync) ; la modale
   // elle-même est reconstruite à chaque changement de période via
   // MX.showModal (pas de re-render partiel de modale dans cette app).
-  window._anOpenChartForm = function(chartId) {
+  // `scope` ('local'|'shared') détermine où _anSaveChartForm écrira —
+  // obligatoire à la création, déduit du graphique lui-même en modification.
+  window._anOpenChartForm = function(chartId, scope) {
     _anEditingChartId = chartId || null;
-    const chart = chartId ? _anCharts.find(c => c.id === chartId) : null;
+    _anEditingScope = scope || 'local';
+    const chart = chartId ? _anStoreFor(_anEditingScope).find(c => c.id === chartId) : null;
     _anChartFormState = {
       name: chart ? chart.name : '',
       meterIds: new Set(chart ? chart.meterIds : []),
@@ -2054,7 +2079,10 @@
   function _anRenderChartForm() {
     const st = _anChartFormState;
     if (!st) return;
-    const chart = _anEditingChartId ? _anCharts.find(c => c.id === _anEditingChartId) : null;
+    const chart = _anEditingChartId ? _anStoreFor(_anEditingScope).find(c => c.id === _anEditingChartId) : null;
+    const scopeNoteHtml = _anEditingScope === 'shared'
+      ? '<div style="font-size:12px;color:var(--text-3)"><i class="fas fa-cloud"></i> Ce graphique sera visible et modifiable par tous les utilisateurs de l\'établissement.</div>'
+      : '<div style="font-size:12px;color:var(--text-3)"><i class="fas fa-desktop"></i> Ce graphique reste local à cet appareil (jamais partagé).</div>';
 
     // Tous les compteurs, groupés par type — un graphique personnalisé n'est
     // JAMAIS limité aux 3 types de "Filtres détaillés" (eau/chauffage) : il
@@ -2090,10 +2118,12 @@
         </div>`
       : '';
 
+    const scopeLbl = _anEditingScope === 'shared' ? 'graphique partagé' : 'graphique local';
     MX.showModal({
-      title: chart ? 'Modifier le graphique' : 'Créer un graphique',
+      title: chart ? `Modifier le ${scopeLbl}` : `Créer un ${scopeLbl}`,
       sub: '',
       body: `<div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;max-height:60vh;overflow:auto">
+        ${scopeNoteHtml}
         <input id="an2-cf-name" class="fi" placeholder="Nom du graphique *" value="${esc(st.name)}" maxlength="60">
         <div>
           <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Compteurs</div>
@@ -2116,45 +2146,92 @@
     setTimeout(() => document.getElementById('an2-cf-name')?.focus(), 80);
   }
 
-  window._anSaveChartForm = function() {
+  // `scope` ('local'|'shared') décide où écrire : localStorage (_anCharts,
+  // inchangé depuis la Phase 1) ou Firestore (cso_charts, nouveau). Les deux
+  // chemins restent strictement séparés — jamais de repli implicite d'un
+  // store vers l'autre, jamais d'écriture croisée.
+  window._anSaveChartForm = async function() {
     _anChartFormSync();
     const st = _anChartFormState;
     if (!st) return;
     const name = (st.name || '').trim();
     if (!name) { MX.toast('Le nom est requis', true); return; }
     if (!st.meterIds.size && !st.showClients) { MX.toast('Sélectionnez au moins un compteur ou activez Clients', true); return; }
-    const now = Date.now();
-    if (_anEditingChartId) {
-      const chart = _anCharts.find(c => c.id === _anEditingChartId);
-      if (chart) {
-        chart.name = name;
-        chart.meterIds = Array.from(st.meterIds);
-        chart.showClients = !!st.showClients;
-        chart.period = { ...st.period };
-        chart.updatedAt = now;
-      }
-      MX.toast('Graphique mis à jour');
-    } else {
-      const order = _anCharts.length ? Math.max(..._anCharts.map(c => c.order || 0)) + 1 : 0;
-      _anCharts.push({
-        id: 'local_' + now + '_' + Math.random().toString(36).slice(2, 7),
+    const scope = _anEditingScope;
+    const store = _anStoreFor(scope);
+
+    if (scope === 'shared') {
+      const data = {
         name, meterIds: Array.from(st.meterIds), showClients: !!st.showClients,
-        period: { ...st.period }, displayType: 'line', scope: 'local',
-        createdBy: _author(), createdAt: now, updatedAt: now, order,
-      });
-      MX.toast('Graphique créé');
+        period: { ...st.period }, displayType: 'line',
+        updatedBy: _author(), updatedAt: FV.serverTimestamp(),
+      };
+      try {
+        if (_anEditingChartId) {
+          await CSO.charts().doc(_anEditingChartId).update(data);
+          MX.toast('Graphique partagé mis à jour');
+        } else {
+          const order = store.length ? Math.max(...store.map(c => c.order || 0)) + 1 : 0;
+          await CSO.charts().add({ ...data, createdBy: _author(), createdAt: FV.serverTimestamp(), order });
+          MX.toast('Graphique partagé créé');
+        }
+      } catch (e) {
+        console.error('[CSO] cso_charts save:', e);
+        MX.toast('Erreur lors de l\'enregistrement du graphique partagé', true);
+        return; // ne réinitialise pas le formulaire : l'utilisateur peut réessayer
+      }
+    } else {
+      const now = Date.now();
+      if (_anEditingChartId) {
+        const chart = store.find(c => c.id === _anEditingChartId);
+        if (chart) {
+          chart.name = name;
+          chart.meterIds = Array.from(st.meterIds);
+          chart.showClients = !!st.showClients;
+          chart.period = { ...st.period };
+          chart.updatedAt = now;
+        }
+        MX.toast('Graphique mis à jour');
+      } else {
+        const order = store.length ? Math.max(...store.map(c => c.order || 0)) + 1 : 0;
+        store.push({
+          id: 'local_' + now + '_' + Math.random().toString(36).slice(2, 7),
+          name, meterIds: Array.from(st.meterIds), showClients: !!st.showClients,
+          period: { ...st.period }, displayType: 'line', scope: 'local',
+          createdBy: _author(), createdAt: now, updatedAt: now, order,
+        });
+        MX.toast('Graphique créé');
+      }
+      _anSaveLocalCharts();
+      MX.Pages.Conso._tab('analyses'); // pas de listener Firestore pour le local : rerender manuel
     }
-    _anSaveLocalCharts();
+
     _anChartFormState = null;
     _anEditingChartId = null;
-    MX.Pages.Conso._tab('analyses');
   };
 
-  window._anDuplicateChart = function(id) {
-    const chart = _anCharts.find(c => c.id === id);
+  window._anDuplicateChart = async function(id, scope) {
+    const store = _anStoreFor(scope);
+    const chart = store.find(c => c.id === id);
     if (!chart) return;
+    const order = store.length ? Math.max(...store.map(c => c.order || 0)) + 1 : 0;
+
+    if (scope === 'shared') {
+      try {
+        await CSO.charts().add({
+          name: chart.name + ' (copie)', meterIds: chart.meterIds.slice(),
+          showClients: !!chart.showClients, period: { ...chart.period }, displayType: chart.displayType || 'line',
+          createdBy: _author(), createdAt: FV.serverTimestamp(),
+          updatedBy: _author(), updatedAt: FV.serverTimestamp(), order,
+        });
+        MX.toast('Graphique partagé dupliqué');
+      } catch (e) {
+        console.error('[CSO] cso_charts duplicate:', e);
+        MX.toast('Erreur lors de la duplication', true);
+      }
+      return;
+    }
     const now = Date.now();
-    const order = _anCharts.length ? Math.max(..._anCharts.map(c => c.order || 0)) + 1 : 0;
     _anCharts.push({
       ...chart,
       id: 'local_' + now + '_' + Math.random().toString(36).slice(2, 7),
@@ -2171,11 +2248,28 @@
     MX.Pages.Conso._tab('analyses');
   };
 
-  window._anDeleteChart = function(id) {
-    const chart = _anCharts.find(c => c.id === id);
+  window._anDeleteChart = function(id, scope) {
+    const store = _anStoreFor(scope);
+    const chart = store.find(c => c.id === id);
     if (!chart) return;
-    MX.showModal('Supprimer ce graphique ?', `« ${esc(chart.name)} » sera définitivement supprimé de ce navigateur.`, [
-      { label: 'Supprimer', cls: 'danger', fn: () => {
+    const isShared = scope === 'shared';
+    const warnTxt = isShared
+      ? `« ${esc(chart.name)} » sera définitivement supprimé pour TOUS les utilisateurs de l'établissement.`
+      : `« ${esc(chart.name)} » sera définitivement supprimé de ce navigateur.`;
+    MX.showModal('Supprimer ce graphique ?', warnTxt, [
+      { label: 'Supprimer', cls: 'danger', fn: async () => {
+        // Ne touche QUE ce document cso_charts — jamais un compteur, relevé,
+        // client, ratio ou alerte, jamais un autre graphique.
+        if (isShared) {
+          try {
+            await CSO.charts().doc(id).delete();
+            MX.toast('Graphique partagé supprimé');
+          } catch (e) {
+            console.error('[CSO] cso_charts delete:', e);
+            MX.toast('Erreur lors de la suppression', true);
+          }
+          return;
+        }
         _anCharts = _anCharts.filter(c => c.id !== id);
         _anSaveLocalCharts();
         MX.toast('Graphique supprimé');
@@ -2240,7 +2334,7 @@
   // compteur existant (compteur supprimé depuis), et sépare automatiquement
   // les séries en un sous-panneau par unité RÉELLE (jamais d'échelle
   // normalisée 0-100, jamais de mélange m³/MWh/Clients dans un même panneau).
-  function _anBuildCustomChartCard(chart) {
+  function _anBuildCustomChartCard(chart, scope) {
     const bounds = _anResolvePeriodBounds(chart.period || { mode: '30', start: null, end: null });
     _ensureReadingsFrom(bounds.start);
     _ensureClientsFrom(bounds.start);
@@ -2313,17 +2407,22 @@
 
     window._anChartDomIds = (window._anChartDomIds || []).concat(domIds);
 
-    return `<div class="an2-card" style="margin-bottom:0" data-chart-id="${esc(chart.id)}">
+    const isShared = scope === 'shared';
+    const badgeHtml = isShared
+      ? '<span class="an2-bdg" style="background:rgba(59,130,246,0.15);color:#3B82F6;border:1px solid rgba(59,130,246,0.4)"><i class="fas fa-cloud"></i> Partagé</span>'
+      : '<span class="an2-bdg" style="background:rgba(148,163,184,0.15);color:#64748b;border:1px solid rgba(148,163,184,0.4)"><i class="fas fa-desktop"></i> Local</span>';
+
+    return `<div class="an2-card" style="margin-bottom:0" data-chart-id="${esc(chart.id)}" data-chart-scope="${scope}">
       <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
         <span>${esc(chart.name)}</span>
-        <span class="an2-bdg" style="background:rgba(148,163,184,0.15);color:#64748b;border:1px solid rgba(148,163,184,0.4)"><i class="fas fa-desktop"></i> Local</span>
+        ${badgeHtml}
       </div>
       <div style="margin-top:8px">${panelsHtml}</div>
       ${missingNote}
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <button class="an2-rb" onclick="window._anOpenChartForm('${esc(chart.id)}')"><i class="fas fa-pen"></i> Modifier</button>
-        <button class="an2-rb" onclick="window._anDuplicateChart('${esc(chart.id)}')"><i class="fas fa-copy"></i> Dupliquer</button>
-        <button class="an2-rb" onclick="window._anDeleteChart('${esc(chart.id)}')"><i class="fas fa-trash"></i> Supprimer</button>
+        <button class="an2-rb" onclick="window._anOpenChartForm('${esc(chart.id)}','${scope}')"><i class="fas fa-pen"></i> Modifier</button>
+        <button class="an2-rb" onclick="window._anDuplicateChart('${esc(chart.id)}','${scope}')"><i class="fas fa-copy"></i> Dupliquer</button>
+        <button class="an2-rb" onclick="window._anDeleteChart('${esc(chart.id)}','${scope}')"><i class="fas fa-trash"></i> Supprimer</button>
       </div>
     </div>`;
   }
@@ -3016,18 +3115,33 @@
       <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">${anMeterCardsHtml}${anClientsCardHtml}</div>
     </div>`;
 
+    // ── GRAPHIQUES PARTAGÉS (Firestore, cso_charts) ─────────────────────────
+    // Groupe distinct des graphiques locaux ci-dessous — jamais mélangés,
+    // aucun pont automatique entre les deux à cette étape (voir _anStoreFor).
+    const anSharedChartsHtml = _anSharedCharts.length
+      ? _anSharedCharts.slice().sort((a, b) => (a.order||0) - (b.order||0)).map(c => _anBuildCustomChartCard(c, 'shared')).join('')
+      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun graphique partagé pour le moment. Cliquez sur « + Ajouter un graphique ».</div>';
+    const anSharedChartsSectionHtml = `<div class="an2-card" style="margin-bottom:14px">
+      <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
+        <span><i class="fas fa-cloud"></i> Graphiques partagés <small style="color:var(--text-3);font-weight:400">— visibles par tous les utilisateurs</small></span>
+        <button class="an2-rb an2-rb--act" onclick="window._anOpenChartForm(null,'shared')"><i class="fas fa-plus"></i> Ajouter un graphique</button>
+      </div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:14px">${anSharedChartsHtml}</div>
+    </div>`;
+
     // ── CONSTRUCTEUR DE GRAPHIQUES PERSONNALISÉS (Phase 1 — local) ──────────
     // Section additive : ne remplace ni ne modifie les panneaux automatiques
     // ci-dessous (anChartPanelsHtml) — les deux coexistent pendant cette
     // phase, la suppression des anciens panneaux étant réservée à une phase
-    // ultérieure validée séparément.
+    // ultérieure validée séparément. Conservé tel quel (Phase 1), toujours
+    // 100% localStorage, aucune migration automatique vers le partagé.
     const anCustomChartsHtml = _anCharts.length
-      ? _anCharts.slice().sort((a, b) => (a.order||0) - (b.order||0)).map(_anBuildCustomChartCard).join('')
-      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun graphique personnalisé pour le moment. Cliquez sur « + Créer un graphique ».</div>';
+      ? _anCharts.slice().sort((a, b) => (a.order||0) - (b.order||0)).map(c => _anBuildCustomChartCard(c, 'local')).join('')
+      : '<div class="an2-empty"><i class="fas fa-chart-line"></i> Aucun graphique local pour le moment. Cliquez sur « + Créer un graphique local ».</div>';
     const anChartsBuilderHtml = `<div class="an2-card" style="margin-bottom:14px">
       <div class="an2-card-hdr" style="flex-wrap:wrap;gap:10px">
-        <span><i class="fas fa-chart-line"></i> Mes graphiques</span>
-        <button class="an2-rb an2-rb--act" onclick="window._anOpenChartForm(null)"><i class="fas fa-plus"></i> Créer un graphique</button>
+        <span><i class="fas fa-desktop"></i> Graphiques locaux <small style="color:var(--text-3);font-weight:400">— visibles uniquement sur cet appareil</small></span>
+        <button class="an2-rb an2-rb--act" onclick="window._anOpenChartForm(null,'local')"><i class="fas fa-plus"></i> Créer un graphique local</button>
       </div>
       <div style="margin-top:10px;display:flex;flex-direction:column;gap:14px">${anCustomChartsHtml}</div>
     </div>`;
@@ -3039,6 +3153,9 @@
         <div class="an2-rb-group">${perBtns}</div>
         ${zoneSelect?`<div class="an2-zone-wrap"><i class="fas fa-filter"></i>${zoneSelect}</div>`:''}
       </div>
+
+      <!-- Graphiques partagés (Firestore, cso_charts) -->
+      ${anSharedChartsSectionHtml}
 
       <!-- Constructeur de graphiques personnalisés (Phase 1 — local) -->
       ${anChartsBuilderHtml}

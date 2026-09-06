@@ -364,6 +364,21 @@ service cloud.firestore {
     match /cso_activity_log/{docId} {
       allow read, create: if true;
     }
+    // cso_charts : graphiques personnalisés PARTAGÉS (onglet Analyses).
+    // RÈGLE PROVISOIRE : l'authentification actuelle par PIN ne permet pas
+    // de distinguer Responsable/Technicien côté serveur (session Firebase
+    // Auth anonyme commune, voir firebase-config.js) — isAuthenticated()
+    // autorise donc tout utilisateur ayant chargé l'application (Admin ou
+    // PIN) à lire/créer/modifier/supprimer, SANS distinction de rôle. Ce
+    // n'est PAS une sécurité complète : elle bloque uniquement un accès
+    // direct à l'API sans jamais être passé par l'app (contrairement à
+    // `allow read, write: if true`, qui ne bloquerait même pas cela). La
+    // distinction fine par rôle nécessitera des Custom Claims, prévue avec
+    // la future architecture utilisateurs/multi-sites — pas traitée ici.
+    match /cso_charts/{docId} {
+      allow read:                   if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
 
     // ── ALERTES DÉCLENCHÉES ──────────────────────────────────────────────────
     // batch.delete pour purger les anciennes alertes
