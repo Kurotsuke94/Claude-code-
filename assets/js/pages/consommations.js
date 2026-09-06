@@ -21,6 +21,19 @@
   let _currentCritAlert = null;
   let _lastSmartAlerts  = [];
   let _anHiddenTypes    = new Set();
+  // PHASE A (refonte Analyses) : état de la future barre de filtres détaillée
+  // (période / types / compteurs). Volontairement séparé de `window._csoPer`
+  // (boutons période déjà existants, toujours utilisés par le graphique et la
+  // carte thermique actuels) et de `_anHiddenTypes` (légende déjà existante,
+  // qui masque/affiche une série du graphique) : ces nouveaux filtres ne
+  // pilotent encore aucun calcul ni le graphique — ils préparent seulement
+  // l'état que la Phase B réutilisera. `let`/`Set` au même niveau que
+  // `_anHiddenTypes` : survivent aux rerenders (_rerender()/_tab()) et aux
+  // changements d'onglet exactement comme la légende existante, sans code de
+  // persistance supplémentaire.
+  let _anFilterPeriod   = { mode: '30', start: null, end: null }; // mode: '7' | '30' | 'month' | 'custom'
+  let _anFilterTypes    = new Set(['eau_froide', 'eau_chaude', 'chauffage']);
+  let _anFilterMeters   = new Set(); // ids sélectionnés individuellement ; vide = aucun filtre compteur
   const _recalcLocks   = new Set(); // meters currently being recalculated
   const _recalcPending = new Set(); // meters waiting for a re-run once current lock releases
   const _recalcWaiters = new Map(); // meterId → [{resolve,reject}] Promises waiting for recalc to finish
@@ -1811,6 +1824,25 @@
     return html + '</div>';
   }
 
+  // PHASE A (refonte Analyses) : résout les bornes {start,end} ('YYYY-MM-DD',
+  // dates locales via _today()/_daysAgo(), jamais new Date().toISOString())
+  // de la nouvelle barre de filtres, à partir de _anFilterPeriod. Pure
+  // fonction d'affichage/état — ne recalcule aucune consommation ni ratio
+  // (ce n'est pas un nouveau moteur de calcul, juste l'équivalent, pour ce
+  // nouveau sélecteur, de ce que fait déjà `parseInt(per)` pour les boutons
+  // existants). "Mois en cours" va du 1er du mois à aujourd'hui (jamais la
+  // fin du mois, qui n'a pas encore de données).
+  function _anResolvePeriodBounds(filter) {
+    const todayStr = _today();
+    if (filter.mode === '7')  return { start: _daysAgo(6),  end: todayStr };
+    if (filter.mode === '30') return { start: _daysAgo(29), end: todayStr };
+    if (filter.mode === 'month') return { start: todayStr.slice(0, 7) + '-01', end: todayStr };
+    if (filter.mode === 'custom' && filter.start && filter.end && filter.start <= filter.end) {
+      return { start: filter.start, end: filter.end };
+    }
+    return { start: _daysAgo(29), end: todayStr }; // repli 30 jours (ex. "personnalisé" pas encore renseigné)
+  }
+
   // ── TAB: ANALYSES — Dashboard supervision énergétique V2 ──
   function _tAnalyses() {
     const per  = window._csoPer || '30';
@@ -1827,8 +1859,54 @@
     _ensureReadingsFrom(_daysAgo(Math.max(days * 2 - 1, 29)));
     _ensureClientsFrom(_daysAgo(Math.max(days * 2 - 1, 29)));
     const ratioZone = window._csoRatioZone || 'all';
-    const zones   = [...new Set(_meters.map(m => m.zone).filter(Boolean))].sort();
-    const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.zone || '') === ratioZone);
+    // Corrigé (Phase A) : `m.zone` n'est jamais écrit sur cso_meters (le
+    // champ réel est `m.location`, écrit par _meterForm) — ce filtre de zone
+    // était donc inerte (liste toujours vide) avant ce correctif.
+    const zones   = [...new Set(_meters.map(m => m.location).filter(Boolean))].sort();
+    const fMeters = ratioZone === 'all' ? _meters : _meters.filter(m => (m.location || '') === ratioZone);
+
+    // PHASE A (refonte Analyses) : nouvelle barre de filtres détaillée —
+    // résout uniquement l'état/l'affichage, ne touche à aucun calcul du
+    // graphique/carte thermique existants (qui continuent d'utiliser `per`/
+    // `ratioZone`/`_anHiddenTypes` ci-dessus, inchangés).
+    const anPeriodBounds = _anResolvePeriodBounds(_anFilterPeriod);
+    // Précharge en tâche de fond (comme ci-dessus) la plage couverte par le
+    // nouveau sélecteur, pour que la Phase B n'ait pas de délai de chargement
+    // au moment où ces filtres piloteront réellement le graphique.
+    _ensureReadingsFrom(anPeriodBounds.start);
+    _ensureClientsFrom(anPeriodBounds.start);
+    // Compteurs proposés à la sélection individuelle : tous les compteurs
+    // des types actuellement cochés dans le filtre de type — jamais limités
+    // aux compteurs généraux (cso_perf_config/ref_meters), conformément à la
+    // demande ("l'analyse doit pouvoir comparer les compteurs disponibles").
+    const anFilterableMeters = _meters
+      .filter(m => _anFilterTypes.has(m.type))
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    window._anSetFilterPeriod = function(mode) {
+      _anFilterPeriod.mode = mode;
+      MX.Pages.Conso._tab('analyses');
+    };
+    window._anSetFilterCustomDate = function(which, val) {
+      _anFilterPeriod.mode = 'custom';
+      _anFilterPeriod[which] = val;
+      MX.Pages.Conso._tab('analyses');
+    };
+    window._anToggleFilterType = function(type) {
+      if (_anFilterTypes.has(type)) _anFilterTypes.delete(type);
+      else _anFilterTypes.add(type);
+      MX.Pages.Conso._tab('analyses');
+    };
+    window._anToggleFilterMeter = function(id) {
+      if (_anFilterMeters.has(id)) _anFilterMeters.delete(id);
+      else _anFilterMeters.add(id);
+      MX.Pages.Conso._tab('analyses');
+    };
+    window._anClearFilterMeters = function() {
+      _anFilterMeters.clear();
+      MX.Pages.Conso._tab('analyses');
+    };
 
     window._anToggle = function(type) {
       if (_anHiddenTypes.has(type)) _anHiddenTypes.delete(type);
@@ -2185,6 +2263,69 @@
       </div>`;
     }).join('') || '<div class="an2-rc-empty">Pas de données</div>';
 
+    // ── PHASE A (refonte Analyses) : barre de filtres détaillée ──────────────
+    // Purement préparatoire : ces filtres ne pilotent ni le graphique
+    // principal (_anMainSVG, inchangé) ni la carte thermique (inchangée)
+    // pour cette phase — seule leur sélection est capturée dans l'état
+    // module (_anFilterPeriod/_anFilterTypes/_anFilterMeters), prête pour la
+    // Phase B.
+    const anPerBtns = [
+      { mode: '7',     lbl: '7 jours' },
+      { mode: '30',    lbl: '30 jours' },
+      { mode: 'month', lbl: 'Mois en cours' },
+      { mode: 'custom', lbl: 'Personnalisé' },
+    ].map(p => `<button class="an2-rb${_anFilterPeriod.mode===p.mode?' an2-rb--act':''}" onclick="window._anSetFilterPeriod('${p.mode}')">${p.lbl}</button>`).join('');
+
+    const anCustomDatesHtml = _anFilterPeriod.mode === 'custom'
+      ? `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text3)">
+          <input type="date" value="${esc(_anFilterPeriod.start||'')}" max="${esc(today)}" onchange="window._anSetFilterCustomDate('start',this.value)">
+          <span>→</span>
+          <input type="date" value="${esc(_anFilterPeriod.end||'')}" max="${esc(today)}" onchange="window._anSetFilterCustomDate('end',this.value)">
+        </span>`
+      : '';
+
+    const anTypeChipsHtml = ['eau_froide', 'eau_chaude', 'chauffage'].map(t => {
+      const meta = MT[t];
+      const active = _anFilterTypes.has(t);
+      return `<label class="an2-ck${active?'':' an2-ck--off'}">
+        <input type="checkbox" ${active?'checked':''} onchange="window._anToggleFilterType('${t}')">
+        <span class="an2-ck-dot" style="background:${active?meta.color:'transparent'};border-color:${meta.color}"></span>
+        <span>${meta.icon} ${esc(meta.label)}</span>
+      </label>`;
+    }).join('');
+
+    const anMeterListHtml = anFilterableMeters.length
+      ? anFilterableMeters.map(m => {
+          const mt = MT[m.type] || {};
+          const checked = _anFilterMeters.has(m.id);
+          return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 4px">
+            <input type="checkbox" ${checked?'checked':''} onchange="window._anToggleFilterMeter('${esc(m.id)}')">
+            <span>${mt.icon||''} ${esc(m.name||m.id)}</span>
+            <span style="color:var(--text-3);font-size:10px">${esc(mt.label||m.type||'')}</span>
+          </label>`;
+        }).join('')
+      : '<div style="font-size:11px;color:var(--text-3);padding:3px 4px">Aucun compteur pour les types cochés ci-dessus</div>';
+
+    const anFilterBarHtml = `<div class="an2-toolbar" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px">
+        <span class="an2-toolbar-ttl"><i class="fas fa-sliders"></i> Filtres détaillés</span>
+        <div class="an2-rb-group">${anPerBtns}</div>
+        ${anCustomDatesHtml}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px">
+        <div class="an2-ck-group" style="display:flex;flex-wrap:wrap;gap:10px">${anTypeChipsHtml}</div>
+        <details>
+          <summary style="cursor:pointer;font-size:12px;color:var(--text2)">
+            <i class="fas fa-filter"></i> Compteurs${_anFilterMeters.size?` (${_anFilterMeters.size} sélectionné${_anFilterMeters.size>1?'s':''})`:' (tous)'}
+          </summary>
+          <div style="display:flex;flex-direction:column;gap:2px;max-height:200px;overflow-y:auto;padding:8px 4px 0">
+            ${_anFilterMeters.size ? `<button type="button" style="align-self:flex-start;font-size:11px;color:var(--text-3);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0 0 4px" onclick="window._anClearFilterMeters()">Tout désélectionner</button>` : ''}
+            ${anMeterListHtml}
+          </div>
+        </details>
+      </div>
+    </div>`;
+
     return `<div class="cso-inner an2-page">
       <!-- Toolbar -->
       <div class="an2-toolbar">
@@ -2192,6 +2333,9 @@
         <div class="an2-rb-group">${perBtns}</div>
         ${zoneSelect?`<div class="an2-zone-wrap"><i class="fas fa-filter"></i>${zoneSelect}</div>`:''}
       </div>
+
+      <!-- PHASE A : nouvelle barre de filtres détaillée (préparatoire, Phase B) -->
+      ${anFilterBarHtml}
 
       <!-- KPI row + Score gauge -->
       <div class="an2-kpi-row">
