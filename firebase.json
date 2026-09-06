@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "maintix-c9dbd",
     "public": ".",
     "ignore": [
       "firebase.json",
