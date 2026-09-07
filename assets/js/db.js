@@ -447,6 +447,69 @@
     await db.collection("orders").doc(id).delete();
   }
 
+  // ── STOCK CHECKS (états des lieux hebdomadaires) ──
+  // Un seul document par état des lieux (zone + semaine), créé UNIQUEMENT
+  // quand l'utilisateur démarre réellement (jamais à l'ouverture de la page).
+  // `draftCounts` (map productId -> quantité saisie) est un champ technique
+  // ajouté en plus des champs demandés, pour permettre la reprise d'un état
+  // des lieux "in_progress" si l'utilisateur quitte avant validation — il
+  // est effacé à la validation finale (commitStockCheck).
+  function listenStockChecks(cb) {
+    _unsub.stock_checks = db.collection("stock_checks").orderBy("createdAt", "desc").limit(100).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }
+  async function createStockCheck(data) {
+    const ref = await db.collection("stock_checks").add({
+      ...data,
+      status: "in_progress",
+      createdAt: FV.serverTimestamp(),
+      updatedAt: FV.serverTimestamp()
+    });
+    return ref.id;
+  }
+  async function saveStockCheckDraft(id, draftCounts) {
+    await db.collection("stock_checks").doc(id).update({ draftCounts, updatedAt: FV.serverTimestamp() });
+  }
+  async function cancelStockCheck(id) {
+    await db.collection("stock_checks").doc(id).update({ status: "cancelled", updatedAt: FV.serverTimestamp() });
+  }
+  // Validation finale : écrit les lignes dans la sous-collection items, met à
+  // jour products.qty (dernière quantité constatée = stock actuel), et clôt
+  // le document stock_checks. N'écrit JAMAIS de commande fournisseur — la
+  // commande reste une action séparée (voir MX.Pages.Orders._generatePDF).
+  // Le batch Firestore est limité à 500 opérations : on découpe par
+  // paquets de 200 lignes (2 écritures/ligne) par sécurité.
+  async function commitStockCheck(id, items, summary) {
+    const checkRef = db.collection("stock_checks").doc(id);
+    const CHUNK = 200;
+    for (let i = 0; i < items.length; i += CHUNK) {
+      const batch = db.batch();
+      items.slice(i, i + CHUNK).forEach(function (it) {
+        batch.set(checkRef.collection("items").doc(), it);
+        if (it.productId) {
+          batch.update(db.collection("products").doc(it.productId), {
+            qty: it.countedQty,
+            lastCheckAt: FV.serverTimestamp(),
+            lastCheckId: id
+          });
+        }
+      });
+      await batch.commit();
+    }
+    await checkRef.update({
+      status: "done",
+      checkedProducts: summary.checkedProducts,
+      productsToOrder: summary.productsToOrder,
+      draftCounts: FV.delete(),
+      updatedAt: FV.serverTimestamp()
+    });
+  }
+  function getStockCheckItems(id) {
+    return db.collection("stock_checks").doc(id).collection("items").get()
+      .then(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }
+
   // ── REWARDS ──
   const R_RULES  = () => db.collection('rewards_rules');
   const R_GRADES = () => db.collection('rewards_grades');
@@ -1176,6 +1239,8 @@
     saveFcmToken, deleteFcmToken,
     updatePresence, listenPresence,
     listenOrders, addOrder, updateOrderStatus, deleteOrder,
+    listenStockChecks, createStockCheck, saveStockCheckDraft, cancelStockCheck,
+    commitStockCheck, getStockCheckItems,
     listenPlanningShifts, loadPlanningMonth, listenPlanningEntries, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,

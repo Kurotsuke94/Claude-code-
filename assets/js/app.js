@@ -128,6 +128,7 @@
   let _plngOpen   = localStorage.getItem("mx_sx_plng")   !== "0";
   let _maintOpen  = localStorage.getItem("mx_sx_maint")  !== "0";
   let _gestOpen   = localStorage.getItem("mx_sx_gest")   === "1";
+  let _stockOpen  = localStorage.getItem("mx_sx_stock")  === "1";
   let _anlyOpen   = localStorage.getItem("mx_sx_anly")   === "1";
   let _adminOpen  = localStorage.getItem("mx_sx_adm")    === "1";
   let _mxdocOpen  = localStorage.getItem("mx_sx_mxdoc")  === "1";
@@ -142,6 +143,7 @@
       plng:  _plngOpen,
       maint: _maintOpen,
       gest:  _gestOpen,
+      stock: _stockOpen,
       anly:  _anlyOpen,
       adm:   _adminOpen,
       mxdoc: _mxdocOpen,
@@ -160,13 +162,14 @@
   function _toggleSec(which) {
     const mob = window.innerWidth <= 900;
     if (mob) {
-      const wasPlng = _plngOpen, wasMaint = _maintOpen, wasGest = _gestOpen,
+      const wasPlng = _plngOpen, wasMaint = _maintOpen, wasGest = _gestOpen, wasStock = _stockOpen,
             wasAnly = _anlyOpen, wasAdm = _adminOpen, wasMxdoc = _mxdocOpen;
-      _plngOpen = false; _maintOpen = false; _gestOpen = false;
+      _plngOpen = false; _maintOpen = false; _gestOpen = false; _stockOpen = false;
       _anlyOpen = false; _adminOpen = false; _mxdocOpen = false;
       if (which === "plng")  _plngOpen  = !wasPlng;
       if (which === "maint") _maintOpen = !wasMaint;
       if (which === "gest")  _gestOpen  = !wasGest;
+      if (which === "stock") _stockOpen = !wasStock;
       if (which === "anly")  _anlyOpen  = !wasAnly;
       if (which === "adm")   _adminOpen = !wasAdm;
       if (which === "mxdoc") _mxdocOpen = !wasMxdoc;
@@ -174,6 +177,7 @@
       if (which === "plng")  _plngOpen  = !_plngOpen;
       if (which === "maint") _maintOpen = !_maintOpen;
       if (which === "gest")  _gestOpen  = !_gestOpen;
+      if (which === "stock") _stockOpen = !_stockOpen;
       if (which === "anly")  _anlyOpen  = !_anlyOpen;
       if (which === "adm")   _adminOpen = !_adminOpen;
       if (which === "mxdoc") _mxdocOpen = !_mxdocOpen;
@@ -181,6 +185,7 @@
     _sx("mx_sx_plng",  _plngOpen);
     _sx("mx_sx_maint", _maintOpen);
     _sx("mx_sx_gest",  _gestOpen);
+    _sx("mx_sx_stock", _stockOpen);
     _sx("mx_sx_anly",  _anlyOpen);
     _sx("mx_sx_adm",   _adminOpen);
     _sx("mx_sx_mxdoc", _mxdocOpen);
@@ -190,10 +195,12 @@
   window.MX.toggleNavPlng   = function() { _toggleSec("plng"); };
   window.MX.toggleNavMaint  = function() { _toggleSec("maint"); };
   window.MX.toggleNavGest   = function() { _toggleSec("gest"); };
+  window.MX.toggleNavStock  = function() { _toggleSec("stock"); };
   window.MX.toggleNavAnly   = function() { _toggleSec("anly"); };
   window.MX.toggleNavAdmin  = function() { _toggleSec("adm"); };
   window.MX.toggleNavMxDoc  = function() { _toggleSec("mxdoc"); };
   window.MX.showCsoTab      = function(tab) { window._csoStartTab  = tab; MX.showPage('consommations'); };
+  window.MX.showOrdersTab   = function(tab) { window._ordStartTab  = tab; MX.showPage('orders'); };
   window.MX.showIntTab      = function(tab) { window._intStartTab  = tab; MX.showPage('interventions'); };
   window.MX.showPmpTab      = function(tab) { window._pmpStartTab  = tab; MX.showPage('pmp'); };
   window.MX.showMxDocTab    = function(tab) { window._mxdocStartTab = tab; MX.showPage('mx-doc'); };
@@ -317,6 +324,7 @@
     // (conserver l'état localStorage uniquement si l'utilisateur a explicitement fermé = "0")
     if (canAll) {
       if (localStorage.getItem("mx_sx_gest")  !== "0") _gestOpen  = true;
+      if (localStorage.getItem("mx_sx_stock") !== "0") _stockOpen = true;
       if (localStorage.getItem("mx_sx_anly")  !== "0") _anlyOpen  = true;
       if (localStorage.getItem("mx_sx_adm")   !== "0") _adminOpen = true;
       if (localStorage.getItem("mx_sx_mxdoc") !== "0") _mxdocOpen = true;
@@ -443,12 +451,32 @@
 
     // ── 📦 Gestion ──
     let gestItems = "";
-    if (_see('stock'))     { gestItems += _item("orders",    "fa-box",      "Stock",       { sub: true, dynBadge: "stock", favable: true }); _dbgAdd("Gestion > Stock"); }
     if (_see('resources')) { gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true }); _dbgAdd("Gestion > Ressources"); }
     if (_see('messages'))  { gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true }); _dbgAdd("Gestion > Journal"); }
     if (gestItems) {
-      h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "orders", "Stock");
+      h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "documents", "Ressources");
       _dbgAdd("[Groupe] Gestion");
+    }
+
+    // ── 📦 Stock ──
+    if (_see('stock')) {
+      let stockItems = "";
+      [
+        { tab: "overview",  icon: "fa-grip",          l: "Vue d'ensemble" },
+        { tab: "check",     icon: "fa-clipboard-check", l: "État des lieux" },
+        { tab: "scan",      icon: "fa-qrcode",        l: "Scanner QR code" },
+        { tab: "manual",    icon: "fa-keyboard",      l: "Saisie directe" },
+        { tab: "toorder",   icon: "fa-cart-shopping",  l: "Produits à commander" },
+        { tab: "products",  icon: "fa-box",           l: "Produits" },
+        { tab: "locations", icon: "fa-location-dot",  l: "Emplacements" },
+        { tab: "suppliers", icon: "fa-truck",         l: "Fournisseurs" },
+        { tab: "history",   icon: "fa-clock-rotate-left", l: "Historique" },
+        { tab: "settings",  icon: "fa-gear",          l: "Paramètres" },
+      ].forEach(t => {
+        stockItems += `<button class="sx-item sx-sub" onclick="MX.showOrdersTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+      });
+      h += _group("fa-box", "sx-group-ico--cyan", "Stock", "stock", "toggleNavStock", _stockOpen, stockItems, "orders", "Stock");
+      _dbgAdd("[Groupe] Stock");
     }
 
     // ── 📊 Analyses ──
@@ -553,6 +581,7 @@
     // ── ÉTAT ACCORDÉONS (pré-render) ──
     console.group('%c[Maintix] 🗂️ État accordéons (pré-render)', 'color:#60A5FA;font-weight:700');
     console.log('Gestion          (_gestOpen)  :', _gestOpen,  '| localStorage "mx_sx_gest"  :', localStorage.getItem("mx_sx_gest"));
+    console.log('Stock            (_stockOpen) :', _stockOpen, '| localStorage "mx_sx_stock" :', localStorage.getItem("mx_sx_stock"));
     console.log('Analyses         (_anlyOpen)  :', _anlyOpen,  '| localStorage "mx_sx_anly"  :', localStorage.getItem("mx_sx_anly"));
     console.log('Maintenance PMP  (_maintOpen) :', _maintOpen, '| localStorage "mx_sx_maint" :', localStorage.getItem("mx_sx_maint"));
     console.log('MX Doc           (_mxdocOpen) :', _mxdocOpen, '| localStorage "mx_sx_mxdoc" :', localStorage.getItem("mx_sx_mxdoc"));
@@ -1550,6 +1579,11 @@
       if (state.currentPage === "orders") MX.Pages.Orders.render();
       if (state.currentPage === "home")   MX.Pages.Home.render();
       if (state.currentPage === "admin")  MX.Pages.Admin.render();
+    });
+
+    DB.listenStockChecks(list => {
+      state.stockChecks = list;
+      if (state.currentPage === "orders") MX.Pages.Orders.render();
     });
 
     DB.listenMessages(list => {
@@ -2991,7 +3025,7 @@
     const navItems = [
       { id: 'planning',     icon: 'fa-calendar-days',  label: 'Planning',      fn: "MX.closeMobileDrawer();MX.showPage('planning')" },
       { id: 'msgs',         icon: 'fa-book-open',      label: 'Journal',       fn: "MX.closeMobileDrawer();MX.showPage('msgs')" },
-      { id: 'orders',       icon: 'fa-box',            label: 'Stock',         fn: "MX.closeMobileDrawer();MX.showPage('orders')" },
+      { id: 'orders',       icon: 'fa-box',            label: 'Stock',         fn: "MX.closeMobileDrawer();MX.showOrdersTab('overview')" },
       { id: 'documents',    icon: 'fa-book',           label: 'Ressources',    fn: "MX.closeMobileDrawer();MX.showPage('documents')" },
       { id: 'parametres',   icon: 'fa-gear',           label: 'Paramètres',    fn: "MX.closeMobileDrawer();MX.showPage('parametres')" },
     ];

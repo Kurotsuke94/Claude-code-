@@ -23851,3 +23851,142 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 :root[data-theme="light"] .iosd-log { background: #0F172A; }
 :root[data-theme="light"] .iosd-token-box { background: rgba(0,0,0,0.06); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   STOCK v2 — refonte page Stock (onglets, cartes d'action, état des lieux)
+   Préfixe stk-. Les classes ord-panel / ord-hist-* / ord-fi / ord-pdf-* /
+   modal-btn restent utilisées telles quelles par orders.js pour le panneau
+   PDF de commande et l'historique des commandes (fonctions inchangées).
+   ══════════════════════════════════════════════════════════════════════ */
+
+.stk-page { display: grid; grid-template-columns: 1fr 300px; gap: 18px; padding: 0 16px 80px; align-items: start; }
+.stk-main, .stk-side { min-width: 0; }
+@media (max-width: 1100px) { .stk-page { grid-template-columns: 1fr; } }
+@media (max-width: 600px)  { .stk-page { padding: 0 10px 80px; gap: 14px; } }
+
+/* ── Header ── */
+.stk-hdr { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 0 6px; flex-wrap: wrap; }
+.stk-hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.stk-hdr-week { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text1); background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; }
+.stk-hdr-week i { color: var(--cyan); }
+.stk-hdr-user { font-size: 11px; color: var(--text3); }
+
+/* ── Onglets internes (accès sans sidebar / mobile) ── */
+.stk-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 16px; }
+.stk-tab { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text2); padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--ffs); transition: all var(--t); }
+.stk-tab:hover { border-color: var(--border2); color: var(--text1); }
+.stk-tab.stk-tab-on { background: var(--cyan-dim); border-color: var(--cyan); color: var(--cyan); }
+
+/* ── Cartes d'action (4 grandes cartes) ── */
+.stk-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+@media (max-width: 1100px) { .stk-actions { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px)  { .stk-actions { grid-template-columns: 1fr; } }
+.stk-action { display: flex; flex-direction: column; gap: 10px; text-align: left; border: 1px solid var(--border); border-radius: var(--rx); padding: 18px; cursor: pointer; transition: all var(--t); background: var(--bg3); }
+.stk-action:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.stk-action-ico { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 19px; }
+.stk-action-ttl { font-size: 14px; font-weight: 700; color: var(--text1); }
+.stk-action-sub { font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+.stk-action-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; align-self: flex-start; }
+
+.stk-action--violet { background: linear-gradient(135deg, rgba(139,92,246,0.14), rgba(139,92,246,0.05)); border-color: var(--cyan-border); }
+.stk-action--violet .stk-action-ico { background: var(--cyan); color: #fff; }
+.stk-action--blue   { background: linear-gradient(135deg, rgba(59,130,246,0.13), rgba(59,130,246,0.04)); border-color: rgba(59,130,246,0.28); }
+.stk-action--blue .stk-action-ico { background: #3B82F6; color: #fff; }
+.stk-action--green  { background: linear-gradient(135deg, rgba(34,197,94,0.13), rgba(34,197,94,0.04)); border-color: var(--green-border); }
+.stk-action--green .stk-action-ico { background: var(--green); color: #fff; }
+.stk-action--orange { background: linear-gradient(135deg, rgba(249,115,22,0.13), rgba(249,115,22,0.04)); border-color: var(--orange-border); }
+.stk-action--orange .stk-action-ico { background: var(--orange); color: #fff; }
+
+/* ── Bloc "État des lieux de la semaine" ── */
+.stk-week { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rx); padding: 18px 20px; margin-bottom: 18px; }
+.stk-week-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.stk-week-ttl { font-size: 14px; font-weight: 700; color: var(--text1); }
+.stk-week-sub { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+.stk-week-prog { min-width: 220px; }
+.stk-week-prog-lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); margin-bottom: 5px; }
+.stk-week-bar { height: 8px; border-radius: 20px; background: var(--bg4); overflow: hidden; }
+.stk-week-bar-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), #A78BFA); border-radius: 20px; transition: width .3s ease; }
+.stk-week-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+@media (max-width: 900px) { .stk-week-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px) { .stk-week-kpis { grid-template-columns: repeat(2, 1fr); } }
+.stk-week-kpi { text-align: center; padding: 10px 6px; border-radius: 10px; background: var(--bg4); }
+.stk-week-kpi-val { font-size: 19px; font-weight: 800; font-family: var(--ffm); color: var(--text1); }
+.stk-week-kpi-lbl { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+/* ── Liste produits (carte + onglets internes) ── */
+.stk-list-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rx); padding: 16px 18px; margin-bottom: 18px; }
+.stk-list-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+.stk-list-tab { background: var(--bg4); border: 1px solid var(--border); border-radius: 20px; color: var(--text2); padding: 6px 13px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: var(--ffs); transition: all var(--t); }
+.stk-list-tab:hover { color: var(--text1); }
+.stk-list-tab.stk-list-tab-on { background: var(--cyan-dim); border-color: var(--cyan); color: var(--cyan); }
+.stk-list-tab-cnt { font-size: 10px; font-family: var(--ffm); font-weight: 700; padding: 1px 6px; border-radius: 10px; background: var(--bg5); }
+
+.stk-table-wrap { width: 100%; overflow-x: auto; }
+.stk-table { width: 100%; border-collapse: collapse; }
+.stk-table th { text-align: left; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.stk-table td { padding: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text1); vertical-align: middle; }
+.stk-table tr:last-child td { border-bottom: none; }
+.stk-table tr:hover td { background: var(--bg4); }
+.stk-num { font-family: var(--ffm); text-align: center; }
+.stk-badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid transparent; white-space: nowrap; }
+.stk-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; color: var(--text3); font-size: 12.5px; }
+
+.stk-mobile-cards { display: none; }
+@media (max-width: 760px) {
+  .stk-table-wrap { display: none; }
+  .stk-mobile-cards { display: flex; flex-direction: column; gap: 8px; }
+}
+.stk-mcard { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--bg4); }
+.stk-mcard-r1 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.stk-mcard-name { font-size: 13px; font-weight: 700; color: var(--text1); }
+.stk-mcard-r2 { font-size: 11px; color: var(--text3); margin-bottom: 6px; }
+.stk-mcard-r3 { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text2); }
+
+.stk-actbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+
+/* ── Panneau latéral ── */
+.stk-side-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rx); padding: 16px; margin-bottom: 14px; }
+.stk-side-ttl { font-size: 12.5px; font-weight: 700; color: var(--text1); margin-bottom: 12px; display: flex; align-items: center; gap: 7px; }
+.stk-side-ttl i { color: var(--green); }
+.stk-lastcheck-loc { font-size: 13px; font-weight: 700; color: var(--text1); }
+.stk-lastcheck-meta { font-size: 11px; color: var(--text3); margin: 4px 0 12px; }
+.stk-side-btn { display: block; width: 100%; text-align: center; background: var(--cyan); color: #fff; border: none; border-radius: 10px; padding: 9px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--ffs); }
+.stk-quick-list { display: flex; flex-direction: column; gap: 6px; }
+.stk-quick-item { display: flex; align-items: center; gap: 9px; background: var(--bg4); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--text1); cursor: pointer; transition: all var(--t); text-align: left; width: 100%; }
+.stk-quick-item:hover { border-color: var(--cyan); color: var(--cyan); }
+.stk-quick-item i { color: var(--cyan); width: 16px; text-align: center; }
+.stk-tip { background: linear-gradient(135deg, rgba(139,92,246,0.14), rgba(139,92,246,0.04)); border: 1px solid var(--cyan-border); border-radius: var(--rx); padding: 16px; font-size: 12.5px; font-weight: 700; color: var(--text1); line-height: 1.4; }
+
+/* ── État des lieux : démarrage / reprise / formulaire ── */
+.stk-check-start { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+@media (max-width: 700px) { .stk-check-start { grid-template-columns: 1fr; } }
+.stk-resume-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: var(--orange-dim); border: 1px solid var(--orange-border); border-radius: var(--rx); padding: 14px 16px; margin-bottom: 16px; }
+.stk-resume-txt { font-size: 12.5px; color: var(--text1); }
+.stk-resume-txt b { color: var(--orange); }
+.stk-check-field { margin-bottom: 12px; }
+.stk-check-label { font-size: 11px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 5px; }
+.stk-check-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.stk-check-row:last-child { border-bottom: none; }
+.stk-check-row-info { min-width: 0; }
+.stk-check-row-name { font-size: 13px; font-weight: 600; color: var(--text1); }
+.stk-check-row-meta { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+.stk-check-row-input { width: 90px; flex-shrink: 0; }
+.stk-check-input { width: 100%; background: var(--bg4); border: 1px solid var(--border2); border-radius: 8px; color: var(--text1); padding: 8px 10px; font-size: 14px; font-family: var(--ffm); text-align: center; }
+.stk-check-input:focus { border-color: var(--cyan); outline: none; }
+.stk-check-progress { font-size: 12px; color: var(--text2); margin: 10px 0; }
+.stk-check-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ── Scanner QR ── */
+.stk-scan-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 16px; }
+.stk-scan-video { width: 100%; max-width: 420px; aspect-ratio: 1/1; background: #000; border-radius: var(--rx); object-fit: cover; }
+.stk-scan-msg { text-align: center; font-size: 13px; color: var(--text2); max-width: 380px; line-height: 1.5; }
+.stk-scan-err { background: var(--red-dim); border: 1px solid var(--red-border); color: var(--red); border-radius: 12px; padding: 12px 16px; font-size: 12.5px; text-align: center; max-width: 420px; }
+
+/* ── Boutons génériques ── */
+.stk-btn { border: none; border-radius: 10px; padding: 10px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: var(--ffs); transition: all var(--t); }
+.stk-btn-primary { background: var(--cyan); color: #fff; }
+.stk-btn-primary:hover { filter: brightness(1.08); }
+.stk-btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+.stk-btn-ghost { background: var(--bg4); border: 1px solid var(--border2); color: var(--text2); }
+.stk-btn-ghost:hover { color: var(--text1); border-color: var(--border3); }
+.stk-btn-danger { background: var(--red-dim); border: 1px solid var(--red-border); color: var(--red); }

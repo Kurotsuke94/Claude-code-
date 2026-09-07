@@ -99,6 +99,7 @@ window.MX.state = {
   rewardsUsers:  {},
   dailyClaims:        {},
   csoAlerts:          [],
+  stockChecks:        [],
   todayDateStr:       new Date().toISOString().slice(0, 10),
   todayPlanSuggestions: {}
 };
