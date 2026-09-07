@@ -23864,54 +23864,90 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 @media (max-width: 1100px) { .stk-page { grid-template-columns: 1fr; } }
 @media (max-width: 600px)  { .stk-page { padding: 0 10px 80px; gap: 14px; } }
 
-/* ── Header ── */
-.stk-hdr { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 0 6px; flex-wrap: wrap; }
+/* ── Hero (bandeau d'en-tête avec image de fond) ──
+   Voile clair par défaut (thème sombre = fond app déjà sombre, le voile
+   reste un blanc doux pour détacher le bandeau du reste de la page, comme
+   sur la maquette) ; re-décliné pour le thème clair juste après. */
+.stk-hero {
+  position: relative;
+  border-radius: var(--rxx);
+  padding: 0 20px;
+  margin: 16px 0 20px;
+  overflow: hidden;
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,0.90) 0%, rgba(255,255,255,0.85) 55%, rgba(255,255,255,0.97) 100%),
+    url('/assets/images/stock-hero.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+}
+@media (max-width: 600px) { .stk-hero { padding: 0 14px; border-radius: var(--rx); } }
+
+/* ── Header ──
+   Le bandeau .stk-hero garde toujours un voile CLAIR (photo + dégradé
+   blanc), quel que soit le thème sombre/clair de l'app — le texte à
+   l'intérieur doit donc rester sombre et lisible dans les deux cas. */
+.stk-hero .pg-title    { color: #1E1B2E; }
+.stk-hero .pg-sub       { color: #4B5563; }
+.stk-hero .stk-hdr-user { color: #4B5563; }
+.stk-hdr { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 0 8px; flex-wrap: wrap; position: relative; z-index: 1; }
 .stk-hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
-.stk-hdr-week { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text1); background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; }
+.stk-hdr-week { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text1); background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .stk-hdr-week i { color: var(--cyan); }
 .stk-hdr-user { font-size: 11px; color: var(--text3); }
 
 /* ── Onglets internes (accès sans sidebar / mobile) ── */
-.stk-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 16px; }
-.stk-tab { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text2); padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--ffs); transition: all var(--t); }
+.stk-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; padding-bottom: 18px; position: relative; z-index: 1; }
+.stk-tab { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text2); padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--ffs); transition: all var(--t); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .stk-tab:hover { border-color: var(--border2); color: var(--text1); }
-.stk-tab.stk-tab-on { background: var(--cyan-dim); border-color: var(--cyan); color: var(--cyan); }
+.stk-tab.stk-tab-on { background: var(--cyan); border-color: var(--cyan); color: #fff; }
 
 /* ── Cartes d'action (4 grandes cartes) ── */
 .stk-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
 @media (max-width: 1100px) { .stk-actions { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px)  { .stk-actions { grid-template-columns: 1fr; } }
-.stk-action { display: flex; flex-direction: column; gap: 10px; text-align: left; border: 1px solid var(--border); border-radius: var(--rx); padding: 18px; cursor: pointer; transition: all var(--t); background: var(--bg3); }
-.stk-action:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-.stk-action-ico { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 19px; }
-.stk-action-ttl { font-size: 14px; font-weight: 700; color: var(--text1); }
-.stk-action-sub { font-size: 11.5px; color: var(--text2); line-height: 1.4; }
-.stk-action-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; align-self: flex-start; }
+.stk-action { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; text-align: left; border: 1px solid var(--border); border-radius: var(--rxx); padding: 20px 20px 44px; cursor: pointer; transition: transform var(--t), box-shadow var(--t), border-color var(--t); background: var(--bg3); }
+.stk-action:hover { transform: translateY(-3px); box-shadow: var(--shadow-hover); }
+.stk-action:hover .stk-action-ico { transform: scale(1.08); }
+.stk-action:hover .stk-action-arrow { transform: translateX(3px); opacity: 1; }
+.stk-action-ico { flex-shrink: 0; width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 21px; transition: transform var(--t); box-shadow: 0 4px 14px rgba(0,0,0,0.12); }
+.stk-action-body { min-width: 0; width: 100%; }
+/* Ces cartes vivent toujours à l'intérieur de .stk-hero (voile clair) —
+   texte forcé en sombre quel que soit le thème actif, pour rester lisible
+   sur l'image de fond (voir .stk-hero .pg-title juste au-dessus). */
+.stk-action-ttl { font-size: 14.5px; font-weight: 800; color: #1E1B2E; margin-bottom: 4px; }
+.stk-action-sub { font-size: 11.5px; color: #4B5563; line-height: 1.4; }
+.stk-action-arrow { position: absolute; right: 16px; bottom: 16px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.06); color: #4B5563; font-size: 12px; opacity: 0.8; transition: transform var(--t), opacity var(--t); }
+.stk-action-badge { position: absolute; top: -8px; right: -8px; font-size: 10.5px; font-weight: 800; padding: 3px 9px; border-radius: 20px; background: var(--red); color: #fff; box-shadow: 0 2px 8px rgba(239,68,68,0.4); }
 
-.stk-action--violet { background: linear-gradient(135deg, rgba(139,92,246,0.14), rgba(139,92,246,0.05)); border-color: var(--cyan-border); }
-.stk-action--violet .stk-action-ico { background: var(--cyan); color: #fff; }
-.stk-action--blue   { background: linear-gradient(135deg, rgba(59,130,246,0.13), rgba(59,130,246,0.04)); border-color: rgba(59,130,246,0.28); }
-.stk-action--blue .stk-action-ico { background: #3B82F6; color: #fff; }
-.stk-action--green  { background: linear-gradient(135deg, rgba(34,197,94,0.13), rgba(34,197,94,0.04)); border-color: var(--green-border); }
-.stk-action--green .stk-action-ico { background: var(--green); color: #fff; }
-.stk-action--orange { background: linear-gradient(135deg, rgba(249,115,22,0.13), rgba(249,115,22,0.04)); border-color: var(--orange-border); }
-.stk-action--orange .stk-action-ico { background: var(--orange); color: #fff; }
+.stk-action--violet { background: linear-gradient(135deg, rgba(139,92,246,0.16), rgba(139,92,246,0.05)); border-color: var(--cyan-border); }
+.stk-action--violet .stk-action-ico { background: linear-gradient(135deg, var(--cyan), #A78BFA); color: #fff; }
+.stk-action--blue   { background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(59,130,246,0.04)); border-color: rgba(59,130,246,0.28); }
+.stk-action--blue .stk-action-ico { background: linear-gradient(135deg, #3B82F6, #60A5FA); color: #fff; }
+.stk-action--green  { background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.04)); border-color: var(--green-border); }
+.stk-action--green .stk-action-ico { background: linear-gradient(135deg, var(--green), #4ADE80); color: #fff; }
+.stk-action--orange { background: linear-gradient(135deg, rgba(249,115,22,0.15), rgba(249,115,22,0.04)); border-color: var(--orange-border); }
+.stk-action--orange .stk-action-ico { background: linear-gradient(135deg, var(--orange), #FB923C); color: #fff; }
 
 /* ── Bloc "État des lieux de la semaine" ── */
-.stk-week { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rx); padding: 18px 20px; margin-bottom: 18px; }
-.stk-week-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-.stk-week-ttl { font-size: 14px; font-weight: 700; color: var(--text1); }
-.stk-week-sub { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+.stk-week { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rxx); padding: 20px 22px; margin-bottom: 18px; box-shadow: var(--shadow-card); }
+.stk-week-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.stk-week-ttl { font-size: 15px; font-weight: 800; color: var(--text1); display: flex; align-items: center; gap: 8px; }
+.stk-week-ttl i { color: var(--cyan); }
+.stk-week-sub { font-size: 11.5px; color: var(--text3); margin-top: 3px; }
 .stk-week-prog { min-width: 220px; }
 .stk-week-prog-lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); margin-bottom: 5px; }
 .stk-week-bar { height: 8px; border-radius: 20px; background: var(--bg4); overflow: hidden; }
 .stk-week-bar-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), #A78BFA); border-radius: 20px; transition: width .3s ease; }
-.stk-week-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.stk-week-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
 @media (max-width: 900px) { .stk-week-kpis { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 560px) { .stk-week-kpis { grid-template-columns: repeat(2, 1fr); } }
-.stk-week-kpi { text-align: center; padding: 10px 6px; border-radius: 10px; background: var(--bg4); }
-.stk-week-kpi-val { font-size: 19px; font-weight: 800; font-family: var(--ffm); color: var(--text1); }
-.stk-week-kpi-lbl { font-size: 10px; color: var(--text3); margin-top: 2px; }
+.stk-week-kpi { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 14px 8px; border-radius: var(--rx); background: var(--bg4); }
+.stk-week-kpi-ico { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.stk-week-kpi-val { font-size: 20px; font-weight: 800; font-family: var(--ffm); color: var(--text1); }
+.stk-week-kpi-lbl { font-size: 10px; color: var(--text3); }
 
 /* ── Liste produits (carte + onglets internes) ── */
 .stk-list-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--rx); padding: 16px 18px; margin-bottom: 18px; }

@@ -197,8 +197,11 @@
     if (_tab !== 'scan' && _scan.active) _scanStop();
 
     var h = '<div class="stk-page"><div class="stk-main">';
+    h += '<div class="stk-hero">';
     h += _renderHeader();
     h += _renderTabs();
+    if (_tab === 'overview' || !_tab) h += _renderActionCards();
+    h += '</div>';
 
     switch (_tab) {
       case 'check':     h += _renderCheckTab(); break;
@@ -257,48 +260,62 @@
   // ══════════════════════════════════════════════════════════════════════
   // ONGLET : Vue d'ensemble
   // ══════════════════════════════════════════════════════════════════════
+  // Cartes d'action séparées du reste : rendues À L'INTÉRIEUR de .stk-hero
+  // (voir render()) pour que l'image de fond s'étende bien derrière elles,
+  // en plus du titre et des onglets.
+  function _renderActionCards() {
+    var stats = _weekStats();
+    var h = '';
+    h += '<div class="stk-actions">';
+    h += '<div class="stk-action stk-action--violet" onclick="MX.Pages.Orders._goTab(\'scan\')">';
+    h += '<div class="stk-action-ico"><i class="fas fa-qrcode"></i></div>';
+    h += '<div class="stk-action-body"><div class="stk-action-ttl">Scanner un QR code</div>';
+    h += '<div class="stk-action-sub">Scannez une armoire, une zone ou un produit</div></div>';
+    h += '<div class="stk-action-arrow"><i class="fas fa-arrow-right"></i></div></div>';
+
+    h += '<div class="stk-action stk-action--blue" onclick="MX.Pages.Orders._goTab(\'manual\')">';
+    h += '<div class="stk-action-ico"><i class="fas fa-keyboard"></i></div>';
+    h += '<div class="stk-action-body"><div class="stk-action-ttl">Saisir le stock directement</div>';
+    h += '<div class="stk-action-sub">Choisissez une zone et renseignez les quantités</div></div>';
+    h += '<div class="stk-action-arrow"><i class="fas fa-arrow-right"></i></div></div>';
+
+    h += '<div class="stk-action stk-action--green" onclick="MX.Pages.Orders._goTab(\'toorder\')">';
+    if (stats.productsToOrder > 0) h += '<span class="stk-action-badge">' + stats.productsToOrder + '</span>';
+    h += '<div class="stk-action-ico"><i class="fas fa-cart-shopping"></i></div>';
+    h += '<div class="stk-action-body"><div class="stk-action-ttl">Voir les produits à commander</div>';
+    h += '<div class="stk-action-sub">Liste automatique selon vos stocks</div></div>';
+    h += '<div class="stk-action-arrow"><i class="fas fa-arrow-right"></i></div></div>';
+
+    h += '<div class="stk-action stk-action--orange" onclick="MX.Pages.Orders._goTab(\'history\')">';
+    h += '<div class="stk-action-ico"><i class="fas fa-clock-rotate-left"></i></div>';
+    h += '<div class="stk-action-body"><div class="stk-action-ttl">Historique des états des lieux</div>';
+    h += '<div class="stk-action-sub">Suivi par semaine et par zone</div></div>';
+    h += '<div class="stk-action-arrow"><i class="fas fa-arrow-right"></i></div></div>';
+    h += '</div>';
+    return h;
+  }
+
   function _renderOverviewTab() {
     var stats = _weekStats();
     var h = '';
 
-    // 4 cartes d'action
-    h += '<div class="stk-actions">';
-    h += '<div class="stk-action stk-action--violet" onclick="MX.Pages.Orders._goTab(\'scan\')">';
-    h += '<div class="stk-action-ico"><i class="fas fa-qrcode"></i></div>';
-    h += '<div class="stk-action-ttl">Scanner un QR code</div>';
-    h += '<div class="stk-action-sub">Scannez une armoire, une zone ou un produit</div></div>';
-
-    h += '<div class="stk-action stk-action--blue" onclick="MX.Pages.Orders._goTab(\'manual\')">';
-    h += '<div class="stk-action-ico"><i class="fas fa-keyboard"></i></div>';
-    h += '<div class="stk-action-ttl">Saisir le stock directement</div>';
-    h += '<div class="stk-action-sub">Choisissez une zone et renseignez les quantités</div></div>';
-
-    h += '<div class="stk-action stk-action--green" onclick="MX.Pages.Orders._goTab(\'toorder\')">';
-    h += '<div class="stk-action-ico"><i class="fas fa-cart-shopping"></i></div>';
-    h += '<div class="stk-action-ttl">Voir les produits à commander</div>';
-    h += '<div class="stk-action-sub">Liste automatique selon vos stocks</div>';
-    if (stats.productsToOrder > 0) h += '<span class="stk-action-badge" style="background:var(--red-dim);color:var(--red)">' + stats.productsToOrder + '</span>';
-    h += '</div>';
-
-    h += '<div class="stk-action stk-action--orange" onclick="MX.Pages.Orders._goTab(\'history\')">';
-    h += '<div class="stk-action-ico"><i class="fas fa-clock-rotate-left"></i></div>';
-    h += '<div class="stk-action-ttl">Historique des états des lieux</div>';
-    h += '<div class="stk-action-sub">Suivi par semaine et par zone</div></div>';
-    h += '</div>';
-
     // Bloc "État des lieux de la semaine"
+    function wkpi(icon, cssVar, val, lbl) {
+      return '<div class="stk-week-kpi"><div class="stk-week-kpi-ico" style="background:var(--' + cssVar + '-dim);color:var(--' + cssVar + ')"><i class="fas ' + icon + '"></i></div>'
+        + '<div class="stk-week-kpi-val" style="color:var(--' + cssVar + ')">' + val + '</div><div class="stk-week-kpi-lbl">' + lbl + '</div></div>';
+    }
     h += '<div class="stk-week">';
     h += '<div class="stk-week-top">';
-    h += '<div><div class="stk-week-ttl">État des lieux de la semaine</div><div class="stk-week-sub">' + MX.esc(_weekLabel()) + '</div></div>';
+    h += '<div><div class="stk-week-ttl"><i class="fas fa-calendar-check"></i> État des lieux de la semaine</div><div class="stk-week-sub">' + MX.esc(_weekLabel()) + '</div></div>';
     h += '<div class="stk-week-prog"><div class="stk-week-prog-lbl"><span>Progression globale</span><span>' + stats.checkedZones + ' / ' + stats.totalZones + ' zones</span></div>';
     h += '<div class="stk-week-bar"><div class="stk-week-bar-fill" style="width:' + stats.pct + '%"></div></div></div>';
     h += '</div>';
     h += '<div class="stk-week-kpis">';
-    h += '<div class="stk-week-kpi"><div class="stk-week-kpi-val">' + stats.totalZones + '</div><div class="stk-week-kpi-lbl">Zones au total</div></div>';
-    h += '<div class="stk-week-kpi"><div class="stk-week-kpi-val" style="color:var(--green)">' + stats.checkedZones + '</div><div class="stk-week-kpi-lbl">Zones contrôlées</div></div>';
-    h += '<div class="stk-week-kpi"><div class="stk-week-kpi-val">' + stats.checkedProducts + '</div><div class="stk-week-kpi-lbl">Produits contrôlés</div></div>';
-    h += '<div class="stk-week-kpi"><div class="stk-week-kpi-val" style="color:var(--red)">' + stats.productsToOrder + '</div><div class="stk-week-kpi-lbl">Produits à commander</div></div>';
-    h += '<div class="stk-week-kpi"><div class="stk-week-kpi-val" style="color:var(--orange)">' + stats.pendingZones + '</div><div class="stk-week-kpi-lbl">Zones en attente</div></div>';
+    h += wkpi('fa-map-location-dot', 'cyan',   stats.totalZones,      'Zones au total');
+    h += wkpi('fa-circle-check',     'green',  stats.checkedZones,    'Zones contrôlées');
+    h += wkpi('fa-boxes-stacked',    'jour',   stats.checkedProducts, 'Produits contrôlés');
+    h += wkpi('fa-cart-shopping',    'red',    stats.productsToOrder, 'Produits à commander');
+    h += wkpi('fa-clock',            'orange', stats.pendingZones,    'Zones en attente');
     h += '</div></div>';
 
     // Liste produits (aperçu — mêmes onglets que la page dédiée)
