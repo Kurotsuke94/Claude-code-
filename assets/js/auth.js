@@ -11,7 +11,7 @@
 
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
-    window.MX.state.adminUser = user || null;
+    window.MX.state.adminUser = (user && user.isAnonymous === false) ? user : null;
 
     // ── DEBUG AUTH (temporaire) ──
     var _cu  = window.MX.state.currentUser;
