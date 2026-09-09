@@ -1894,34 +1894,53 @@
         <div class="cso-empty-sub">Prenez votre premier relevé pour commencer le suivi.</div>
       </div>`;
     } else {
-      let lastDate = null;
+      // CORRECTIF (classement des relevés rétroactifs) : `_readings` reste
+      // ordonné par `createdAt desc` (ordre du listener Firestore, ligne
+      // ~1033 — ordre de SAISIE, pas de date réelle). L'ancien code créait
+      // un séparateur de date dès que `ds !== lastDate` en itérant
+      // directement ce tableau : un relevé rétroactif (ex. 28/08 saisi après
+      // le 09/09) se retrouvait donc positionné à sa date de SAISIE, pas à
+      // sa date réelle.
+      // Regroupement explicite par date réelle (`date`), puis tri EXPLICITE
+      // des clés de groupe juste avant le rendu — jamais d'ordre d'insertion
+      // implicite d'un objet/Map, jamais `createdAt` comme critère principal
+      // (uniquement en second critère à l'intérieur d'un même groupe, via
+      // _cmpReadingDateDesc).
+      const groups = new Map(); // date réelle → relevés de ce jour (dans l'ordre de _readings)
       _readings.forEach(r => {
-        const d    = _tsDate(r.createdAt);
-        const ds   = r.date || (d ? d.toISOString().slice(0, 10) : '');
-        const time = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-        if (ds !== lastDate) { html += `<div class="cso-date-sep">${_dateLbl(ds)}</div>`; lastDate = ds; }
-        const m    = _meters.find(x => x.id === r.meterId);
-        const meta = MT[m?.type || 'eau_froide'] || MT.eau_froide;
-        const unit = m?.unit || meta.unit;
-        const tsMs = _tsMs(r.createdAt);
-        const hasPhoto = r.photoB64 && (tsMs + exp7 > nowMs);
-        html += `<div class="cso-rrow">
-          <div class="cso-rico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
-          <div class="cso-rinfo">
-            <div class="cso-rname">${esc(r.meterName || '?')}</div>
-            <div class="cso-rmeta">
-              <span>${time}</span>
-              <span>Index: <b>${_fmtIdx(r.index)} ${esc(unit)}</b></span>
-              ${r.consumption != null ? `<span>+${_fmtIdx(r.consumption)} ${esc(unit)}</span>` : ''}
-              <span>${esc(r.technicienName || '')}</span>
+        const ds = r.date || '';
+        if (!groups.has(ds)) groups.set(ds, []);
+        groups.get(ds).push(r);
+      });
+      const sortedDates = Array.from(groups.keys()).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+      sortedDates.forEach(ds => {
+        html += `<div class="cso-date-sep">${_dateLbl(ds)}</div>`;
+        groups.get(ds).slice().sort(_cmpReadingDateDesc).forEach(r => {
+          const d    = _tsDate(r.createdAt);
+          const time = d ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+          const m    = _meters.find(x => x.id === r.meterId);
+          const meta = MT[m?.type || 'eau_froide'] || MT.eau_froide;
+          const unit = m?.unit || meta.unit;
+          const tsMs = _tsMs(r.createdAt);
+          const hasPhoto = r.photoB64 && (tsMs + exp7 > nowMs);
+          html += `<div class="cso-rrow">
+            <div class="cso-rico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
+            <div class="cso-rinfo">
+              <div class="cso-rname">${esc(r.meterName || '?')}</div>
+              <div class="cso-rmeta">
+                <span>${time}</span>
+                <span>Index: <b>${_fmtIdx(r.index)} ${esc(unit)}</b></span>
+                ${r.consumption != null ? `<span>+${_fmtIdx(r.consumption)} ${esc(unit)}</span>` : ''}
+                <span>${esc(r.technicienName || '')}</span>
+              </div>
             </div>
-          </div>
-          <div class="cso-rbtns">
-            ${hasPhoto ? `<button class="cso-ibtn" title="Photo" onclick="MX.Pages.Conso._showPhoto('${r.id}')"><i class="fas fa-image"></i></button>` : ''}
-            <button class="cso-ibtn" title="Modifier l'index" onclick="MX.Pages.Conso._editReading('${r.id}')"><i class="fas fa-pen"></i></button>
-            <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delReading('${r.id}')"><i class="fas fa-trash"></i></button>
-          </div>
-        </div>`;
+            <div class="cso-rbtns">
+              ${hasPhoto ? `<button class="cso-ibtn" title="Photo" onclick="MX.Pages.Conso._showPhoto('${r.id}')"><i class="fas fa-image"></i></button>` : ''}
+              <button class="cso-ibtn" title="Modifier l'index" onclick="MX.Pages.Conso._editReading('${r.id}')"><i class="fas fa-pen"></i></button>
+              <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delReading('${r.id}')"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>`;
+        });
       });
     }
     return html + '</div>';
