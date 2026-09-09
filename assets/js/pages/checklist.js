@@ -1,6 +1,64 @@
 (function () {
   var _clWsSelKey = null;
 
+  // ── REFONTE MISSIONS (Admin/Responsable) : horaires des créneaux ──────────
+  // Source UNIQUE pour les 3 écrans du flux admin/responsable (Vue d'ensemble/
+  // Semaine/Journée), utilisée par render()/_renderHistDay()/_showFutureDay().
+  // mes-missions.js (SLOT_INFO, dashboard technicien) et admin.js (_WIZ_SLOTS,
+  // assistant d'alertes) restent inchangés : ce sont des écrans différents.
+  var _slotTimes = { matin: '08h00 – 16h30', journee: '10h00 – 18h30', soir: '13h00 – 21h30' };
+
+  // ── REFONTE MISSIONS : navigation jour précédent/suivant/aujourd'hui ──────
+  // Détermine le jour adjacent (delta -1/+1) en franchissant les bornes de
+  // semaine si besoin, puis ouvre l'écran adapté (semaine en cours, archivée
+  // ou future) en réutilisant render()/_showHistDay()/_showFutureDay() —
+  // aucune duplication du calcul de jour/semaine.
+  function _navDay(weekKey, dayId, delta) {
+    const idx = MX.DAYS.findIndex(function(d) { return d.id === dayId; });
+    if (idx < 0) return;
+    let newIdx = idx + delta;
+    let newWeekKey = weekKey;
+    if (newIdx < 0) {
+      const mon = _weekKeyToMonday(weekKey); mon.setDate(mon.getDate() - 7);
+      newWeekKey = _weekKey(mon); newIdx = 6;
+    } else if (newIdx > 6) {
+      const mon = _weekKeyToMonday(weekKey); mon.setDate(mon.getDate() + 7);
+      newWeekKey = _weekKey(mon); newIdx = 0;
+    }
+    _openDay(newWeekKey, MX.DAYS[newIdx].id);
+  }
+  function _openDay(weekKey, dayId) {
+    const currKey = _weekKey(new Date());
+    if (weekKey === currKey)    MX.showPage(dayId);
+    else if (weekKey > currKey) _showFutureDay(weekKey, dayId);
+    else                        _showHistDay(weekKey, dayId);
+  }
+  function _goToday() { _openDay(_weekKey(new Date()), MX.todayId()); }
+
+  // Barre de navigation commune aux 3 variantes de la vue journée (semaine en
+  // cours / archivée / future) — bouton retour, jour précédent/suivant,
+  // raccourci Aujourd'hui. weekKey/dayId = jour actuellement affiché.
+  function _dayNavBarHtml(weekKey, dayId) {
+    const isToday = weekKey === _weekKey(new Date()) && dayId === MX.todayId();
+    return '<div class="mis-daynav">' +
+      '<button class="mis-daynav-btn mis-daynav-back" onclick="MX.Pages.Checklist._showWeekDayGrid(\'' + weekKey + '\')" title="Retour à la semaine">' +
+        '<i class="fas fa-arrow-left"></i><span>Semaine</span>' +
+      '</button>' +
+      '<div class="mis-daynav-ctr">' +
+        '<button class="mis-daynav-btn mis-daynav-icon" onclick="MX.Pages.Checklist._navDay(\'' + weekKey + '\',\'' + dayId + '\',-1)" title="Jour précédent"><i class="fas fa-chevron-left"></i></button>' +
+        '<button class="mis-daynav-btn mis-daynav-today' + (isToday ? ' mis-daynav-today--act' : '') + '" onclick="MX.Pages.Checklist._goToday()">Aujourd\'hui</button>' +
+        '<button class="mis-daynav-btn mis-daynav-icon" onclick="MX.Pages.Checklist._navDay(\'' + weekKey + '\',\'' + dayId + '\',1)" title="Jour suivant"><i class="fas fa-chevron-right"></i></button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Replie/déplie une carte de créneau (Vue journée) — état purement visuel,
+  // non persisté, aucune donnée modifiée.
+  function _toggleSlotCard(elId) {
+    const card = document.getElementById(elId);
+    if (card) card.classList.toggle('mis-slot-collapsed');
+  }
+
   function render(dayId) {
     const { state, DAYS, getDaySlots, esc, Widgets } = MX;
     const day    = DAYS.find(d => d.id === dayId);
@@ -58,14 +116,24 @@
     const acceptedIn = cu ? (state.transfers || []).filter(tr => tr.toUser === cu.name && tr.status === "accepted" && tr.dayId === dayId) : [];
 
     const _currK = _weekKey(new Date());
+    const dayIdx   = DAYS.findIndex(d => d.id === dayId);
+    const todayIdx = DAYS.findIndex(d => d.id === MX.todayId());
+    const isPastDay = dayIdx >= 0 && todayIdx >= 0 && dayIdx < todayIdx;
+    const fullDate = (function() {
+      try {
+        const ds = MX.checkDateForDay(dayId);
+        return new Date(ds + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      } catch (e) { return ''; }
+    })();
 
     // ── Page header ──
-    let h = '<div class="ph">';
+    let h = _dayNavBarHtml(_currK, dayId);
+    h += '<div class="ph">';
     h += '<div class="ph-eye">' + esc(state.weekLabel) + '</div>';
     h += '<div class="ph-row">';
     h +=   '<div>';
-    h +=     '<div class="ph-title">' + esc(day.l) + '</div>';
-    h +=     '<div class="ph-sub">' + done + ' / ' + total + ' tâches complétées</div>';
+    h +=     '<div class="ph-title">' + esc(day.l) + (isToday ? ' <span class="mis-today-pill">Aujourd\'hui</span>' : '') + '</div>';
+    h +=     '<div class="ph-sub">' + esc(fullDate) + '</div>';
     h +=   '</div>';
     h +=   '<div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:' + (pct>=80?'var(--green)':pct>=40?'var(--orange)':'var(--red)') + '">' + pct + '%</div>';
     h += '</div>';
@@ -79,11 +147,14 @@
     // User banner
     h += banner;
 
-    // Stats row
-    h += '<div class="cl-ws-stats">';
-    h += '<div class="cl-ws-stat cl-ws-stat--g"><div class="cl-ws-stat-n">' + done + '</div><div class="cl-ws-stat-l">Faites</div></div>';
+    // Stats row (+ "En retard" uniquement pour un jour déjà passé de la semaine en cours)
+    h += '<div class="cl-ws-stats' + (isPastDay ? ' cl-ws-stats--4' : '') + '">';
+    h += '<div class="cl-ws-stat cl-ws-stat--g"><div class="cl-ws-stat-n">' + done + '</div><div class="cl-ws-stat-l">Terminées</div></div>';
     h += '<div class="cl-ws-stat cl-ws-stat--b"><div class="cl-ws-stat-n">' + total + '</div><div class="cl-ws-stat-l">Total</div></div>';
     h += '<div class="cl-ws-stat cl-ws-stat--r"><div class="cl-ws-stat-n">' + (total - done) + '</div><div class="cl-ws-stat-l">Restantes</div></div>';
+    if (isPastDay) {
+      h += '<div class="cl-ws-stat cl-ws-stat--late"><div class="cl-ws-stat-n">' + (total - done) + '</div><div class="cl-ws-stat-l">En retard</div></div>';
+    }
     h += '</div>';
 
     // ── Incoming transfers ──
@@ -113,7 +184,6 @@
     }
 
     // ── Compact slot groups ──
-    const _slotTimes = { matin: '06h – 14h', journee: '14h – 18h', soir: '18h – 22h' };
     let anyVisible = false;
 
     slots.forEach(function(sl) {
@@ -136,17 +206,24 @@
       const slPct = visTasks.length ? Math.round(slDone / visTasks.length * 100) : 0;
       anyVisible = true;
 
-      h += '<div class="cl-ws-sg">';
+      // Créneaux 100% terminés repliés par défaut (purement visuel, la
+      // tranche active/incomplète reste toujours ouverte).
+      const slCollapsed = visTasks.length > 0 && slPct === 100;
+      const slElId = 'mis-slot-' + dayId + '-' + sl;
+
+      h += '<div class="cl-ws-sg' + (slCollapsed ? ' mis-slot-collapsed' : '') + '" id="' + slElId + '">';
 
       // Slot header
-      h += '<div class="cl-ws-sg-hd">';
+      h += '<div class="cl-ws-sg-hd" onclick="MX.Pages.Checklist._toggleSlotCard(\'' + slElId + '\')" style="cursor:pointer">';
       h +=   '<div class="cl-ws-sg-ico ' + s.c + '">' + s.e + '</div>';
       h +=   '<div class="cl-ws-sg-info">';
       h +=     '<div class="cl-ws-sg-lbl">' + esc(s.l) + '<span class="cl-ws-sg-time">' + (_slotTimes[sl] || '') + '</span></div>';
       h +=     '<div class="cl-ws-sg-sub">' + slDone + '/' + visTasks.length + ' tâches</div>';
       h +=   '</div>';
       h +=   '<div class="cl-ws-sg-pct ' + (slPct>=80?'g':slPct>=40?'o':'r') + '">' + slPct + '%</div>';
+      h +=   '<i class="fas fa-chevron-down mis-slot-chev"></i>';
       h += '</div>';
+      h += '<div class="mis-slot-collapsible">';
 
       // Assignment row
       if (canAll) {
@@ -184,9 +261,12 @@
           const hasNote = !!((state.notes || {})[tKey]);
           const isSel   = _clWsSelKey === tKey;
           const hasAsgn = !!(t.assignedTo || slAsn);
-          const stripeC = isChk ? 'done' : (hasAsgn ? 'asgn' : 'todo');
+          // Jour déjà passé + tâche non cochée = en retard (dérivé, comme
+          // renderMonthly() — aucun nouveau champ Firestore).
+          const baseCls = (isPastDay && !isChk) ? 'late' : (hasAsgn ? 'asgn' : 'todo');
+          const stripeC = isChk ? 'done' : baseCls;
           h += '<div class="cl-ws-tr cl-ws-tr--' + stripeC + (isSel ? ' cl-ws-tr--sel' : '') +
-            '" id="cl-ws-tr-' + esc(t.id) + '" data-base="cl-ws-tr--' + (hasAsgn ? 'asgn' : 'todo') +
+            '" id="cl-ws-tr-' + esc(t.id) + '" data-base="cl-ws-tr--' + baseCls +
             '" onclick="MX.Pages.Checklist._clWsOpen(\'' + esc(dayId) + '\',\'' + esc(sl) + '\',\'' + esc(t.id) + '\',true)">';
           h +=   '<div class="cl-ws-tr-stripe"></div>';
           h +=   '<div class="cl-ws-tr-cb' + (isChk ? ' on' : '') + '"><i class="fas fa-check"></i></div>';
@@ -202,6 +282,7 @@
 
       // Slot progress footer
       h += '<div class="cl-ws-sg-prog"><div class="cl-ws-sg-prog-fill" style="width:' + slPct + '%"></div></div>';
+      h += '</div>'; // mis-slot-collapsible
       h += '</div>'; // cl-ws-sg
     });
 
@@ -1514,25 +1595,24 @@
     });
     const pct  = total ? Math.round(done / total * 100) : 0;
     const pctC = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--orange)' : 'var(--red)';
+    const fullDate = (function() {
+      try { return new Date(_weekDayToDate(weekKey, dayId) + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }); }
+      catch (e) { return ''; }
+    })();
 
-    const backFn = `MX.Pages.Checklist._showWeekDayGrid('${weekKey}')`;
-
-    let h = `<div class="ph">
+    let h = _dayNavBarHtml(weekKey, dayId);
+    h += `<div class="ph">
       <div class="ph-eye">${esc(wLabel)}</div>
       <div class="ph-row">
         <div>
           <div class="ph-title">${esc((day || {}).l || dayId)}</div>
-          <div class="ph-sub">${done} / ${total} tâches complétées — historique</div>
+          <div class="ph-sub">${esc(fullDate)} — historique</div>
         </div>
         <div style="font-size:28px;font-weight:700;font-family:var(--ffm);color:${pctC}">${pct}%</div>
       </div>
       <div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div></div>
     </div>
     <div class="page-body" style="max-width:760px">
-
-    <button onclick="${backFn}" style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
-      <i class="fas fa-arrow-left"></i> Retour au calendrier
-    </button>
 
     <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
       <i class="fas fa-clock-rotate-left" style="color:var(--cyan)"></i>
@@ -1541,7 +1621,7 @@
     </div>
 
     <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-      <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Faites</div></div>
+      <div class="stat-card"><div class="stat-n g">${done}</div><div class="stat-l">Terminées</div></div>
       <div class="stat-card"><div class="stat-n b">${total}</div><div class="stat-l">Total</div></div>
       <div class="stat-card"><div class="stat-n r">${total - done}</div><div class="stat-l">Restantes</div></div>
     </div>`;
@@ -1560,16 +1640,20 @@
         const slDone = tasks.filter(t => !!(chk[`${dayId}_${sl}_${t.id}`])).length;
         const slPct  = tasks.length ? Math.round(slDone / tasks.length * 100) : 0;
         const slC    = slPct >= 80 ? 'var(--green)' : slPct >= 40 ? 'var(--orange)' : 'var(--red)';
+        const slCollapsed = slPct === 100;
+        const slElId = 'mis-slot-' + dayId + '-' + sl;
 
-        h += `<div class="slot-card" style="margin-bottom:12px">
-          <div class="slot-head">
+        h += `<div class="slot-card${slCollapsed ? ' mis-slot-collapsed' : ''}" id="${slElId}" style="margin-bottom:12px">
+          <div class="slot-head" onclick="MX.Pages.Checklist._toggleSlotCard('${slElId}')" style="cursor:pointer">
             <div class="ch-ico"><i class="fas ${_slotIcon(sl)}"></i></div>
             <div style="flex:1">
-              <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}</div>
+              <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}<span class="cl-ws-sg-time">${esc(_slotTimes[sl] || '')}</span></div>
               ${slAsn ? `<div class="slot-dl">${esc(slAsn)}</div>` : ''}
             </div>
             <div class="slot-pct" style="background:${slC}22;color:${slC}">${slPct}%</div>
-          </div>`;
+            <i class="fas fa-chevron-down mis-slot-chev"></i>
+          </div>
+          <div class="mis-slot-collapsible">`;
 
         tasks.forEach(t => {
           const key       = `${dayId}_${sl}_${t.id}`;
@@ -1582,7 +1666,7 @@
           </div>`;
         });
 
-        h += `</div>`;
+        h += `</div></div>`;
       });
     }
 
@@ -1823,7 +1907,7 @@
       return `<div class="cl-v2-rp-slot">
           <span class="cl-v2-rp-slot-ico">${sd.icon}</span>
           <div class="cl-v2-rp-slot-info">
-            <span class="cl-v2-rp-slot-lbl">${sd.label}</span>
+            <span class="cl-v2-rp-slot-lbl">${sd.label}<span class="cl-ws-sg-time">${esc(_slotTimes[sd.key] || '')}</span></span>
             <span class="cl-v2-rp-slot-user">${asn ? esc(asn) : '<em style="opacity:.55">Non assigné</em>'}</span>
           </div>
           <span class="cl-v2-rp-slot-ct">${slDone}/${slTasks.length}</span>
@@ -1861,23 +1945,151 @@
 
     const pmpsBadgeHtml = '<span class="cl-v2-rp-badge' + (pmpsActive.length ? ' cl-v2-rp-badge--purple' : '') + '">' + pmpsDone + '/' + pmps.length + '</span>';
 
+    // ── REFONTE MISSIONS : KPI réels (4 cartes, aucune donnée inventée) ──────
+    // Terminées = doneW (semaine). En cours = tâches non faites d'AUJOURD'HUI
+    // (déjà calculées ci-dessus). Restantes = reste de la semaine (hors
+    // aujourd'hui). Partition exacte de totalW, sans nouveau calcul.
+    const enCoursN  = Math.max(0, todayTotal - todayDone);
+    const restantesN = Math.max(0, totalW - doneW - enCoursN);
+
+    // ── REFONTE MISSIONS : aperçu 7 jours de la semaine en cours (clic direct) ──
+    const weekPreviewTodayIdx = DAYS.findIndex(d => d.id === todayId);
+    const weekDayStats = currSlot ? DAYS.map((day, dIdx) => {
+      let dt = 0, dd = 0;
+      (getDaySlots(day.id) || []).forEach(sl => {
+        (state.tasks[`${day.id}_${sl}`] || []).forEach(t => {
+          dt++;
+          if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) dd++;
+        });
+      });
+      const pct = dt ? Math.round(dd / dt * 100) : 0;
+      return { day, dIdx, dt, dd, pct };
+    }) : [];
+
+    // Tâches en retard = jours de la semaine en cours AVANT aujourd'hui, non
+    // terminés (même dérivation que ailleurs, aucune donnée inventée).
+    const retardN = weekDayStats
+      .filter(ds => weekPreviewTodayIdx >= 0 && ds.dIdx < weekPreviewTodayIdx)
+      .reduce((s, ds) => s + (ds.dt - ds.dd), 0);
+
+    // ── REFONTE MISSIONS : tâches à traiter (aujourd'hui, non terminées) ─────
+    const todoToday = [];
+    (getDaySlots(todayId) || []).forEach(sl => {
+      const slAsn = (claims[sl] && claims[sl].name) || (state.assignments && state.assignments[`${todayId}_${sl}`]) || '';
+      (state.tasks[`${todayId}_${sl}`] || []).forEach(t => {
+        const isDone = state.checks[MX.checkKey(todayId, sl, t.id, MX.checkOwnerId(todayId, sl, t))];
+        if (!isDone) todoToday.push({ text: t.text || t.id, who: t.assignedTo || slAsn || '', slot: sl });
+      });
+    });
+    const todoTodayHtml = todoToday.length === 0
+      ? '<div class="mis-todo-empty"><i class="fas fa-circle-check"></i> Tout est à jour pour aujourd\'hui</div>'
+      : todoToday.slice(0, 6).map(function(t) {
+          const s = MX.SLOTS[t.slot] || { l: t.slot };
+          return '<div class="mis-todo-row" onclick="MX.showPage(\'' + todayId + '\')">' +
+            '<span class="mis-todo-txt">' + esc(t.text) + '</span>' +
+            (t.who ? '<span class="mis-todo-who">' + esc(t.who) + '</span>' : '') +
+            '<span class="mis-todo-when"><i class="fas fa-clock"></i> Aujourd\'hui</span>' +
+            '</div>';
+        }).join('');
+
     // ── Build HTML ──
-    let h = `<div class="ph">
-      <div class="ph-eye">Vue d'ensemble</div>
+    let h = `<div class="mis-tabs">
+      <button class="mis-tab mis-tab--act" onclick="MX.Pages.Checklist.renderWeekSlots()">Vue d'ensemble</button>
+      <button class="mis-tab" onclick="MX.Pages.Checklist._showWeekDayGrid('${currKey}')">Semaine</button>
+      <button class="mis-tab" onclick="MX.showPage('${todayId}')">Journée</button>
+      <button class="mis-tab mis-tab--today" onclick="MX.Pages.Checklist._goToday()"><i class="fas fa-calendar-day"></i> Aujourd'hui</button>
+    </div>
+    <div class="ph">
+      <div class="ph-eye">Missions</div>
       <div class="ph-row">
         <div>
-          <div class="ph-title">Check-lists</div>
-          <div class="ph-sub">${archiveCount} archive${archiveCount !== 1 ? 's' : ''} · semaine en cours · ${futureCount} à venir</div>
+          <div class="ph-title">Vue d'ensemble</div>
+          <div class="ph-sub">Suivi des check-lists et avancement des tâches — ${archiveCount} archive${archiveCount !== 1 ? 's' : ''} · semaine en cours · ${futureCount} à venir</div>
         </div>
-        <div class="cl-v2-pct" style="color:${wPctC}">${wPct}%</div>
-      </div>
-      <div class="cl-v2-ph-prog-wrap">
-        <div class="cl-v2-ph-prog-track"><div class="cl-v2-ph-prog-fill" style="width:${wPct}%"></div></div>
       </div>
     </div>
+
+    <div class="mis-kpi-row">
+      <div class="mis-kpi-card mis-kpi-card--main">
+        <div class="mis-kpi-ico"><i class="fas fa-chart-pie"></i></div>
+        <div class="mis-kpi-body">
+          <div class="mis-kpi-n" style="color:${wPctC}">${wPct}%</div>
+          <div class="mis-kpi-l">Avancement global</div>
+          <div class="mis-kpi-track"><div class="mis-kpi-fill" style="width:${wPct}%"></div></div>
+          <div class="mis-kpi-sub">${doneW} / ${totalW} tâches</div>
+        </div>
+      </div>
+      <div class="mis-kpi-card mis-kpi-card--green">
+        <div class="mis-kpi-ico"><i class="fas fa-check"></i></div>
+        <div class="mis-kpi-body"><div class="mis-kpi-n">${doneW}</div><div class="mis-kpi-l">Tâches terminées</div>
+        <div class="mis-kpi-sub">dont ${todayDone} aujourd'hui</div></div>
+      </div>
+      <div class="mis-kpi-card mis-kpi-card--orange">
+        <div class="mis-kpi-ico"><i class="fas fa-clock"></i></div>
+        <div class="mis-kpi-body"><div class="mis-kpi-n">${enCoursN}</div><div class="mis-kpi-l">Tâches en cours</div>
+        <div class="mis-kpi-sub">aujourd'hui</div></div>
+      </div>
+      <div class="mis-kpi-card mis-kpi-card--red">
+        <div class="mis-kpi-ico"><i class="fas fa-triangle-exclamation"></i></div>
+        <div class="mis-kpi-body"><div class="mis-kpi-n">${restantesN}</div><div class="mis-kpi-l">Tâches restantes</div>
+        <div class="mis-kpi-sub">reste de la semaine</div></div>
+      </div>
+    </div>
+
+    <div class="mis-quick">
+      <div class="mis-quick-hd"><i class="fas fa-bolt"></i><div><div class="mis-quick-ttl">Accès rapide</div><div class="mis-quick-sub">Accédez directement aux actions principales</div></div></div>
+      <div class="mis-quick-btns">
+        <button class="mis-quick-btn mis-quick-btn--main" onclick="MX.Pages.Checklist._showWeekDayGrid('${currKey}')"><i class="fas fa-calendar-week"></i> Voir la semaine</button>
+        <button class="mis-quick-btn" onclick="MX.showPage('${todayId}')"><i class="fas fa-calendar-day"></i> Voir aujourd'hui</button>
+        ${MX.Auth.canSeeAll() ? `<button class="mis-quick-btn" onclick="MX.Pages.Checklist._addFutureTask('${currKey}',null,null)"><i class="fas fa-plus"></i> Créer une tâche</button>` : ''}
+        <button class="mis-quick-btn" onclick="document.getElementById('mis-todo-anchor')?.scrollIntoView({behavior:'smooth',block:'start'})"><i class="fas fa-list-check"></i> Tâches restantes</button>
+        ${retardN > 0 ? `<button class="mis-quick-btn mis-quick-btn--danger" onclick="MX.Pages.Checklist._showWeekDayGrid('${currKey}')"><i class="fas fa-triangle-exclamation"></i> ${retardN} en retard</button>` : ''}
+      </div>
+    </div>
+
+    <div class="mis-week-preview">
+      <div class="mis-week-preview-hd"><i class="fas fa-calendar"></i><div><div class="mis-quick-ttl">Vue semaine</div><div class="mis-quick-sub">Aperçu rapide des tâches par jour</div></div>
+        <div class="mis-week-legend">
+          <span><i class="mis-dot mis-dot--g"></i>Terminé</span>
+          <span><i class="mis-dot mis-dot--o"></i>En cours</span>
+          <span><i class="mis-dot mis-dot--r"></i>Restant</span>
+          <span><i class="mis-dot mis-dot--n"></i>Non planifié</span>
+        </div>
+      </div>
+      <div class="mis-week-preview-grid">
+        ${weekDayStats.map(function(ds) {
+          const isT = ds.day.id === todayId;
+          const isUp = !isT && weekPreviewTodayIdx >= 0 && ds.dIdx > weekPreviewTodayIdx;
+          const ring = ds.pct >= 100 ? 'var(--green)' : ds.pct > 0 ? 'var(--orange)' : (isUp ? 'var(--text3)' : ds.dt ? 'var(--red)' : 'var(--text3)');
+          const dateStr = (function() { try { return MX.checkDateForDay(ds.day.id).slice(8,10) + '/' + MX.checkDateForDay(ds.day.id).slice(5,7); } catch(e) { return ''; } })();
+          return '<div class="mis-day-mini' + (isT ? ' mis-day-mini--today' : '') + '">' +
+            '<div class="mis-day-mini-name">' + esc(ds.day.l) + '</div>' +
+            '<div class="mis-day-mini-date">' + dateStr + '</div>' +
+            '<div class="mis-day-mini-ring" style="--ring-c:' + ring + ';--ring-pct:' + ds.pct + '"><span style="color:' + ring + '">' + ds.pct + '%</span></div>' +
+            '<div class="mis-day-mini-ct">' + ds.dd + ' / ' + ds.dt + '</div>' +
+            '<button class="mis-day-mini-btn' + (isT ? ' mis-day-mini-btn--act' : '') + '" onclick="MX.showPage(\'' + ds.day.id + '\')">Voir les tâches</button>' +
+          '</div>';
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="mis-bottom-row">
+      <div class="mis-todo-card" id="mis-todo-anchor">
+        <div class="mis-todo-hd"><i class="fas fa-list-check"></i><span>Tâches à traiter</span>
+          <a class="mis-todo-viewall" onclick="MX.showPage('${todayId}')">Voir tout <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="mis-todo-list">${todoTodayHtml}</div>
+      </div>
+      <div class="mis-slots-card">
+        <div class="mis-todo-hd"><i class="fas fa-users"></i><span>Créneaux — aujourd'hui</span></div>
+        <div class="mis-slots-list">${planningRowsHtml}</div>
+      </div>
+    </div>
+
     <div class="cl-v2-layout">
       <div class="cl-v2-list">
-        <div class="cl-v2-cards">`;
+        <div class="mis-quick-ttl" style="margin:4px 0 10px">Toutes les semaines</div>
+        <div class="cl-v2-cards cl-v2-cards--strip">`;
 
     slots.reverse().forEach(({ wk, offset }) => {
       const isCurr   = wk === currKey;
@@ -1983,21 +2195,11 @@
       </div>`;
     }
 
-    // ── Right panel ──
+    // ── Right panel (Interventions/PMP — non dupliqué : "Journée du jour" et
+    // "Planning" sont désormais couverts par les KPI et le bloc Créneaux
+    // ci-dessus, pour éviter de répéter la même information deux fois) ──
     h += `</div>
       <aside class="cl-v2-rp">
-        <div class="cl-v2-rp-section">
-          <div class="cl-v2-rp-hd"><i class="fas fa-calendar-day cl-v2-rp-ico"></i><span>Journée du jour</span></div>
-          <div class="cl-v2-rp-stats">
-            <div class="cl-v2-rps"><strong style="color:var(--green)">${todayDone}</strong><span>Terminées</span></div>
-            <div class="cl-v2-rps"><strong style="color:var(--red)">${todayTotal - todayDone}</strong><span>Restantes</span></div>
-            <div class="cl-v2-rps"><strong>${todayTotal}</strong><span>Total</span></div>
-          </div>
-        </div>
-        <div class="cl-v2-rp-section">
-          <div class="cl-v2-rp-hd"><i class="fas fa-clock cl-v2-rp-ico"></i><span>Planning</span></div>
-          <div class="cl-v2-rp-slots">${planningRowsHtml}</div>
-        </div>
         <div class="cl-v2-rp-section">
           <div class="cl-v2-rp-hd">
             <i class="fas fa-wrench cl-v2-rp-ico" style="color:#3b82f6"></i><span>Interventions</span>${intsBadgeHtml}
@@ -2071,8 +2273,15 @@
 
     const pctW = totalW ? Math.round(doneW / totalW * 100) : 0;
     const pctC = pctW >= 80 ? 'var(--green)' : pctW >= 40 ? 'var(--orange)' : 'var(--red)';
+    const todayIdxG = DAYS.findIndex(d => d.id === todayId);
 
-    let h = `<div class="ph">
+    let h = `<div class="mis-daynav">
+      <button class="mis-daynav-btn mis-daynav-back" onclick="MX.Pages.Checklist.renderWeekSlots()" title="Toutes les semaines">
+        <i class="fas fa-arrow-left"></i><span>Semaines</span>
+      </button>
+      <button class="mis-daynav-btn mis-daynav-today" onclick="MX.Pages.Checklist._goToday()">Aujourd'hui</button>
+    </div>
+    <div class="ph">
       <div class="ph-eye">${esc(wLabel)}</div>
       <div class="ph-row">
         <div>
@@ -2084,11 +2293,6 @@
       ${!isFuture ? `<div style="margin-top:10px"><div class="prog-track"><div class="prog-fill" style="width:${pctW}%"></div></div></div>` : ''}
     </div>
     <div class="page-body" style="max-width:760px">
-
-    <button onclick="MX.Pages.Checklist.renderWeekSlots()"
-      style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
-      <i class="fas fa-arrow-left"></i> Toutes les semaines
-    </button>
 
     ${isFuture ? `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
       <i class="fas fa-wand-sparkles" style="color:#A78BFA"></i>
@@ -2103,12 +2307,15 @@
 
     <div class="cl-week-grid">`;
 
-    dayStats.forEach(({ day, dt, dd, pct }) => {
-      const isT  = isCurr && day.id === todayId;
+    dayStats.forEach(({ day, dt, dd, pct }, dIdx) => {
+      const isT = isCurr && day.id === todayId;
+      // Jour de la semaine en cours pas encore arrivé = à venir (gris),
+      // jamais confondu avec "en retard" (rouge, réservé au passé incomplet).
+      const isUpcoming = isCurr && !isT && todayIdxG >= 0 && dIdx > todayIdxG;
       const pC   = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
       let cls    = 'cl-week-day';
       if (isT)          cls += ' cl-day--today';
-      else if (pct === -2) cls += ' cl-day--future';
+      else if (pct === -2 || isUpcoming) cls += ' cl-day--future';
       else if (pct < 0) cls += ' cl-day--empty';
       else if (pct >= 100) cls += ' cl-day--done';
       else if (pct > 0) cls += ' cl-day--prog';
@@ -2155,19 +2362,20 @@
     const PRIO_COLOR = { critique: 'var(--red)', haute: 'var(--orange)', faible: 'var(--text3)' };
     const PRIO_LABEL = { critique: '🔴 Critique', haute: '🟠 Haute', faible: '⚪ Faible' };
 
-    let h = `<div class="ph">
+    const fullDate = (function() {
+      try { return new Date(_weekDayToDate(weekKey, dayId) + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }); }
+      catch (e) { return ''; }
+    })();
+
+    let h = _dayNavBarHtml(weekKey, dayId);
+    h += `<div class="ph">
       <div class="ph-eye">${esc(wLabel)}</div>
       <div class="ph-row"><div>
         <div class="ph-title">${esc((day || {}).l || dayId)}</div>
-        <div class="ph-sub">Configuration · Semaine à venir</div>
+        <div class="ph-sub">${esc(fullDate)} — configuration, semaine à venir</div>
       </div></div>
     </div>
     <div class="page-body" style="max-width:760px">
-
-    <button onclick="MX.Pages.Checklist._showWeekDayGrid('${esc(weekKey)}')"
-      style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--ffs);margin-bottom:16px">
-      <i class="fas fa-arrow-left"></i> Retour à la semaine
-    </button>
 
     <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2)">
       <i class="fas fa-circle-info" style="color:#A78BFA"></i>
@@ -2177,12 +2385,13 @@
     slots.forEach(sl => {
       const tasks       = tsk[`${dayId}_${sl}`] || [];
       const suggestions = _getPlanSuggestions(weekKey, dayId, sl);
+      const slElId      = 'mis-slot-' + dayId + '-' + sl;
 
-      h += `<div class="slot-card" style="margin-bottom:12px">
-        <div class="slot-head">
+      h += `<div class="slot-card" id="${slElId}" style="margin-bottom:12px">
+        <div class="slot-head" onclick="MX.Pages.Checklist._toggleSlotCard('${slElId}')" style="cursor:pointer">
           <div class="ch-ico"><i class="fas ${_slotIcon(sl)}"></i></div>
           <div style="flex:1">
-            <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}</div>
+            <div style="font-size:14px;font-weight:700">${esc(SLOT_LABELS[sl] || sl)}<span class="cl-ws-sg-time">${esc(_slotTimes[sl] || '')}</span></div>
             <div class="slot-dl">${tasks.length} tâche${tasks.length!==1?'s':''}</div>
           </div>`;
 
@@ -2194,11 +2403,13 @@
         </div>`;
       }
 
-      h += `<button onclick="MX.Pages.Checklist._addFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}')"
+      h += `<button onclick="event.stopPropagation();MX.Pages.Checklist._addFutureTask('${esc(weekKey)}','${esc(dayId)}','${esc(sl)}')"
             style="padding:6px 10px;border:1px solid var(--cyan-border);border-radius:7px;background:var(--cyan-dim);color:var(--cyan);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--ffs);display:flex;align-items:center;gap:5px;flex-shrink:0">
             <i class="fas fa-plus"></i> Ajouter
           </button>
-        </div>`;
+          <i class="fas fa-chevron-down mis-slot-chev"></i>
+        </div>
+        <div class="mis-slot-collapsible">`;
 
       if (!tasks.length) {
         h += `<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px">
@@ -2241,7 +2452,7 @@
           </div>`;
         });
       }
-      h += `</div>`;
+      h += `</div></div>`; // mis-slot-collapsible, slot-card
     });
 
     h += `</div>`;
@@ -2487,5 +2698,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg, _clWsOpen, _clWsClose, _clWsToggle, _clWsBlockTask, _clWsConfirmBlock };
+  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg, _clWsOpen, _clWsClose, _clWsToggle, _clWsBlockTask, _clWsConfirmBlock, _navDay, _goToday, _toggleSlotCard };
 })();

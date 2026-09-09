@@ -24028,3 +24028,174 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .stk-btn-ghost { background: var(--bg4); border: 1px solid var(--border2); color: var(--text2); }
 .stk-btn-ghost:hover { color: var(--text1); border-color: var(--border3); }
 .stk-btn-danger { background: var(--red-dim); border: 1px solid var(--red-border); color: var(--red); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   REFONTE MISSIONS (Admin/Responsable) — Vue d'ensemble / Semaine / Journée
+   Préfixe .mis- dédié : n'entre en collision avec aucune classe .cl-*
+   existante (dont dépendent slot-card.js/task-row.js). Réutilise
+   uniquement les tokens de marque déjà définis dans variables.css
+   (--cyan = violet Maintix, --green/--orange/--red, --matin/--jour/--soir).
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Onglets Vue d'ensemble / Semaine / Journée ── */
+.mis-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 16px 28px 0; }
+.mis-tab {
+  border: 1px solid var(--border2); background: var(--bg3); color: var(--text2);
+  font-family: var(--ffs); font-size: 12.5px; font-weight: 600; padding: 8px 16px;
+  border-radius: 20px; cursor: pointer; transition: all var(--t);
+}
+.mis-tab:hover { color: var(--text1); border-color: var(--border3); }
+.mis-tab--act { background: var(--cyan); border-color: var(--cyan); color: #fff; }
+.mis-tab--today { margin-left: auto; background: var(--cyan-dim); border-color: var(--cyan-border); color: var(--cyan); }
+.mis-tab--today i { margin-right: 4px; }
+@media (max-width: 640px) { .mis-tabs { padding: 12px 16px 0; } .mis-tab--today { margin-left: 0; } }
+
+/* ── Barre de navigation jour (Retour / Précédent / Aujourd'hui / Suivant) ── */
+.mis-daynav {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 28px 0; flex-wrap: wrap;
+}
+.mis-daynav-btn {
+  border: 1px solid var(--border2); background: var(--bg3); color: var(--text2);
+  font-family: var(--ffs); font-size: 12px; font-weight: 600; cursor: pointer;
+  border-radius: 9px; padding: 8px 12px; display: inline-flex; align-items: center; gap: 7px;
+  transition: all var(--t);
+}
+.mis-daynav-btn:hover { color: var(--text1); border-color: var(--border3); }
+.mis-daynav-back span { display: inline; }
+.mis-daynav-ctr { display: flex; align-items: center; gap: 6px; }
+.mis-daynav-icon { padding: 8px 11px; }
+.mis-daynav-today { color: var(--cyan); }
+.mis-daynav-today--act { background: var(--cyan-dim); border-color: var(--cyan-border); }
+@media (max-width: 640px) {
+  .mis-daynav { padding: 12px 16px 0; }
+  .mis-daynav-back span { display: none; }
+}
+
+.mis-today-pill {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .03em;
+  background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan-border);
+  border-radius: 20px; padding: 2px 9px; vertical-align: middle; margin-left: 6px;
+}
+
+/* ── Cartes KPI (Vue d'ensemble) ── */
+.mis-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 16px 28px 0; }
+.mis-kpi-card {
+  display: flex; align-items: flex-start; gap: 12px; background: var(--bg2);
+  border: 1px solid var(--border2); border-radius: var(--rx); padding: 16px;
+}
+.mis-kpi-ico {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  background: var(--cyan-dim); color: var(--cyan);
+}
+.mis-kpi-card--green  .mis-kpi-ico { background: var(--green-dim);  color: var(--green); }
+.mis-kpi-card--orange .mis-kpi-ico { background: var(--orange-dim); color: var(--orange); }
+.mis-kpi-card--red    .mis-kpi-ico { background: var(--red-dim);    color: var(--red); }
+.mis-kpi-body { flex: 1; min-width: 0; }
+.mis-kpi-n { font-size: 24px; font-weight: 800; font-family: var(--ffm); color: var(--text1); line-height: 1.1; }
+.mis-kpi-l { font-size: 12px; color: var(--text2); font-weight: 600; margin-top: 2px; }
+.mis-kpi-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+.mis-kpi-track { height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.mis-kpi-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--cyan), var(--green)); }
+@media (max-width: 1100px) { .mis-kpi-row { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px)  { .mis-kpi-row { grid-template-columns: 1fr; padding: 12px 16px 0; } }
+
+/* ── Bloc Accès rapide ── */
+.mis-quick { margin: 18px 28px 0; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--rx); padding: 16px; }
+.mis-quick-hd { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.mis-quick-hd > i { width: 34px; height: 34px; border-radius: 10px; background: var(--cyan-dim); color: var(--cyan); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mis-quick-ttl { font-size: 14px; font-weight: 700; color: var(--text1); }
+.mis-quick-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.mis-quick-btns { display: flex; flex-wrap: wrap; gap: 10px; }
+.mis-quick-btn {
+  border: 1px solid var(--border2); background: var(--bg3); color: var(--text1);
+  font-family: var(--ffs); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  border-radius: 10px; padding: 10px 16px; display: inline-flex; align-items: center; gap: 8px;
+  transition: all var(--t);
+}
+.mis-quick-btn:hover { border-color: var(--border3); transform: translateY(-1px); }
+.mis-quick-btn--main { background: var(--cyan); border-color: var(--cyan); color: #fff; }
+.mis-quick-btn--danger { background: var(--red-dim); border-color: var(--red-border); color: var(--red); }
+@media (max-width: 640px) { .mis-quick { margin: 14px 16px 0; } .mis-quick-btns { flex-direction: column; } .mis-quick-btn { justify-content: center; } }
+
+/* ── Aperçu semaine (7 jours, Vue d'ensemble) ── */
+.mis-week-preview { margin: 18px 28px 0; }
+.mis-week-preview-hd { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.mis-week-preview-hd > i { width: 34px; height: 34px; border-radius: 10px; background: var(--cyan-dim); color: var(--cyan); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mis-week-legend { margin-left: auto; display: flex; gap: 12px; font-size: 11px; color: var(--text3); flex-wrap: wrap; }
+.mis-week-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.mis-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.mis-dot--g { background: var(--green); }
+.mis-dot--o { background: var(--orange); }
+.mis-dot--r { background: var(--red); }
+.mis-dot--n { background: var(--text3); }
+.mis-week-preview-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+.mis-day-mini {
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--rx);
+  padding: 14px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.mis-day-mini--today { border-color: var(--cyan-border); background: var(--cyan-dim); box-shadow: 0 0 0 1px var(--cyan-border); }
+.mis-day-mini-name { font-size: 12.5px; font-weight: 700; color: var(--text1); }
+.mis-day-mini-date { font-size: 11px; color: var(--text3); margin-top: -4px; }
+.mis-day-mini-ring {
+  width: 56px; height: 56px; border-radius: 50%; margin: 4px 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--ffm); font-weight: 700; font-size: 13px;
+  background: conic-gradient(var(--ring-c) calc(var(--ring-pct) * 1%), var(--bg4) 0);
+}
+.mis-day-mini-ring span { width: 42px; height: 42px; border-radius: 50%; background: var(--bg2); display: flex; align-items: center; justify-content: center; }
+.mis-day-mini--today .mis-day-mini-ring span { background: var(--bg3); }
+.mis-day-mini-ct { font-size: 11px; color: var(--text2); font-family: var(--ffm); }
+.mis-day-mini-btn {
+  width: 100%; margin-top: 4px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2);
+  font-family: var(--ffs); font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 7px 8px;
+  transition: all var(--t);
+}
+.mis-day-mini-btn:hover { color: var(--text1); border-color: var(--border3); }
+.mis-day-mini-btn--act { background: var(--cyan); border-color: var(--cyan); color: #fff; }
+@media (max-width: 1100px) { .mis-week-preview-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 640px)  { .mis-week-preview { margin: 14px 16px 0; } .mis-week-preview-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Tâches à traiter + Créneaux du jour (Vue d'ensemble) ── */
+.mis-bottom-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin: 18px 28px 0; align-items: start; }
+.mis-todo-card, .mis-slots-card { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--rx); overflow: hidden; }
+.mis-todo-hd {
+  display: flex; align-items: center; gap: 8px; padding: 14px 16px; font-size: 13.5px; font-weight: 700; color: var(--text1);
+  border-bottom: 1px solid var(--border2);
+}
+.mis-todo-hd i { color: var(--cyan); }
+.mis-todo-viewall { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--cyan); cursor: pointer; font-family: var(--ffs); }
+.mis-todo-list { padding: 6px; }
+.mis-todo-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; cursor: pointer; transition: background var(--t);
+}
+.mis-todo-row:hover { background: var(--bg4); }
+.mis-todo-txt { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mis-todo-who { font-size: 11px; color: var(--text2); background: var(--bg4); border-radius: 6px; padding: 2px 8px; flex-shrink: 0; }
+.mis-todo-when { font-size: 10.5px; color: var(--orange); flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; }
+.mis-todo-empty { padding: 20px 16px; text-align: center; font-size: 12.5px; color: var(--text3); }
+.mis-slots-list { padding: 4px 0; }
+@media (max-width: 900px) { .mis-bottom-row { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .mis-bottom-row { margin: 14px 16px 0; } }
+
+/* ── Bandeau de semaines horizontal (Vue d'ensemble) ── */
+.cl-v2-cards--strip { flex-direction: row; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.cl-v2-cards--strip .cl-v2-card { flex: 0 0 240px; scroll-snap-align: start; }
+.cl-v2-cards--strip .cl-v2-card-body { min-height: 72px; padding: 14px 16px; }
+
+/* ── Créneaux repliables (Vue journée, les 3 variantes) ── */
+.mis-slot-chev { color: var(--text3); font-size: 12px; transition: transform var(--t); margin-left: 4px; flex-shrink: 0; }
+.mis-slot-collapsible { display: block; overflow: hidden; }
+.mis-slot-collapsed .mis-slot-chev { transform: rotate(-90deg); }
+.mis-slot-collapsed .mis-slot-collapsible { display: none; }
+
+/* ── 4e carte "En retard" (Vue journée, jour passé) ── */
+.cl-ws-stats--4 { grid-template-columns: repeat(4, 1fr); }
+.cl-ws-stat--late { background: var(--red-dim); }
+.cl-ws-stat--late .cl-ws-stat-n { color: var(--red); }
+
+/* ── Ligne de tâche "en retard" (jour passé, non cochée) / "terminée" (fond discret) ── */
+.cl-ws-tr--late { background: var(--red-dim); }
+.cl-ws-tr--late .cl-ws-tr-stripe { background: var(--red); }
+.cl-ws-tr--done { background: var(--green-dim); }
