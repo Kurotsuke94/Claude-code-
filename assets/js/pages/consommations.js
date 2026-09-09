@@ -3836,32 +3836,30 @@
     }
 
     // ── Monthly bilan table ──
+    // CORRECTIF : ce tableau calculait auparavant "L/client" comme une
+    // MOYENNE des ratios journaliers (somme des ratios / nombre de jours),
+    // ce qui diverge de la consolidation mensuelle réelle dès que le nombre
+    // de clients varie d'un jour à l'autre. Réutilise désormais
+    // _monthlyRealRatio() — le même moteur (totaux du mois, index de
+    // fin − index de début, compteurs généraux configurés) que la carte
+    // "Ratio réel mensuel" juste au-dessus, pour que les deux affichent
+    // toujours la même valeur, recalculée en direct par le même listener.
     function _buildMonthlyTable() {
       var now2d = new Date(today + 'T00:00:00');
       var y2d = now2d.getFullYear();
       var MFULL = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
       var trows = '';
       for (var mo3d = 0; mo3d <= now2d.getMonth(); mo3d++) {
-        var dIM4 = new Date(y2d, mo3d + 1, 0).getDate();
-        var mCli4 = 0, mEau4 = 0, mRS4 = 0, mRC4 = 0;
-        for (var ddd = 1; ddd <= dIM4; ddd++) {
-          if (mo3d === now2d.getMonth() && ddd > now2d.getDate()) break;
-          var dsd = new Date(y2d, mo3d, ddd).toISOString().slice(0, 10);
-          var cl4 = _cliForDate(dsd);
-          if (cl4 > 0) mCli4 += cl4;
-          var eau4 = _perfConso('eau_froide', dsd);
-          if (eau4 !== null) mEau4 += eau4;
-          var rrd = _perfRatio('eau_froide', dsd);
-          if (rrd !== null) { mRS4 += rrd; mRC4++; }
-        }
-        if (!mCli4 && !mEau4) continue;
-        var avgR4 = mRC4 ? Math.round(mRS4 / mRC4) : null;
+        var monthKey4 = y2d + '-' + String(mo3d + 1).padStart(2, '0');
+        var res4 = _monthlyRealRatio('eau_froide', monthKey4);
+        if (res4.clients === null && res4.conso === null) continue;
+        var avgR4 = res4.ratio !== null ? Math.round(res4.ratio) : null;
         var grade4 = avgR4 !== null ? _getGrade('eau_froide', avgR4) : null;
         var col4 = grade4 ? ((c[grade4.key] || {}).color || '#64748b') : '#64748b';
         trows += '<tr>' +
           '<td class="pe-mt-month">' + MFULL[mo3d] + '</td>' +
-          '<td class="pe-mt-val">' + (mCli4 > 0 ? mCli4.toLocaleString('fr-FR') : '—') + '</td>' +
-          '<td class="pe-mt-val">' + (mEau4 > 0 ? _fmt(mEau4, 1) + ' m³' : '—') + '</td>' +
+          '<td class="pe-mt-val">' + (res4.clients !== null ? res4.clients.toLocaleString('fr-FR') : '—') + '</td>' +
+          '<td class="pe-mt-val">' + (res4.conso !== null ? _fmt(res4.conso, 1) + ' m³' : '—') + '</td>' +
           '<td class="pe-mt-val" style="color:' + col4 + ';font-weight:700">' + (avgR4 !== null ? avgR4 : '—') + '</td>' +
           '<td class="pe-mt-val">' + (grade4 && grade4.key !== 'na' ? gradeBadge(grade4.key) : '—') + '</td>' +
           '</tr>';
@@ -3952,17 +3950,12 @@
     // affiche "Non configuré" — jamais une valeur par défaut inventée.
     const objCfg = _perfCfg.objectifs || {};
     // Compute monthly average ratios (current month, days 1 to today)
+    // CORRECTIF : calculait auparavant une MOYENNE des ratios journaliers
+    // du mois (somme des ratios / nombre de jours) — remplacé par la même
+    // consolidation par totaux que _monthlyRealRatio() (totaux mensuels,
+    // pas une moyenne), pour cohérence avec la carte "Ratio réel mensuel".
     function _monthAvgRatio(type) {
-      const now = new Date(today + 'T00:00:00');
-      const daysThisMonth = now.getDate(); // day of month (1-based)
-      let sum = 0, cnt = 0;
-      for (let d = 1; d <= daysThisMonth; d++) {
-        const dt = new Date(now.getFullYear(), now.getMonth(), d);
-        const ds = dt.toISOString().slice(0, 10);
-        const r  = _perfRatio(type, ds);
-        if (r !== null) { sum += r; cnt++; }
-      }
-      return cnt ? sum / cnt : null;
+      return _monthlyRealRatio(type, today.slice(0, 7)).ratio;
     }
     let objRows = '';
     typeBreakdown.forEach(function({ type: ot, meta: mt, ratio: ratioToday, grade: gradeToday }) {
