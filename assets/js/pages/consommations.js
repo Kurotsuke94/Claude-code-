@@ -298,6 +298,20 @@
   }
   function _tsDate(ts) { const ms = _tsMs(ts); return ms ? new Date(ms) : null; }
 
+  // CORRECTIF (classement des relevés rétroactifs) : comparateur pour
+  // trier des relevés par DATE RÉELLE du relevé (`date`, choisie par
+  // l'utilisateur), du plus récent au plus ancien — jamais par `createdAt`
+  // (date de saisie), qui ne sert qu'en second critère pour départager deux
+  // relevés de la même date réelle (ex : correction saisie le même jour).
+  // À utiliser partout où `_readings` est affiché/consulté comme historique
+  // chronologique — le tableau `_readings` lui-même reste ordonné par
+  // `createdAt desc` (ordre du listener Firestore, ligne ~1033), qui ne
+  // reflète PAS la date réelle dès qu'un relevé est saisi en retard.
+  function _cmpReadingDateDesc(a, b) {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return _tsMs(b.createdAt) - _tsMs(a.createdAt);
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   // MOTEUR DE CALCUL COMMUN — MX.CsoCalc
   // Fonctions pures (aucun accès Firestore, aucune lecture de l'état module
@@ -912,8 +926,12 @@
     // Volontairement retiré d'ici pour éviter un double calcul/double alerte.
 
     // Compteur sans relevé récent
+    // CORRECTIF : mR[0] doit être le relevé le plus récent par DATE RÉELLE,
+    // pas le plus récemment saisi (sinon un relevé rétroactif ancien, saisi
+    // en dernier, fait croire à tort que le compteur n'a pas été relevé
+    // depuis longtemps).
     _meters.forEach(m => {
-      const mR = _readings.filter(r => r.meterId === m.id);
+      const mR = _readings.filter(r => r.meterId === m.id).sort(_cmpReadingDateDesc);
       if (!mR.length) {
         alerts.push({ type: 'sans_releve', level: 'warning', metric: m.type, title: 'Compteur sans relevé', msg: `${m.name} — aucun relevé`, zone: m.location || '' });
       } else {
@@ -924,8 +942,10 @@
     });
 
     // Compteur bloqué (même index sur 2 relevés)
+    // CORRECTIF : les "2 derniers relevés" doivent être les 2 chronologiquement
+    // les plus récents par date réelle, pas les 2 derniers saisis.
     _meters.forEach(m => {
-      const mR = _readings.filter(r => r.meterId === m.id).slice(0, 3);
+      const mR = _readings.filter(r => r.meterId === m.id).sort(_cmpReadingDateDesc).slice(0, 3);
       if (mR.length >= 2 && mR[0].index != null && mR[0].index === mR[1].index) {
         alerts.push({ type: 'bloque', level: 'warning', metric: m.type, title: 'Compteur bloqué', msg: `${m.name} — index identique sur les 2 derniers relevés`, zone: m.location || '' });
       }
@@ -5545,7 +5565,9 @@
     if (!m) return;
     const meta = MT[m.type] || MT.eau_froide;
     const unit = m.unit || meta.unit;
-    const mReadings = _readings.filter(r => r.meterId === id).slice(0, 30);
+    // CORRECTIF : trié par date RÉELLE du relevé (pas par ordre de saisie)
+    // pour qu'un relevé rétroactif reprenne sa place chronologique exacte.
+    const mReadings = _readings.filter(r => r.meterId === id).sort(_cmpReadingDateDesc).slice(0, 30);
     let rows = '';
     if (!mReadings.length) {
       rows = '<div style="text-align:center;color:var(--text3);padding:28px 0">Aucun relevé enregistré</div>';
@@ -5649,8 +5671,16 @@
     const m = _meters.find(x => x.id === meterId);
     if (!m) return;
 
-    const prev = _readings.find(r => r.meterId === meterId && r.date <= dateStr && r.index < index)
-              || _readings.find(r => r.meterId === meterId);
+    // CORRECTIF : pour un relevé rétroactif, le relevé précédent doit être
+    // celui qui le précède CHRONOLOGIQUEMENT (date réelle, puis createdAt en
+    // second critère pour une même date) — jamais le dernier relevé SAISI
+    // (`_readings.find` sur un tableau ordonné par createdAt). Cette valeur
+    // n'est qu'une estimation immédiate (toast + valeur initiale du
+    // document) ; recalculateConsumption() ci-dessous reste la source
+    // faisant autorité et recalcule déjà tout le compteur dans le bon ordre.
+    const prev = _readings
+      .filter(r => r.meterId === meterId && r.date <= dateStr && r.index != null)
+      .sort(_cmpReadingDateDesc)[0] || null;
     const consumption = (prev && prev.index <= index) ? Math.round((index - prev.index) * 1000) / 1000 : null;
 
     const expAt = new Date(); expAt.setDate(expAt.getDate() + 7);
