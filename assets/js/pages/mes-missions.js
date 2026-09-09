@@ -10,6 +10,7 @@
   var _pendingSignal  = null;
   var _activeFilter   = 'all';    // 'all' | 'urgent' | 'retard' | 'done' | 'todo'
   var _searchQuery    = '';
+  var _filtersOpen    = false;    // affichage/masquage du panneau de filtres (REFONTE)
   var _pmpSubTab      = 'today';  // 'today' | 'upcoming' | 'inprogress' | 'urgent'
   var _upcomingRange  = 7;        // 7 | 15 | 30
   var _lastConfettiAt = 0;
@@ -59,10 +60,14 @@
     urgence:      '#ef4444',
   };
 
+  // REFONTE VUE TECHNICIEN : libellés d'horaires alignés sur ceux affichés
+  // côté admin/responsable (checklist.js, _slotTimes) pour cohérence visuelle
+  // — uniquement l'affichage (`sub`) ; `MX.SLOTS`/`getDaySlots` (logique
+  // métier réelle des créneaux) ne sont pas touchés.
   var SLOT_INFO = {
-    matin:   { l: 'Matin',       sub: 'avant 13h',     icon: '☀️',  time: '08:00', order: 1 },
-    journee: { l: 'Après-midi',  sub: '13h – 18h',     icon: '🌤',  time: '13:00', order: 2 },
-    soir:    { l: 'Soir',        sub: 'fin de service', icon: '🌙',  time: '18:00', order: 3 },
+    matin:   { l: 'Matin',       sub: '08h00 – 16h30', icon: '☀️',  time: '08:00', order: 1 },
+    journee: { l: 'Après-midi',  sub: '10h00 – 18h30', icon: '🌤',  time: '13:00', order: 2 },
+    soir:    { l: 'Soir',        sub: '13h00 – 21h30', icon: '🌙',  time: '18:00', order: 3 },
   };
 
   // ══════════════════════════════════════════════
@@ -619,6 +624,10 @@
     var doneCount   = myMissions.filter(function (t) { return t.done; }).length;
     var todoCount   = myMissions.filter(function (t) { return !t.done; }).length;
     var urgentCount = myMissions.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; }).length;
+    // REFONTE : "En cours" / "En retard" réutilisent getMissionStatus() déjà
+    // existant (aucun nouveau calcul de statut) pour les 4 cartes KPI.
+    var progressCount = myMissions.filter(function (t) { return getMissionStatus(t) === 'progress'; }).length;
+    var lateCount     = myMissions.filter(function (t) { return getMissionStatus(t) === 'late'; }).length;
     var newCount    = newMissions.length;
     var pct         = totalCount ? Math.round(doneCount / totalCount * 100) : 0;
     var pctCol      = pct >= 80 ? TC.checklist : pct >= 40 ? '#f97316' : TC.intervention;
@@ -638,6 +647,22 @@
       return (m.isPmp || m.missionType === 'pmp') && !m.done && _isNew(m.id);
     }).length;
 
+    // ── REFONTE : données de la colonne latérale (calculées une seule fois,
+    // indépendamment de l'onglet actif, à partir des données déjà chargées —
+    // aucune nouvelle requête Firestore) ──
+    var sideSlots = ['matin', 'journee', 'soir'].map(function (slotKey) {
+      var si = SLOT_INFO[slotKey];
+      var slotTasks = checklistTasks.filter(function (t) { return t.slot === slotKey && t.mine; });
+      var slotDone  = slotTasks.filter(function (t) { return t.done; }).length;
+      return { key: slotKey, si: si, total: slotTasks.length, done: slotDone };
+    });
+    var sideUrgentPmp = myMissions.filter(function (t) {
+      return t.missionType === 'pmp' && !t.done && getMissionStatus(t) === 'late';
+    }).length;
+    var sideUrgentInt = myMissions.filter(function (t) {
+      return t.missionType === 'intervention' && !t.done && (t.priority === 'haute' || t.priority === 'critique');
+    }).length;
+
     // Hero info
     var nc    = MX.userColors ? MX.userColors(cu.name) : { bg: 'var(--cyan)', fg: '#fff' };
     var avBg  = cu.color || nc.bg;
@@ -653,12 +678,14 @@
     // ── Confetti canvas ─────────────────────────
     h += '<canvas id="mm-confetti-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none"></canvas>';
 
+    h += '<div class="mtv-layout"><div class="mtv-main">';
+
     // ── Hero ──────────────────────────────────────
-    h += '<div class="mm-v3-hero">'
+    h += '<div class="mm-v3-hero mtv-hero">'
       + '<div class="mm-v3-hero-av" style="background:' + avBg + ';color:' + avFg + '">' + e(inits) + '</div>'
       + '<div class="mm-v3-hero-txt">'
       + '<div class="mm-v3-hero-greet">' + e(greet) + ', <strong>' + e(fname) + '</strong> 👋</div>'
-      + '<div class="mm-v3-hero-date">' + e(dateStr) + '</div>'
+      + '<div class="mm-v3-hero-date">Voici vos missions du ' + e(dateStr.charAt(0).toLowerCase() + dateStr.slice(1)) + '.</div>'
       + '</div>';
     if (ru.points !== undefined || ru.streak) {
       h += '<div class="mm-v3-hero-xp">';
@@ -667,42 +694,36 @@
       if (ru.streak) h += '<div class="mm-v3-xp-streak"><span>🔥</span><span class="mm-v3-xp-val">' + ru.streak + '</span><span class="mm-v3-xp-lbl">j</span></div>';
       h += '</div>';
     }
+    h += '<button class="mtv-today-btn" onclick="MX.MM.render()"><i class="fas fa-calendar-day"></i> Aujourd\'hui</button>';
     h += '</div>';
 
-    // ── Stats bar ─────────────────────────────────
-    var dashFill = Math.round(pct);
-    h += '<div class="mm-v3-stats">'
-      + '<div class="mm-v3-stat"><span class="mm-v3-stat-val">' + totalCount + '</span><span class="mm-v3-stat-lbl">Total</span></div>'
-      + '<div class="mm-v3-stat mm-v3-stat--done"><span class="mm-v3-stat-val" style="color:' + TC.checklist + '">' + doneCount + '</span><span class="mm-v3-stat-lbl">Terminées</span></div>'
-      + '<div class="mm-v3-stat"><span class="mm-v3-stat-val">' + todoCount + '</span><span class="mm-v3-stat-lbl">À faire</span></div>'
-      + '<div class="mm-v3-stat mm-v3-stat--urg"><span class="mm-v3-stat-val" style="color:' + TC.urgence + '">' + urgentCount + '</span><span class="mm-v3-stat-lbl">Urgentes</span></div>'
-      + '<div class="mm-v3-stat mm-v3-stat--prog">'
-      + '<div class="mm-v3-donut-wrap">'
-      + '<svg viewBox="0 0 36 36" class="mm-v3-donut">'
-      + '<circle class="mm-v3-donut-bg" cx="18" cy="18" r="15.9"/>'
-      + '<circle class="mm-v3-donut-fill" cx="18" cy="18" r="15.9" style="stroke:' + pctCol + ';stroke-dasharray:' + dashFill + ' ' + (100 - dashFill) + '"/>'
-      + '</svg>'
-      + '<span class="mm-v3-donut-pct" style="color:' + pctCol + '">' + pct + '%</span>'
-      + '</div>'
-      + '<span class="mm-v3-stat-lbl">Progression</span>'
-      + '</div>'
+    // ── KPI cards (réutilise le style admin .mis-kpi-*) ──
+    h += '<div class="mis-kpi-row mtv-kpi-row">'
+      + '<div class="mis-kpi-card mis-kpi-card--main"><div class="mis-kpi-ico"><i class="fas fa-list-check"></i></div>'
+      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + todoCount + '</div><div class="mis-kpi-l">Tâches à réaliser</div><div class="mis-kpi-sub">aujourd\'hui</div></div></div>'
+      + '<div class="mis-kpi-card mis-kpi-card--green"><div class="mis-kpi-ico"><i class="fas fa-check"></i></div>'
+      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + doneCount + '</div><div class="mis-kpi-l">Terminées</div><div class="mis-kpi-sub">aujourd\'hui</div></div></div>'
+      + '<div class="mis-kpi-card mis-kpi-card--orange"><div class="mis-kpi-ico"><i class="fas fa-clock"></i></div>'
+      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + progressCount + '</div><div class="mis-kpi-l">En cours</div></div></div>'
+      + '<div class="mis-kpi-card mis-kpi-card--red"><div class="mis-kpi-ico"><i class="fas fa-triangle-exclamation"></i></div>'
+      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + lateCount + '</div><div class="mis-kpi-l">En retard</div><div class="mis-kpi-sub">à traiter</div></div></div>'
       + '</div>';
 
-    // ── 4-Tab navigation ──────────────────────────
+    // ── 4-Tab navigation (Tout / Missions / PMP / Interventions) ──
     var TABS = [
-      { id: 'checklist',    icon: '✅',  l: 'Missions',      count: clCount,   badge: 0,         col: TC.checklist    },
-      { id: 'intervention', icon: '🔧',  l: 'Interventions', count: intCount,  badge: unseenInt, col: TC.intervention },
-      { id: 'pmp',          icon: '🛠️',  l: 'PMP',           count: pmpCount,  badge: unseenPmp, col: TC.pmp          },
-      { id: 'tout',         icon: '📋',  l: 'TOUT',          count: toutCount, badge: 0,         col: '#64748B'       },
+      { id: 'tout',         icon: 'fa-table-cells-large', l: 'Tout',          count: toutCount, badge: 0,         col: 'var(--cyan)'  },
+      { id: 'checklist',    icon: 'fa-clipboard-check',   l: 'Missions',      count: clCount,   badge: 0,         col: TC.checklist    },
+      { id: 'pmp',          icon: 'fa-screwdriver-wrench',l: 'PMP',           count: pmpCount,  badge: unseenPmp, col: TC.pmp          },
+      { id: 'intervention', icon: 'fa-wrench',            l: 'Interventions', count: intCount,  badge: unseenInt, col: TC.intervention },
     ];
-    h += '<div class="mm-v3-tabs">';
+    h += '<div class="mtv-tabs">';
     TABS.forEach(function (tab) {
       var active = _activeTab === tab.id;
-      h += '<button class="mm-v3-tab' + (active ? ' mm-v3-tab--active' : '') + '"'
-        + (active ? ' style="border-bottom-color:' + tab.col + ';color:' + tab.col + '"' : '')
+      h += '<button class="mtv-tab' + (active ? ' mtv-tab--active' : '') + '"'
+        + (active ? ' style="background:' + tab.col + '"' : ' style="--tab-col:' + tab.col + '"')
         + ' onclick="MX.MM.setTab(\'' + tab.id + '\')">'
-        + tab.icon + ' ' + e(tab.l)
-        + '<span class="mm-v3-tab-ct">' + tab.count + '</span>'
+        + '<i class="fas ' + tab.icon + '"></i><span>' + e(tab.l) + '</span>'
+        + '<span class="mtv-tab-ct">' + tab.count + '</span>'
         + (tab.badge > 0 ? '<span class="mm-v3-tab-badge">' + tab.badge + '</span>' : '')
         + '</button>';
     });
@@ -718,26 +739,33 @@
       h += '</div></div>';
     }
 
-    // ── Toolbar: search + filter pills ────────────
+    // ── Toolbar: search + Filtres + filter pills ──
     h += '<div class="mm-v3-toolbar">'
+      + '<div class="mtv-toolbar-row">'
       + '<div class="mm-v3-search-wrap">'
       + '<i class="fas fa-magnifying-glass mm-v3-search-ico"></i>'
-      + '<input class="mm-v3-search-inp" type="text" placeholder="Rechercher une mission…" value="' + e(_searchQuery) + '" oninput="MX.MM._doMmSearch(this.value)">'
+      + '<input class="mm-v3-search-inp" type="text" placeholder="Rechercher une tâche…" value="' + e(_searchQuery) + '" oninput="MX.MM._doMmSearch(this.value)">'
       + (_searchQuery ? '<button class="mm-v3-search-clr" onclick="MX.MM._doMmSearch(\'\')" title="Effacer"><i class="fas fa-times"></i></button>' : '')
+      + '</div>'
+      + '<button class="mtv-filters-btn' + (_filtersOpen || _activeFilter !== 'all' ? ' mtv-filters-btn--active' : '') + '" onclick="MX.MM.toggleFilters()">'
+      + '<i class="fas fa-sliders"></i> Filtres' + (_activeFilter !== 'all' ? ' <span class="mtv-filters-dot"></span>' : '') + '</button>'
       + '</div>';
-    var FILTERS = [
-      { id: 'all',    l: 'Toutes'    },
-      { id: 'urgent', l: 'Urgent'    },
-      { id: 'retard', l: 'En retard' },
-      { id: 'todo',   l: 'À faire'   },
-      { id: 'done',   l: 'Terminées' },
-    ];
-    h += '<div class="mm-v3-filter-pills">';
-    FILTERS.forEach(function (f) {
-      var act = _activeFilter === f.id;
-      h += '<button class="mm-v3-fp' + (act ? ' mm-v3-fp--active' : '') + '" onclick="MX.MM.setMmFilter(\'' + f.id + '\')">' + e(f.l) + '</button>';
-    });
-    h += '</div></div>';
+    if (_filtersOpen) {
+      var FILTERS = [
+        { id: 'all',    l: 'Toutes'    },
+        { id: 'urgent', l: 'Urgent'    },
+        { id: 'retard', l: 'En retard' },
+        { id: 'todo',   l: 'À faire'   },
+        { id: 'done',   l: 'Terminées' },
+      ];
+      h += '<div class="mm-v3-filter-pills">';
+      FILTERS.forEach(function (f) {
+        var act = _activeFilter === f.id;
+        h += '<button class="mm-v3-fp' + (act ? ' mm-v3-fp--active' : '') + '" onclick="MX.MM.setMmFilter(\'' + f.id + '\')">' + e(f.l) + '</button>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
 
     // ── Content ───────────────────────────────────
     h += '<div class="mm-v3-content">';
@@ -1057,6 +1085,12 @@
       var toutAll      = myMissions;
       var hasToutContent = false;
 
+      h += '<div class="mtv-content-hd">'
+        + '<span class="mtv-content-hd-ico">📌</span>'
+        + '<div><div class="mtv-content-hd-ttl">Mes tâches du jour</div>'
+        + '<div class="mtv-content-hd-sub">' + toutAll.length + ' tâche' + (toutAll.length !== 1 ? 's' : '') + ' · ' + e(dateStr) + '</div></div>'
+        + '</div>';
+
       // Build card map once for all event handlers (also includes noSlot items)
       _buildToutCardMap(toutAll);
 
@@ -1138,6 +1172,55 @@
     }
 
     h += '</div>'; // mm-v3-content
+    h += '</div>'; // mtv-main
+
+    // ── Colonne latérale (desktop) — passe sous le contenu en mobile ──
+    h += '<aside class="mtv-side">'
+      + '<div class="mtv-side-section">'
+      + '<div class="mtv-side-hd"><i class="fas fa-calendar-day"></i><span>Journée du jour</span></div>'
+      + '<div class="mtv-side-prog-track"><div class="mtv-side-prog-fill" style="width:' + pct + '%;background:' + pctCol + '"></div></div>'
+      + '<div class="mtv-side-stats">'
+      + '<div class="mtv-side-stat"><strong style="color:' + TC.checklist + '">' + doneCount + '</strong><span>Terminées</span></div>'
+      + '<div class="mtv-side-stat"><strong style="color:' + TC.urgence + '">' + todoCount + '</strong><span>Restantes</span></div>'
+      + '<div class="mtv-side-stat"><strong>' + totalCount + '</strong><span>Total</span></div>'
+      + '</div></div>';
+
+    h += '<div class="mtv-side-section">'
+      + '<div class="mtv-side-hd"><i class="fas fa-layer-group"></i><span>Créneaux</span></div>';
+    sideSlots.forEach(function (s) {
+      h += '<div class="mtv-side-slot" onclick="MX.MM.setTab(\'checklist\')">'
+        + '<span class="mtv-side-slot-ico">' + s.si.icon + '</span>'
+        + '<div class="mtv-side-slot-info"><span class="mtv-side-slot-lbl">' + e(s.si.l) + '</span><span class="mtv-side-slot-time">' + e(s.si.sub) + '</span></div>'
+        + '<span class="mtv-side-slot-ct">' + s.done + '/' + s.total + '</span>'
+        + '<i class="fas fa-chevron-right mtv-side-slot-chev"></i>'
+        + '</div>';
+    });
+    h += '</div>';
+
+    if (sideUrgentInt > 0 || sideUrgentPmp > 0) {
+      h += '<div class="mtv-side-section">'
+        + '<div class="mtv-side-hd"><i class="fas fa-triangle-exclamation" style="color:' + TC.urgence + '"></i><span>À traiter en priorité</span></div>';
+      if (sideUrgentPmp > 0) {
+        h += '<div class="mtv-side-alert" onclick="MX.MM.setTab(\'pmp\')">'
+          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentPmp + '</span>'
+          + '<span>PMP en retard</span><i class="fas fa-chevron-right"></i></div>';
+      }
+      if (sideUrgentInt > 0) {
+        h += '<div class="mtv-side-alert" onclick="MX.MM.setTab(\'intervention\')">'
+          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentInt + '</span>'
+          + '<span>Intervention' + (sideUrgentInt > 1 ? 's' : '') + ' urgente' + (sideUrgentInt > 1 ? 's' : '') + '</span><i class="fas fa-chevron-right"></i></div>';
+      }
+      h += '</div>';
+    }
+    h += '</aside>';
+    h += '</div>'; // mtv-layout
+
+    // ── Bandeau motivant ──
+    h += '<div class="mtv-banner">'
+      + '<i class="fas fa-screwdriver-wrench"></i>'
+      + '<span>Un site bien entretenu, c\'est un environnement plus sûr pour tous.</span>'
+      + '<button class="mtv-banner-btn" onclick="MX.MM.render()"><i class="fas fa-sun"></i> Bonne journée !</button>'
+      + '</div>';
 
     // Hidden file inputs
     h += '<input type="file" id="mm-ph-in" accept="image/*" capture="environment" style="display:none" onchange="MX.MM._onPh(this)">';
@@ -3341,6 +3424,8 @@
 
   function setMmFilter(f) { _activeFilter = f; render(); }
 
+  function toggleFilters() { _filtersOpen = !_filtersOpen; render(); }
+
   function _doMmSearch(q) { _searchQuery = q || ''; render(); }
 
   function setTab(tab) {
@@ -3475,7 +3560,7 @@
   window.MX.Pages.MesMissions = {
     render: render, setFilter: setFilter, setTab: setTab,
     setPmpSubTab: setPmpSubTab, setUpcomingRange: setUpcomingRange,
-    setMmFilter: setMmFilter, _doMmSearch: _doMmSearch,
+    setMmFilter: setMmFilter, _doMmSearch: _doMmSearch, toggleFilters: toggleFilters,
     toggle: toggle, prendre: prendre,
     photo: photo, _onPh: _onPh, signal: signal, _doSignal: _doSignal,
     _acceptMission: _acceptMission,
