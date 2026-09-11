@@ -3673,14 +3673,19 @@
       const hasRatio = dailyRatios.length > 0;
       const avgRatio = hasRatio ? average(dailyRatios) : null;
       const rUnit = isW(type) ? 'L/client' : `${unit}/client`;
+      // data-label sur chaque <td> : utilisé UNIQUEMENT par le CSS mobile
+      // (::before{content:attr(data-label)}) pour reconstituer visuellement
+      // les intitulés de colonnes quand le tableau est reformaté en cartes
+      // verticales sur petit écran — aucune valeur, aucun calcul modifié,
+      // le <thead> desktop reste la seule source de ces libellés à l'écran.
       compRows += `<tr>
         <td class="pe-comp-per">${meta.icon} ${e(meta.label)}</td>
-        <td>${hasReading ? `${_fmt(total)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
-        <td>${hasPrevReading ? `${_fmt(prevTotal)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
-        <td>${absDelta !== null ? `${absDelta >= 0 ? '+' : ''}${_fmt(absDelta)} ${e(unit)}` : '—'}</td>
-        <td>${pct !== null ? `${pct > 0 ? '+' : ''}${_fmt(pct, 1)}%` : '—'}</td>
-        <td>${hasRatio ? `${_fmt(avgRatio, isW(type) ? 0 : 2)} ${rUnit}` : '—'}</td>
-        <td>${statusPill(status)}</td>
+        <td data-label="Période">${hasReading ? `${_fmt(total)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
+        <td data-label="Période préc.">${hasPrevReading ? `${_fmt(prevTotal)} ${e(unit)}` : '<span class="pe-hist-nd">Aucun relevé</span>'}</td>
+        <td data-label="Écart abs.">${absDelta !== null ? `${absDelta >= 0 ? '+' : ''}${_fmt(absDelta)} ${e(unit)}` : '—'}</td>
+        <td data-label="Évolution">${pct !== null ? `${pct > 0 ? '+' : ''}${_fmt(pct, 1)}%` : '—'}</td>
+        <td data-label="Ratio/client">${hasRatio ? `${_fmt(avgRatio, isW(type) ? 0 : 2)} ${rUnit}` : '—'}</td>
+        <td data-label="Statut">${statusPill(status)}</td>
       </tr>`;
     });
     const perfPerBtns = [

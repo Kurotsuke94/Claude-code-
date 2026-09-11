@@ -17303,6 +17303,55 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pe-comp-table td { padding: 7px 10px; border-bottom: 1px solid var(--border1); font-family: 'Space Mono', monospace; font-size: 12px; }
 .pe-comp-per { color: var(--text2); font-family: inherit; font-weight: 600; }
 
+/* ── Comparaison par type — reflow mobile en cartes verticales ──────────
+   Aucune colonne supprimée, aucune valeur modifiée : chaque <td> garde
+   exactement la même donnée, seul l'agencement visuel change (table ->
+   liste de lignes libellé/valeur), via les data-label déjà posés sur
+   chaque cellule côté JS (_tPerformance/compRows). ── */
+@media (max-width: 620px) {
+  .pe-comp-table-wrap { overflow-x: visible; }
+  .pe-comp-table, .pe-comp-table thead, .pe-comp-table tbody,
+  .pe-comp-table tr, .pe-comp-table td {
+    display: block; width: 100%;
+  }
+  .pe-comp-table thead { display: none; }
+  .pe-comp-table tr {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 4px 12px; margin-bottom: 10px;
+  }
+  .pe-comp-table tr:last-child { margin-bottom: 0; }
+  .pe-comp-table td {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border1);
+    font-size: 13px; white-space: normal; text-align: right;
+  }
+  .pe-comp-table td:last-child { border-bottom: none; }
+  .pe-comp-table td[data-label]::before {
+    content: attr(data-label);
+    font-family: var(--ffs, inherit); font-weight: 600; color: var(--text3);
+    text-align: left; flex-shrink: 0; margin-right: 10px;
+  }
+  .pe-comp-table td.pe-comp-per {
+    display: block; text-align: left;
+    font-size: 14px; padding: 10px 0 7px;
+    border-bottom: 1px solid var(--border2);
+  }
+}
+
+/* ── Comparaison par type — boutons de période (Aujourd'hui/7 jours/Mois
+   en cours) : défilement horizontal propre si leur largeur cumulée
+   dépasse l'écran, sans jamais faire déborder la page. Scopé à cette
+   carte uniquement (Supervision réutilise les mêmes classes ailleurs et
+   n'est pas concerné par cette refonte). ── */
+@media (max-width: 620px) {
+  .pe-v4-sec--comp .cso-chart2-per {
+    flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding-bottom: 2px;
+  }
+  .pe-v4-sec--comp .cso-chart2-per::-webkit-scrollbar { display: none; }
+  .pe-v4-sec--comp .cso-per-btn { flex-shrink: 0; white-space: nowrap; }
+}
+
 /* Forecasts */
 .pe-fc-sub-hd { font-size: 11px; color: var(--text3); margin-bottom: 10px; margin-top: -6px; }
 .pe-fc-list { display: flex; flex-direction: column; gap: 10px; }
@@ -17794,7 +17843,18 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 /* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 1180px) {
-  .pe-v4-layout { flex-direction: column; }
+  /* CORRECTIF (mobile/tablette) : .pe-v4-layout garde align-items:flex-start
+     en desktop (2 colonnes côte à côte, pour ne pas étirer la sidebar plus
+     courte à la hauteur du contenu principal). Une fois basculé en colonne
+     ici, cet "flex-start" devient un axe TRANSVERSE horizontal : sans
+     stretch, .pe-v4-main se dimensionne alors sur le contenu le moins
+     compressible qu'il contient (ex. le tableau "Comparaison par type"),
+     largement plus large que l'écran — #main-content masque cet excédent
+     en silence (overflow-x:hidden), ce qui coupait visuellement le cercle
+     du Score énergétique et d'autres blocs sans jamais déclencher de
+     scrollbar. "stretch" (valeur par défaut) restaure la largeur réelle du
+     conteneur pour .pe-v4-main/.pe-v4-sidebar — aucun changement desktop. */
+  .pe-v4-layout { flex-direction: column; align-items: stretch; }
   .pe-v4-sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; }
   .pe-v4-sw { flex: 1; min-width: 220px; }
 }
