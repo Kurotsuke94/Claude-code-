@@ -211,7 +211,13 @@
       var key    = todayId + '_' + slot;
       var tasks  = state.tasks[key] || [];
       var claims = state.dailyClaims || {};
-      var slotAssignee = (claims[slot] && claims[slot].name) || state.assignments[key] || '';
+      // CORRECTIF (Planning ≠ prise de créneau) : la propriété du créneau
+      // DU JOUR ne doit dépendre que de dailyClaims (écrit uniquement par
+      // claimSlot/unclaimSlot/assignToday). state.assignments est une
+      // pré-affectation HEBDOMADAIRE posée à l'avance par un responsable
+      // (menu déroulant Vue journée admin, parfois suggérée par le
+      // Planning) — elle ne doit jamais valoir "créneau pris" ici.
+      var slotAssignee = (claims[slot] && claims[slot].name) || '';
       var si = SLOT_INFO[slot] || { order: 9 };
 
       tasks.forEach(function (task) {
@@ -782,8 +788,11 @@
         var claim      = claims[slotKey] || {};
         var claimName  = claim.name || '';
         var lockedBy   = claim.lockedBy || '';
-        var weekAsgn   = (MX.state.assignments || {})[todayDayId + '_' + slotKey] || '';
-        var effective  = claimName || weekAsgn;
+        // CORRECTIF (Planning ≠ prise de créneau) : un créneau n'est
+        // "pris" que via dailyClaims (claimSlot/unclaimSlot/assignToday),
+        // jamais via la pré-affectation hebdomadaire state.assignments —
+        // voir la même correction dans _getChecklistTasks() ci-dessus.
+        var effective  = claimName;
         var isMine     = effective === cu.name;
 
         if (isMine) myClaims++;
