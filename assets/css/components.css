@@ -5895,12 +5895,41 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   }
   .cso-zone-hd { align-items: flex-start; }
   .cso-zone-hd-left { align-items: flex-start; }
-  .cso-v2-hero { padding: 14px; gap: 10px; }
+  /* Le header topbar mobile est fixe (.topbar) : marge de respiration pour
+     que le nouveau bandeau titre/date ne colle jamais dessous. */
+  .cso-v2-hero { margin-top: 10px; padding: 14px; gap: 10px; }
   .cso-v2-hero-ico { width: 42px; height: 42px; font-size: 18px; }
   .cso-v2-hero-ttl { font-size: 16px; }
   .cso-v2-ratio-card { padding: 14px; }
   .cso-v2-ratio-val { font-size: 26px; }
-  .cso-v2-mcard-name { font-size: 13.5px; }
+
+  /* Chips de filtre : buffer à droite pour que le dernier chip ne semble
+     jamais "coupé" pile au bord de l'écran (le scroll horizontal reste
+     inchangé, overflow-x:auto + scrollbar masquée, déjà en place). */
+  .cso-fchips { padding-right: 8px; }
+
+  /* Carte compteur : nom/index toujours lisibles en entier (jamais
+     d'ellipsis, retour à la ligne autorisé), hauteur de carte resserrée. */
+  .cso-v2-mcard { padding: 12px; gap: 8px; }
+  .cso-v2-mcard-top { gap: 8px; }
+  .cso-v2-mcard-ico { width: 36px; height: 36px; font-size: 16px; }
+  .cso-v2-mcard-name {
+    font-size: 13.5px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+  .cso-v2-mcard-idx {
+    font-size: 12.5px;
+    line-height: 1.4;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .cso-v2-mcard-acts { gap: 6px; }
+  .cso-v2-mcard-cam { padding: 9px; font-size: 12.5px; }
+  .cso-v2-mcard-more { width: 38px; height: 38px; flex-shrink: 0; }
 }
 
 /* ══════════════════════════════════════════════════════
