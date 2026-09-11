@@ -5784,12 +5784,123 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .cso-add-meter-btn:hover { border-color: #34d399; color: #34d399; background: rgba(52,211,153,0.06); }
 
+/* ══════════════════════════════════════════════════════
+   COMPTEURS & RATIOS — REFONTE VISUELLE (header + Ratio du
+   jour + cartes compteur verticales). Aucune donnée ni
+   fonction : uniquement présentation.
+══════════════════════════════════════════════════════ */
+
+/* ── Header de page ── */
+.cso-v2-hero {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: var(--rx); padding: 16px;
+}
+.cso-v2-hero-ico {
+  width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cyan-dim); color: var(--cyan); font-size: 20px;
+}
+.cso-v2-hero-txt { flex: 1; min-width: 160px; }
+.cso-v2-hero-ttl { font-size: 18px; font-weight: 800; color: var(--text1); line-height: 1.2; }
+.cso-v2-hero-sub { font-size: 12.5px; color: var(--text3); margin-top: 2px; }
+.cso-v2-hero-today {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  border: 1px solid var(--cyan-border); background: var(--cyan-dim); color: var(--cyan);
+  border-radius: 12px; padding: 8px 14px; cursor: pointer; transition: all 0.15s;
+  flex-shrink: 0; font-family: var(--ffs);
+}
+.cso-v2-hero-today:hover { background: var(--cyan); color: #fff; }
+.cso-v2-hero-today-lbl { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cso-v2-hero-today-date { font-size: 11px; opacity: 0.85; font-family: var(--ffm); }
+
+/* ── Carte "Ratio du jour" ── */
+.cso-v2-ratio-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: var(--rx); padding: 16px;
+}
+.cso-v2-ratio-lead { display: flex; align-items: center; gap: 12px; }
+.cso-v2-ratio-ico {
+  width: 44px; height: 44px; border-radius: 13px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.cso-v2-ratio-lbl { font-size: 12.5px; font-weight: 700; color: var(--text2); }
+.cso-v2-ratio-val {
+  font-size: 30px; font-weight: 800; font-family: var(--ffm); color: var(--text1);
+  line-height: 1.15; margin-top: 2px;
+}
+.cso-v2-ratio-unit { font-size: 14px; font-weight: 500; color: var(--text3); margin-left: 5px; }
+.cso-v2-ratio-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin-top: 6px;
+}
+.cso-v2-ratio-trend {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; font-family: var(--ffm); white-space: nowrap;
+}
+
+/* ── Carte compteur verticale ── */
+.cso-v2-mcard {
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-left: 3px solid transparent; border-radius: 14px;
+  padding: 14px; cursor: pointer; transition: background 0.12s;
+}
+.cso-v2-mcard:hover { background: var(--bg3); }
+.cso-v2-mcard.done    { border-left-color: #34d399; }
+.cso-v2-mcard.pending { border-left-color: #f59e0b; }
+.cso-v2-mcard-top { display: flex; align-items: center; gap: 10px; }
+.cso-v2-mcard-ico {
+  width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.cso-v2-mcard-name {
+  flex: 1; min-width: 0; font-size: 14.5px; font-weight: 700; color: var(--text1);
+}
+.cso-v2-mcard-idx { font-size: 13.5px; color: var(--text2); line-height: 1.5; }
+.cso-v2-mcard-idx b { color: var(--text1); }
+.cso-v2-mcard-acts { display: flex; align-items: center; gap: 8px; }
+.cso-v2-mcard-cam {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px; border-radius: 10px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #fff; font-weight: 700; font-size: 13px; transition: all 0.15s;
+}
+.cso-v2-mcard-cam:hover { box-shadow: 0 4px 14px rgba(124,58,237,0.4); }
+.cso-v2-mcard-more {
+  width: 42px; height: 42px; border-radius: 10px; flex-shrink: 0;
+  border: 1px solid var(--border2); background: var(--bg3); color: var(--text2);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s;
+}
+.cso-v2-mcard-more:hover { background: var(--bg4); color: var(--text1); }
+.cso-v2-mcard-chev { color: var(--text3); font-size: 12px; flex-shrink: 0; }
+
 /* ── Mobile responsive ── */
 @media (max-width: 480px) {
   .cso-zone-relev-lbl { display: none; }
   .cso-mrow-vals { font-size: 11px; }
   .cso-mrow-name { font-size: 13px; }
-  .cso-zone-name { font-size: 13px; }
+  .cso-zone-name {
+    font-size: 13px;
+    /* Nom de zone lisible en entier sur mobile (comme les noms de compteurs
+       et les index) : autorisé à passer sur plusieurs lignes plutôt que
+       tronqué — les noms de zone réels restent courts, donc en pratique
+       1 à 2 lignes, la hauteur de la carte reste raisonnable. */
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+    line-height: 1.25;
+  }
+  .cso-zone-hd { align-items: flex-start; }
+  .cso-zone-hd-left { align-items: flex-start; }
+  .cso-v2-hero { padding: 14px; gap: 10px; }
+  .cso-v2-hero-ico { width: 42px; height: 42px; font-size: 18px; }
+  .cso-v2-hero-ttl { font-size: 16px; }
+  .cso-v2-ratio-card { padding: 14px; }
+  .cso-v2-ratio-val { font-size: 26px; }
+  .cso-v2-mcard-name { font-size: 13.5px; }
 }
 
 /* ══════════════════════════════════════════════════════

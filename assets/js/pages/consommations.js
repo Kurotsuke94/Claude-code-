@@ -1681,6 +1681,44 @@
     if (!m) { _relQueueIdx++; _nextQueueReading(); return; }
     _newReading(meterId);
   }
+  // ── Menu "⋯" d'un compteur (Historique + actions responsable) ──────────
+  // Mêmes fonctions qu'avant (_meterHistory/_meterForm/_archiveMeter/
+  // _delMeter, aucune nouvelle logique métier) : uniquement regroupées dans
+  // un menu, sur le même mécanisme déjà utilisé ailleurs dans l'app
+  // (org-resp.js : dropdown positionné en fixed + fermeture au clic
+  // extérieur). Le bouton Relevé/caméra, lui, reste toujours visible et
+  // direct — jamais dans ce menu.
+  function _csoCloseMenus() {
+    document.querySelectorAll('[data-cso-dropdown]').forEach(el => el.remove());
+  }
+  function _csoAttachMenu(btn, menu) {
+    document.body.appendChild(menu);
+    const rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.zIndex   = '9999';
+    const menuW = 190;
+    let left = rect.right - menuW;
+    if (left < 8) left = 8;
+    menu.style.left = left + 'px';
+    menu.style.top  = (rect.bottom + 4) + 'px';
+    menu.dataset.csoDropdown = '1';
+    setTimeout(() => { document.addEventListener('click', _csoCloseMenus, { once: true }); }, 10);
+  }
+  function _csoOpenMeterMenu(btn, meterId) {
+    _csoCloseMenus();
+    const m = _meters.find(x => x.id === meterId);
+    if (!m) return;
+    const resp = _isResp();
+    const menu = document.createElement('div');
+    menu.className = 'or-dropdown-menu';
+    menu.innerHTML = `<div class="or-dropdown-item" onclick="MX.Pages.Conso._meterHistory('${meterId}');MX.Pages.Conso._csoCloseMenus()"><i class="fas fa-chart-line"></i> Historique</div>`
+      + (resp ? `<div class="or-dropdown-sep"></div>
+        <div class="or-dropdown-item" onclick="MX.Pages.Conso._meterForm('${meterId}');MX.Pages.Conso._csoCloseMenus()"><i class="fas fa-pen"></i> Modifier</div>
+        <div class="or-dropdown-item" onclick="MX.Pages.Conso._archiveMeter('${meterId}','${esc(m.name)}');MX.Pages.Conso._csoCloseMenus()"><i class="fas fa-box-archive"></i> Archiver</div>
+        <div class="or-dropdown-item or-dropdown-item--warn" onclick="MX.Pages.Conso._delMeter('${meterId}','${esc(m.name)}');MX.Pages.Conso._csoCloseMenus()"><i class="fas fa-trash"></i> Supprimer</div>` : '');
+    _csoAttachMenu(btn, menu);
+  }
+
   function _meterRowHtml(m, selDate, cli, isToday) {
     const meta     = MT[m.type] || MT.eau_froide;
     const unit     = m.unit || meta.unit;
@@ -1689,8 +1727,8 @@
     const selConso = dateRdgs.reduce((s, r) => s + (r.consumption || 0), 0);
     const ratio    = selConso > 0 ? computeRatio(m.type, selConso, cli) : null;
     const hasRdg   = !!lr;
-    const resp     = _isResp();
     const alert    = _csoAlerts.find(a => a.meterId === m.id && a.status === 'active');
+    const resp     = _isResp();
     let valLine = '';
     if (lr) {
       valLine = `Index&thinsp;: <b>${_fmtIdx(lr.index)}&thinsp;${esc(unit)}</b>`;
@@ -1699,11 +1737,6 @@
     } else {
       valLine = `<span class="cso-mrow-empty"><i class="fas fa-circle-minus"></i> Aucun relevé${isToday ? '' : ' ce jour'}</span>`;
     }
-    const respBtns = resp ? `
-        <button class="cso-ibtn green" title="Modifier" onclick="MX.Pages.Conso._meterForm('${m.id}')"><i class="fas fa-pen"></i></button>
-        <span class="cso-mrow-acts-sep"></span>
-        <button class="cso-ibtn amber" title="Archiver" onclick="MX.Pages.Conso._archiveMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-box-archive"></i></button>
-        <button class="cso-ibtn red" title="Supprimer" onclick="MX.Pages.Conso._delMeter('${m.id}','${esc(m.name)}')"><i class="fas fa-trash"></i></button>` : '';
     const alertBadge = alert
       ? `<span class="cso-mrow-badge cso-mrow-badge--${alert.level}">${alert.level === 'critical' ? 'CRITIQUE' : 'IMPORTANTE'}</span>`
       : `<span class="cso-mrow-badge ${hasRdg ? 'done' : 'pending'}">${hasRdg ? '✅ Relevé' : '🟠 En attente'}</span>`;
@@ -1716,21 +1749,68 @@
         </div>
         ${resp ? `<button class="cso-ibtn" title="Acquitter l'alerte" onclick="MX.Pages.Conso._resolveAlert('${esc(alert.id)}')"><i class="fas fa-check"></i></button>` : ''}
       </div>` : '';
-    return `<div class="cso-mrow ${hasRdg ? 'done' : 'pending'}${alert ? ' cso-mrow--anomaly cso-mrow--' + alert.level : ''}" onclick="MX.Pages.Conso._newReading('${m.id}')">
-      <div class="cso-mrow-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
-      <div class="cso-mrow-info">
-        <div class="cso-mrow-top">
-          <span class="cso-mrow-name">${esc(m.name)}</span>
-          ${alertBadge}
+    return `<div class="cso-v2-mcard ${hasRdg ? 'done' : 'pending'}${alert ? ' cso-mrow--anomaly cso-mrow--' + alert.level : ''}" onclick="MX.Pages.Conso._newReading('${m.id}')">
+      <div class="cso-v2-mcard-top">
+        <div class="cso-v2-mcard-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
+        <div class="cso-v2-mcard-name">${esc(m.name)}</div>
+        ${alertBadge}
+      </div>
+      <div class="cso-v2-mcard-idx">${valLine}</div>
+      ${alertBlock}
+      <div class="cso-v2-mcard-acts" onclick="event.stopPropagation()">
+        <button class="cso-v2-mcard-cam" title="Relevé" onclick="MX.Pages.Conso._newReading('${m.id}')"><i class="fas fa-camera"></i> Relever</button>
+        <button class="cso-v2-mcard-more" title="Plus d'actions" onclick="MX.Pages.Conso._csoOpenMeterMenu(this,'${m.id}')"><i class="fas fa-ellipsis-vertical"></i></button>
+        <i class="fas fa-chevron-right cso-v2-mcard-chev" aria-hidden="true"></i>
+      </div>
+    </div>`;
+  }
+
+  // ── NOUVEAU : carte "Ratio du jour" (refonte visuelle de l'onglet
+  // Compteurs & Ratios). Réutilise EXACTEMENT les mêmes fonctions pures déjà
+  // utilisées par _tPerformance() pour sa comparaison par type (compRows) :
+  // sumConsumptionByType / comparePeriods / statusFromDeviation /
+  // computeRatio. Aucun nouveau calcul, aucun nouveau seuil, aucun arrondi
+  // différent — cette carte est uniquement une nouvelle présentation d'une
+  // valeur déjà calculée ailleurs de façon identique. Type "phare" =
+  // eau_froide (même choix que le widget "Score énergétique" de
+  // _tPerformance, voir scRatioRes plus haut), avec repli sur le premier
+  // type configuré si pas d'eau froide.
+  function _csoRatioDuJourCard(selDate, prevDs, cli) {
+    const type = _meters.some(m => m.type === 'eau_froide')
+      ? 'eau_froide'
+      : Object.keys(MT).find(t => _meters.some(m => m.type === t));
+    if (!type) return '';
+    const meta  = MT[type];
+    const rUnit = _isLiterRatioType(type) ? 'L/client' : `${meta.unit}/client`;
+    const total     = sumConsumptionByType(_readings, _meters, type, selDate);
+    const prevTotal = sumConsumptionByType(_readings, _meters, type, prevDs);
+    const hasReading = _readings.some(r => r.date === selDate && _meters.some(m => m.id === r.meterId && m.type === type));
+    const ratio  = hasReading ? computeRatio(type, total, cli) : null;
+    const { pct } = comparePeriods(total, prevTotal);
+    const status = hasReading ? statusFromDeviation(pct) : 'na';
+    // Libellés/couleurs identiques à statusPill() de _tPerformance — copie
+    // volontaire de ces 4 lignes plutôt qu'un partage de fonction, pour ne
+    // toucher aucune ligne de _tPerformance dans cette refonte.
+    const statusMap = {
+      crit: { l: 'Critique',     col: '#ef4444' },
+      warn: { l: 'À surveiller', col: '#f59e0b' },
+      ok:   { l: 'Normal',       col: '#22c55e' },
+      na:   { l: '—',            col: '#64748b' },
+    };
+    const sMeta = statusMap[status] || statusMap.na;
+    const trendHtml = (pct !== null && pct !== undefined && !isNaN(pct)) ? `<div class="cso-v2-ratio-trend" style="color:${pct <= 0 ? '#22c55e' : '#f87171'}">
+        <i class="fas fa-arrow-trend-${pct <= 0 ? 'down' : 'up'}"></i> ${pct > 0 ? '+' : ''}${_fmt(pct, 1)}% vs hier
+      </div>` : '';
+    return `<div class="cso-v2-ratio-card">
+      <div class="cso-v2-ratio-lead">
+        <div class="cso-v2-ratio-ico" style="background:${meta.dim};color:${meta.color}">${meta.icon}</div>
+        <div>
+          <div class="cso-v2-ratio-lbl">Ratio du jour</div>
+          <div class="cso-v2-ratio-val">${ratio !== null ? _fmt(ratio, _isLiterRatioType(type) ? 0 : 2) : '—'}<span class="cso-v2-ratio-unit">${esc(rUnit)}</span></div>
+          <span class="cso-v2-ratio-status" style="background:${sMeta.col}20;color:${sMeta.col};border:1px solid ${sMeta.col}50">${esc(sMeta.l)}</span>
         </div>
-        <div class="cso-mrow-vals">${valLine}</div>
-        ${alertBlock}
       </div>
-      <div class="cso-mrow-acts" onclick="event.stopPropagation()">
-        <button class="cso-ibtn blue" title="Relevé" onclick="MX.Pages.Conso._newReading('${m.id}')"><i class="fas fa-camera"></i></button>
-        <button class="cso-ibtn orange" title="Historique" onclick="MX.Pages.Conso._meterHistory('${m.id}')"><i class="fas fa-chart-line"></i></button>
-        ${respBtns}
-      </div>
+      ${trendHtml}
     </div>`;
   }
 
@@ -1747,6 +1827,18 @@
     const nextDs  = (() => { const d = new Date(selDate + 'T12:00'); d.setDate(d.getDate() + 1); const n = d.toISOString().slice(0, 10); return n <= today ? n : null; })();
 
     let html = `<div class="cso-inner">
+      <div class="cso-v2-hero">
+        <div class="cso-v2-hero-ico"><i class="fas fa-gauge-high"></i></div>
+        <div class="cso-v2-hero-txt">
+          <div class="cso-v2-hero-ttl">Compteurs &amp; Ratios</div>
+          <div class="cso-v2-hero-sub">Suivi des relevés et consommations</div>
+        </div>
+        <button class="cso-v2-hero-today" onclick="MX.Pages.Conso._csoDateSet('${today}')">
+          <span class="cso-v2-hero-today-lbl"><i class="fas fa-calendar-day"></i> ${isToday ? "Aujourd'hui" : 'Revenir à aujourd’hui'}</span>
+          <span class="cso-v2-hero-today-date">${_dateLbl(selDate)}</span>
+        </button>
+      </div>
+      ${_csoRatioDuJourCard(selDate, prevDs, cli)}
       <div class="cso-date-nav">
         <button class="cso-date-btn" onclick="MX.Pages.Conso._csoDatePrev()" title="${_dateLbl(prevDs)}"><i class="fas fa-chevron-left"></i></button>
         <input type="date" class="cso-date-inp" value="${selDate}" max="${today}" onchange="MX.Pages.Conso._csoDateSet(this.value)">
@@ -5813,6 +5905,7 @@
     _getCsoState, _load,
     _ensureReadingsFrom, _ensureClientsFrom,
     _csoSetSearch, _csoSetFilter, _toggleZone, _releverZone,
+    _csoOpenMeterMenu, _csoCloseMenus,
     _resolveAlert, _createIntFromAlert, _critDismiss, _supView,
     _salCreateInt, _salSave,
     _rerender, _archiveMeter, _restoreMeter, _delMeterPermanent,
