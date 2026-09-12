@@ -9852,8 +9852,12 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
    Mobile uniquement (≤900px). Desktop inchangé.
 ══════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
-  /* Hauteur visible de la barre (hors safe area) */
-  :root { --bottomnav-h: 62px; }
+  /* Hauteur visible de la barre (hors safe area) — 50px = taille naturelle
+     du contenu d'un bouton (icône 20px + espace 3px + libellé + padding
+     8px haut/bas), sans espace mort ; proche des proportions natives iOS
+     (barre 49pt + 34pt d'indicateur d'accueil). env(safe-area-inset-bottom)
+     s'ajoute toujours à part, dans #bottom-nav ci-dessous, inchangé. */
+  :root { --bottomnav-h: 50px; }
 
   /* Conteneur fixe — colle au bord physique bas, couvre la safe area */
   #bottom-nav {
@@ -9863,6 +9867,19 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
     backdrop-filter: blur(20px);
     border-top: 1px solid rgba(255,255,255,0.07);
     overflow: visible;
+    /* CORRECTIF (barre trop épaisse au premier chargement mobile, redevient
+       normale après un pincer-zoomer) : sans cette ligne, `text-size-adjust`
+       vaut `auto` — certains navigateurs mobiles (notamment Safari iOS)
+       appliquent alors leur propre agrandissement automatique du texte pour
+       la lisibilité, qui gonfle la hauteur réelle des libellés/lignes des
+       boutons au-delà des tailles déclarées ici (11px), débordant du cadre
+       fixe (overflow:visible) et donnant l'impression d'une barre deux fois
+       trop haute. Un zoom manuel force le navigateur à recalculer cet
+       ajustement, ce qui « corrige » temporairement l'affichage — d'où le
+       symptôme. 100% fige le texte à la taille réellement déclarée, sans
+       toucher au layout, aux icônes, aux couleurs ni à la navigation. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   /* Barre pleine largeur — row de boutons sur la hauteur visible uniquement */
