@@ -565,6 +565,7 @@
         aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
         aItems += _tabBtn("superadmin",   "fa-hotel",           "Hôtels & Config");
         aItems += _tabBtn("pin",          "fa-key",             "Codes PIN & Accès");
+        aItems += `<button class="sx-item sx-sub" onclick="MX.PwaDebug && MX.PwaDebug.open()" title="Diagnostic PWA"><i class="fas fa-wrench sx-ico"></i><span class="sx-lbl">Diagnostic PWA</span><span class="sx-count">DEBUG</span></button>`;
       }
       const _alertCnt = window.MX.Alerts ? MX.Alerts.activeCount() : (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
