@@ -9862,9 +9862,11 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   /* Conteneur fixe — colle au bord physique bas, couvre la safe area */
   #bottom-nav {
     height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px));
-    background: rgba(10,15,35,0.92);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
+    /* Fond opaque plein (sans flou) sur toute la boîte, y compris la safe
+       area : le flou (::before ci-dessous) est confiné aux 50px visibles
+       pour éviter le bug de compositing iOS sur la zone d'indicateur
+       d'accueil — voir commentaire du ::before. */
+    background: rgb(10,15,35);
     border-top: 1px solid rgba(255,255,255,0.07);
     overflow: visible;
     /* CORRECTIF (barre trop épaisse au premier chargement mobile, redevient
@@ -9880,6 +9882,28 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
        toucher au layout, aux icônes, aux couleurs ni à la navigation. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+  }
+
+  /* CORRECTIF (compositing) : le flou ne doit jamais couvrir la safe area
+     (zone de l'indicateur d'accueil iOS, où backdrop-filter se composite
+     mal en PWA standalone). On confine backdrop-filter à un pseudo-élément
+     calé exactement sur les 50px visibles de .mbn-bar — jamais sur les
+     34px de safe-area, qui restent au fond opaque uni de #bottom-nav
+     ci-dessus. z-index négatif : reste derrière .mbn-bar/les boutons/le
+     FAB, purement décoratif (pointer-events:none), sans effet sur leur
+     taille ni leur position. */
+  #bottom-nav::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--bottomnav-h);
+    background: rgba(10,15,35,0.92);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    pointer-events: none;
+    z-index: -1;
   }
 
   /* Barre pleine largeur — row de boutons sur la hauteur visible uniquement */
