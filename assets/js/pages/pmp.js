@@ -26,6 +26,10 @@
   var _pmpInt          = [];
   var _pmpTpl          = [];
   var _loaded          = false;
+  var _gotEq           = false;
+  var _gotInt          = false;
+  var _ready           = false;
+  var _readyCbs        = [];
   var _unsubPmp        = {};
   var _calMonth        = '';
   var _importStep      = 1;
@@ -223,16 +227,27 @@
 
   // ── DATA LOADING ──────────────────────────────────────────────────────────
 
+  // Les stats (getStats) ne dépendent que de _pmpEq + _pmpInt : prêtes dès
+  // que ces deux collections ont reçu leur premier snapshot.
+  function _checkReady() {
+    if (_ready || !_gotEq || !_gotInt) return;
+    _ready = true;
+    var cbs = _readyCbs; _readyCbs = [];
+    cbs.forEach(function (cb) { try { cb(); } catch (e) {} });
+  }
+
   function _load() {
     if (_loaded) return;
     _loaded = true;
 
     _unsubPmp.eq = PMP_DB.eq().onSnapshot(function (snap) {
       _pmpEq = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      _gotEq = true; _checkReady();
       _rerender();
     }, _fsErr('pmp_equipments'));
     _unsubPmp.int = PMP_DB.int().onSnapshot(function (snap) {
       _pmpInt = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (x) { return !x.inTrash; });
+      _gotInt = true; _checkReady();
       _rerender();
     }, _fsErr('pmp_interventions'));
     _unsubPmp.tpl = PMP_DB.tpl().onSnapshot(function (snap) {
@@ -3244,6 +3259,29 @@
     getStats: function () {
       var k = _kpiData();
       return { totalEq: k.totalEq, thisMonthCount: k.thisMonthCount, realisees: k.realisees, enRetard: k.enRetard, conformite: k.conformite, nextDue: k.nextDue };
+    },
+    // Déclenche le chargement PMP (idempotent, ne duplique jamais les
+    // listeners — _load() est déjà gardé par _loaded) et prévient l'appelant
+    // une fois les données réellement disponibles, pour éviter d'afficher un
+    // 0%/100% avant que les collections aient répondu.
+    ensureLoaded: function (cb) {
+      _load();
+      if (_ready) { if (cb) cb(); return; }
+      if (cb) _readyCbs.push(cb);
+    },
+    isReady: function () { return _ready; },
+    // Détail des interventions PMP en retard — même condition exacte que
+    // getStats().enRetard (_kpiData ci-dessus), pour un affichage "Priorités
+    // du jour" cliquable sans dupliquer la règle métier.
+    getLateItems: function () {
+      var today = _today();
+      return _pmpInt
+        .filter(function (i) {
+          return i.status === 'en_retard' ||
+                 (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee');
+        })
+        .map(function (i) { return { id: i.id, name: i.equipmentName || '—', dueDate: i.dueDate, daysLate: _daysLate(i.dueDate) }; })
+        .sort(function (a, b) { return b.daysLate - a.daysLate; });
     },
   };
 })();

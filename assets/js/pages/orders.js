@@ -1290,5 +1290,12 @@
     _viewCheckDetail: _viewCheckDetail,
     _scanStart: _scanStart,
     _scanCancel: _scanCancel,
+    // Exposée pour réutilisation par l'Accueil (cockpit) : mêmes règles que
+    // celles affichées ici (badge "Sous le seuil" v2, _statusMax), aucune
+    // formule dupliquée. Un produit doit avoir été contrôlé au moins une
+    // fois (lastCheckAt) pour être considéré fiable.
+    getCriticalProducts: function () {
+      return (MX.state.products || []).filter(function (p) { return _controlled(p) && _statusMax(p) === 'order'; });
+    },
   };
 })();

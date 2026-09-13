@@ -10,6 +10,11 @@
   let _clients       = {};
   let _csoAlerts     = [];   // cso_energy_alerts documents
   let _loaded        = false;
+  let _gotMeters     = false;
+  let _gotReadings   = false;
+  let _gotClients    = false;
+  let _ready         = false;
+  let _readyCbs      = [];
   let _unsubCso      = {};
   let _photoB64      = null;
   let _csoSearch     = '';
@@ -1041,6 +1046,16 @@
   }
 
   // ── DATA LAYER ──
+  // Le score Performance/les totaux (_calcPerfScore, _perfRatio, _perfConso)
+  // ne dépendent que de _meters + _readings + _clients : prêts dès que ces
+  // trois collections ont reçu leur premier snapshot.
+  function _checkReady() {
+    if (_ready || !_gotMeters || !_gotReadings || !_gotClients) return;
+    _ready = true;
+    const cbs = _readyCbs; _readyCbs = [];
+    cbs.forEach(cb => { try { cb(); } catch (e) {} });
+  }
+
   function _load() {
     if (_loaded) return;
     _loaded = true;
@@ -1048,6 +1063,7 @@
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _meters         = all.filter(m => !m.archived);
       _archivedMeters = all.filter(m =>  m.archived);
+      _gotMeters = true; _checkReady();
       _rerender();
     }, _fsErr('cso_meters'));
     _unsubCso.readings = CSO.readings().orderBy('createdAt', 'desc').limit(_readingsLiveCap).onSnapshot(snap => {
@@ -1074,6 +1090,7 @@
       const liveIds  = new Set(liveDocs.map(d => d.id));
       _readings = liveDocs.concat(_readings.filter(r => r._ext && !liveIds.has(r.id)));
       changedMeterIds.forEach(mid => recalculateConsumption(mid).catch(() => {}));
+      _gotReadings = true; _checkReady();
       _rerender();
     }, _fsErr('cso_readings'));
     _unsubCso.clients = CSO.clients().orderBy('date', 'desc').limit(_clientsLiveCap).onSnapshot(snap => {
@@ -1085,6 +1102,7 @@
         if (!liveDates.has(d) && !_clientsExtDates.has(d)) delete _clients[d];
       });
       _clientsLiveMinDate = snap.size === _clientsLiveCap ? [...liveDates].sort()[0] : null;
+      _gotClients = true; _checkReady();
       _rerender();
     }, _fsErr('cso_clients'));
     _unsubCso.alerts = CSO.alerts().orderBy('ts', 'desc').limit(100).onSnapshot(snap => {
@@ -5917,5 +5935,19 @@
     _peDatePrev, _peDateNext, _editCliDate, _peRefresh,
     _peRatioMonthPrev, _peRatioMonthNext,
     _peShowDay, _peAddJustif, _peSaveJustif, _peOpenConfig, _peOpenGeneralMetersConfig,
+    // Exposées pour réutilisation par l'Accueil (cockpit) : mêmes fonctions
+    // que celles utilisées en interne par l'onglet Performance, aucune
+    // formule dupliquée.
+    _calcPerfScore, _getGrade, _perfRatio, _perfConso, _refMeterIds,
+    // Déclenche le chargement (idempotent, _load() est déjà gardé par
+    // _loaded) et prévient l'appelant une fois meters+readings+clients
+    // réellement disponibles (évite un score/consommation à 0 avant que
+    // Firestore ait répondu).
+    ensureLoaded: function (cb) {
+      _load();
+      if (_ready) { if (cb) cb(); return; }
+      if (cb) _readyCbs.push(cb);
+    },
+    isReady: function () { return _ready; },
   };
 })();

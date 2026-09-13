@@ -13,6 +13,8 @@
   let _transfers     = [];
   let _users         = [];
   let _loaded    = false;
+  let _ready     = false;
+  let _readyCbs  = [];
   let _unsubInt  = {};
   let _pickerSel  = [];
   let _intPhotoB64 = null;
@@ -192,6 +194,7 @@
         _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.inTrash);
         _sendIntNotifs(_interventions);
         _autoRetard();
+        if (!_ready) { _ready = true; const cbs = _readyCbs; _readyCbs = []; cbs.forEach(cb => { try { cb(); } catch (e) {} }); }
         _rerender();
       }, _fsErr('interventions'));
 
@@ -1202,5 +1205,13 @@
     _transferInt, _acceptXfr, _refuseXfr,
     _setFilter, _toggleTech, _onIntPhoto,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
+    // Déclenche le chargement (idempotent, _load() est déjà gardé par
+    // _loaded) et prévient l'appelant une fois les données disponibles.
+    ensureLoaded: function (cb) {
+      _load();
+      if (_ready) { if (cb) cb(); return; }
+      if (cb) _readyCbs.push(cb);
+    },
+    isReady: function () { return _ready; },
   };
 })();

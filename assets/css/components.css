@@ -9862,11 +9862,9 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   /* Conteneur fixe — colle au bord physique bas, couvre la safe area */
   #bottom-nav {
     height: calc(var(--bottomnav-h) + env(safe-area-inset-bottom, 0px));
-    /* Fond opaque plein (sans flou) sur toute la boîte, y compris la safe
-       area : le flou (::before ci-dessous) est confiné aux 50px visibles
-       pour éviter le bug de compositing iOS sur la zone d'indicateur
-       d'accueil — voir commentaire du ::before. */
-    background: rgb(10,15,35);
+    background: rgba(10,15,35,0.92);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
     border-top: 1px solid rgba(255,255,255,0.07);
     overflow: visible;
     /* CORRECTIF (barre trop épaisse au premier chargement mobile, redevient
@@ -9882,28 +9880,6 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
        toucher au layout, aux icônes, aux couleurs ni à la navigation. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
-  }
-
-  /* CORRECTIF (compositing) : le flou ne doit jamais couvrir la safe area
-     (zone de l'indicateur d'accueil iOS, où backdrop-filter se composite
-     mal en PWA standalone). On confine backdrop-filter à un pseudo-élément
-     calé exactement sur les 50px visibles de .mbn-bar — jamais sur les
-     34px de safe-area, qui restent au fond opaque uni de #bottom-nav
-     ci-dessus. z-index négatif : reste derrière .mbn-bar/les boutons/le
-     FAB, purement décoratif (pointer-events:none), sans effet sur leur
-     taille ni leur position. */
-  #bottom-nav::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: var(--bottomnav-h);
-    background: rgba(10,15,35,0.92);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
-    pointer-events: none;
-    z-index: -1;
   }
 
   /* Barre pleine largeur — row de boutons sur la hauteur visible uniquement */
@@ -24580,5 +24556,191 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   font-family: var(--ffs); font-size: 12.5px; font-weight: 700; cursor: pointer;
   border-radius: 10px; padding: 8px 14px; display: inline-flex; align-items: center; gap: 6px;
   flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ACCUEIL — COCKPIT OPÉRATIONNEL (assets/js/pages/home.js)
+   Toutes les valeurs affichées viennent de MX.state / des moteurs métier
+   existants (PMP, Interventions, Conso, Orders, MesMissions, alertes,
+   logs) — voir home.js pour le détail des sources.
+   ══════════════════════════════════════════════════════════════════════ */
+.acc-page { display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Header ── */
+.acc-header {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--rx);
+  padding: 18px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
+}
+.acc-greeting { font-size: 20px; font-weight: 800; color: var(--text); font-family: var(--ffs); }
+.acc-header-date { font-size: 12.5px; color: var(--text2); margin-top: 4px; font-family: var(--ffm); }
+.acc-kpi-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.acc-kpi {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: 1px solid var(--border); background: var(--bg3);
+  border-radius: 14px; padding: 10px 16px; min-width: 92px; cursor: pointer;
+  font-family: var(--ffs); transition: transform 150ms ease, border-color 150ms ease;
+}
+.acc-kpi:hover { transform: translateY(-1px); }
+.acc-kpi i { font-size: 15px; margin-bottom: 2px; }
+.acc-kpi-v { font-size: 20px; font-weight: 800; font-family: var(--ffm); color: var(--text); line-height: 1; }
+.acc-kpi-l { font-size: 10px; color: var(--text3); text-align: center; line-height: 1.3; margin-top: 2px; }
+.acc-kpi--red    i { color: var(--red); }
+.acc-kpi--orange i { color: var(--orange); }
+.acc-kpi--purple i { color: #6D4CFF; }
+.acc-kpi--blue   i { color: #4F7CFF; }
+.acc-kpi--red:hover    { border-color: var(--red-border); }
+.acc-kpi--orange:hover { border-color: var(--orange-border); }
+.acc-kpi--purple:hover { border-color: rgba(109,76,255,0.4); }
+.acc-kpi--blue:hover   { border-color: rgba(79,124,255,0.4); }
+
+/* ── Grille principale ── */
+.acc-grid { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(0,1fr); gap: 16px; align-items: start; }
+.acc-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* ── Carte générique ── */
+.acc-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--rx); overflow: hidden; }
+.acc-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 16px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--ffs);
+}
+.acc-card-head > span { display: flex; align-items: center; gap: 7px; }
+.acc-card-link {
+  border: none; background: none; color: var(--cyan); font-size: 11.5px; font-weight: 600;
+  cursor: pointer; font-family: var(--ffs); white-space: nowrap;
+}
+.acc-card-link:hover { text-decoration: underline; }
+.acc-empty {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 24px 16px; color: var(--text3); font-size: 12.5px; font-family: var(--ffs);
+}
+
+/* ── Priorités du jour ── */
+.acc-pr-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 16px; border: none; border-bottom: 1px solid var(--border);
+  background: none; cursor: pointer; text-align: left; font-family: var(--ffs);
+}
+.acc-pr-row:last-child { border-bottom: none; }
+.acc-pr-row:hover { background: var(--bg3); }
+.acc-pr-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.acc-pr--urgent .acc-pr-dot    { background: var(--red); box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+.acc-pr--important .acc-pr-dot{ background: var(--orange); box-shadow: 0 0 6px rgba(249,115,22,0.5); }
+.acc-pr--plan .acc-pr-dot      { background: var(--cyan); }
+.acc-pr-body { flex: 1; min-width: 0; }
+.acc-pr-title { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-pr-sub { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-pr-badge {
+  font-size: 9.5px; font-weight: 800; font-family: var(--ffm); padding: 3px 8px; border-radius: 6px;
+  flex-shrink: 0; white-space: nowrap; letter-spacing: 0.02em;
+}
+.acc-pr--urgent .acc-pr-badge    { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
+.acc-pr--important .acc-pr-badge{ background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange-border); }
+.acc-pr--plan .acc-pr-badge      { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan-border); }
+.acc-pr-arrow { color: var(--text3); font-size: 11px; flex-shrink: 0; }
+
+/* ── Ma journée ── */
+.acc-day-list { display: flex; flex-direction: column; }
+.acc-day-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); font-family: var(--ffs);
+}
+.acc-day-row:last-child { border-bottom: none; }
+.acc-day-time { font-size: 11px; font-family: var(--ffm); color: var(--text3); width: 76px; flex-shrink: 0; }
+.acc-day-ic {
+  width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; flex-shrink: 0;
+}
+.acc-day-ic--done  { background: var(--green-dim); color: var(--green); }
+.acc-day-ic--late  { background: var(--red-dim); color: var(--red); }
+.acc-day-ic--prog  { background: var(--jour-dim); color: var(--jour); }
+.acc-day-ic--todo  { background: var(--bg4); color: var(--text3); }
+.acc-day-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-day-status { font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
+
+/* ── Performance générale ── */
+.acc-perf-wrap { display: flex; align-items: center; gap: 20px; padding: 18px 16px; flex-wrap: wrap; }
+.acc-perf-score { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }
+.acc-perf-ring {
+  --pct: 0;
+  width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: conic-gradient(var(--green) calc(var(--pct)*1%), var(--bg4) 0);
+  position: relative;
+}
+.acc-perf-ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--bg2); }
+.acc-perf-num { position: relative; font-size: 22px; font-weight: 800; font-family: var(--ffm); color: var(--text); }
+.acc-perf-unit { position: relative; font-size: 10px; color: var(--text3); margin-left: 1px; }
+.acc-perf-label { font-size: 11.5px; font-weight: 700; font-family: var(--ffs); }
+.acc-perf-mini { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 8px; }
+.acc-perf-mrow { display: flex; justify-content: space-between; font-size: 12.5px; font-family: var(--ffs); color: var(--text2); }
+.acc-perf-mrow strong { color: var(--text); font-family: var(--ffm); font-size: 12px; }
+
+/* ── Actions rapides ── */
+.acc-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 16px; }
+.acc-action {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  padding: 16px 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg3);
+  color: var(--text); cursor: pointer; font-family: var(--ffs); font-size: 11.5px; font-weight: 600;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+.acc-action:hover { border-color: var(--cyan-border); transform: translateY(-1px); }
+.acc-action i { font-size: 18px; color: var(--cyan); }
+
+/* ── Stock critique ── */
+.acc-stock-list { display: flex; flex-direction: column; }
+.acc-stock-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; font-family: var(--ffs);
+}
+.acc-stock-row:last-child { border-bottom: none; }
+.acc-stock-row:hover { background: var(--bg3); }
+.acc-stock-name { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-stock-qty { font-size: 11px; color: var(--orange); font-weight: 700; font-family: var(--ffm); flex-shrink: 0; }
+
+/* ── Objectifs opérationnels ── */
+.acc-obj-list { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; }
+.acc-obj-row:last-child { padding-bottom: 0; }
+.acc-obj-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.acc-obj-label { flex: 1; min-width: 0; font-size: 12px; color: var(--text2); font-family: var(--ffs); }
+.acc-obj-val { font-size: 11.5px; font-family: var(--ffm); color: var(--text); }
+.acc-obj-pct { font-size: 11px; font-weight: 800; font-family: var(--ffm); min-width: 34px; text-align: right; }
+.acc-obj-bar { height: 6px; border-radius: 4px; background: var(--bg4); overflow: hidden; }
+.acc-obj-fill { height: 100%; border-radius: 4px; transition: width 300ms ease; }
+.acc-obj-rest { font-size: 10.5px; color: var(--text3); margin-top: 4px; font-family: var(--ffm); }
+.acc-c-green  { color: var(--green); } .acc-obj-fill.acc-c-green  { background: var(--green); }
+.acc-c-blue   { color: #4F7CFF; }      .acc-obj-fill.acc-c-blue   { background: #4F7CFF; }
+.acc-c-purple { color: #6D4CFF; }      .acc-obj-fill.acc-c-purple { background: #6D4CFF; }
+.acc-c-red    { color: var(--red); }   .acc-obj-fill.acc-c-red    { background: var(--red); }
+
+/* ── Dernières activités ── */
+.acc-feed-list { display: flex; flex-direction: column; }
+.acc-feed-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); font-family: var(--ffs);
+}
+.acc-feed-row:last-child { border-bottom: none; }
+.acc-feed-body { flex: 1; min-width: 0; }
+.acc-feed-line { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-feed-what { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.acc-feed-time { font-size: 10px; color: var(--text3); flex-shrink: 0; white-space: nowrap; font-family: var(--ffm); }
+
+/* ── Responsive : tablette / mobile ── */
+@media (max-width: 1080px) {
+  .acc-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .acc-header { flex-direction: column; align-items: stretch; padding: 16px; }
+  .acc-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .acc-kpi { min-width: 0; padding: 10px 8px; }
+  .acc-greeting { font-size: 18px; }
+  .acc-perf-wrap { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .acc-perf-mini { width: 100%; }
+  /* CORRECTIF (libellé/valeur collés sur mobile) : "Coût énergie" +
+     "Donnée indisponible" ne tiennent pas sur une seule ligne en dessous de
+     ~430px. On empile label au-dessus de la valeur plutôt que de tronquer
+     le texte — contenu et calculs inchangés. */
+  .acc-perf-mrow { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .acc-day-time { width: 58px; font-size: 10px; }
+  .acc-actions-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (min-width: 1100px) { .mtv-banner { margin-left: 8px; margin-right: 8px; } }
