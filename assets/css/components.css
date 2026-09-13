@@ -9882,25 +9882,6 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
     text-size-adjust: 100%;
   }
 
-  /* CORRECTIF (bande safe-area visuellement disjointe en PWA standalone iOS) :
-     sous les boutons, la portion de #bottom-nav couvrant env(safe-area-inset-bottom)
-     ne flanque aucun contenu à flouter — sur iOS standalone, le rendu du
-     backdrop-filter y est alors incohérent et cette bande peut apparaître
-     claire/vide, donnant l'impression d'une barre bien plus épaisse que les
-     50px réels de .mbn-bar. On peint uniquement cette bande avec la même
-     teinte que le fond de la barre, en uni (sans flou), sans toucher à la
-     hauteur ni à la position de .mbn-bar, des boutons ou du FAB. */
-  #bottom-nav::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: env(safe-area-inset-bottom, 0px);
-    background: rgb(10,15,35);
-    pointer-events: none;
-  }
-
   /* Barre pleine largeur — row de boutons sur la hauteur visible uniquement */
   .mbn-bar {
     display: flex;
