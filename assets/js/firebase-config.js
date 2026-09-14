@@ -13,6 +13,18 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db   = firebase.firestore();
 const auth = firebase.auth();
 
+// Persistance SESSION (et non LOCAL, le défaut) : Maintix tourne sur des
+// postes potentiellement partagés (tablette/PC commun aux techniciens).
+// Une session Firebase Admin survit ainsi à un F5 (même onglet/navigateur)
+// mais est supprimée à la fermeture complète du navigateur — l'admin doit
+// se reconnecter à la prochaine ouverture. S'applique à toute l'instance
+// auth, y compris la connexion anonyme ci-dessous (sans conséquence : elle
+// est automatiquement recréée au boot si absente, voir onAuthStateChanged
+// juste en dessous, et aucun code ne dépend d'un UID anonyme stable).
+auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(function(e) {
+  console.warn('[Auth] setPersistence(SESSION) a échoué :', e);
+});
+
 // Connexion anonyme Firebase Auth — nécessaire car les techniciens et
 // responsables s'authentifient uniquement par PIN Firestore (jamais via
 // Firebase Auth). Sans ceci, request.auth est TOUJOURS null pour eux côté

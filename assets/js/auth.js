@@ -2,12 +2,12 @@
   let _onLogin  = null;
   let _onLogout = null;
   let _pendingUserId = null;
-
-  // ── DEV BYPASS (temporaire — supprimer avant production) ──
-  var DEV_ADMIN_EMAIL = 'keyzeur94460@hotmail.fr';
-  function _isDevAdmin() {
-    try { var u = auth.currentUser; return !!(u && u.email === DEV_ADMIN_EMAIL); } catch(e) { return false; }
-  }
+  // true pendant la fenêtre où confirmPin() clôture une session admin
+  // résiduelle avant d'établir la session technicien : empêche le teardown
+  // de onAuthStateChanged(null) ci-dessous d'effacer le currentUser qui
+  // vient tout juste d'être choisi (race entre auth.signOut() et le
+  // déclenchement asynchrone du listener).
+  let _switchingToPin = false;
 
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
@@ -21,12 +21,11 @@
     console.log('Utilisateur connecté :', user ? 'Oui (Firebase Admin)' : 'Non');
     console.log('Email :', user ? user.email : '—');
     console.log('UID :', user ? user.uid : '—');
-    console.log('DEV BYPASS actif :', _isDevAdmin());
     console.log('adminUser :', !!window.MX.state.adminUser);
     console.log('currentUser (PIN) :', _cu ? _cu.name : '—');
     console.log('Role détecté :', user ? 'Administrateur Firebase' : (_cu ? (_roleDef ? _roleDef.name : _cu.role) : 'Non connecté'));
-    console.log('isAdmin() :', !!(window.MX.state.adminUser || _isDevAdmin()));
-    console.log('canSeeAll() :', !!(window.MX.state.adminUser || _isDevAdmin() || (_cu && _cu.role === 'responsable')));
+    console.log('isAdmin() :', isAdmin());
+    console.log('canSeeAll() :', canSeeAll());
     console.groupEnd();
 
     if (user) {
@@ -38,7 +37,7 @@
         try { window.MX.buildNav(); } catch(e) {}
       }
     } else {
-      if (prevAdmin) {
+      if (prevAdmin && !_switchingToPin) {
         // Admin logout → full session teardown: clear PIN user + destroy UI
         _pendingUserId = null;
         window.MX.state.currentUser = null;
@@ -57,7 +56,7 @@
 
   function onLogin(cb)  { _onLogin  = cb; }
   function onLogout(cb) { _onLogout = cb; }
-  function isAdmin()    { return !!window.MX.state.adminUser || _isDevAdmin(); }
+  function isAdmin()    { return !!window.MX.state.adminUser; }
   function canSeeAll()  { return isAdmin() || (window.MX.state.currentUser && window.MX.state.currentUser.role === "responsable"); }
 
   // ── FCM TOKEN REGISTRATION ──
@@ -168,6 +167,12 @@
     }
     _destroyUI();         // close modals, destroy page listeners — before state is wiped
     setCurrentUser(null); // clear MX.state.currentUser + localStorage
+    // Filet de sécurité : si une session Firebase Admin est encore active
+    // (poste partagé), la terminer aussi — "changer d'utilisateur" ne doit
+    // jamais laisser des droits admin résiduels pour le prochain profil PIN.
+    if (window.MX.state.adminUser) {
+      auth.signOut().catch(function(e) { console.warn('[Auth] Erreur signOut résiduel :', e); });
+    }
     showUserPicker();
   }
 
@@ -278,6 +283,16 @@
     if (match) {
       MX.closeModal();
       _pendingUserId = null;
+      // Un technicien qui se connecte par PIN ne doit jamais hériter d'une
+      // session Firebase Admin résiduelle (poste partagé) : on la termine
+      // d'abord, et on attend la fin du signOut avant d'établir la session
+      // PIN pour éviter que le teardown de onAuthStateChanged(null) (ci-
+      // dessus) n'efface le currentUser qu'on vient de définir.
+      if (window.MX.state.adminUser) {
+        _switchingToPin = true;
+        try { await auth.signOut(); } catch (e) {}
+        _switchingToPin = false;
+      }
       setCurrentUser(user);
       MX.toast("Bienvenue " + user.name + " !");
     } else {
