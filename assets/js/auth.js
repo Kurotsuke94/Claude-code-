@@ -9,6 +9,44 @@
   // déclenchement asynchrone du listener).
   let _switchingToPin = false;
 
+  // ── SUPER-ADMIN (révocation forcée des sessions admin) ──
+  // UN seul compte, en dur — même valeur que isSuperAdmin() dans
+  // firestore.rules, qui est la vraie source de vérité côté serveur. Ceci
+  // ne sert qu'à l'affichage du bouton côté client (UX) ; la sécurité réelle
+  // est appliquée par les règles Firestore sur config/adminSession, jamais
+  // par cette seule vérification client. Portée strictement limitée à ce
+  // mécanisme — ne remplace jamais isAdmin() ailleurs.
+  var SUPER_ADMIN_EMAIL = 'keyzeur94460@hotmail.fr';
+  function isSuperAdmin() {
+    var u = window.MX.state.adminUser;
+    return !!(u && u.email === SUPER_ADMIN_EMAIL);
+  }
+
+  // ── VERSION DE SESSION ADMIN (révocation forcée à distance) ──
+  // null tant qu'aucune session admin n'a mémorisé de version de référence.
+  var _adminSessionVersion = null;
+  var ADMIN_SESSION_CHECK_MS = 3 * 60 * 1000; // 3 min — dans la fourchette 1-5 min demandée
+
+  async function _checkAdminSessionVersion() {
+    if (!window.MX.state.adminUser) return; // jamais pour une session technicien PIN
+    if (!(window.MX.DB && window.MX.DB.getAdminSessionVersion)) return;
+    try {
+      var remote = await window.MX.DB.getAdminSessionVersion();
+      if (_adminSessionVersion !== null && remote !== _adminSessionVersion) {
+        await auth.signOut(); // déclenche le teardown normal via onAuthStateChanged(null) ci-dessous
+        _adminSessionVersion = null;
+        if (window.MX.showModal) {
+          window.MX.showModal(
+            'Session administrateur invalidée',
+            "Votre session administrateur a été invalidée. Veuillez vous reconnecter.",
+            [{ label: 'Se reconnecter', cls: 'confirm', fn: function () { showLogin(); } }]
+          );
+        }
+      }
+    } catch (e) { console.warn('[Auth] Vérification version session admin échouée :', e); }
+  }
+  setInterval(_checkAdminSessionVersion, ADMIN_SESSION_CHECK_MS);
+
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
     window.MX.state.adminUser = (user && user.isAnonymous === false) ? user : null;
@@ -32,11 +70,18 @@
       _onLogin && _onLogin(user);
       _registerFcmToken("admin");
       MX.DB && MX.DB.updatePresence && MX.DB.updatePresence(user.email ? user.email.split("@")[0] : "admin");
+      // Mémorise la version de session admin courante comme référence pour
+      // ce poste : toute divergence future (forceAdminLogout ailleurs)
+      // déclenchera _checkAdminSessionVersion() ci-dessus.
+      if (MX.DB && MX.DB.getAdminSessionVersion) {
+        MX.DB.getAdminSessionVersion().then(function (v) { _adminSessionVersion = v; }).catch(function () {});
+      }
       // Rebuild nav with admin sections now that auth is confirmed
       if (window.MX && window.MX.buildNav) {
         try { window.MX.buildNav(); } catch(e) {}
       }
     } else {
+      _adminSessionVersion = null; // toujours réinitialisé dès qu'il n'y a plus d'admin (même si !prevAdmin)
       if (prevAdmin && !_switchingToPin) {
         // Admin logout → full session teardown: clear PIN user + destroy UI
         _pendingUserId = null;
@@ -464,9 +509,14 @@
   window.MX = window.MX || {};
   window.MX.Auth = {
     login, logout, requireAdmin, showLogin, hideLogin, cancelLogin,
-    isAdmin, canSeeAll, isResponsable, can, onLogin, onLogout,
+    isAdmin, canSeeAll, isResponsable, isSuperAdmin, can, onLogin, onLogout,
     setCurrentUser, clearCurrentUser, promptLogin,
     showUserPicker, hidePicker, selectUser, confirmPin, backToPicker, skipPicker,
-    updateSidebarFooter
+    updateSidebarFooter,
+    // Déclenchement manuel de la vérification de version de session admin
+    // (normalement automatique toutes les 3 min) — utile pour un contrôle
+    // immédiat après "Forcer la déconnexion des admins", et pour les tests.
+    // Ne révoque jamais une session valide ; aucune élévation de droits.
+    checkAdminSessionVersionNow: _checkAdminSessionVersion,
   };
 })();

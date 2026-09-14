@@ -1209,6 +1209,17 @@
 
   // ── PIN ──
   function renderPin() {
+    const superAdminBlock = (MX.Auth.isSuperAdmin && MX.Auth.isSuperAdmin()) ? `
+      <div style="font-size:14px;font-weight:600;margin:24px 0 16px">Sessions administrateur</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5">
+        Invalide immédiatement toutes les sessions administrateur actuellement ouvertes
+        (sur d'autres postes/navigateurs) — elles devront se reconnecter. Sans effet sur
+        les techniciens connectés par PIN.
+      </div>
+      <button class="danger-btn" onclick="MX.Pages.Admin.confirmForceAdminLogout()">
+        <i class="fas fa-triangle-exclamation"></i> Forcer la déconnexion des admins
+      </button>` : '';
+
     return `<div class="acfg" style="padding:16px">
       <div style="font-size:14px;font-weight:600;margin-bottom:16px">Changer le mot de passe admin</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5">
@@ -1217,7 +1228,20 @@
         → Authentication → Utilisateurs → Modifier l'utilisateur
       </div>
       <div class="info-note"><i class="fas fa-circle-info"></i> Le mot de passe est géré de façon sécurisée par Firebase Auth.</div>
+      ${superAdminBlock}
     </div>`;
+  }
+
+  function confirmForceAdminLogout() {
+    if (!(MX.Auth.isSuperAdmin && MX.Auth.isSuperAdmin())) return; // filet de sécurité — les règles Firestore restent la vraie protection
+    MX.showModal("Forcer la déconnexion des admins ?",
+      "Cette action va invalider les sessions administrateur actuellement ouvertes. Les administrateurs devront se reconnecter. Continuer ?", [
+      { label: "Forcer la déconnexion", cls: "danger", fn: async () => {
+        try { await MX.DB.forceAdminLogout(); MX.toast("Les sessions administrateur ont été invalidées."); }
+        catch (e) { MX.toast("Erreur", true); }
+      } },
+      { label: "Annuler", cls: "cancel" }
+    ]);
   }
 
   // ── ACTIONS ──
@@ -2728,7 +2752,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
     updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
     delMsg,
-    confirmClearLogs, confirmReset, confirmNewWeek,
+    confirmClearLogs, confirmReset, confirmNewWeek, confirmForceAdminLogout,
     generateReport,
     addAbsence, validateAbsence, deleteAbsence,
     biblePublish, bibleReject, bibleSavePerms, bibleRefreshStats,

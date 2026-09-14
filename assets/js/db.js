@@ -912,6 +912,25 @@
     await db.collection('config').doc('games_config').set(data, { merge: true });
   }
 
+  // ── ADMIN SESSION VERSION (révocation forcée des sessions admin) ──
+  // Lecture : tout admin (auth.js, au login + vérif périodique).
+  // Écriture : réservée au super-admin côté règles (firestore.rules) —
+  // ce n'est PAS ce module qui fait respecter la restriction.
+  async function getAdminSessionVersion() {
+    const snap = await db.collection('config').doc('adminSession').get();
+    // 0 par défaut (pas 1) : cohérent avec FieldValue.increment(1) appliqué
+    // à un champ absent (part de 0), pour que le tout premier
+    // forceAdminLogout() sur un document inexistant (0 → 1) soit bien
+    // détecté par les admins dont la version locale de référence est
+    // encore ce même défaut.
+    return snap.exists && typeof snap.data().version === 'number' ? snap.data().version : 0;
+  }
+  async function forceAdminLogout() {
+    await db.collection('config').doc('adminSession').set(
+      { version: FV.increment(1) }, { merge: true }
+    );
+  }
+
   // ── HOTEL CONFIG ──
   async function getHotelConfig() {
     const snap = await db.collection('config').doc('hotel_config').get();
@@ -1252,6 +1271,7 @@
     listenDailyClaims, setDailyClaim, clearDailyClaim,
     purgeOldHistory,
     getBiblePermissions, setBiblePermissions,
+    getAdminSessionVersion, forceAdminLogout,
     getHotelConfig, saveHotelConfig,
     getVersions, saveVersions,
     listenMaintenance, saveMaintenance, logDeploy, listenDeployLog,

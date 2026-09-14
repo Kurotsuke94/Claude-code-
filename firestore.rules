@@ -38,6 +38,18 @@ service cloud.firestore {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // HELPER : Super-admin — UN seul compte Firebase Auth, en dur ici (pas de
+    // custom claims/Cloud Functions dans ce projet). Sert uniquement à
+    // restreindre l'écriture de config/adminSession (mécanisme de révocation
+    // forcée des sessions admin) : aucun autre document ni aucune autre
+    // fonctionnalité ne doit dépendre de ce helper. Ne PAS l'utiliser comme
+    // substitut/alias de isAdmin() ailleurs dans ce fichier.
+    // ────────────────────────────────────────────────────────────────────────
+    function isSuperAdmin() {
+      return isAdmin() && request.auth.token.email == 'keyzeur94460@hotmail.fr';
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // HELPER : session applicative authentifiée (Admin OU PIN via bootstrap
     // anonyme). Ne prouve PAS l'identité du technicien/responsable (le PIN
     // lui-même n'est vérifié que côté client), mais exige un vrai jeton
@@ -98,6 +110,17 @@ service cloud.firestore {
     match /config/notes {
       allow read: if true;
       allow create, update: if isAuthenticated();
+    }
+
+    // config/adminSession : version de session admin (mécanisme de
+    // révocation forcée des sessions Firebase Admin résiduelles sur un
+    // poste partagé — voir auth.js). Lecture libre (tout admin doit pouvoir
+    // vérifier sa propre version périodiquement) ; écriture réservée au
+    // SEUL super-admin — plus restrictif que /config/{docId} (isAdmin()),
+    // donc prend le pas dessus pour ce document précis.
+    match /config/adminSession {
+      allow read: if true;
+      allow create, update: if isSuperAdmin();
     }
 
     // ── USERS ────────────────────────────────────────────────────────────────
