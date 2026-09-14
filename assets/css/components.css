@@ -12380,6 +12380,104 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .pmdb-pg-info { display: none; }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   PMP — TABLEAU DE BORD V3 (cockpit : KPI / État global / Prochaines
+   échéances / Interventions réalisées / Priorités PMP)
+   Toutes les valeurs viennent de _pmpInt/_pmpEq/_pmpPlans déjà chargés —
+   voir pmp.js:_tDashboard(). Réutilise le style de carte .pmdb-widget /
+   .pmdb-kpi-card déjà existant, aucune nouvelle charte.
+   ══════════════════════════════════════════════════════════════════════ */
+.pmdb-kpi-row.pmdb2-kpi-row5 { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1300px) { .pmdb-kpi-row.pmdb2-kpi-row5 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px)  { .pmdb-kpi-row.pmdb2-kpi-row5 { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Ligne 2 : État global | Prochaines échéances ── */
+.pmdb2-row2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; align-items: stretch; }
+@media (max-width: 900px) { .pmdb2-row2 { grid-template-columns: 1fr; } }
+
+/* ── État global du PMP (barre segmentée) ── */
+.pmdb2-gbar { display: flex; width: 100%; height: 22px; border-radius: 8px; overflow: hidden; background: var(--bg4, #EEF1F6); margin: 4px 0 14px; }
+.pmdb2-gbar-seg { height: 100%; transition: width .3s ease; }
+.pmdb2-gbar-legend { display: flex; flex-direction: column; gap: 9px; }
+.pmdb2-gbar-leg { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.pmdb2-gbar-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.pmdb2-gbar-leg-lbl { flex: 1; color: var(--text, #111827); font-weight: 600; }
+.pmdb2-gbar-leg-val { color: var(--text2, #475569); font-family: var(--ffm); font-size: 12px; }
+.pmdb2-gbar-leg-val em { font-style: normal; color: var(--text3, #8896AB); }
+
+/* ── Prochaines échéances ── */
+.pmdb2-upc-list { display: flex; flex-direction: column; }
+.pmdb2-upc-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 2px;
+  border-bottom: 1px solid var(--border, #E7EAF3); cursor: pointer;
+}
+.pmdb2-upc-row:last-child { border-bottom: none; }
+.pmdb2-upc-row:hover { background: var(--bg4, #F8FAFC); }
+.pmdb2-upc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.pmdb2-upc-body { flex: 1; min-width: 0; }
+.pmdb2-upc-name { font-size: 12.5px; font-weight: 600; color: var(--text, #111827); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pmdb2-upc-sub { font-size: 11px; color: var(--text3, #8896AB); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pmdb2-upc-status { font-size: 11px; font-weight: 700; flex-shrink: 0; white-space: nowrap; text-align: right; }
+
+/* ── Interventions réalisées ce mois ── */
+.pmdb2-done-wrap { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.pmdb2-done-chart { flex: 1; min-width: 260px; }
+.pmdb2-done-stats { display: flex; flex-direction: column; gap: 12px; min-width: 160px; }
+.pmdb2-done-stat { display: flex; flex-direction: column; }
+.pmdb2-done-stat-v { font-size: 20px; font-weight: 800; font-family: var(--ffm); color: var(--text, #111827); }
+.pmdb2-done-stat-l { font-size: 11px; color: var(--text3, #8896AB); margin-top: 1px; }
+@media (max-width: 700px) { .pmdb2-done-wrap { flex-direction: column; align-items: stretch; } }
+
+/* ── Priorités PMP ── */
+.pmdb2-priority-badge {
+  margin-left: 8px; font-size: 10.5px; font-weight: 800; font-family: var(--ffm);
+  padding: 2px 9px; border-radius: 20px; background: #EF444418; color: #EF4444; border: 1px solid #EF444440;
+}
+.pmdb2-pr-table-wrap { overflow-x: auto; }
+.pmdb2-pr-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pmdb2-pr-table th {
+  text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--text3, #8896AB); padding: 8px 10px; border-bottom: 1px solid var(--border, #E7EAF3); white-space: nowrap;
+}
+.pmdb2-pr-table td { padding: 10px; border-bottom: 1px solid var(--border, #E7EAF3); vertical-align: middle; white-space: nowrap; }
+.pmdb2-pr-tr { cursor: pointer; }
+.pmdb2-pr-tr:hover { background: var(--bg4, #F8FAFC); }
+.pmdb2-pr-tr:last-child td { border-bottom: none; }
+.pmdb2-pr-eq { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text, #111827); }
+.pmdb2-pr-badge {
+  font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid; white-space: nowrap; display: inline-block;
+}
+.pmdb2-pr-actions { display: flex; gap: 6px; }
+.pmdb2-pr-btn {
+  border: 1px solid var(--border, #E7EAF3); background: var(--bg3, #fff); color: var(--text, #111827);
+  font-size: 11.5px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-family: var(--ffs);
+}
+.pmdb2-pr-btn:hover { border-color: var(--cyan, #7C3AED); color: var(--cyan, #7C3AED); }
+.pmdb2-pr-check {
+  border: none; background: #22C55E; color: #fff; width: 30px; height: 30px; border-radius: 8px;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.pmdb2-pr-check:hover { background: #16A34A; }
+
+/* Mobile : tableau → cartes */
+.pmdb2-pr-cards { display: none; flex-direction: column; gap: 10px; }
+@media (max-width: 900px) {
+  .pmdb2-pr-table-wrap { display: none; }
+  .pmdb2-pr-cards { display: flex; }
+}
+.pmdb2-pr-card { border: 1px solid var(--border, #E7EAF3); border-radius: 12px; padding: 12px; cursor: pointer; }
+.pmdb2-pr-card:hover { border-color: var(--cyan, #7C3AED); }
+.pmdb2-pr-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.pmdb2-pr-card-meta { font-size: 11.5px; color: var(--text3, #8896AB); margin-bottom: 10px; }
+.pmdb2-pr-card-acts { display: flex; gap: 8px; }
+.pmdb2-pr-card-acts .pmdb2-pr-btn { flex: 1; min-height: 40px; }
+.pmdb2-pr-card-acts .pmdb2-pr-check { width: auto; padding: 0 14px; gap: 6px; min-height: 40px; }
+
+/* Boutons tactiles suffisamment grands sur mobile */
+@media (max-width: 600px) {
+  .pmdb2-upc-status { font-size: 10.5px; }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    CSO SECURITY — archived section + delete modal
    ═══════════════════════════════════════════════════════════════════════════ */

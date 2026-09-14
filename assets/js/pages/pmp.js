@@ -594,21 +594,13 @@
   // ── DASHBOARD V2 ──────────────────────────────────────────────────────────
 
   function _tDashboard() {
-    var today   = _today();
-    var per     = window._pmpDashPer   || '30';
-    var page    = parseInt(window._pmpDashPage || 1);
-    var srch    = window._pmpDashSrch  || '';
-    var eqType  = window._pmpDashType  || 'all';
-    var eqSite  = window._pmpDashSite  || 'all';
-    var eqStat  = window._pmpDashStat  || 'all';
-    var PER     = parseInt(per);
-    var kpi     = _kpiData();
-    var weekEnd = _addDays(today, 6);
+    var today     = _today();
+    var kpi       = _kpiData();
+    var weekEnd   = _addDays(today, 6);
+    var tomorrow  = _addDays(today, 1);
+    var thisMonth = today.slice(0, 7);
 
-    // ── KPI computations ──
-    var todayCount = _pmpInt.filter(function (i) {
-      return i.dueDate === today && i.status !== 'terminee' && i.status !== 'annulee';
-    }).length;
+    // ── KPI computations (réutilisation stricte de getStats()/_kpiData()) ──
     var weekCount = _pmpInt.filter(function (i) {
       return i.dueDate >= today && i.dueDate <= weekEnd && i.status !== 'terminee' && i.status !== 'annulee';
     }).length;
@@ -617,315 +609,197 @@
     }, 0);
     var chargeH = Math.round(totalMins / 60);
 
-    // ── Chart data ──
-    var chartDates = [];
-    for (var ci = -5; ci < PER; ci++) chartDates.push(_addDays(today, ci));
-
-    function _chartCount(ds, filter) {
-      return _pmpInt.filter(function (i) { return i.dueDate === ds && filter(i); }).length;
-    }
-    var chartSeries = [
-      {
-        vals: chartDates.map(function (ds) { return _chartCount(ds, function (i) { return i.status !== 'annulee'; }); }),
-        color: '#3B82F6', w: 2.5, area: true
-      },
-      {
-        vals: chartDates.map(function (ds) {
-          return _chartCount(ds, function (i) { return i.status === 'en_retard' || (i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee'); });
-        }),
-        color: '#EF4444', w: 2
-      },
-      {
-        vals: chartDates.map(function (ds) {
-          return (ds >= today && ds <= weekEnd) ? _chartCount(ds, function (i) { return i.status !== 'terminee' && i.status !== 'annulee'; }) : 0;
-        }),
-        color: '#F59E0B', w: 2
-      },
-      {
-        vals: chartDates.map(function (ds) {
-          var nm = _addDays(today, 30), nme = _addDays(today, 60);
-          return (ds >= nm && ds <= nme) ? _chartCount(ds, function (i) { return i.status !== 'annulee'; }) : 0;
-        }),
-        color: '#22C55E', w: 2, dashed: true
-      },
+    // ── État global du PMP (répartition des interventions actives — réel, 4 catégories exclusives) ──
+    var active = _pmpInt.filter(function (i) { return i.status !== 'terminee' && i.status !== 'annulee'; });
+    var gRetard = 0, gSemaine = 0, gMois = 0, gAJour = 0;
+    active.forEach(function (i) {
+      var d = i.dueDate;
+      if (!d) { gAJour++; return; }
+      if (d < today) gRetard++;
+      else if (d <= weekEnd) gSemaine++;
+      else if (d.slice(0, 7) === thisMonth) gMois++;
+      else gAJour++;
+    });
+    var gTotal = active.length;
+    function _gPct(n) { return gTotal ? Math.round(n / gTotal * 100) : 0; }
+    var globalSegs = [
+      { n: gRetard,  pct: _gPct(gRetard),  c: '#EF4444', l: 'En retard' },
+      { n: gSemaine, pct: _gPct(gSemaine), c: '#F97316', l: 'Cette semaine' },
+      { n: gMois,    pct: _gPct(gMois),    c: '#F59E0B', l: 'Ce mois' },
+      { n: gAJour,   pct: _gPct(gAJour),   c: '#22C55E', l: 'À jour' },
     ];
-    var chartSVG = _pmdbChartSVG(chartSeries, chartDates);
-
-    // ── À surveiller ──
-    var lateInts = _pmpInt.filter(function (i) {
-      return i.status === 'en_retard' || (i.dueDate && i.dueDate < today && i.status !== 'terminee' && i.status !== 'annulee');
-    }).sort(function (a, b) { return _daysLate(b.dueDate) - _daysLate(a.dueDate); }).slice(0, 5);
-
-    var watchHtml = lateInts.length ? lateInts.map(function (i) {
-      var days = _daysLate(i.dueDate);
-      var ti   = EQ_TYPES[i.type] || { icon: '🔧' };
-      var col  = days >= 7 ? '#EF4444' : '#F59E0B';
-      var nxt  = _pmpInt.filter(function (x) { return x.equipmentId === i.equipmentId && x.dueDate >= today && x.status !== 'annulee'; })
-                         .sort(function (a, b) { return a.dueDate.localeCompare(b.dueDate); })[0];
-      return '<div class="pmdb-watch-row">' +
-        '<div class="pmdb-watch-ico" style="background:' + col + '18;color:' + col + '">' + ti.icon + '</div>' +
-        '<div class="pmdb-watch-info">' +
-          '<div class="pmdb-watch-name">' + esc(i.equipmentName || '—') + '</div>' +
-          '<div class="pmdb-watch-sub"><span style="color:' + col + ';font-weight:600">Retard : ' + days + 'j</span>' +
-          (nxt ? ' · Prochaine : ' + _dateLbl(nxt.dueDate) : '') + '</div>' +
-        '</div></div>';
-    }).join('') : '<div class="pmdb-empty-sm"><i class="fas fa-check-circle" style="color:#22C55E"></i> Aucun retard en cours</div>';
-
-    // ── Top 5 interventions les plus longues ──
-    var top5 = _pmpInt.filter(function (i) { return i.estimatedDuration; })
-      .map(function (i) { return { name: i.equipmentName || '—', dur: i.estimatedDuration, mins: _parseDurMins(i.estimatedDuration) }; })
-      .filter(function (x) { return x.mins > 0; })
-      .sort(function (a, b) { return b.mins - a.mins; }).slice(0, 5);
-
-    var top5Html = top5.length ? top5.map(function (item, idx) {
-      return '<div class="pmdb-top5-row">' +
-        '<span class="pmdb-top5-rank">' + (idx + 1) + '</span>' +
-        '<span class="pmdb-top5-name">' + esc(item.name) + '</span>' +
-        '<span class="pmdb-top5-dur">' + esc(item.dur) + '</span></div>';
-    }).join('') : '<div class="pmdb-empty-sm">Aucune durée renseignée</div>';
-
-    // ── Indice de santé du parc ──
-    var ph       = _parkHealth();
-    var phScore  = ph.score;
-    var phTotal  = ph.total || 1;
-    var phC      = phScore >= 90 ? '#22C55E' : phScore >= 75 ? '#10B981' : phScore >= 55 ? '#F59E0B' : phScore >= 35 ? '#F97316' : '#EF4444';
-    var phLbl    = phScore >= 90 ? 'Excellent' : phScore >= 75 ? 'Très bon' : phScore >= 55 ? 'Bon' : phScore >= 35 ? 'Dégradé' : 'Critique';
-    var phEmoji  = phScore >= 90 ? '🟢' : phScore >= 55 ? '🟡' : phScore >= 35 ? '🟠' : '🔴';
-
-    var PH_ORDER = ['excellent', 'bon', 'moyen', 'degrade', 'critique'];
-    var phBarHtml = PH_ORDER.map(function (k) {
-      var st  = HEALTH_STATES[k];
-      var cnt = ph.counts[k] || 0;
-      var pct = cnt / phTotal * 100;
-      if (!cnt) return '';
-      return '<div class="pmdb-ph-seg" style="width:' + pct.toFixed(1) + '%;background:' + st.c + '" title="' + st.l + ': ' + cnt + '"></div>';
+    var globalBarHtml = gTotal ? globalSegs.filter(function (s) { return s.n > 0; }).map(function (s) {
+      return '<div class="pmdb2-gbar-seg" style="width:' + s.pct + '%;background:' + s.c + '" title="' + s.l + ' : ' + s.n + '"></div>';
+    }).join('') : '<div class="pmdb2-gbar-seg" style="width:100%;background:var(--border)"></div>';
+    var globalLegendHtml = globalSegs.map(function (s) {
+      return '<div class="pmdb2-gbar-leg"><span class="pmdb2-gbar-dot" style="background:' + s.c + '"></span>' +
+        '<span class="pmdb2-gbar-leg-lbl">' + s.l + '</span>' +
+        '<span class="pmdb2-gbar-leg-val">' + s.n + ' <em>(' + s.pct + '%)</em></span></div>';
     }).join('');
 
-    var phRowsHtml = PH_ORDER.map(function (k) {
-      var st  = HEALTH_STATES[k];
-      var cnt = ph.counts[k] || 0;
-      return '<div class="pmdb-ph-row' + (!cnt ? ' pmdb-ph-row--zero' : '') + '">' +
-        '<span class="pmdb-ph-dot">' + st.dot + '</span>' +
-        '<span class="pmdb-ph-lbl">' + cnt + ' ' + st.l + (cnt > 1 && k !== 'moyen' ? 's' : '') + '</span>' +
-        (cnt ? '<div class="pmdb-ph-mini" style="width:' + (cnt / phTotal * 64).toFixed(0) + 'px;background:' + st.c + '"></div>' : '') +
+    // ── Badge de statut d'une intervention active (réutilisé Priorités + Prochaines échéances) ──
+    function _statusBadge(i) {
+      if (!i.dueDate) return { txt: 'À jour', col: '#22C55E' };
+      if (i.dueDate < today) { var dl = _daysLate(i.dueDate); return { txt: 'En retard de ' + dl + ' jour' + (dl > 1 ? 's' : ''), col: '#EF4444' }; }
+      if (i.dueDate === today) return { txt: "À faire aujourd'hui", col: '#F97316' };
+      if (i.dueDate === tomorrow) return { txt: 'À faire demain', col: '#F97316' };
+      if (i.dueDate <= weekEnd) {
+        var dj = Math.round((new Date(i.dueDate + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+        return { txt: 'Cette semaine — dans ' + dj + ' jour' + (dj > 1 ? 's' : ''), col: '#F97316' };
+      }
+      return { txt: 'À jour', col: '#22C55E' };
+    }
+
+    // ── Prochaines échéances (urgence d'abord, top 6) ──
+    var upcoming = active.slice().sort(function (a, b) {
+      var aLate = a.dueDate && a.dueDate < today, bLate = b.dueDate && b.dueDate < today;
+      if (aLate !== bLate) return aLate ? -1 : 1;
+      if (aLate) return _daysLate(b.dueDate) - _daysLate(a.dueDate);
+      return (a.dueDate || 'zzz').localeCompare(b.dueDate || 'zzz');
+    });
+    var upcomingTop = upcoming.slice(0, 6);
+    var upcomingHtml = upcomingTop.length ? upcomingTop.map(function (i) {
+      var ti = EQ_TYPES[i.type] || { icon: '🔧', l: 'Contrôle' };
+      var b  = _statusBadge(i);
+      return '<div class="pmdb2-upc-row" onclick="MX.Pages.PMP._viewEq(\'' + esc(i.equipmentId || '') + '\')">' +
+        '<span class="pmdb2-upc-dot" style="background:' + b.col + '"></span>' +
+        '<div class="pmdb2-upc-body">' +
+          '<div class="pmdb2-upc-name">' + esc(i.equipmentName || '—') + '</div>' +
+          '<div class="pmdb2-upc-sub">' + esc(ti.l || 'Contrôle') + '</div>' +
+        '</div>' +
+        '<span class="pmdb2-upc-status" style="color:' + b.col + '">' + b.txt + '</span>' +
       '</div>';
-    }).join('');
+    }).join('') : '<div class="pmdb-empty-sm"><i class="fas fa-check-circle" style="color:#22C55E"></i> Aucune échéance à venir</div>';
 
-    // ── Equipment grid (filtered + paginated) ──
-    var PER_PAGE = 8;
-    var zonesArr = [];
-    _pmpEq.forEach(function (e) { if (e.zone && zonesArr.indexOf(e.zone) < 0) zonesArr.push(e.zone); });
-    zonesArr.sort();
+    // ── Interventions réalisées ce mois (doneDate réel, aucune donnée inventée) ──
+    var doneThisMonth = _pmpInt.filter(function (i) { return i.status === 'terminee' && i.doneDate && i.doneDate.slice(0, 7) === thisMonth; });
+    var monthDays = [];
+    var d0 = new Date(thisMonth + '-01T00:00:00');
+    var dToday = new Date(today + 'T00:00:00');
+    for (var dd = new Date(d0); dd <= dToday; dd.setDate(dd.getDate() + 1)) monthDays.push(dd.toISOString().slice(0, 10));
+    var doneByDay = {};
+    doneThisMonth.forEach(function (i) { doneByDay[i.doneDate] = (doneByDay[i.doneDate] || 0) + 1; });
+    var doneSeries = [{ vals: monthDays.map(function (d) { return doneByDay[d] || 0; }), color: '#22C55E', w: 2.5, area: true }];
+    var doneChartSVG = monthDays.length >= 2 ? _pmdbChartSVG(doneSeries, monthDays) : '<div class="pmdb-empty-sm">Pas assez de données ce mois-ci</div>';
 
-    var filtered = _pmpEq.filter(function (eq) {
-      if (srch) {
-        var sv = srch.toLowerCase();
-        if (!(eq.name || '').toLowerCase().includes(sv) && !(eq.zone || '').toLowerCase().includes(sv) && !(eq.ref || '').toLowerCase().includes(sv)) return false;
-      }
-      if (eqType !== 'all' && eq.type !== eqType) return false;
-      if (eqSite !== 'all' && eq.zone !== eqSite) return false;
-      if (eqStat !== 'all') {
-        var eqNd    = _eqPlanNextDue(eq.id) || eq.nextDue;
-        var isLateF = eqNd && eqNd < today && eq.status !== 'inactif';
-        var isSoonF = !isLateF && eqNd && eqNd >= today && eqNd <= weekEnd;
-        if (eqStat === 'late' && !isLateF) return false;
-        if (eqStat === 'soon' && !isSoonF) return false;
-        if (eqStat === 'ok' && (isLateF || isSoonF)) return false;
-      }
-      return true;
-    }).sort(function (a, b) {
-      var aNd = _eqPlanNextDue(a.id) || a.nextDue;
-      var bNd = _eqPlanNextDue(b.id) || b.nextDue;
-      var aL = (aNd && aNd < today) ? 1 : 0;
-      var bL = (bNd && bNd < today) ? 1 : 0;
-      if (bL !== aL) return bL - aL;
-      return (aNd || 'z').localeCompare(bNd || 'z');
+    // Comparaison au mois précédent : même méthode exacte que _kpiData() (dueDate dans le mois, status terminée) appliquée au mois précédent.
+    var prevMonth     = _addDays(thisMonth + '-01', -1).slice(0, 7);
+    var prevMonthInts = _pmpInt.filter(function (i) { return (i.dueDate || '').slice(0, 7) === prevMonth; });
+    var prevRealisees = prevMonthInts.filter(function (i) { return i.status === 'terminee'; }).length;
+    var evoTxt = null, evoUp = null;
+    if (prevRealisees > 0) {
+      var evoPct = Math.round((kpi.realisees - prevRealisees) / prevRealisees * 100);
+      evoTxt = (evoPct >= 0 ? '+' : '') + evoPct + '% vs mois précédent';
+      evoUp  = evoPct >= 0;
+    }
+    // Aucun champ de durée réellement enregistrée à la validation (_markDone n'écrit que date + observations) : "—", jamais une estimation présentée comme réelle.
+    var tempsPasseTxt = '—';
+
+    // ── Priorités PMP (retard + échéance ≤ cette semaine, urgence d'abord) ──
+    var priorityItems = active.filter(function (i) { return i.dueDate && i.dueDate <= weekEnd; }).sort(function (a, b) {
+      var aLate = a.dueDate < today, bLate = b.dueDate < today;
+      if (aLate !== bLate) return aLate ? -1 : 1;
+      if (aLate) return _daysLate(b.dueDate) - _daysLate(a.dueDate);
+      return a.dueDate.localeCompare(b.dueDate);
     });
 
-    var totalEqs   = filtered.length;
-    var totalPages = Math.max(1, Math.ceil(totalEqs / PER_PAGE));
-    var safeP      = Math.min(Math.max(1, page), totalPages);
-    var startIdx   = (safeP - 1) * PER_PAGE;
-    var pageEqs    = filtered.slice(startIdx, startIdx + PER_PAGE);
-
-    var eqCardsHtml = '';
-    if (!pageEqs.length) {
-      eqCardsHtml = '<div class="pmdb-empty"><i class="fas fa-wrench"></i>' +
-        '<div>' + (!_pmpEq.length ? 'Aucun équipement configuré' : 'Aucun résultat pour cette recherche') + '</div>' +
-        (!_pmpEq.length ? '<button class="pmdb-add-btn" style="margin-top:6px" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter</button>' : '') +
-        '</div>';
-    } else {
-      eqCardsHtml = '<div class="pmdb-eq-grid">';
-      pageEqs.forEach(function (eq) {
-        var ti       = EQ_TYPES[eq.type] || { icon: '🔧', l: eq.type || 'Divers' };
-        var nextDue  = _eqPlanNextDue(eq.id) || eq.nextDue;
-        var planCnt  = _eqPlanCount(eq.id);
-        var isLate   = nextDue && nextDue < today && eq.status !== 'inactif';
-        var daysOff  = nextDue ? Math.round((new Date(nextDue + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000) : null;
-        var eqHs     = HEALTH_STATES[(eq.healthState && HEALTH_STATES[eq.healthState]) ? eq.healthState : 'bon'];
-        var health   = eqHs.pts;
-        var hColor   = eqHs.c;
-        var badgeT   = eq.status === 'inactif' ? 'off' : isLate ? 'late' : (daysOff !== null && daysOff <= 7) ? 'soon' : 'ok';
-        var badgeLbl = { off:'Inactif', late:'En retard', soon:'À venir', ok:'OK' }[badgeT];
-        var nextStr  = !nextDue ? '—' : isLate ? '<span style="color:#EF4444">' + _dateLbl(nextDue) + ' (' + Math.abs(daysOff) + 'j)</span>' :
-                       daysOff === 0 ? "Aujourd'hui" : _dateLbl(nextDue);
-        var latestInt = _pmpInt.filter(function (i) { return i.equipmentId === eq.id && i.technician; })
-                               .sort(function (a, b) { return (b.dueDate || '').localeCompare(a.dueDate || ''); })[0];
-        var eqPlans  = _pmpPlans.filter(function (p) { return p.equipmentId === eq.id; });
-        var planTech = eqPlans.length === 1 ? eqPlans[0].technician : '';
-        var tech = latestInt ? latestInt.technician : (planTech || eq.technician || '');
-        var dur  = latestInt ? (latestInt.estimatedDuration || '') : (eqPlans.length === 1 ? eqPlans[0].duration || '' : eq.duration || '');
-        var initials = tech ? tech.split(' ').map(function (w) { return w ? w[0].toUpperCase() : ''; }).join('').slice(0, 2) : '';
-
-        eqCardsHtml +=
-          '<div class="pmdb-eq-card' + (isLate ? ' pmdb-eq-card--late' : '') + '">' +
-            '<div class="pmdb-eq-card-top">' +
-              '<div class="pmdb-eq-ico">' + ti.icon + '</div>' +
-              '<div class="pmdb-eq-head">' +
-                '<div class="pmdb-eq-name">' + esc(eq.name) + '</div>' +
-                '<div class="pmdb-eq-ref">' + (eq.ref ? esc(eq.ref) + ' · ' : '') + esc(ti.l) + '</div>' +
-              '</div>' +
-              '<span class="pmdb-eq-badge pmdb-eq-badge--' + badgeT + '">' + badgeLbl + '</span>' +
-            '</div>' +
-            (eq.zone ? '<div class="pmdb-eq-zone"><i class="fas fa-location-dot"></i> ' + esc(eq.zone) + (eq.subZone ? ' · ' + esc(eq.subZone) : '') + '</div>' : '') +
-            '<div class="pmdb-eq-health-row" style="--hw:' + health + '%;--hc:' + hColor + '">' +
-              '<div class="pmdb-eq-health-bar"><div class="pmdb-eq-health-fill"></div></div>' +
-              '<span class="pmdb-eq-health-pct" style="color:' + hColor + '">' + eqHs.dot + ' ' + eqHs.l + '</span>' +
-            '</div>' +
-            '<div class="pmdb-eq-meta">' +
-              '<div class="pmdb-eq-meta-item"><i class="fas fa-calendar-check"></i> ' + nextStr + '</div>' +
-              (dur ? '<div class="pmdb-eq-meta-item"><i class="fas fa-clock"></i> ' + esc(dur) + '</div>' : '') +
-            '</div>' +
-            (tech ? '<div class="pmdb-eq-tech"><div class="pmdb-eq-tech-av">' + initials + '</div><span>' + esc(tech) + '</span></div>' : '') +
-            '<div class="pmdb-eq-actions">' +
-              '<button class="pmdb-eq-btn-int" onclick="MX.Pages.PMP._viewEq(\'' + esc(eq.id) + '\')"><i class="fas fa-list-check"></i> ' + planCnt + ' plan' + (planCnt !== 1 ? 's' : '') + '</button>' +
-              '<button class="pmdb-eq-btn-ico" onclick="MX.Pages.PMP._eqForm(\'' + esc(eq.id) + '\')" title="Modifier"><i class="fas fa-pen"></i></button>' +
-              '<button class="pmdb-eq-btn-ico pmdb-eq-btn-del" onclick="MX.Pages.PMP._delEq(\'' + eq.id + '\')" title="Supprimer"><i class="fas fa-trash"></i></button>' +
-            '</div>' +
-          '</div>';
-      });
-      eqCardsHtml += '</div>';
+    function _lastControlOf(i) {
+      var plan = i.planId ? _pmpPlans.find(function (p) { return p.id === i.planId; }) : null;
+      var eq   = _pmpEq.find(function (e) { return e.id === i.equipmentId; });
+      var ld   = (plan && plan.lastDone) || (eq && eq.lastDone) || null;
+      return ld ? _dateLbl(ld) : '—';
     }
 
-    // ── Pagination ──
-    var pgHtml = '';
-    if (totalPages > 1) {
-      var pageNums = '';
-      var prev = -1;
-      for (var p = 1; p <= totalPages; p++) {
-        var show = p === 1 || p === totalPages || (p >= safeP - 1 && p <= safeP + 1);
-        if (show) {
-          if (prev > 0 && p - prev > 1) pageNums += '<span class="pmdb-pg-dots">…</span>';
-          pageNums += '<button class="pmdb-pg-btn' + (p === safeP ? ' pmdb-pg-btn--act' : '') + '"' +
-            ' onclick="window._pmpDashPage=' + p + ';MX.Pages.PMP._tab(\'dashboard\')">' + p + '</button>';
-          prev = p;
-        }
-      }
-      pgHtml = '<div class="pmdb-pg-row">' +
-        '<div class="pmdb-pagination">' +
-          '<button class="pmdb-pg-btn"' + (safeP <= 1 ? ' disabled' : ' onclick="window._pmpDashPage=' + (safeP - 1) + ';MX.Pages.PMP._tab(\'dashboard\')"') + '><i class="fas fa-chevron-left"></i></button>' +
-          pageNums +
-          '<button class="pmdb-pg-btn"' + (safeP >= totalPages ? ' disabled' : ' onclick="window._pmpDashPage=' + (safeP + 1) + ';MX.Pages.PMP._tab(\'dashboard\')"') + '><i class="fas fa-chevron-right"></i></button>' +
-        '</div>' +
-        '<div class="pmdb-pg-info">Afficher ' + (startIdx + 1) + '-' + Math.min(startIdx + PER_PAGE, totalEqs) + ' sur ' + totalEqs + ' équipements</div>' +
-      '</div>';
-    }
+    var priorityRows = priorityItems.map(function (i) {
+      var ti = EQ_TYPES[i.type] || { icon: '🔧', l: '—' };
+      var b  = _statusBadge(i);
+      return {
+        eqIcon: ti.icon, eqName: i.equipmentName || '—', type: ti.l || '—',
+        badgeTxt: b.txt, badgeCol: b.col, due: _dateLbl(i.dueDate), last: _lastControlOf(i),
+        eqId: i.equipmentId || '', intId: i.id,
+      };
+    });
 
-    // ── Toolbar selectors ──
-    var perBtns = ['7','30','90','365'].map(function (p) {
-      var lbl = { 7:'7J', 30:'30J', 90:'3M', 365:'1A' }[p];
-      return '<button class="pmdb-per-btn' + (per === p ? ' pmdb-per-btn--act' : '') + '" onclick="window._pmpDashPer=\'' + p + '\';MX.Pages.PMP._tab(\'dashboard\')">' + lbl + '</button>';
+    var priorityTableHtml = priorityRows.map(function (r) {
+      return '<tr class="pmdb2-pr-tr" onclick="MX.Pages.PMP._viewEq(\'' + esc(r.eqId) + '\')">' +
+        '<td><div class="pmdb2-pr-eq"><span>' + r.eqIcon + '</span>' + esc(r.eqName) + '</div></td>' +
+        '<td>' + esc(r.type) + '</td>' +
+        '<td><span class="pmdb2-pr-badge" style="color:' + r.badgeCol + ';background:' + r.badgeCol + '18;border-color:' + r.badgeCol + '40">' + esc(r.badgeTxt) + '</span></td>' +
+        '<td>' + r.due + '</td>' +
+        '<td>' + r.last + '</td>' +
+        '<td class="pmdb2-pr-actions">' +
+          '<button class="pmdb2-pr-btn" onclick="event.stopPropagation();MX.Pages.PMP._viewEq(\'' + esc(r.eqId) + '\')">Ouvrir</button>' +
+          '<button class="pmdb2-pr-check" onclick="event.stopPropagation();MX.Pages.PMP._markDone(\'' + esc(r.intId) + '\')" title="Marquer réalisé"><i class="fas fa-check"></i></button>' +
+        '</td>' +
+      '</tr>';
     }).join('');
 
-    var typeOpts = '<option value="all"' + (eqType === 'all' ? ' selected' : '') + '>Tous les types</option>' +
-      Object.entries(EQ_TYPES).map(function (kv) {
-        return '<option value="' + kv[0] + '"' + (eqType === kv[0] ? ' selected' : '') + '>' + kv[1].icon + ' ' + kv[1].l + '</option>';
-      }).join('');
-    var siteOpts = '<option value="all"' + (eqSite === 'all' ? ' selected' : '') + '>Tous les sites</option>' +
-      zonesArr.map(function (z) { return '<option value="' + esc(z) + '"' + (eqSite === z ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('');
-    var statOpts = '<option value="all"' + (eqStat === 'all' ? ' selected' : '') + '>Tous les statuts</option>' +
-      '<option value="late"' + (eqStat === 'late' ? ' selected' : '') + '>En retard</option>' +
-      '<option value="soon"' + (eqStat === 'soon' ? ' selected' : '') + '>À venir (7j)</option>' +
-      '<option value="ok"' + (eqStat === 'ok' ? ' selected' : '') + '>OK</option>';
-
-    var filterChange = ';window._pmpDashPage=1;MX.Pages.PMP._tab(\'dashboard\')';
+    var priorityCardsHtml = priorityRows.map(function (r) {
+      return '<div class="pmdb2-pr-card" onclick="MX.Pages.PMP._viewEq(\'' + esc(r.eqId) + '\')">' +
+        '<div class="pmdb2-pr-card-top">' +
+          '<div class="pmdb2-pr-eq"><span>' + r.eqIcon + '</span>' + esc(r.eqName) + '</div>' +
+          '<span class="pmdb2-pr-badge" style="color:' + r.badgeCol + ';background:' + r.badgeCol + '18;border-color:' + r.badgeCol + '40">' + esc(r.badgeTxt) + '</span>' +
+        '</div>' +
+        '<div class="pmdb2-pr-card-meta">' + esc(r.type) + ' · Échéance ' + r.due + ' · Dernier contrôle ' + r.last + '</div>' +
+        '<div class="pmdb2-pr-card-acts">' +
+          '<button class="pmdb2-pr-btn" onclick="event.stopPropagation();MX.Pages.PMP._viewEq(\'' + esc(r.eqId) + '\')">Ouvrir</button>' +
+          '<button class="pmdb2-pr-check" onclick="event.stopPropagation();MX.Pages.PMP._markDone(\'' + esc(r.intId) + '\')"><i class="fas fa-check"></i> Réalisé</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
 
     // ── Assemble ──
     return '<div class="pmdb">' +
 
-      '<div class="pmdb-kpi-row">' +
-        _pmdbKpiCard('fa-screwdriver-wrench', '#3B82F6', kpi.totalEq,       'Équipements',          'Tous sites confondus',      'equipements') +
-        _pmdbKpiCard('fa-calendar-day',       '#8B5CF6', todayCount,        'Interventions auj.',   'Planifiées',                null) +
-        _pmdbKpiCard('fa-triangle-exclamation','#EF4444', kpi.enRetard,     'En retard',            'À traiter',                 'retards', true) +
-        _pmdbKpiCard('fa-calendar-week',       '#22C55E', weekCount,        'Cette semaine',        'Interventions',             null) +
-        _pmdbKpiCard('fa-calendar',            '#F59E0B', kpi.thisMonthCount,'Ce mois',             'Interventions',             null) +
-        _pmdbKpiCard('fa-clock',               '#06B6D4', (chargeH || '0') + ' h', 'Charge annuelle', 'Temps estimé', null) +
+      '<div class="pmdb-kpi-row pmdb2-kpi-row5">' +
+        _pmdbKpiCard('fa-screwdriver-wrench',    '#3B82F6', kpi.totalEq,   'Équipements suivis',    'Tous sites confondus',  'equipements') +
+        _pmdbKpiCard('fa-triangle-exclamation',  '#EF4444', kpi.enRetard,  'En retard',              'À traiter',             'retards', true) +
+        _pmdbKpiCard('fa-calendar-week',         '#F97316', weekCount,     'À faire cette semaine',  'Interventions',         'file') +
+        _pmdbKpiCard('fa-calendar-check',        '#22C55E', kpi.realisees, 'Réalisées ce mois',      'Interventions',         'historique') +
+        _pmdbKpiCard('fa-clock',                 '#06B6D4', chargeH ? (chargeH + ' h') : '—', 'Charge annuelle', 'Temps estimé cumulé', null) +
       '</div>' +
 
-      '<div class="pmdb-main-grid">' +
-        '<div class="pmdb-left-col">' +
+      '<div class="pmdb2-row2">' +
 
-          '<div class="pmdb-chart-card">' +
-            '<div class="pmdb-chart-hdr">' +
-              '<div>' +
-                '<div class="pmdb-chart-ttl">Évolution des prochaines interventions</div>' +
-                '<div class="pmdb-chart-leg">' +
-                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#3B82F6"></span>Tous</span>' +
-                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#EF4444"></span>En retard</span>' +
-                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot" style="background:#F59E0B"></span>Cette semaine</span>' +
-                  '<span class="pmdb-leg-item"><span class="pmdb-leg-dot--dash" style="border-color:#22C55E"></span>Mois prochain</span>' +
-                '</div>' +
-              '</div>' +
-              '<div class="pmdb-chart-acts">' +
-                '<div class="pmdb-per-group">' + perBtns + '</div>' +
-                '<button class="pmdb-chart-ico-btn" onclick="MX.Pages.PMP._tab(\'dashboard\')" title="Actualiser"><i class="fas fa-rotate"></i></button>' +
-              '</div>' +
-            '</div>' +
-            '<div class="pmdb-chart-wrap">' + chartSVG + '</div>' +
-          '</div>' +
-
-          '<div class="pmdb-eq-section">' +
-            '<div class="pmdb-eq-toolbar">' +
-              '<input type="text" class="pmdb-filter-search" placeholder="Rechercher un équipement…" value="' + esc(srch) + '" oninput="window._pmpDashSrch=this.value' + filterChange + '">' +
-              '<select class="pmdb-filter-sel" onchange="window._pmpDashType=this.value' + filterChange + '">' + typeOpts + '</select>' +
-              '<select class="pmdb-filter-sel" onchange="window._pmpDashSite=this.value' + filterChange + '">' + siteOpts + '</select>' +
-              '<select class="pmdb-filter-sel" onchange="window._pmpDashStat=this.value' + filterChange + '">' + statOpts + '</select>' +
-              '<button class="pmdb-add-btn" onclick="MX.Pages.PMP._eqForm(null)"><i class="fas fa-plus"></i> Ajouter un équipement</button>' +
-            '</div>' +
-            eqCardsHtml +
-            pgHtml +
-          '</div>' +
-
+        '<div class="pmdb-widget pmdb2-global-card">' +
+          '<div class="pmdb-widget-hdr"><i class="fas fa-gauge-high"></i> État global du PMP</div>' +
+          '<div class="pmdb2-gbar">' + globalBarHtml + '</div>' +
+          '<div class="pmdb2-gbar-legend">' + globalLegendHtml + '</div>' +
         '</div>' +
 
-        '<div class="pmdb-right-col">' +
+        '<div class="pmdb-widget pmdb2-upcoming-card">' +
+          '<div class="pmdb-widget-hdr"><i class="fas fa-list-check"></i> Prochaines échéances</div>' +
+          '<div class="pmdb2-upc-list">' + upcomingHtml + '</div>' +
+          (upcoming.length > upcomingTop.length ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'retards\')" class="pmdb-widget-link">Voir tout →</a></div>' : '') +
+        '</div>' +
 
-          '<div class="pmdb-widget">' +
-            '<div class="pmdb-widget-hdr"><i class="fas fa-triangle-exclamation"></i> À surveiller</div>' +
-            '<div class="pmdb-watch-list">' + watchHtml + '</div>' +
-            (lateInts.length ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'retards\')" class="pmdb-widget-link">Voir toutes les alertes (' + kpi.enRetard + ') →</a></div>' : '') +
+      '</div>' +
+
+      '<div class="pmdb-widget pmdb2-done-card">' +
+        '<div class="pmdb-widget-hdr"><i class="fas fa-chart-line"></i> Interventions réalisées ce mois</div>' +
+        '<div class="pmdb2-done-wrap">' +
+          '<div class="pmdb2-done-chart">' + doneChartSVG + '</div>' +
+          '<div class="pmdb2-done-stats">' +
+            '<div class="pmdb2-done-stat"><span class="pmdb2-done-stat-v">' + kpi.realisees + '</span><span class="pmdb2-done-stat-l">Réalisées ce mois</span></div>' +
+            '<div class="pmdb2-done-stat"><span class="pmdb2-done-stat-v">' + tempsPasseTxt + '</span><span class="pmdb2-done-stat-l">Temps passé (non enregistré)</span></div>' +
+            (evoTxt ? '<div class="pmdb2-done-stat"><span class="pmdb2-done-stat-v" style="color:' + (evoUp ? '#22C55E' : '#EF4444') + '">' + evoTxt + '</span><span class="pmdb2-done-stat-l">Vs mois précédent</span></div>' : '') +
           '</div>' +
-
-          '<div class="pmdb-widget">' +
-            '<div class="pmdb-widget-hdr"><i class="fas fa-ranking-star"></i> Top 5 interventions les plus longues</div>' +
-            '<div class="pmdb-top5-list">' + top5Html + '</div>' +
-            (top5.length >= 5 ? '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'interventions\')" class="pmdb-widget-link">Voir le classement complet →</a></div>' : '') +
-          '</div>' +
-
-          '<div class="pmdb-widget pmdb-widget--ph">' +
-            '<div class="pmdb-widget-hdr"><i class="fas fa-battery-three-quarters"></i> Indice de santé du parc</div>' +
-            '<div class="pmdb-ph-score-row">' +
-              '<span class="pmdb-ph-pct" style="color:' + phC + '">' + phScore + ' %</span>' +
-              '<div class="pmdb-ph-badge" style="color:' + phC + ';border-color:' + phC + '">' + phEmoji + ' ' + phLbl + '</div>' +
-            '</div>' +
-            '<div class="pmdb-ph-bar">' + (phBarHtml || '<div class="pmdb-ph-seg" style="width:100%;background:var(--border)"></div>') + '</div>' +
-            '<div class="pmdb-ph-counts">' + phTotal + ' équipement' + (phTotal > 1 ? 's' : '') + ' actif' + (phTotal > 1 ? 's' : '') + '</div>' +
-            '<div class="pmdb-ph-rows">' + phRowsHtml + '</div>' +
-            '<div class="pmdb-widget-ft"><a onclick="MX.Pages.PMP._tab(\'equipements\')" class="pmdb-widget-link">Gérer les états de santé →</a></div>' +
-          '</div>' +
-
         '</div>' +
       '</div>' +
+
+      '<div class="pmdb-widget pmdb2-priority-card">' +
+        '<div class="pmdb-widget-hdr"><i class="fas fa-bullseye" style="color:#EF4444"></i> Priorités PMP' +
+          (priorityRows.length ? '<span class="pmdb2-priority-badge">' + priorityRows.length + ' élément' + (priorityRows.length > 1 ? 's' : '') + '</span>' : '') +
+        '</div>' +
+        (!priorityRows.length ?
+          '<div class="pmdb-empty-sm" style="padding:20px"><i class="fas fa-circle-check" style="color:#22C55E"></i> Aucune priorité — tout est à jour</div>' :
+          '<div class="pmdb2-pr-table-wrap"><table class="pmdb2-pr-table"><thead><tr>' +
+            '<th>Équipement</th><th>Type de contrôle</th><th>Statut</th><th>Échéance</th><th>Dernier contrôle</th><th>Actions</th>' +
+          '</tr></thead><tbody>' + priorityTableHtml + '</tbody></table></div>' +
+          '<div class="pmdb2-pr-cards">' + priorityCardsHtml + '</div>'
+        ) +
+      '</div>' +
+
     '</div>';
   }
 
