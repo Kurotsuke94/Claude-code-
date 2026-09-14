@@ -1237,7 +1237,7 @@
     MX.showModal("Forcer la déconnexion des admins ?",
       "Cette action va invalider les sessions administrateur actuellement ouvertes. Les administrateurs devront se reconnecter. Continuer ?", [
       { label: "Forcer la déconnexion", cls: "danger", fn: async () => {
-        try { await MX.DB.forceAdminLogout(); MX.toast("Les sessions administrateur ont été invalidées."); }
+        try { await MX.Auth.forceAdminLogout(); MX.toast("Les sessions administrateur ont été invalidées."); }
         catch (e) { MX.toast("Erreur", true); }
       } },
       { label: "Annuler", cls: "cancel" }

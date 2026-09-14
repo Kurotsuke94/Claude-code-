@@ -47,6 +47,28 @@
   }
   setInterval(_checkAdminSessionVersion, ADMIN_SESSION_CHECK_MS);
 
+  // Retour au premier plan (onglet/PWA ravivé après mise en arrière-plan) :
+  // ne pas dépendre uniquement du tick de 3 min, qui peut être fortement
+  // retardé/suspendu par le navigateur mobile pendant que l'app est en
+  // arrière-plan. visibilityState==='visible' couvre aussi bien un onglet
+  // classique qu'une PWA en mode standalone ravivée.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') _checkAdminSessionVersion();
+  });
+
+  // Déclenché uniquement par le super-admin (bouton "Forcer la déconnexion
+  // des admins", admin.js). Incrémente la version côté Firestore PUIS adopte
+  // immédiatement cette nouvelle version en local : contrairement à un
+  // simple appel à MX.DB.forceAdminLogout(), le poste qui déclenche l'action
+  // ne se retrouve jamais lui-même avec une version locale périmée — seules
+  // les AUTRES sessions admin (dont la version locale reste l'ancienne)
+  // seront déconnectées à leur prochaine vérification.
+  async function forceAdminLogout() {
+    var newVersion = await window.MX.DB.forceAdminLogout();
+    _adminSessionVersion = newVersion;
+    return newVersion;
+  }
+
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
     window.MX.state.adminUser = (user && user.isAnonymous === false) ? user : null;
@@ -518,5 +540,6 @@
     // immédiat après "Forcer la déconnexion des admins", et pour les tests.
     // Ne révoque jamais une session valide ; aucune élévation de droits.
     checkAdminSessionVersionNow: _checkAdminSessionVersion,
+    forceAdminLogout,
   };
 })();

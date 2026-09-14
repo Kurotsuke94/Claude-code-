@@ -926,9 +926,13 @@
     return snap.exists && typeof snap.data().version === 'number' ? snap.data().version : 0;
   }
   async function forceAdminLogout() {
-    await db.collection('config').doc('adminSession').set(
-      { version: FV.increment(1) }, { merge: true }
-    );
+    const ref = db.collection('config').doc('adminSession');
+    await ref.set({ version: FV.increment(1) }, { merge: true });
+    // Relit la valeur réelle après incrémentation : l'appelant (auth.js) en
+    // a besoin pour que le super-admin adopte immédiatement la nouvelle
+    // version et ne se déconnecte pas lui-même à sa propre action.
+    const snap = await ref.get();
+    return snap.exists && typeof snap.data().version === 'number' ? snap.data().version : 0;
   }
 
   // ── HOTEL CONFIG ──
