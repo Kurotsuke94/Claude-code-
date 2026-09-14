@@ -12405,6 +12405,27 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmdb2-gbar-leg-val { color: var(--text2, #475569); font-family: var(--ffm); font-size: 12px; }
 .pmdb2-gbar-leg-val em { font-style: normal; color: var(--text3, #8896AB); }
 
+/* ── État global : légende + donut équipements côte à côte ── */
+.pmdb2-global-body { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.pmdb2-global-body .pmdb2-gbar-legend { flex: 1; min-width: 180px; }
+.pmdb2-global-donut { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.pmdb2-global-donut svg { display: block; }
+@media (max-width: 900px) {
+  .pmdb2-global-body { flex-direction: column; align-items: stretch; }
+  .pmdb2-global-donut { align-self: center; }
+}
+
+/* ── Alerte dynamique État global ── */
+.pmdb2-galert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding: 11px 14px; border-radius: 10px; font-size: 12.5px; }
+.pmdb2-galert--warn { background: #EF444412; border: 1px solid #EF444435; color: #B91C1C; }
+.pmdb2-galert--warn i { color: #EF4444; }
+.pmdb2-galert--ok { background: #22C55E12; border: 1px solid #22C55E35; color: #15803D; }
+.pmdb2-galert--ok i { color: #22C55E; }
+.pmdb2-galert-txt { flex: 1; min-width: 200px; line-height: 1.45; }
+.pmdb2-galert .pmdb-widget-link { flex-shrink: 0; font-weight: 700; cursor: pointer; }
+[data-theme="dark"] .pmdb2-galert--warn { color: #FCA5A5; }
+[data-theme="dark"] .pmdb2-galert--ok { color: #86EFAC; }
+
 /* ── Prochaines échéances ── */
 .pmdb2-upc-list { display: flex; flex-direction: column; }
 .pmdb2-upc-row {
@@ -12420,13 +12441,20 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pmdb2-upc-status { font-size: 11px; font-weight: 700; flex-shrink: 0; white-space: nowrap; text-align: right; }
 
 /* ── Interventions réalisées ce mois ── */
-.pmdb2-done-wrap { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.pmdb2-done-legend { margin-bottom: 10px; flex-direction: row !important; flex-wrap: wrap; gap: 18px !important; }
+.pmdb2-done-wrap { display: flex; gap: 24px; align-items: stretch; flex-wrap: wrap; }
 .pmdb2-done-chart { flex: 1; min-width: 260px; }
-.pmdb2-done-stats { display: flex; flex-direction: column; gap: 12px; min-width: 160px; }
+.pmdb2-done-chart--big { min-width: 320px; }
+.pmdb2-done-chart--big svg { min-height: 260px; }
+.pmdb2-done-stats { display: flex; flex-direction: column; gap: 18px; min-width: 170px; justify-content: center; }
 .pmdb2-done-stat { display: flex; flex-direction: column; }
-.pmdb2-done-stat-v { font-size: 20px; font-weight: 800; font-family: var(--ffm); color: var(--text, #111827); }
-.pmdb2-done-stat-l { font-size: 11px; color: var(--text3, #8896AB); margin-top: 1px; }
-@media (max-width: 700px) { .pmdb2-done-wrap { flex-direction: column; align-items: stretch; } }
+.pmdb2-done-stat-v { font-size: 26px; font-weight: 800; font-family: var(--ffm); color: var(--text, #111827); }
+.pmdb2-done-stat-l { font-size: 11.5px; color: var(--text3, #8896AB); margin-top: 2px; }
+@media (max-width: 700px) {
+  .pmdb2-done-wrap { flex-direction: column; align-items: stretch; }
+  .pmdb2-done-chart--big svg { min-height: 220px; }
+  .pmdb2-done-stats { flex-direction: row; flex-wrap: wrap; gap: 20px; justify-content: flex-start; }
+}
 
 /* ── Priorités PMP ── */
 .pmdb2-priority-badge {

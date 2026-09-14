@@ -521,23 +521,32 @@
       '</div></div>';
   }
 
-  function _pmdbChartSVG(series, dates) {
-    var W = 700, H = 200, ML = 40, MR = 15, MT = 14, MB = 36;
+  function _pmdbChartSVG(series, dates, opts) {
+    opts = opts || {};
+    var hasRight = series.some(function (s) { return s.axis === 'right'; });
+    var W = opts.W || 700, H = opts.H || 200, ML = opts.ML || 40, MR = opts.MR || (hasRight ? 46 : 15), MT = opts.MT || 14, MB = opts.MB || 36;
     var PW = W - ML - MR, PH = H - MT - MB;
-    var maxV = 1;
-    series.forEach(function (s) { s.vals.forEach(function (v) { if (v > maxV) maxV = v; }); });
-    maxV = Math.max(Math.ceil(maxV * 1.3), 5);
+    var leftSeries  = series.filter(function (s) { return s.axis !== 'right'; });
+    var rightSeries = series.filter(function (s) { return s.axis === 'right'; });
+    var maxL = 1; leftSeries.forEach(function (s) { s.vals.forEach(function (v) { if (v > maxL) maxL = v; }); });
+    maxL = Math.max(Math.ceil(maxL * 1.3), 5);
+    var maxR = 1; rightSeries.forEach(function (s) { s.vals.forEach(function (v) { if (v > maxR) maxR = v; }); });
+    maxR = Math.max(Math.ceil(maxR * 1.15), 1);
     var today = _today();
 
     function px(i) { return ML + (i / Math.max(dates.length - 1, 1)) * PW; }
-    function py(v) { return MT + PH - (v / maxV * PH); }
+    function py(v, axis) { var m = axis === 'right' ? maxR : maxL; return MT + PH - (v / m * PH); }
 
     var grid = '';
     for (var g = 0; g <= 4; g++) {
-      var yV = g * maxV / 4;
+      var yV = g * maxL / 4;
       var yG = py(yV).toFixed(1);
       grid += '<line x1="' + ML + '" y1="' + yG + '" x2="' + (W - MR) + '" y2="' + yG + '" stroke="var(--border)" stroke-width="0.7" stroke-dasharray="4,3" opacity="0.7"/>';
       if (g > 0) grid += '<text x="' + (ML - 5) + '" y="' + (parseFloat(yG) + 3).toFixed(0) + '" text-anchor="end" font-size="9" fill="var(--text3)">' + Math.round(yV) + '</text>';
+      if (g > 0 && hasRight) {
+        var yVr = g * maxR / 4, yGr = py(yVr, 'right').toFixed(1);
+        grid += '<text x="' + (W - MR + 6) + '" y="' + (parseFloat(yGr) + 3).toFixed(0) + '" text-anchor="start" font-size="9" fill="var(--text3)">' + Math.round(yVr) + '</text>';
+      }
     }
 
     var xlbl = '';
@@ -558,8 +567,8 @@
         '<text x="' + tx + '" y="' + (MT - 3) + '" text-anchor="middle" font-size="8" fill="#fff" font-weight="600">Auj.</text>';
     }
 
-    function buildPath(vals) {
-      var pts = vals.map(function (v, i) { return { x: px(i), y: py(v) }; });
+    function buildPath(vals, axis) {
+      var pts = vals.map(function (v, i) { return { x: px(i), y: py(v, axis) }; });
       if (!pts.length) return '';
       var d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
       for (var j = 1; j < pts.length; j++) {
@@ -569,18 +578,28 @@
       return d;
     }
 
-    function areaPath(vals) {
+    function areaPath(vals, axis) {
       var base = (MT + PH).toFixed(1);
-      var p = buildPath(vals);
+      var p = buildPath(vals, axis);
       return p ? p + ' L' + px(vals.length - 1).toFixed(1) + ',' + base + ' L' + ML + ',' + base + ' Z' : '';
     }
 
     var seriesSvg = '';
+    var valueLbls = '';
     series.forEach(function (s) {
       var dash = s.dashed ? ' stroke-dasharray="7,4"' : '';
-      if (s.area) seriesSvg += '<path d="' + areaPath(s.vals) + '" fill="' + s.color + '" fill-opacity="0.09"/>';
-      var linePath = buildPath(s.vals);
+      if (s.area) seriesSvg += '<path d="' + areaPath(s.vals, s.axis) + '" fill="' + s.color + '" fill-opacity="0.09"/>';
+      var linePath = buildPath(s.vals, s.axis);
       if (linePath) seriesSvg += '<path d="' + linePath + '" fill="none" stroke="' + s.color + '" stroke-width="' + (s.w || 2.5) + '" stroke-linecap="round" stroke-linejoin="round"' + dash + '/>';
+      if (s.showValues) {
+        s.vals.forEach(function (v, i) {
+          if (v > 0) valueLbls += '<text x="' + px(i).toFixed(1) + '" y="' + (py(v, s.axis) - 7).toFixed(1) + '" text-anchor="middle" font-size="9" font-weight="700" fill="' + s.color + '">' + v + '</text>';
+        });
+      }
+      if (s.endLabel && s.vals.length) {
+        var lastV = s.vals[s.vals.length - 1];
+        seriesSvg += '<circle cx="' + px(s.vals.length - 1).toFixed(1) + '" cy="' + py(lastV, s.axis).toFixed(1) + '" r="3" fill="' + s.color + '"/>';
+      }
     });
 
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" style="display:block" id="pmdb-svg">' +
@@ -588,7 +607,34 @@
       grid +
       '<line x1="' + ML + '" y1="' + MT + '" x2="' + ML + '" y2="' + (MT + PH) + '" stroke="var(--border)" stroke-width="1"/>' +
       '<line x1="' + ML + '" y1="' + (MT + PH) + '" x2="' + (W - MR) + '" y2="' + (MT + PH) + '" stroke="var(--border)" stroke-width="1"/>' +
-      todayMk + seriesSvg + xlbl + '</svg>';
+      todayMk + seriesSvg + valueLbls + xlbl + '</svg>';
+  }
+
+  // Petit donut SVG générique (répartition + valeur centrale) — nouveau, aucune donnée inventée : alimenté uniquement par des compteurs réels transmis par l'appelant.
+  function _pmdbDonutSVG(items, sz, centerVal, centerLbl) {
+    var total = items.reduce(function (s, it) { return s + it.n; }, 0);
+    var SZ = sz || 140, cx = SZ / 2, cy = SZ / 2, R = SZ * 0.4, ri = SZ * 0.28;
+    var paths = '', ang = -Math.PI / 2;
+    if (total > 0) {
+      items.forEach(function (it) {
+        if (!it.n) return;
+        var pct = it.n / total, sw = pct * 2 * Math.PI, ea = ang + sw, lg = sw > Math.PI ? 1 : 0;
+        var x1 = cx + R * Math.cos(ang), y1 = cy + R * Math.sin(ang);
+        var x2 = cx + R * Math.cos(ea), y2 = cy + R * Math.sin(ea);
+        var ix1 = cx + ri * Math.cos(ang), iy1 = cy + ri * Math.sin(ang);
+        var ix2 = cx + ri * Math.cos(ea), iy2 = cy + ri * Math.sin(ea);
+        paths += '<path d="M ' + x1.toFixed(2) + ',' + y1.toFixed(2) + ' A ' + R + ',' + R + ' 0 ' + lg + ' 1 ' + x2.toFixed(2) + ',' + y2.toFixed(2) +
+          ' L ' + ix2.toFixed(2) + ',' + iy2.toFixed(2) + ' A ' + ri + ',' + ri + ' 0 ' + lg + ' 0 ' + ix1.toFixed(2) + ',' + iy1.toFixed(2) + ' Z" fill="' + it.c + '"/>';
+        ang = ea;
+      });
+    } else {
+      paths = '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((R + ri) / 2) + '" fill="none" stroke="var(--border)" stroke-width="' + (R - ri) + '"/>';
+    }
+    return '<svg width="' + SZ + '" height="' + SZ + '" viewBox="0 0 ' + SZ + ' ' + SZ + '">' + paths +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + (ri - 1) + '" fill="var(--bg2,#fff)"/>' +
+      '<text x="' + cx + '" y="' + (cy - 4) + '" text-anchor="middle" font-size="' + (SZ * 0.16) + '" font-weight="800" fill="var(--text)">' + centerVal + '</text>' +
+      '<text x="' + cx + '" y="' + (cy + SZ * 0.12) + '" text-anchor="middle" font-size="' + (SZ * 0.075) + '" fill="var(--text3)">' + centerLbl + '</text>' +
+      '</svg>';
   }
 
   // ── DASHBOARD V2 ──────────────────────────────────────────────────────────
@@ -610,24 +656,27 @@
     var chargeH = Math.round(totalMins / 60);
 
     // ── État global du PMP (répartition des interventions actives — réel, 4 catégories exclusives) ──
+    // _bucketOf() est la SEULE règle de classement retard/semaine/mois/à jour de tout le dashboard :
+    // réutilisée telle quelle pour la barre, le donut équipements, "Prochaines échéances" et "Priorités PMP"
+    // (via _statusBadge ci-dessous) — un seul moteur de calcul, jamais de logique dupliquée.
     var active = _pmpInt.filter(function (i) { return i.status !== 'terminee' && i.status !== 'annulee'; });
-    var gRetard = 0, gSemaine = 0, gMois = 0, gAJour = 0;
-    active.forEach(function (i) {
+    function _bucketOf(i) {
       var d = i.dueDate;
-      if (!d) { gAJour++; return; }
-      if (d < today) gRetard++;
-      else if (d <= weekEnd) gSemaine++;
-      else if (d.slice(0, 7) === thisMonth) gMois++;
-      else gAJour++;
-    });
+      if (!d) return 'ajour';
+      if (i.status === 'en_retard' || d < today) return 'retard'; // même règle exacte que kpi.enRetard
+      if (d <= weekEnd) return 'semaine';
+      if (d.slice(0, 7) === thisMonth) return 'mois';
+      return 'ajour';
+    }
+    var BUCKET_COL = { retard: '#EF4444', semaine: '#F97316', mois: '#F59E0B', ajour: '#22C55E' };
+    var BUCKET_LBL = { retard: 'En retard', semaine: 'Cette semaine', mois: 'Ce mois', ajour: 'À jour' };
+    var gCounts = { retard: 0, semaine: 0, mois: 0, ajour: 0 };
+    active.forEach(function (i) { gCounts[_bucketOf(i)]++; });
     var gTotal = active.length;
     function _gPct(n) { return gTotal ? Math.round(n / gTotal * 100) : 0; }
-    var globalSegs = [
-      { n: gRetard,  pct: _gPct(gRetard),  c: '#EF4444', l: 'En retard' },
-      { n: gSemaine, pct: _gPct(gSemaine), c: '#F97316', l: 'Cette semaine' },
-      { n: gMois,    pct: _gPct(gMois),    c: '#F59E0B', l: 'Ce mois' },
-      { n: gAJour,   pct: _gPct(gAJour),   c: '#22C55E', l: 'À jour' },
-    ];
+    var globalSegs = ['retard', 'semaine', 'mois', 'ajour'].map(function (k) {
+      return { key: k, n: gCounts[k], pct: _gPct(gCounts[k]), c: BUCKET_COL[k], l: BUCKET_LBL[k] };
+    });
     var globalBarHtml = gTotal ? globalSegs.filter(function (s) { return s.n > 0; }).map(function (s) {
       return '<div class="pmdb2-gbar-seg" style="width:' + s.pct + '%;background:' + s.c + '" title="' + s.l + ' : ' + s.n + '"></div>';
     }).join('') : '<div class="pmdb2-gbar-seg" style="width:100%;background:var(--border)"></div>';
@@ -636,6 +685,31 @@
         '<span class="pmdb2-gbar-leg-lbl">' + s.l + '</span>' +
         '<span class="pmdb2-gbar-leg-val">' + s.n + ' <em>(' + s.pct + '%)</em></span></div>';
     }).join('');
+
+    // ── Donut "répartition des équipements selon leur état" (réel : pire bucket parmi les interventions actives de chaque équipement suivi) ──
+    var activeEqList = _pmpEq.filter(function (e) { return e.status !== 'inactif'; });
+    var BUCKET_RANK = { retard: 0, semaine: 1, mois: 2, ajour: 3 };
+    var eqCounts = { retard: 0, semaine: 0, mois: 0, ajour: 0 };
+    activeEqList.forEach(function (eq) {
+      var worst = 'ajour';
+      active.filter(function (i) { return i.equipmentId === eq.id; }).forEach(function (i) {
+        var b = _bucketOf(i);
+        if (BUCKET_RANK[b] < BUCKET_RANK[worst]) worst = b;
+      });
+      eqCounts[worst]++;
+    });
+    var donutItems = ['retard', 'semaine', 'mois', 'ajour'].map(function (k) { return { n: eqCounts[k], c: BUCKET_COL[k] }; });
+    var donutSVG = _pmdbDonutSVG(donutItems, 130, kpi.totalEq, 'équipements');
+
+    // ── Alerte dynamique sous les stats (réel : kpi.enRetard, même chiffre que la carte KPI "En retard") ──
+    var globalAlertHtml = kpi.enRetard > 0 ?
+      '<div class="pmdb2-galert pmdb2-galert--warn">' +
+        '<div class="pmdb2-galert-txt"><i class="fas fa-triangle-exclamation"></i> <strong>' + kpi.enRetard + ' intervention' + (kpi.enRetard > 1 ? 's' : '') + '</strong> ' + (kpi.enRetard > 1 ? 'sont en retard.' : 'est en retard.') + ' Un traitement rapide est recommandé pour limiter les risques de non-conformité.</div>' +
+        '<a class="pmdb-widget-link" onclick="MX.Pages.PMP._tab(\'retards\')">Voir les retards →</a>' +
+      '</div>' :
+      '<div class="pmdb2-galert pmdb2-galert--ok">' +
+        '<div class="pmdb2-galert-txt"><i class="fas fa-circle-check"></i> Aucune intervention en retard. Le plan de maintenance préventive est à jour.</div>' +
+      '</div>';
 
     // ── Badge de statut d'une intervention active (réutilisé Priorités + Prochaines échéances) ──
     function _statusBadge(i) {
@@ -679,8 +753,16 @@
     for (var dd = new Date(d0); dd <= dToday; dd.setDate(dd.getDate() + 1)) monthDays.push(dd.toISOString().slice(0, 10));
     var doneByDay = {};
     doneThisMonth.forEach(function (i) { doneByDay[i.doneDate] = (doneByDay[i.doneDate] || 0) + 1; });
-    var doneSeries = [{ vals: monthDays.map(function (d) { return doneByDay[d] || 0; }), color: '#22C55E', w: 2.5, area: true }];
-    var doneChartSVG = monthDays.length >= 2 ? _pmdbChartSVG(doneSeries, monthDays) : '<div class="pmdb-empty-sm">Pas assez de données ce mois-ci</div>';
+    var dailyVals = monthDays.map(function (d) { return doneByDay[d] || 0; });
+    var cumVals = []; dailyVals.reduce(function (acc, v, i) { cumVals[i] = acc + v; return cumVals[i]; }, 0);
+    var doneSeries = [
+      { vals: dailyVals, color: '#22C55E', w: 2.5, area: true, showValues: true, label: 'Réalisées / jour' },
+      { vals: cumVals,   color: '#5B3DF5', w: 2,   dashed: true, axis: 'right', endLabel: true, label: 'Cumul du mois' },
+    ];
+    var doneChartSVG = monthDays.length >= 2 ? _pmdbChartSVG(doneSeries, monthDays, { H: 300 }) : '<div class="pmdb-empty-sm">Pas assez de données ce mois-ci</div>';
+    var doneChartLegendHtml = monthDays.length >= 2 ? doneSeries.map(function (s) {
+      return '<div class="pmdb2-gbar-leg"><span class="pmdb2-gbar-dot" style="background:' + s.color + (s.dashed ? ';border:1px dashed ' + s.color + ';background:transparent' : '') + '"></span><span class="pmdb2-gbar-leg-lbl">' + s.label + '</span></div>';
+    }).join('') : '';
 
     // Comparaison au mois précédent : même méthode exacte que _kpiData() (dueDate dans le mois, status terminée) appliquée au mois précédent.
     var prevMonth     = _addDays(thisMonth + '-01', -1).slice(0, 7);
@@ -764,7 +846,11 @@
         '<div class="pmdb-widget pmdb2-global-card">' +
           '<div class="pmdb-widget-hdr"><i class="fas fa-gauge-high"></i> État global du PMP</div>' +
           '<div class="pmdb2-gbar">' + globalBarHtml + '</div>' +
-          '<div class="pmdb2-gbar-legend">' + globalLegendHtml + '</div>' +
+          '<div class="pmdb2-global-body">' +
+            '<div class="pmdb2-gbar-legend">' + globalLegendHtml + '</div>' +
+            '<div class="pmdb2-global-donut">' + donutSVG + '</div>' +
+          '</div>' +
+          globalAlertHtml +
         '</div>' +
 
         '<div class="pmdb-widget pmdb2-upcoming-card">' +
@@ -777,8 +863,9 @@
 
       '<div class="pmdb-widget pmdb2-done-card">' +
         '<div class="pmdb-widget-hdr"><i class="fas fa-chart-line"></i> Interventions réalisées ce mois</div>' +
+        (doneChartLegendHtml ? '<div class="pmdb2-gbar-legend pmdb2-done-legend">' + doneChartLegendHtml + '</div>' : '') +
         '<div class="pmdb2-done-wrap">' +
-          '<div class="pmdb2-done-chart">' + doneChartSVG + '</div>' +
+          '<div class="pmdb2-done-chart pmdb2-done-chart--big">' + doneChartSVG + '</div>' +
           '<div class="pmdb2-done-stats">' +
             '<div class="pmdb2-done-stat"><span class="pmdb2-done-stat-v">' + kpi.realisees + '</span><span class="pmdb2-done-stat-l">Réalisées ce mois</span></div>' +
             '<div class="pmdb2-done-stat"><span class="pmdb2-done-stat-v">' + tempsPasseTxt + '</span><span class="pmdb2-done-stat-l">Temps passé (non enregistré)</span></div>' +
