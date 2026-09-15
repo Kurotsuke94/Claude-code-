@@ -2,6 +2,9 @@
   "hosting": {
     "site": "maintix-c9dbd",
     "public": ".",
+    "predeploy": [
+      "bash scripts/generate-version.sh"
+    ],
     "ignore": [
       "firebase.json",
       ".firebaserc",

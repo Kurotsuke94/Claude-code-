@@ -722,7 +722,7 @@
 
     const seen      = _getMsgsSeen();
     const unread    = (state.announcements || []).filter(a => _tsMs(a.createdAt) > seen).length;
-    const _hasNewVer = localStorage.getItem('mx_last_ver') !== _APP_VER;
+    const _hasNewVer = localStorage.getItem('mx_last_ver') !== _CHANGELOG_VER;
 
     el.innerHTML = `
       <div class="dh-search-wrap" onclick="document.getElementById('dh-search-inp') && document.getElementById('dh-search-inp').focus()" title="Rechercher une page">
@@ -1274,6 +1274,13 @@
   // ── STATUS BAR ──
   const _APP_VER   = window.MX_VERSION || "1.1.08";
   const _APP_BUILD = window.MX_BUILD   || 208;
+  // Version "release" du système Bienvenue/Nouveautés — DÉCOUPLÉE de
+  // _APP_VER (build technique généré automatiquement à chaque déploiement,
+  // voir scripts/generate-version.sh). Basée sur CHANGELOG[0].ver, éditée à
+  // la main uniquement lors d'une vraie nouveauté : le popup et le badge
+  // "Nouvelle version" ne doivent réagir qu'à ces moments-là, jamais à
+  // chaque déploiement technique.
+  const _CHANGELOG_VER = (window.MX.CHANGELOG && window.MX.CHANGELOG[0] && window.MX.CHANGELOG[0].ver) || _APP_VER;
   let _lastSyncTime = null;
   let _presenceCount = 0;
   let _pendingSaves  = 0;
@@ -2966,10 +2973,10 @@
   // ── VERSION UPDATES MODULE ──
   window.MX.Updates = (function() {
     function init() {
-      if (localStorage.getItem('mx_last_ver') !== _APP_VER) {
+      if (localStorage.getItem('mx_last_ver') !== _CHANGELOG_VER) {
         buildDeskHeader();
         setTimeout(showWelcome, 2500);
-        MX.Notifs.createVersionNotif(_APP_VER);
+        MX.Notifs.createVersionNotif(_CHANGELOG_VER);
       }
     }
 
@@ -2988,7 +2995,7 @@
         '<div class="ver-modal">' +
           '<div style="text-align:center;margin-bottom:22px">' +
             '<div style="font-size:32px;margin-bottom:10px">🎉</div>' +
-            '<div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1.2">Bienvenue sur Maintix ' + _APP_VER + '</div>' +
+            '<div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;line-height:1.2">Bienvenue sur Maintix ' + _CHANGELOG_VER + '</div>' +
             '<div style="font-size:12px;color:var(--text3);margin-top:6px">Application mise à jour avec succès</div>' +
           '</div>' +
           (latest.title ? '<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text2)">' + MX.esc(latest.title) + '</div>' : '') +
@@ -3004,7 +3011,7 @@
     }
 
     function markSeen() {
-      localStorage.setItem('mx_last_ver', _APP_VER);
+      localStorage.setItem('mx_last_ver', _CHANGELOG_VER);
       var badge = document.getElementById('dh-ver-badge');
       if (badge) badge.remove();
     }
