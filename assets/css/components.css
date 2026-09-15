@@ -14995,6 +14995,84 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   font-size: 12px; color: var(--text3);
 }
 
+/* ── MISE À JOUR OBLIGATOIRE ──────────────────────────────────────────────
+   Remplace l'ancienne bannière dismissible (.mx-update-banner, conservée
+   mais inutilisée). Plein écran, aucune sortie possible : aucun rôle
+   (admin/super-admin inclus) ne doit pouvoir accéder à l'app en dessous
+   tant que la mise à jour n'est pas appliquée. z-index au-dessus de tout
+   le reste de l'application (modals, sidebar, bottom-nav compris). */
+.mx-forced-update-overlay {
+  position: fixed; inset: 0; z-index: 100000;
+  background: rgba(8,11,20,0.88);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  transition: opacity .25s ease;
+}
+.mx-forced-update-overlay.mx-forced-update-overlay--visible { opacity: 1; }
+.mx-fupd-modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 18px;
+  padding: 40px 28px 32px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  gap: 4px;
+}
+.mx-fupd-icon {
+  font-size: 40px;
+  margin-bottom: 10px;
+  animation: mxFupdSpin 2.5s linear infinite;
+}
+@keyframes mxFupdSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.mx-fupd-title {
+  font-size: 22px; font-weight: 800; letter-spacing: -.5px;
+  color: var(--text1); margin-bottom: 6px;
+}
+.mx-fupd-sub {
+  font-size: 14px; color: var(--text2); line-height: 1.6;
+}
+.mx-fupd-sub2 {
+  font-size: 13px; color: var(--text3); line-height: 1.5; margin-bottom: 6px;
+}
+.mx-fupd-versions {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--bg4, rgba(255,255,255,.04));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 10px 0 4px;
+  width: 100%;
+}
+.mx-fupd-ver-row { font-size: 12.5px; color: var(--text2); text-align: left; }
+.mx-fupd-ver-row b { color: var(--text1); font-family: var(--ffm); }
+.mx-fupd-ver-row b.new { color: var(--cyan); }
+.mx-fupd-btn {
+  margin-top: 14px;
+  width: 100%;
+  min-height: 46px;
+  border: none; border-radius: 12px;
+  background: var(--cyan, #22d3ee);
+  color: #06222a;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: opacity .15s;
+}
+.mx-fupd-btn:hover { opacity: .88; }
+.mx-fupd-btn:active { opacity: .75; }
+.mx-fupd-spinner {
+  font-size: 26px; color: var(--cyan); margin-top: 18px;
+}
+@media (max-width: 430px) {
+  .mx-fupd-modal { padding: 32px 20px 26px; max-width: 100%; }
+  .mx-fupd-title { font-size: 19px; }
+}
+
 /* ═══════════════════════════════════════════════
    JOURNAL D'EXPLOITATION — .jex-* styles
    ════════════════════════════════════════════════ */

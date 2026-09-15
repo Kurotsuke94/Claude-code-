@@ -2614,10 +2614,13 @@
     var _reg          = null;
     var _hadController = false;
     var _waitingSW    = null;
-    var _bannerEl     = null;
+    var _overlayEl    = null; // overlay de mise à jour obligatoire (remplace l'ancienne bannière "Plus tard")
     var _lastCheck    = 0;
     var _serverVer    = null;
     var _serverBuild  = 0;
+    var PENDING_KEY   = 'mx_pending_update_build';
+    var ATTEMPTS_KEY  = 'mx_update_attempts';
+    var MAX_ATTEMPTS  = 3;
 
     function init() {
       if (!('serviceWorker' in navigator)) {
@@ -2627,16 +2630,23 @@
       _hadController = !!navigator.serviceWorker.controller;
       console.log('[PWA] Init — local v' + (window.MX_VERSION || '?') + ' build ' + (window.MX_BUILD || '?') + ' | hadController:', _hadController);
 
+      // Vérifie AVANT toute autre chose si on revient d'un reload déclenché
+      // par une mise à jour obligatoire : le nouveau code est-il réellement
+      // celui attendu ? (voir _verifyPostReload — garantit qu'on ne débloque
+      // jamais l'app sur la foi du seul rechargement, et coupe court à une
+      // boucle si l'activation a échoué au-delà de MAX_ATTEMPTS tentatives)
+      _verifyPostReload();
+
       navigator.serviceWorker.register('/sw.js')
         .then(function(reg) {
           _reg = reg;
           console.log('[PWA] SW registered — active:', reg.active ? reg.active.state : 'none', '| waiting:', !!reg.waiting, '| installing:', !!reg.installing);
 
-          // Waiting SW from a previous update cycle — show banner immediately
+          // Waiting SW from a previous update cycle — mise à jour obligatoire immédiate
           if (reg.waiting && _hadController) {
-            console.log('[PWA] Existing waiting SW found on startup — preparing update banner');
+            console.log('[PWA] Existing waiting SW found on startup — mise à jour obligatoire');
             _waitingSW = reg.waiting;
-            _fetchServerVer(function(ver) { _showBanner(window.MX_VERSION, ver); });
+            _fetchServerVer(function(ver) { _showForcedUpdate(window.MX_VERSION, ver); });
           }
 
           // Track newly installing SWs
@@ -2653,9 +2663,9 @@
                   return;
                 }
                 // New version installed and waiting for user approval
-                console.log('[PWA] New SW installed and waiting — showing update banner');
+                console.log('[PWA] New SW installed and waiting — mise à jour obligatoire');
                 _waitingSW = sw;
-                _fetchServerVer(function(ver) { _showBanner(window.MX_VERSION, ver); });
+                _fetchServerVer(function(ver) { _showForcedUpdate(window.MX_VERSION, ver); });
               }
             });
           });
@@ -2677,6 +2687,7 @@
         console.log('[PWA] controllerchange — new SW is controller | hadController:', _hadController);
         if (_hadController) {
           console.log('[PWA] Controller changed — reloading for new assets');
+          _setOverlayStep('Redémarrage de Maintix…');
           window.location.reload(true);
         } else {
           _hadController = true;
@@ -2691,13 +2702,27 @@
         }
       });
 
-      // Tab visible → trigger update check
+      // Retour au premier plan — déclencheur central, réutilisé par
+      // visibilitychange ET pageshow (voir plus bas pourquoi les deux).
+      function _onResume(source) {
+        console.log('[PWA] Resume (' + source + ') — triggering update check');
+        if (_reg) _reg.update().catch(function(){});
+        if (Date.now() - _lastCheck > 60000) checkVersion();
+      }
+
+      // Tab visible → trigger update check (couvre onglet classique + PWA
+      // standalone ravivée sur desktop/Android).
       document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') {
-          console.log('[PWA] Tab visible — triggering update check');
-          if (_reg) _reg.update().catch(function(){});
-          if (Date.now() - _lastCheck > 60000) checkVersion();
-        }
+        if (document.visibilityState === 'visible') _onResume('visibilitychange');
+      });
+
+      // pageshow — complément indispensable sur iOS Safari/PWA : après une
+      // longue mise en arrière-plan, iOS peut restaurer la page depuis le
+      // bfcache (event.persisted===true) sans redéclencher visibilitychange
+      // de façon fiable, voire relancer complètement le contexte JS. Dans
+      // les deux cas, un contrôle de version au retour est nécessaire.
+      window.addEventListener('pageshow', function(e) {
+        if (e.persisted) _onResume('pageshow/bfcache');
       });
 
       // Back online → check for updates immediately
@@ -2742,50 +2767,102 @@
         .catch(function() { cb('?'); });
     }
 
-    function _showBanner(currentVer, newVer) {
-      if (_bannerEl) return;
-      console.log('[PWA] Showing update banner: v' + currentVer + ' → v' + newVer);
+    // ── Overlay de mise à jour OBLIGATOIRE ──────────────────────────────────
+    // Remplace l'ancienne bannière dismissible : plein écran, aucun bouton
+    // "Plus tard", aucune exemption de rôle (ni admin ni super-admin — ce
+    // module ne fait d'ailleurs aucune vérification de rôle, contrairement
+    // à MX.Maintenance qui exempte volontairement les admins pour un usage
+    // différent). Tant que cet overlay est affiché, il capture tous les
+    // clics (position:fixed + inset:0 + z-index au-dessus de tout le reste
+    // de l'app) : aucune page ni action métier n'est accessible derrière.
+    function _showForcedUpdate(currentVer, newVer) {
+      if (_overlayEl) { _refreshForcedUpdateVersions(currentVer, newVer); return; }
+      console.log('[PWA] Mise à jour obligatoire : v' + currentVer + ' → v' + newVer);
       try { localStorage.setItem('mx_pwa_last_update', String(Date.now())); } catch(ex) {}
       var el = document.createElement('div');
-      el.id = 'mx-update-banner';
-      el.className = 'mx-update-banner';
+      el.id = 'mx-forced-update-overlay';
+      el.className = 'mx-forced-update-overlay';
       el.innerHTML =
-        '<div class="mx-upd-top">'
-      + '<div class="mx-upd-icon"><i class="fas fa-rocket"></i></div>'
-      + '<div class="mx-upd-info">'
-      +   '<div class="mx-upd-title">Une nouvelle version de Maintix est disponible. Rechargez l\'application.</div>'
-      +   '<div class="mx-upd-versions">'
-      +     '<div class="mx-upd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--text3)"></i> Version actuelle : <b>' + MX.esc(String(currentVer || '?')) + '</b></div>'
-      +     '<div class="mx-upd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--cyan)"></i> Nouvelle version : <b class="new">' + MX.esc(String(newVer || '?')) + '</b></div>'
-      +   '</div>'
-      + '</div>'
-      + '</div>'
-      + '<div class="mx-upd-actions">'
-      +   '<button class="mx-upd-btn-now" onclick="MX.UpdateManager.applyUpdate()">'
-      +     '<i class="fas fa-rotate"></i> Mettre à jour maintenant'
-      +   '</button>'
-      +   '<button class="mx-upd-btn-later" onclick="MX.UpdateManager.dismissUpdate()">'
-      +     'Plus tard'
-      +   '</button>'
-      + '</div>';
+        '<div class="mx-fupd-modal">' +
+          '<div class="mx-fupd-icon">🔄</div>' +
+          '<div class="mx-fupd-title">Mise à jour obligatoire</div>' +
+          '<div class="mx-fupd-sub">Une nouvelle version de Maintix est disponible.</div>' +
+          '<div class="mx-fupd-sub2">Vous devez mettre à jour Maintix pour continuer.</div>' +
+          '<div class="mx-fupd-versions">' +
+            '<div class="mx-fupd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--text3)"></i> Version actuelle : <b>' + MX.esc(String(currentVer || '?')) + '</b></div>' +
+            '<div class="mx-fupd-ver-row"><i class="fas fa-circle" style="font-size:5px;color:var(--cyan)"></i> Nouvelle version : <b class="new">' + MX.esc(String(newVer || '?')) + '</b></div>' +
+          '</div>' +
+          '<button class="mx-fupd-btn" id="mx-fupd-btn" onclick="MX.UpdateManager.applyUpdate()">' +
+            '<i class="fas fa-rotate"></i> Mettre à jour maintenant' +
+          '</button>' +
+        '</div>';
       document.body.appendChild(el);
-      _bannerEl = el;
+      _overlayEl = el;
       requestAnimationFrame(function() {
-        requestAnimationFrame(function() { el.classList.add('mx-update-banner--visible'); });
+        requestAnimationFrame(function() { el.classList.add('mx-forced-update-overlay--visible'); });
       });
     }
 
-    function _hideBanner() {
-      if (!_bannerEl) return;
-      var el = _bannerEl;
-      _bannerEl = null;
-      el.classList.remove('mx-update-banner--visible');
-      setTimeout(function() { if (el.parentNode) el.remove(); }, 350);
+    function _refreshForcedUpdateVersions(currentVer, newVer) {
+      if (!_overlayEl) return;
+      var rows = _overlayEl.querySelectorAll('.mx-fupd-ver-row b');
+      if (rows[0]) rows[0].textContent = String(currentVer || '?');
+      if (rows[1]) rows[1].textContent = String(newVer || '?');
+    }
+
+    // Fait progresser l'overlay vers un état "étape en cours" (texte +
+    // spinner, boutons masqués) — utilisé pendant l'installation puis le
+    // redémarrage, pour que l'utilisateur voie clairement que ça avance.
+    function _setOverlayStep(text) {
+      if (!_overlayEl) return;
+      var sub = _overlayEl.querySelector('.mx-fupd-sub');
+      if (sub) sub.textContent = text;
+      var sub2 = _overlayEl.querySelector('.mx-fupd-sub2');
+      if (sub2) sub2.style.display = 'none';
+      var vers = _overlayEl.querySelector('.mx-fupd-versions');
+      if (vers) vers.style.display = 'none';
+      var btn = document.getElementById('mx-fupd-btn');
+      if (btn) btn.style.display = 'none';
+      if (!_overlayEl.querySelector('.mx-fupd-spinner')) {
+        var modal = _overlayEl.querySelector('.mx-fupd-modal');
+        if (modal) {
+          var spinner = document.createElement('div');
+          spinner.className = 'mx-fupd-spinner';
+          spinner.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+          modal.appendChild(spinner);
+        }
+      }
+    }
+
+    // État d'erreur terminal — affiché seulement après MAX_ATTEMPTS échecs
+    // de vérification post-reload (voir _verifyPostReload). Propose un
+    // rétablissement complet (forceUpdate : vide les caches + réenregistre
+    // le SW) plutôt que de reboucler indéfiniment tout seul.
+    function _showUpdateError() {
+      if (!_overlayEl) _showForcedUpdate(window.MX_VERSION, _serverVer);
+      var sub = _overlayEl.querySelector('.mx-fupd-sub');
+      if (sub) sub.textContent = "La mise à jour n'a pas pu être finalisée automatiquement.";
+      var sub2 = _overlayEl.querySelector('.mx-fupd-sub2');
+      if (sub2) { sub2.textContent = 'Cliquez ci-dessous pour réessayer.'; sub2.style.display = ''; }
+      var vers = _overlayEl.querySelector('.mx-fupd-versions');
+      if (vers) vers.style.display = 'none';
+      var spinner = _overlayEl.querySelector('.mx-fupd-spinner');
+      if (spinner) spinner.remove();
+      var btn = document.getElementById('mx-fupd-btn');
+      if (btn) {
+        btn.style.display = '';
+        btn.innerHTML = '<i class="fas fa-rotate"></i> Réessayer';
+        btn.onclick = function() { forceUpdate(); };
+      }
     }
 
     function applyUpdate() {
       console.log('[PWA] Apply update — waitingSW:', !!_waitingSW);
-      _hideBanner();
+      _setOverlayStep('Installation de la mise à jour…');
+      // Mémorise le build attendu AVANT le reload : _verifyPostReload() s'en
+      // sert au prochain boot pour confirmer que le nouveau code est
+      // RÉELLEMENT actif (pas seulement que la page a rechargé).
+      try { sessionStorage.setItem(PENDING_KEY, String(_serverBuild || 0)); } catch(ex) {}
       if (_waitingSW) {
         // Send SKIP_WAITING to the waiting SW → triggers controllerchange → page reloads
         _waitingSW.postMessage({ type: 'SKIP_WAITING' });
@@ -2795,9 +2872,37 @@
       }
     }
 
-    function dismissUpdate() {
-      console.log('[PWA] Update dismissed by user — waiting SW preserved until next visit');
-      _hideBanner();
+    // Appelée tout au début de init(), avant toute autre chose : vérifie si
+    // ce boot fait suite à un reload de mise à jour obligatoire et, si oui,
+    // confirme que le build réellement chargé correspond à ce qui était
+    // attendu. Sans ça, on ne ferait que croire le reload sur parole.
+    function _verifyPostReload() {
+      var pendingRaw;
+      try { pendingRaw = sessionStorage.getItem(PENDING_KEY); } catch(ex) { pendingRaw = null; }
+      if (!pendingRaw) return; // pas de mise à jour en cours — boot normal
+      var pendingBuild = parseInt(pendingRaw, 10) || 0;
+      var localBuild   = parseInt(window.MX_BUILD, 10) || 0;
+      if (localBuild >= pendingBuild) {
+        console.log('[PWA] Mise à jour vérifiée après reload — build ' + localBuild + ' actif (attendu ≥ ' + pendingBuild + ')');
+        try { sessionStorage.removeItem(PENDING_KEY); sessionStorage.removeItem(ATTEMPTS_KEY); } catch(ex) {}
+        return;
+      }
+      var attempts = 0;
+      try {
+        attempts = (parseInt(sessionStorage.getItem(ATTEMPTS_KEY) || '0', 10)) + 1;
+        sessionStorage.setItem(ATTEMPTS_KEY, String(attempts));
+      } catch(ex) {}
+      console.warn('[PWA] Mise à jour NON vérifiée après reload — build local ' + localBuild + ' < attendu ' + pendingBuild + ' (tentative ' + attempts + '/' + MAX_ATTEMPTS + ')');
+      if (attempts >= MAX_ATTEMPTS) {
+        try { sessionStorage.removeItem(PENDING_KEY); } catch(ex) {}
+        // Laisse le boot se terminer (register/checkVersion) puis affiche
+        // l'état d'erreur — pas de nouveau reload automatique : on coupe
+        // la boucle ici.
+        setTimeout(_showUpdateError, 500);
+      }
+      // Sinon (tentative < MAX) : pas d'action immédiate ici — le cycle
+      // normal (checkVersion à 3s, updatefound) va re-détecter l'écart et
+      // ré-afficher l'overlay obligatoire de lui-même.
     }
 
     function forceUpdate() {
@@ -2854,7 +2959,7 @@
       if (checkEl) checkEl.textContent = new Date().toLocaleTimeString('fr-FR');
     }
 
-    return { init, checkVersion, applyUpdate, dismissUpdate, forceUpdate, getStatus };
+    return { init, checkVersion, applyUpdate, forceUpdate, getStatus };
   })();
   window.MX._forceUpdate = function() { MX.UpdateManager.forceUpdate(); };
 
