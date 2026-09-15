@@ -79,14 +79,24 @@
   // a fully-qualified key (owner, year+week, date, slot, task) so that a fresh
   // day/week for a given technician always starts unchecked, and one
   // technician's validation can never appear pre-checked for another.
+  // Formate une Date en YYYY-MM-DD sur son calendrier LOCAL (jamais
+  // toISOString(), qui convertit en UTC et décale d'un jour dès que le
+  // fuseau local est en avance sur UTC — le cas de la France toute l'année).
+  function _localISODate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
   function checkDateForDay(dayId, refDate) {
     const idx = DAYS.findIndex(d => d.id === dayId);
-    if (idx < 0) return (refDate || new Date()).toISOString().slice(0, 10);
+    if (idx < 0) return _localISODate(refDate || new Date());
     const now = refDate || new Date();
     const dow = now.getDay();
     const mon = new Date(now); mon.setDate(now.getDate() - ((dow + 6) % 7)); mon.setHours(0, 0, 0, 0);
     const d = new Date(mon); d.setDate(mon.getDate() + idx);
-    return d.toISOString().slice(0, 10);
+    return _localISODate(d);
   }
   function checkWeekOf(dateStr) {
     const t = new Date(dateStr + "T12:00:00"); t.setHours(0, 0, 0, 0);
