@@ -45,7 +45,7 @@
       }
     } catch (e) { console.warn('[Auth] Vérification version session admin échouée :', e); }
   }
-  setInterval(_checkAdminSessionVersion, ADMIN_SESSION_CHECK_MS);
+  setInterval(function () { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); }, ADMIN_SESSION_CHECK_MS);
 
   // Retour au premier plan (onglet/PWA ravivé après mise en arrière-plan) :
   // ne pas dépendre uniquement du tick de 3 min, qui peut être fortement
@@ -53,7 +53,16 @@
   // arrière-plan. visibilityState==='visible' couvre aussi bien un onglet
   // classique qu'une PWA en mode standalone ravivée.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') _checkAdminSessionVersion();
+    if (document.visibilityState === 'visible') { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); }
+  });
+
+  // pageshow (restauration bfcache iOS/Android) — auth.js n'avait jusqu'ici
+  // aucun écouteur pageshow propre (seul MX.UpdateManager, app.js, en avait
+  // un pour le code JS/assets — non touché ici). Nécessaire car une reprise
+  // depuis le bfcache ne déclenche pas toujours visibilitychange de façon
+  // fiable, en particulier sur iOS Safari/PWA.
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) _checkAdminSessionExpiry();
   });
 
   // Déclenché uniquement par le super-admin (bouton "Forcer la déconnexion
@@ -69,9 +78,102 @@
     return newVersion;
   }
 
+  // ── EXPIRATION DE SESSION ADMIN APPLICATIVE (indépendante de Firebase) ──
+  // Persistence.SESSION (firebase-config.js) borne la session Firebase au
+  // contexte de navigation — mais sur Android/PWA, ce contexte peut être
+  // suspendu puis restauré par l'OS/Chrome sans être réellement détruit,
+  // faisant survivre une session Admin authentique bien plus longtemps que
+  // prévu (voir diagnostic session_01VNPpkGhGKg8oaFrpLH4ZAU). Cette
+  // enveloppe locale ajoute une SECONDE barrière, purement temporelle et
+  // indépendante de Firebase : une fenêtre FIXE de ADMIN_SESSION_MAX_MS
+  // ancrée sur le dernier login() EXPLICITE réussi — jamais prolongée par
+  // l'activité, un clic, une navigation, visibilitychange, pageshow ou un
+  // contrôle périodique.
+  //
+  // RÈGLE DE SÉCURITÉ ABSOLUE : cette enveloppe ne sert JAMAIS à ACCORDER
+  // les droits admin — isAdmin() ne dépend que de MX.state.adminUser, lui-
+  // même dérivé uniquement de Firebase Auth (onAuthStateChanged). Elle sert
+  // UNIQUEMENT à REFUSER une session Firebase par ailleurs valide mais
+  // devenue trop ancienne. Une enveloppe absente pour l'UID admin courant
+  // est toujours traitée comme expirée (fail-closed), jamais comme "non
+  // concerné".
+  var ADMIN_SESSION_ENVELOPE_KEY = 'mx_admin_session';
+  var ADMIN_SESSION_MAX_MS = 2 * 60 * 60 * 1000; // 2h fixes depuis login()
+
+  function _readAdminSessionEnvelope() {
+    try {
+      var raw = localStorage.getItem(ADMIN_SESSION_ENVELOPE_KEY);
+      if (!raw) return null;
+      var env = JSON.parse(raw);
+      if (!env || typeof env.uid !== 'string' || typeof env.expiresAt !== 'number') return null;
+      return env;
+    } catch (e) { return null; }
+  }
+
+  // Appelée UNIQUEMENT depuis login(), après un succès explicite de
+  // signInWithEmailAndPassword — JAMAIS depuis onAuthStateChanged, pour ne
+  // jamais confondre une restauration de session persistée (reload, retour
+  // de background, restauration Android) avec une authentification réelle.
+  function _writeAdminSessionEnvelope(uid, email) {
+    try {
+      var now = Date.now();
+      localStorage.setItem(ADMIN_SESSION_ENVELOPE_KEY, JSON.stringify({
+        uid: uid,
+        email: email || '',
+        startedAt: now,
+        expiresAt: now + ADMIN_SESSION_MAX_MS
+      }));
+    } catch (e) { console.warn('[Auth] Erreur écriture enveloppe session admin :', e); }
+  }
+
+  function _clearAdminSessionEnvelope() {
+    try { localStorage.removeItem(ADMIN_SESSION_ENVELOPE_KEY); } catch (e) {}
+  }
+
+  function _isAdminSessionEnvelopeValid(uid) {
+    var env = _readAdminSessionEnvelope();
+    return !!(env && env.uid === uid && Date.now() < env.expiresAt);
+  }
+
+  // Vérification périodique / retour au premier plan : une session déjà
+  // exposée (adminUser actif) dont l'enveloppe vient d'expirer doit être
+  // coupée même sans nouvel évènement Firebase (le SDK ne prévient jamais
+  // spontanément du simple écoulement du temps). Réutilise le teardown
+  // normal déclenché par onAuthStateChanged(null) via auth.signOut().
+  function _checkAdminSessionExpiry() {
+    var admin = window.MX.state.adminUser;
+    if (!admin) return;
+    if (_isAdminSessionEnvelopeValid(admin.uid)) return;
+    console.warn('[Auth] Session admin applicative expirée (>2h depuis le login) — déconnexion.');
+    _clearAdminSessionEnvelope();
+    auth.signOut().catch(function (e) { console.warn('[Auth] Erreur signOut (session admin expirée) :', e); });
+    if (window.MX.showModal) {
+      window.MX.showModal(
+        'Session administrateur expirée',
+        "Votre session administrateur a expiré (durée maximale : 2 heures). Veuillez vous reconnecter.",
+        [{ label: 'Se reconnecter', cls: 'confirm', fn: function () { showLogin(); } }]
+      );
+    }
+  }
+
   auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
-    window.MX.state.adminUser = (user && user.isAnonymous === false) ? user : null;
+    const candidateAdmin = (user && user.isAnonymous === false) ? user : null;
+
+    // Enveloppe absente ou expirée pour cet UID : cette session Firebase,
+    // même valide côté SDK, n'est PAS autorisée à s'exposer côté app.
+    // Vérifié AVANT toute assignation d'état/UI — aucun rendu admin, aucune
+    // navigation admin, aucun _onLogin() ne doit jamais se produire ici.
+    if (candidateAdmin && !_isAdminSessionEnvelopeValid(candidateAdmin.uid)) {
+      console.warn('[Auth] Session admin Firebase restaurée mais enveloppe locale absente/expirée — refus et déconnexion.');
+      window.MX.state.adminUser = null;
+      _clearAdminSessionEnvelope();
+      auth.signOut().catch(function (e) { console.warn('[Auth] Erreur signOut (session admin expirée) :', e); });
+      updateSidebarFooter();
+      return;
+    }
+
+    window.MX.state.adminUser = candidateAdmin;
 
     // ── DEBUG AUTH (temporaire) ──
     var _cu  = window.MX.state.currentUser;
@@ -104,6 +206,7 @@
       }
     } else {
       _adminSessionVersion = null; // toujours réinitialisé dès qu'il n'y a plus d'admin (même si !prevAdmin)
+      _clearAdminSessionEnvelope(); // idem pour l'enveloppe de session admin (tout signOut réel, quelle qu'en soit la cause)
       if (prevAdmin && !_switchingToPin) {
         // Admin logout → full session teardown: clear PIN user + destroy UI
         _pendingUserId = null;
@@ -423,7 +526,13 @@
     err.classList.add("hidden");
 
     try {
-      await auth.signInWithEmailAndPassword(email, pass);
+      const cred = await auth.signInWithEmailAndPassword(email, pass);
+      // Ancre la fenêtre de validité de la session admin applicative (2h
+      // fixes, voir plus haut) sur CETTE authentification explicite —
+      // jamais recréée ailleurs (onAuthStateChanged ne fait que la lire),
+      // pour ne jamais confondre un vrai login avec une simple restauration
+      // de session persistée.
+      _writeAdminSessionEnvelope(cred.user.uid, cred.user.email);
       hideLogin();
       MX.toast("Connecté en tant qu'administrateur ✓");
       MX.showPage("admin");
@@ -541,5 +650,9 @@
     // Ne révoque jamais une session valide ; aucune élévation de droits.
     checkAdminSessionVersionNow: _checkAdminSessionVersion,
     forceAdminLogout,
+    // Déclenchement manuel de la vérification d'expiration de la session
+    // admin applicative (normalement automatique : périodique, visibility-
+    // change, pageshow) — utile pour un contrôle immédiat et pour les tests.
+    checkAdminSessionExpiryNow: _checkAdminSessionExpiry,
   };
 })();
