@@ -822,6 +822,157 @@
     await batch.commit();
   }
 
+  // ── GESTION SEMAINE TECH — MODÈLES DE CRÉNEAUX ──────────────────────────
+  // Un "modèle de créneau" EST son horaire (nom, heures, couleur, icône) ET
+  // sa liste de tâches — contrairement à planning_shifts ci-dessus (codes
+  // courts régénérés en bloc à chaque sauvegarde, voir savePlanningShifts),
+  // chaque modèle a un ID Firestore STABLE et individuel (jamais dérivé du
+  // nom ni des horaires) : renommer/recolorer un modèle plus tard ne casse
+  // jamais une semaine déjà préparée qui le référence (voir week_slots plus
+  // bas, qui copie — ne référence jamais en direct — le contenu du modèle).
+  const R_SHIFT_TPL = () => db.collection('shift_templates');
+
+  function listenShiftTemplates(cb) {
+    _unsub.shift_templates = R_SHIFT_TPL().orderBy('order').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('shift_templates'));
+  }
+  async function addShiftTemplate(data) {
+    const snap = await R_SHIFT_TPL().orderBy('order', 'desc').limit(1).get();
+    const nextOrder = snap.empty ? 0 : ((snap.docs[0].data().order || 0) + 1);
+    const ref = await R_SHIFT_TPL().add(Object.assign({ order: nextOrder }, data, { createdAt: FV.serverTimestamp() }));
+    return ref.id;
+  }
+  async function updateShiftTemplate(id, data) {
+    await R_SHIFT_TPL().doc(id).update(Object.assign({}, data, { updatedAt: FV.serverTimestamp() }));
+  }
+  async function deleteShiftTemplate(id) {
+    await R_SHIFT_TPL().doc(id).delete();
+  }
+  async function duplicateShiftTemplate(id) {
+    const snap = await R_SHIFT_TPL().doc(id).get();
+    if (!snap.exists) throw new Error('Modèle introuvable');
+    const src = snap.data();
+    return addShiftTemplate(Object.assign({}, src, {
+      name: (src.name || 'Modèle') + ' (copie)',
+      tasks: (src.tasks || []).map(t => Object.assign({}, t)),
+    }));
+  }
+
+  // ── GESTION SEMAINE TECH — AFFECTATIONS RÉELLEMENT DATÉES ───────────────
+  // Un seul document par semaine réelle (weekKey format "AAAA_Wnn", voir
+  // MX.checkWeekOf/MX.weekKeyOf — même algorithme que checklist.js pour que
+  // les clés s'alignent partout), contenant pour chaque jour la liste
+  // ORDONNÉE des instances de créneau de CETTE semaine précise. Une instance
+  // est une COPIE figée du modèle au moment du chargement (nom, horaire,
+  // couleur, icône, tâches) — modifier le modèle source plus tard ne doit
+  // JAMAIS rejaillir sur une semaine déjà préparée. L'avancement (tâche
+  // faite/non faite) est stocké directement sur chaque tâche de l'instance
+  // (chaque instance a EXACTEMENT un technicien assigné, donc pas besoin
+  // d'un système de "propriétaire de coche" séparé comme pour l'ancien
+  // config/checks — la case cochée appartient sans ambiguïté à l'instance).
+  const R_WEEK_SLOTS = () => db.collection('week_slots');
+
+  // Retourne directement la fonction de désabonnement (comme listenRoles,
+  // listenMaintenance, etc.) plutôt que de passer par le registre partagé
+  // _unsub : plusieurs appelants indépendants (le listener global de
+  // app.js pour la semaine en cours, et la navigation propre à l'écran
+  // Gestion semaine tech, potentiellement sur une AUTRE semaine) doivent
+  // pouvoir coexister sans se couper l'un l'autre.
+  function listenWeekSlots(weekKey, cb) {
+    return R_WEEK_SLOTS().doc(weekKey).onSnapshot(snap => {
+      cb(snap.exists ? snap.data() : null);
+    }, _fsError('week_slots'));
+  }
+  async function getWeekSlots(weekKey) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    return snap.exists ? snap.data() : null;
+  }
+  async function ensureWeekSlots(weekKey, weekLabel, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    if (snap.exists) return snap.data();
+    const doc = { weekKey, weekLabel: weekLabel || weekKey, days: {}, createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(), updatedBy: actor || '' };
+    await R_WEEK_SLOTS().doc(weekKey).set(doc);
+    return doc;
+  }
+  async function loadTemplateIntoWeekDay(weekKey, weekLabel, dayId, templateId, userId, userName, actor) {
+    const tplSnap = await R_SHIFT_TPL().doc(templateId).get();
+    if (!tplSnap.exists) throw new Error('Modèle introuvable');
+    const tpl = tplSnap.data();
+    const wkSnap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days   = (wkSnap.exists && wkSnap.data().days) || {};
+    const list   = days[dayId] || [];
+    const instance = {
+      id: uuid(),
+      templateId,
+      name:  tpl.name  || 'Créneau',
+      icon:  tpl.icon  || '',
+      color: tpl.color || '#6B7280',
+      start: tpl.start || '',
+      end:   tpl.end   || '',
+      userId:   userId   || null,
+      userName: userName || '',
+      order: list.length,
+      tasks: (tpl.tasks || []).map(t => ({ id: uuid(), text: t.text, order: t.order || 0, done: false })),
+    };
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      weekKey, weekLabel: weekLabel || weekKey,
+      days: { [dayId]: list.concat([instance]) },
+      updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+    return instance.id;
+  }
+  async function setWeekSlotAssignee(weekKey, dayId, instanceId, userId, userName, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = (days[dayId] || []).map(inst =>
+      inst.id === instanceId ? Object.assign({}, inst, { userId: userId || null, userName: userName || '' }) : inst
+    );
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: list }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+  }
+  async function setWeekSlotTaskDone(weekKey, dayId, instanceId, taskId, done, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = (days[dayId] || []).map(inst => {
+      if (inst.id !== instanceId) return inst;
+      return Object.assign({}, inst, {
+        tasks: (inst.tasks || []).map(t => t.id === taskId ? Object.assign({}, t, { done: !!done }) : t)
+      });
+    });
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: list }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+  }
+  async function deleteWeekSlotInstance(weekKey, dayId, instanceId, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = (days[dayId] || []).filter(inst => inst.id !== instanceId);
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: list }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+  }
+  // Copie INTÉGRALE (structure + techniciens) d'une semaine vers une autre —
+  // nouvelles instances (nouveaux id), jamais de référence partagée avec la
+  // semaine source : modifier la copie ne touche jamais l'originale, et vice
+  // versa. Les tâches repartent toutes à "non faites" (done:false).
+  async function copyWeekSlots(fromWeekKey, toWeekKey, toWeekLabel, actor) {
+    const snap = await R_WEEK_SLOTS().doc(fromWeekKey).get();
+    if (!snap.exists) throw new Error('Semaine source introuvable');
+    const src = snap.data();
+    const newDays = {};
+    Object.keys(src.days || {}).forEach(dayId => {
+      newDays[dayId] = (src.days[dayId] || []).map(inst => Object.assign({}, inst, {
+        id: uuid(),
+        tasks: (inst.tasks || []).map(t => Object.assign({}, t, { done: false })),
+      }));
+    });
+    await R_WEEK_SLOTS().doc(toWeekKey).set({
+      weekKey: toWeekKey, weekLabel: toWeekLabel || toWeekKey, days: newDays,
+      createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    });
+  }
 
   const R_ABS = () => db.collection('absences');
 
@@ -1115,6 +1266,28 @@
     await batch.commit();
   }
 
+  // ── GESTION SEMAINE TECH — modèles par défaut ────────────────────────────
+  // Les horaires historiques (Matin/Journée/Soir) sont conservés comme
+  // données INITIALES du nouveau système de modèles, réutilisant les mêmes
+  // libellés/émojis que MX.SLOTS et les mêmes tâches par défaut que MX.DEFT
+  // (helpers.js) — aucun contenu inventé, uniquement porté dans la nouvelle
+  // structure. N'écrit rien si la collection contient déjà des modèles
+  // (première ouverture de l'écran uniquement, jamais en écrasement).
+  async function initShiftTemplateDefaults() {
+    const snap = await R_SHIFT_TPL().limit(1).get();
+    if (!snap.empty) return;
+    const DEFT = (window.MX && window.MX.DEFT) || {};
+    const mk = (text, i) => ({ id: uuid(), text, order: i });
+    const defaults = [
+      { name: 'Matin',   icon: '☀️', color: '#FDE047', start: '08:00', end: '16:33', active: true, order: 0, tasks: (DEFT.matin   || []).map(mk) },
+      { name: 'Journée', icon: '🌤',  color: '#3B82F6', start: '10:00', end: '18:33', active: true, order: 1, tasks: (DEFT.journee || []).map(mk) },
+      { name: 'Soir',    icon: '🌙', color: '#EF4444', start: '13:00', end: '21:33', active: true, order: 2, tasks: (DEFT.soir    || []).map(mk) },
+    ];
+    const batch = db.batch();
+    defaults.forEach(t => batch.set(R_SHIFT_TPL().doc(), Object.assign({}, t, { createdAt: FV.serverTimestamp() })));
+    await batch.commit();
+  }
+
   // ── ROLES (MÉTIERS) ──
   const R_ROLES = () => db.collection('roles');
 
@@ -1265,6 +1438,9 @@
     listenStockChecks, createStockCheck, saveStockCheckDraft, cancelStockCheck,
     commitStockCheck, getStockCheckItems,
     listenPlanningShifts, loadPlanningMonth, listenPlanningEntries, setPlanningEntry, deletePlanningEntry, savePlanningShifts,
+    listenShiftTemplates, addShiftTemplate, updateShiftTemplate, deleteShiftTemplate, duplicateShiftTemplate, initShiftTemplateDefaults,
+    listenWeekSlots, getWeekSlots, ensureWeekSlots, loadTemplateIntoWeekDay,
+    setWeekSlotAssignee, setWeekSlotTaskDone, deleteWeekSlotInstance, copyWeekSlots,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,

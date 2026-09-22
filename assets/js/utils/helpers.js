@@ -127,6 +127,42 @@
     return (ownerId || "unassigned") + "_" + wk + "_" + dateStr + "_" + slot + "_" + taskId;
   }
 
+  // ── GESTION SEMAINE TECH — clé de semaine pour une date/jour ARBITRAIRE ──
+  // (checkWeekOf() ci-dessus ne convertit qu'une chaîne AAAA-MM-JJ déjà en
+  // main ; ces trois helpers permettent de naviguer semaine <-> date pour
+  // n'importe quelle semaine, passée ou future, sans jamais utiliser
+  // toISOString() — qui décale d'un jour dès que le fuseau local est en
+  // avance sur UTC (le cas de la France) — voir _localISODate() plus haut,
+  // même piège que celui déjà corrigé pour checkDateForDay().
+  function weekKeyOf(date) {
+    return checkWeekOf(_localISODate(date || new Date()));
+  }
+  function mondayOfWeekKey(weekKey) {
+    const parts = String(weekKey || "").split("_W");
+    const year  = parseInt(parts[0], 10);
+    const wn    = parseInt(parts[1], 10);
+    const jan4  = new Date(year, 0, 4);
+    const dow   = jan4.getDay() || 7;
+    const mon   = new Date(jan4);
+    mon.setDate(jan4.getDate() - dow + 1 + (wn - 1) * 7);
+    mon.setHours(0, 0, 0, 0);
+    return mon;
+  }
+  function dateForWeekDay(weekKey, dayId) {
+    const idx = DAYS.findIndex(d => d.id === dayId);
+    if (idx < 0) return _localISODate(new Date());
+    const mon = mondayOfWeekKey(weekKey);
+    const d   = new Date(mon);
+    d.setDate(mon.getDate() + idx);
+    return _localISODate(d);
+  }
+  function weekLabelOf(weekKey) {
+    const mon = mondayOfWeekKey(weekKey);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const fmt = x => x.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+    return "Semaine du " + fmt(mon) + " au " + fmt(sun) + " " + sun.getFullYear();
+  }
+
   function avatarBg(name) {
     const cols = ["#2D1B69","#0D2D5C","#052010","#3A1A00","#3B0A0A","#1E1400","#0A1628"];
     let h = 0;
@@ -357,6 +393,7 @@
     SLOTS, DAYS, DEFT, TEAM_COLORS,
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
     checkKey, checkOwnerId, checkDateForDay, checkWeekOf,
+    weekKeyOf, mondayOfWeekKey, dateForWeekDay, weekLabelOf,
     avatarBg, avatarFg, avatarTxt, chipHtml, userColors, userAvatarHtml, badgeTag, _contrastColor, progressClass, alertLevel, hashPin,
     toast, showModal, closeModal,
     ThemeManager

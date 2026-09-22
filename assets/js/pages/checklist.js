@@ -628,6 +628,7 @@
   }
 
   async function assign(dayId, slot, name) {
+    if (!MX.Auth.canSeeAll()) return; // responsable/admin uniquement — vérifié aussi côté fonction, pas seulement l'UI
     MX.state.assignments[`${dayId}_${slot}`] = name;
     try {
       await MX.DB.setAssignment(dayId, slot, name);
@@ -640,6 +641,7 @@
 
   // ── PER-TASK ASSIGNMENT (current week) ──
   async function assignTask(dayId, slot, taskId, value, setCustomized) {
+    if (!MX.Auth.canSeeAll()) return; // responsable/admin uniquement
     const key      = `${dayId}_${slot}`;
     const tasks    = MX.state.tasks[key] || [];
     const newItems = tasks.map(t => {
@@ -668,6 +670,7 @@
 
   // ── SLOT-FIRST ASSIGNMENT: apply slot tech to all non-customized tasks ──
   async function applySlotTech(dayId, slot, name) {
+    if (!MX.Auth.canSeeAll()) return; // responsable/admin uniquement
     const key   = `${dayId}_${slot}`;
     const tasks = MX.state.tasks[key] || [];
     const newItems = tasks.map(t => {
@@ -728,6 +731,7 @@
 
   // ── ASSIGN ALL TASKS IN A SLOT ──
   async function assignAllSlotTasks(dayId, slot, assigneeName) {
+    if (!MX.Auth.canSeeAll()) return; // responsable/admin uniquement
     const key      = `${dayId}_${slot}`;
     const tasks    = MX.state.tasks[key] || [];
     const newItems = tasks.map(t => {
@@ -773,102 +777,6 @@
     if (!name) { MX.toast('Sélectionnez un technicien', true); return; }
     MX.closeModal();
     assignAllSlotTasks(dayId, slot, name);
-  }
-
-  // ── DAILY CLAIMS (auto-attribution) ──
-  const _SLOT_LBL = { matin: 'Matin', journee: 'Journée', soir: 'Soir' };
-
-  async function claimSlot(slot) {
-    const cu = MX.state.currentUser;
-    if (!cu) return MX.toast("Connectez-vous pour prendre un créneau", true);
-    const dateStr = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
-    const existing = (MX.state.dailyClaims || {})[slot] || {};
-    if (existing.lockedBy) return MX.toast("Ce créneau est verrouillé par le responsable", true);
-    if (existing.name && existing.name !== cu.name) return MX.toast("Ce créneau est déjà pris par " + existing.name, true);
-    try {
-      await MX.DB.setDailyClaim(dateStr, slot, cu.name, "");
-      const todayDayId = MX.todayId();
-      const key = todayDayId + '_' + slot;
-      const tasks = MX.state.tasks[key] || [];
-      if (tasks.length) {
-        const newItems = tasks.map(t => {
-          if (t.customized) return t;
-          const u = Object.assign({}, t);
-          u.assignedTo = cu.name;
-          return u;
-        });
-        MX.DB.setTasks(todayDayId, slot, newItems)
-          .then(() => { MX.state.tasks[key] = newItems; })
-          .catch(() => {});
-      }
-      MX.toast("Créneau " + (_SLOT_LBL[slot] || slot) + " pris ✓");
-      MX.DB.addLog({ workerName: cu.name, action: "claim", taskText: "[Aujourd'hui] " + cu.name + " a pris le créneau " + slot, dayId: todayDayId, slot }).catch(() => {});
-    } catch(e) { MX.toast("Erreur", true); }
-  }
-
-  async function unclaimSlot(slot) {
-    const cu = MX.state.currentUser;
-    if (!cu) return;
-    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
-    const existing = (MX.state.dailyClaims || {})[slot] || {};
-    if (existing.lockedBy) return MX.toast("Créneau verrouillé — contactez un responsable", true);
-    if (existing.name !== cu.name) return;
-    try {
-      await MX.DB.clearDailyClaim(dateStr, slot);
-      const todayDayId = MX.todayId();
-      const key = todayDayId + '_' + slot;
-      const tasks = MX.state.tasks[key] || [];
-      if (tasks.length) {
-        const newItems = tasks.map(t => {
-          if (t.customized) return t;
-          const u = Object.assign({}, t);
-          delete u.assignedTo;
-          return u;
-        });
-        MX.DB.setTasks(todayDayId, slot, newItems)
-          .then(() => { MX.state.tasks[key] = newItems; })
-          .catch(() => {});
-      }
-      MX.toast("Créneau rendu");
-      MX.DB.addLog({ workerName: cu.name, action: "unclaim", taskText: "[Aujourd'hui] " + cu.name + " a rendu le créneau " + slot, dayId: todayDayId, slot }).catch(() => {});
-    } catch(e) { MX.toast("Erreur", true); }
-  }
-
-  async function assignToday(slot, name) {
-    const dateStr = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
-    const actor   = MX.state.adminUser ? (MX.state.adminUser.email || "admin") : (MX.state.currentUser ? MX.state.currentUser.name : "resp");
-    try {
-      await MX.DB.setDailyClaim(dateStr, slot, name, actor);
-      if (name) {
-        const todayDayId = MX.todayId();
-        const key = todayDayId + '_' + slot;
-        const tasks = MX.state.tasks[key] || [];
-        if (tasks.length) {
-          const newItems = tasks.map(t => {
-            if (t.customized) return t;
-            const u = Object.assign({}, t);
-            u.assignedTo = name;
-            return u;
-          });
-          MX.DB.setTasks(todayDayId, slot, newItems)
-            .then(() => { MX.state.tasks[key] = newItems; })
-            .catch(() => {});
-        }
-      }
-      MX.toast((_SLOT_LBL[slot] || slot) + " → " + (name || "(aucun)") + " ✓");
-      MX.DB.addLog({ workerName: actor, action: "assign", taskText: "[Aujourd'hui] " + slot + " → " + (name || "(aucun)") + " (verrouillé)", dayId: MX.todayId(), slot }).catch(() => {});
-    } catch(e) { MX.toast("Erreur lors de l'assignation", true); }
-  }
-
-  async function toggleLockSlot(slot) {
-    const dateStr  = MX.state.todayDateStr || new Date().toISOString().slice(0, 10);
-    const existing = (MX.state.dailyClaims || {})[slot] || {};
-    const actor    = MX.state.adminUser ? (MX.state.adminUser.email || "admin") : (MX.state.currentUser ? MX.state.currentUser.name : "resp");
-    const newLock  = existing.lockedBy ? "" : actor;
-    try {
-      await MX.DB.setDailyClaim(dateStr, slot, existing.name || "", newLock);
-      MX.toast(newLock ? "Créneau verrouillé 🔒" : "Créneau déverrouillé");
-    } catch(e) { MX.toast("Erreur", true); }
   }
 
   // ── TRANSFER ──
@@ -2698,5 +2606,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, claimSlot, unclaimSlot, assignToday, toggleLockSlot, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg, _clWsOpen, _clWsClose, _clWsToggle, _clWsBlockTask, _clWsConfirmBlock, _navDay, _goToday, _toggleSlotCard };
+  window.MX.Pages.Checklist = { render, toggle, assign, assignTask, assignAllSlotTasks, applySlotTech, clearTaskCustom, _togglePick, promptAssignAll, _doAssignAll, toggleMission, _confirmMissionClose, startTransfer, confirmTransfer, acceptTransfer, rejectTransfer, cancelTransfer, toggleTransferred, openNote, saveNote, renderForRole, renderWeekly, renderMonthly, _showHistDay, _renderHistDay, _toggleHistCheck, _archiveCurrentWeek, renderWeekSlots, _showWeekDayGrid, _showFutureDay, _addFutureTask, _doAddFutureTask, _deleteFutureTask, _updateFutureTaskAssign, _refreshAddTaskSugg, _clWsOpen, _clWsClose, _clWsToggle, _clWsBlockTask, _clWsConfirmBlock, _navDay, _goToday, _toggleSlotCard };
 })();

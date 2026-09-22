@@ -199,32 +199,70 @@
   // TASK BUILDING
   // ══════════════════════════════════════════════
 
+  // Résout l'affectation du jour pour le technicien connecté :
+  //  1. Gestion semaine tech (state.weekSlots) — source PRIORITAIRE, seule
+  //     source autoritaire pour toute semaine préparée par un responsable.
+  //  2. Repli LECTURE SEULE sur l'ancien mécanisme (state.dailyClaims) —
+  //     uniquement pour ne pas faire disparaître un créneau déjà pris par
+  //     ce technicien AVANT le déploiement de ce nouveau système, sur une
+  //     semaine jamais préparée via Gestion semaine tech. Aucune écriture
+  //     n'est plus jamais possible par ce chemin (claimSlot/unclaimSlot/
+  //     assignToday ont été retirés de checklist.js).
+  // Ne retourne JAMAIS de créneau "disponible" — un technicien n'a plus
+  // aucun moyen de voir ni de prendre un créneau qui n'est pas le sien.
+  function _getTodayAssignment() {
+    var state = MX.state, cu = state.currentUser;
+    if (!cu) return null;
+    var todayId = MX.todayId();
+    var wk = state.weekSlots;
+    if (wk && wk.days && wk.days[todayId]) {
+      var inst = wk.days[todayId].filter(function (i) { return i.userName === cu.name; })[0];
+      if (inst) return { source: 'week_slots', instance: inst };
+    }
+    var claims = state.dailyClaims || {};
+    var legacySlot = null;
+    (MX.getDaySlots(todayId) || ['matin', 'journee', 'soir']).forEach(function (sl) {
+      if (!legacySlot && claims[sl] && claims[sl].name === cu.name) legacySlot = sl;
+    });
+    if (legacySlot) return { source: 'legacy', slot: legacySlot };
+    return null;
+  }
+
   function _getChecklistTasks() {
     var state   = MX.state;
     var todayId = MX.todayId();
     var cu      = state.currentUser;
     if (!cu) return [];
-    var slots  = MX.getDaySlots(todayId) || ['matin', 'journee', 'soir'];
     var result = [];
+    var asg = _getTodayAssignment();
 
-    slots.forEach(function (slot) {
-      var key    = todayId + '_' + slot;
-      var tasks  = state.tasks[key] || [];
-      var claims = state.dailyClaims || {};
-      // CORRECTIF (Planning ≠ prise de créneau) : la propriété du créneau
-      // DU JOUR ne doit dépendre que de dailyClaims (écrit uniquement par
-      // claimSlot/unclaimSlot/assignToday). state.assignments est une
-      // pré-affectation HEBDOMADAIRE posée à l'avance par un responsable
-      // (menu déroulant Vue journée admin, parfois suggérée par le
-      // Planning) — elle ne doit jamais valoir "créneau pris" ici.
-      var slotAssignee = (claims[slot] && claims[slot].name) || '';
+    if (asg && asg.source === 'week_slots') {
+      var inst = asg.instance;
+      (inst.tasks || []).forEach(function (task) {
+        result.push({
+          id: task.id, text: task.text || '', desc: '', priority: 'normale',
+          slot: inst.id, dayId: todayId, checkKey: todayId + '_' + inst.id + '_' + task.id,
+          done: !!task.done, note: '', fromUser: null,
+          mine: true, unassigned: false, missionType: 'checklist', accepted: true,
+          zone: '', subZone: '', estimatedDuration: '', dueDate: todayId, sortOrder: 0,
+        });
+      });
+    }
+
+    // Tâches assignées individuellement à ce technicien (assignTask(),
+    // responsable/admin) — toujours respectées quel que soit le système
+    // d'affectation du créneau, plus le créneau "legacy" déjà pris par ce
+    // technicien avant la bascule (lecture seule, compat).
+    (MX.getDaySlots(todayId) || ['matin', 'journee', 'soir']).forEach(function (slot) {
+      var key   = todayId + '_' + slot;
+      var tasks = state.tasks[key] || [];
+      var legacyMine = !!(asg && asg.source === 'legacy' && asg.slot === slot);
       var si = SLOT_INFO[slot] || { order: 9 };
-
       tasks.forEach(function (task) {
-        var mine = task.assignedTo === cu.name || (!task.assignedTo && slotAssignee === cu.name);
-        var unassigned = !task.assignedTo && !slotAssignee;
-        if (!mine && !unassigned) return;
+        var mine = task.assignedTo === cu.name || (legacyMine && !task.assignedTo);
+        if (!mine) return;
         var ck = key + '_' + task.id;
+        if (result.some(function (t) { return t.checkKey === ck; })) return;
         result.push({
           id:          task.id,
           text:        task.text || '',
@@ -236,8 +274,8 @@
           done:        !!(state.checks[MX.checkKey(todayId, slot, task.id, MX.checkOwnerId(todayId, slot, task))]),
           note:        (state.notes && state.notes[ck]) || '',
           fromUser:    null,
-          mine:        mine,
-          unassigned:  unassigned,
+          mine:        true,
+          unassigned:  false,
           missionType: 'checklist',
           accepted:    true,
           zone:        task.zone || '',
@@ -777,95 +815,63 @@
     h += '<div class="mm-v3-content">';
 
     if (_activeTab === 'checklist') {
-      // ── Slot-first display: show all 3 slots with claim status ──
-      var todayDayId = MX.todayId();
-      var CLK_SLOTS  = ['matin', 'journee', 'soir'];
-      var myClaims   = 0;
+      // ── Affectation automatique du jour — plus aucune prise de créneau ──
+      // Le technicien ne choisit jamais son créneau : Maintix détermine son
+      // affectation du jour (voir _getTodayAssignment ci-dessus, prioritaire
+      // sur Gestion semaine tech, repli lecture seule sur l'ancien système
+      // pour ne pas perdre un créneau déjà pris avant la bascule).
+      var asg = _getTodayAssignment();
 
-      CLK_SLOTS.forEach(function (slotKey) {
-        var si         = SLOT_INFO[slotKey];
-        var claims     = MX.state.dailyClaims || {};
-        var claim      = claims[slotKey] || {};
-        var claimName  = claim.name || '';
-        var lockedBy   = claim.lockedBy || '';
-        // CORRECTIF (Planning ≠ prise de créneau) : un créneau n'est
-        // "pris" que via dailyClaims (claimSlot/unclaimSlot/assignToday),
-        // jamais via la pré-affectation hebdomadaire state.assignments —
-        // voir la même correction dans _getChecklistTasks() ci-dessus.
-        var effective  = claimName;
-        var isMine     = effective === cu.name;
-
-        if (isMine) myClaims++;
-
-        var mSlotTasks = isMine
-          ? checklistTasks.filter(function (t) { return t.slot === slotKey && t.mine; })
-          : [];
-        var mSlotDone  = mSlotTasks.filter(function (t) { return t.done; }).length;
-        var mSlotPct   = mSlotTasks.length ? Math.round(mSlotDone / mSlotTasks.length * 100) : 0;
-        var barCol     = mSlotPct === 100 ? TC.checklist : mSlotPct >= 50 ? '#f97316' : TC.intervention;
+      if (asg) {
+        var instName, instIcon, instStart, instEnd, mSlotTasks;
+        if (asg.source === 'week_slots') {
+          instName  = asg.instance.name;
+          instIcon  = asg.instance.icon || '';
+          instStart = asg.instance.start || '';
+          instEnd   = asg.instance.end || '';
+          mSlotTasks = checklistTasks.filter(function (t) { return t.slot === asg.instance.id && t.mine; });
+        } else {
+          var si = SLOT_INFO[asg.slot];
+          instName  = si.l;
+          instIcon  = si.icon;
+          instStart = '';
+          instEnd   = '';
+          mSlotTasks = checklistTasks.filter(function (t) { return t.slot === asg.slot && t.mine; });
+        }
+        var mSlotDone = mSlotTasks.filter(function (t) { return t.done; }).length;
+        var mSlotPct  = mSlotTasks.length ? Math.round(mSlotDone / mSlotTasks.length * 100) : 0;
+        var barCol    = mSlotPct === 100 ? TC.checklist : mSlotPct >= 50 ? '#f97316' : TC.intervention;
 
         h += '<div class="mm-v3-slot-group">'
           + '<div class="mm-v3-slot-hd">'
-          + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
-          + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
-          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>';
-
-        if (isMine && mSlotTasks.length) {
+          + '<span class="mm-v3-slot-icon">' + e(instIcon) + '</span>'
+          + '<span class="mm-v3-slot-name">' + e(instName) + '</span>'
+          + '<span class="mm-v3-slot-sub">' + e(instStart) + (instStart || instEnd ? ' – ' : '') + e(instEnd) + '</span>';
+        if (mSlotTasks.length) {
           h += '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + mSlotPct + '%;background:' + barCol + '"></div></div>'
             + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + mSlotDone + '/' + mSlotTasks.length + '</span>';
         }
-
         h += '</div>';
 
-        // ── Status banner ──
-        if (lockedBy) {
-          h += '<div class="mm-v3-slot-status mm-v3-slot-status--locked">'
-            + '<i class="fas fa-lock"></i>'
-            + (claimName ? (' Pris par <strong>' + e(claimName) + '</strong>') : ' Non assigné')
-            + ' <span class="mm-v3-slot-lock-badge">Responsable</span>'
-            + '</div>';
-        } else if (isMine) {
-          h += '<div class="mm-v3-slot-status mm-v3-slot-status--mine">'
-            + '<span><i class="fas fa-check-circle"></i> Votre créneau</span>'
-            + '<button class="mm-v3-slot-unclaim" onclick="MX.Pages.Checklist.unclaimSlot(\'' + e(slotKey) + '\')">'
-            + '<i class="fas fa-right-from-bracket"></i> Rendre le créneau</button>'
-            + '</div>';
-        } else if (claimName) {
-          var nc2 = MX.userColors ? MX.userColors(claimName) : { bg: 'var(--cyan)', fg: '#fff' };
-          h += '<div class="mm-v3-slot-status mm-v3-slot-status--taken">'
-            + '<i class="fas fa-user-check"></i> Pris par '
-            + '<span class="mm-v3-slot-who" style="background:' + nc2.bg + ';color:' + nc2.fg + '">' + e(claimName.substring(0, 2).toUpperCase()) + '</span>'
-            + ' <strong>' + e(claimName) + '</strong>'
-            + '</div>';
+        h += '<div class="mm-v3-slot-status mm-v3-slot-status--mine">'
+          + '<span><i class="fas fa-check-circle"></i> Votre créneau du jour</span>'
+          + '</div>';
+
+        var slotFiltered = _applyFilters(mSlotTasks, todayISO);
+        if (mSlotTasks.length === 0) {
+          h += '<div class="mm-v3-slot-empty">Aucune tâche dans ce créneau.</div>';
+        } else if (slotFiltered.length === 0) {
+          h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
         } else {
-          h += '<div class="mm-v3-slot-status mm-v3-slot-status--free">'
-            + '<span><i class="fas fa-circle-dot"></i> Disponible</span>'
-            + '<button class="mm-v3-slot-claim" onclick="MX.Pages.Checklist.claimSlot(\'' + e(slotKey) + '\')">'
-            + '<i class="fas fa-hand-pointer"></i> Prendre le créneau</button>'
-            + '</div>';
+          h += '<div class="mm-v3-cards">';
+          slotFiltered.forEach(function (task) { h += _checklistCard(task); });
+          h += '</div>';
         }
-
-        // ── Tasks — only when this is my slot ──
-        if (isMine) {
-          var slotFiltered = _applyFilters(mSlotTasks, todayISO);
-          if (mSlotTasks.length === 0) {
-            h += '<div class="mm-v3-slot-empty">Aucune tâche dans ce créneau.</div>';
-          } else if (slotFiltered.length === 0) {
-            h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
-          } else {
-            h += '<div class="mm-v3-cards">';
-            slotFiltered.forEach(function (task) { h += _checklistCard(task); });
-            h += '</div>';
-          }
-        }
-
         h += '</div>';
-      });
-
-      if (myClaims === 0) {
-        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
-          + '<div class="mm-v3-empty-ttl">Aucun créneau pris</div>'
-          + '<div class="mm-v3-empty-sub">Prenez un créneau ci-dessus pour afficher vos tâches.</div></div>';
+      } else {
+        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">⚠️</div>'
+          + '<div class="mm-v3-empty-ttl">Aucun créneau attribué</div>'
+          + '<div class="mm-v3-empty-sub">Vous n\'avez pas de créneau attribué pour aujourd\'hui.<br>Veuillez contacter votre responsable.</div></div>';
       }
 
       // Congrats + confetti when all done
@@ -3456,6 +3462,22 @@
   }
 
   function toggle(dayId, slot, taskId) {
+    // Gestion semaine tech : "slot" est en réalité l'id d'une instance de
+    // créneau de week_slots (voir _getChecklistTasks) — la coche vit
+    // directement sur la tâche de cette instance, jamais dans
+    // config/checks (chaque instance a un seul technicien, pas besoin de
+    // résolution de propriétaire).
+    var wk = MX.state.weekSlots;
+    var dayInstances = wk && wk.days && wk.days[dayId];
+    var inst = dayInstances && dayInstances.filter(function (i) { return i.id === slot; })[0];
+    if (inst) {
+      var task = (inst.tasks || []).filter(function (t) { return t.id === taskId; })[0];
+      var newDone = !(task && task.done);
+      var actor = MX.state.currentUser ? MX.state.currentUser.name : 'inconnu';
+      MX.DB.setWeekSlotTaskDone(MX.weekKeyOf(new Date()), dayId, slot, taskId, newDone, actor)
+        .catch(function () { MX.toast('Erreur validation', true); });
+      return;
+    }
     MX.Pages.Checklist.toggle(dayId, slot, taskId);
   }
 

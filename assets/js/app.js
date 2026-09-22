@@ -84,6 +84,7 @@
     if (id === "admin")        return Pages.Admin.render();
     if (id === "badges")       return Pages.Badges ? Pages.Badges.render() : null;
     if (id === "planning")      return Pages.Planning ? Pages.Planning.render() : null;
+    if (id === "gestion-semaine-tech") return Pages.GestSemaine ? Pages.GestSemaine.render() : null;
     if (id === "consommations") return Pages.Conso ? Pages.Conso.render() : _renderStub("Consommations", "fa-droplet", "Chargement…");
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
     if (id === "pmp")          return Pages.PMP  ? Pages.PMP.render()  : _renderStub("Maintenance PMP", "fa-screwdriver-wrench", "Chargement…");
@@ -222,6 +223,7 @@
     'home':          { icon: 'fa-house',           l: 'Accueil' },
     'msgs':          { icon: 'fa-book-open',        l: 'Journal' },
     'planning':      { icon: 'fa-calendar-days',   l: 'Planning' },
+    'gestion-semaine-tech': { icon: 'fa-user-clock', l: 'Gestion semaine tech' },
     'today-cl':      { icon: 'fa-list-check',      l: 'Checklists' },
     'mes-missions':  { icon: 'fa-list-check',      l: 'Mes missions' },
     'org-resp':      { icon: 'fa-users-gear',      l: 'Organisation' },
@@ -538,6 +540,7 @@
       aItems += _sec("PILOTAGE");
       aItems += _tabBtn("tasks",          "fa-chart-bar",        "Tableau Responsable");
       aItems += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
+      aItems += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
       aItems += _tabBtn("week",           "fa-calendar-week",    "Gestion Semaines");
 
       aItems += _sec("ÉQUIPE");
@@ -809,17 +812,34 @@
       + '</div>';
 
     // ── Planning ──
+    // Priorité à Gestion semaine tech (state.weekSlots, affectation réelle
+    // et datée) ; repli sur l'ancien mécanisme (dailyClaims/assignments)
+    // uniquement pour les semaines pas encore préparées via le nouvel écran.
+    var wkSlotsToday = (state.weekSlots && state.weekSlots.days && state.weekSlots.days[todayId]) || null;
     h += '<div class="dxp-section">'
       + '<div class="dxp-hd"><i class="fas fa-calendar-days dxp-ico"></i><span>Planning</span></div>';
-    slots.forEach(function(slot) {
-      var si = SLOT_LABELS[slot];
-      var assignee = (claims[slot] && claims[slot].name) || (state.assignments && state.assignments[todayId + '_' + slot]) || '';
-      h += '<div class="dxp-slot-row">'
-        + '<span class="dxp-slot-ico">' + si.icon + '</span>'
-        + '<span class="dxp-slot-lbl">' + e(si.l) + '</span>'
-        + '<span class="dxp-slot-user">' + (assignee ? e(assignee) : '<span style="color:var(--text3)">—</span>') + '</span>'
-        + '</div>';
-    });
+    if (wkSlotsToday) {
+      if (!wkSlotsToday.length) {
+        h += '<div style="font-size:11px;color:var(--text3);padding:2px 0">Aucun créneau aujourd\'hui</div>';
+      }
+      wkSlotsToday.forEach(function(inst) {
+        h += '<div class="dxp-slot-row">'
+          + '<span class="dxp-slot-ico">' + e(inst.icon || '') + '</span>'
+          + '<span class="dxp-slot-lbl">' + e(inst.name) + '</span>'
+          + '<span class="dxp-slot-user">' + (inst.userName ? e(inst.userName) : '<span style="color:var(--text3)">—</span>') + '</span>'
+          + '</div>';
+      });
+    } else {
+      slots.forEach(function(slot) {
+        var si = SLOT_LABELS[slot];
+        var assignee = (claims[slot] && claims[slot].name) || (state.assignments && state.assignments[todayId + '_' + slot]) || '';
+        h += '<div class="dxp-slot-row">'
+          + '<span class="dxp-slot-ico">' + si.icon + '</span>'
+          + '<span class="dxp-slot-lbl">' + e(si.l) + '</span>'
+          + '<span class="dxp-slot-user">' + (assignee ? e(assignee) : '<span style="color:var(--text3)">—</span>') + '</span>'
+          + '</div>';
+      });
+    }
     h += '</div>';
 
     // ── Interventions ──
@@ -1744,7 +1764,8 @@
       if (state.currentPage === "orders") MX.Pages.Orders.render();
     });
 
-    // ── Daily claims listener (today only) ──
+    // ── Daily claims listener (today only) — legacy, gardé pour compatibilité
+    // avec les semaines non encore préparées via Gestion semaine tech ──
     DB.listenDailyClaims(state.todayDateStr, data => {
       state.dailyClaims = data;
       const tid = MX.todayId ? MX.todayId() : null;
@@ -1752,6 +1773,17 @@
         MX.Pages.Checklist.render(tid);
       }
       if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
+    });
+
+    // ── Gestion semaine tech : affectations de la semaine en cours ──
+    // Source d'affectation prioritaire (voir mes-missions.js) — si aucune
+    // semaine n'a été préparée par le responsable, state.weekSlots reste
+    // null et l'ancien mécanisme (dailyClaims ci-dessus) prend le relais.
+    DB.listenWeekSlots(MX.weekKeyOf(new Date()), data => {
+      state.weekSlots = data;
+      if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
+      if (state.currentPage === "home") Pages.Home && Pages.Home.render();
+      if (state.currentPage === "gestion-semaine-tech") Pages.GestSemaine && Pages.GestSemaine.render();
     });
 
     // ── Planning suggestions for today ──
@@ -1831,6 +1863,7 @@
     try {
       await MX.DB.initDefaults();
       await MX.DB.initDefaultBadges();
+      await MX.DB.initShiftTemplateDefaults();
       setupListeners();
       const _elapsed = performance.now() - _splashStart;
       await new Promise(r => setTimeout(r, Math.max(0, 2400 - _elapsed)));
