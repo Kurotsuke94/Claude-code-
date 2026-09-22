@@ -175,8 +175,28 @@
   // d'écrire dans un document "null".
   function _wk() { return _viewWeekKey || MX.weekKeyOf(new Date()); }
 
+  // ── VERROU SEMAINES PASSÉES ──────────────────────────────────────────────
+  // week_slots n'est PAS immuable par construction — rien n'empêche
+  // techniquement setWeekSlotAssignee/loadTemplateIntoWeekDay/etc. d'écrire
+  // sur n'importe quel weekKey, y compris une semaine déjà terminée (voir
+  // audit Phase 3, point 9). _prevWeek()/_nextWeek() n'ont aucune borne :
+  // un admin peut naviguer vers une semaine passée dans cet écran. Ce verrou
+  // empêche toute écriture (affectation, chargement de modèle, nouvelle
+  // semaine, copie) sur une semaine strictement antérieure à la semaine
+  // réelle en cours — la seule façon de garantir que l'historique reste
+  // fiable tant qu'aucun mécanisme d'archivage séparé n'existe.
+  function _isPastWeek(weekKey) { return weekKey < MX.weekKeyOf(new Date()); }
+  function _blockIfPastWeek(weekKey) {
+    if (_isPastWeek(weekKey)) {
+      MX.toast('Semaine passée — modification impossible (historique verrouillé)', true);
+      return true;
+    }
+    return false;
+  }
+
   async function _newWeek() {
     if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
     try {
       const actor = _actorName();
       const data = await MX.DB.ensureWeekSlots(_wk(), MX.weekLabelOf(_wk()), actor);
@@ -261,6 +281,7 @@
 
   async function _setAssignee(dayId, instanceId, userId) {
     if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
     const user = _users().find(u => u.id === userId) || null;
     try {
       await MX.DB.setWeekSlotAssignee(_wk(), dayId, instanceId, user ? user.id : null, user ? user.name : '', _actorName());
@@ -270,6 +291,7 @@
 
   async function _removeInstance(dayId, instanceId) {
     if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
     MX.showModal('Retirer ce créneau ?', 'Cette action supprime ce créneau de la semaine (les tâches/coches associées seront perdues).', [
       { label: 'Retirer', cls: 'danger', fn: async () => {
         try { await MX.DB.deleteWeekSlotInstance(_wk(), dayId, instanceId, _actorName()); MX.toast('Créneau retiré'); }
@@ -306,6 +328,7 @@
 
   async function _doLoadTemplate(dayId) {
     if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
     const tplId  = (document.getElementById('lgm-tpl')  || {}).value;
     const userId = (document.getElementById('lgm-user') || {}).value;
     if (!tplId) return;
@@ -344,6 +367,7 @@
     const mon = MX.mondayOfWeekKey(_wk());
     mon.setDate(mon.getDate() + n * 7);
     const targetKey = MX.weekKeyOf(mon);
+    if (_blockIfPastWeek(targetKey)) return;
     try {
       await MX.DB.copyWeekSlots(_wk(), targetKey, MX.weekLabelOf(targetKey), _actorName());
       MX.toast('Semaine copiée ✓');

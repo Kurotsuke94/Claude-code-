@@ -59,10 +59,42 @@
     if (card) card.classList.toggle('mis-slot-collapsed');
   }
 
+  // ── Recherche d'une tâche, week_slots OU legacy (priorité identique à
+  // getEffectiveDaySchedule) — utilisé par le panneau de travail (_clWsOpen/
+  // _clWsToggle/_clWsBlockTask) pour rester agnostique de la source. ──
+  function _findTask(dayId, slot, taskId) {
+    const state = MX.state;
+    const wk = state.weekSlots;
+    const dayInstances = wk && wk.days ? wk.days[dayId] : null;
+    const inst = dayInstances && dayInstances.find(function(i) { return i.id === slot; });
+    if (inst) {
+      const t = (inst.tasks || []).find(function(x) { return x.id === taskId; });
+      if (!t) return null;
+      return {
+        source: 'week_slots', instance: inst,
+        task: { id: t.id, text: t.text || '', done: !!t.done },
+        label: inst.name || '', icon: inst.icon || '',
+        assignee: inst.userName || '',
+      };
+    }
+    const t = (state.tasks[dayId + '_' + slot] || []).find(function(x) { return x.id === taskId; });
+    if (!t) return null;
+    const isToday = dayId === MX.todayId();
+    const asn = isToday
+      ? (((state.dailyClaims || {})[slot] || {}).name || '')
+      : ((state.assignments || {})[dayId + '_' + slot] || '');
+    return {
+      source: 'legacy', instance: null,
+      task: { id: t.id, text: t.text || '', done: !!state.checks[MX.checkKey(dayId, slot, t.id, MX.checkOwnerId(dayId, slot, t))] },
+      label: (MX.SLOTS[slot] || {}).l || slot, icon: (MX.SLOTS[slot] || {}).icon || 'fa-circle',
+      assignee: t.assignedTo || asn || '',
+      raw: t,
+    };
+  }
+
   function render(dayId) {
-    const { state, DAYS, getDaySlots, esc, Widgets } = MX;
+    const { state, DAYS, esc, Widgets } = MX;
     const day    = DAYS.find(d => d.id === dayId);
-    const slots  = getDaySlots(dayId);
     const el     = document.getElementById("main-content");
     const cu     = state.currentUser;
     const canAll = MX.Auth.canSeeAll();
@@ -81,14 +113,18 @@
     const dailyClaims          = isToday ? (state.dailyClaims || {}) : {};
     const todayPlanSuggestions = isToday ? (state.todayPlanSuggestions || {}) : {};
 
+    // ── Programmation effective du jour (priorité week_slots/legacy déjà
+    // tranchée par getEffectiveDaySchedule — jamais les deux mélangées,
+    // voir audit Phase 3). Remplace l'itération fixe matin/journée/soir. ──
+    const schedule = MX.getEffectiveDaySchedule(dayId);
+    const instances = schedule.instances;
+
     let total = 0, done = 0;
-    slots.forEach(sl => {
-      const tasks = state.tasks[`${dayId}_${sl}`] || [];
-      const asn   = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || "") : (state.assignments[`${dayId}_${sl}`] || "");
-      tasks.forEach(t => {
-        if (canAll || !worker || asn === worker || t.assignedTo === worker) {
+    instances.forEach(inst => {
+      inst.tasks.forEach(t => {
+        if (canAll || !worker || inst.userName === worker || t.assignedTo === worker) {
           total++;
-          if (state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]) done++;
+          if (t.done) done++;
         }
       });
     });
@@ -183,15 +219,18 @@
       });
     }
 
-    // ── Compact slot groups ──
+    // ── Compact slot groups — nombre arbitraire de créneaux (week_slots)
+    // ou les 3 créneaux historiques synthétisés (legacy), jamais mélangés
+    // (schedule.source tranché une fois pour toutes par getEffectiveDaySchedule) ──
     let anyVisible = false;
+    const isWeekSlots = schedule.source === 'week_slots';
 
-    slots.forEach(function(sl) {
-      const slotTasks    = state.tasks[dayId + '_' + sl] || [];
-      const slAsn        = isToday ? ((dailyClaims[sl] && dailyClaims[sl].name) || '') : (state.assignments[dayId + '_' + sl] || '');
-      const slDailyClaim = isToday ? (dailyClaims[sl] || null) : null;
-      const slPlanSugg   = canAll ? _getPlanSuggestions(_currK, dayId, sl) : [];
-      const s            = MX.SLOTS[sl] || { l: sl, e: '', c: '', icon: '' };
+    instances.forEach(function(inst) {
+      const sl           = inst.id; // clé legacy ('matin'/'journee'/'soir') OU id d'instance week_slots
+      const slotTasks     = inst.tasks;
+      const slAsn         = inst.userName || '';
+      const slDailyClaim  = (!isWeekSlots && isToday) ? (dailyClaims[sl] || null) : null;
+      const slPlanSugg    = (!isWeekSlots && canAll) ? _getPlanSuggestions(_currK, dayId, sl) : [];
 
       // Visibility filter (mirrors slotCard logic)
       const hasPerTask = worker && slotTasks.some(function(t) { return t.assignedTo === worker; });
@@ -202,7 +241,7 @@
         : slotTasks;
 
       let slDone = 0;
-      visTasks.forEach(function(t) { if (state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))]) slDone++; });
+      visTasks.forEach(function(t) { if (t.done) slDone++; });
       const slPct = visTasks.length ? Math.round(slDone / visTasks.length * 100) : 0;
       anyVisible = true;
 
@@ -210,14 +249,17 @@
       // tranche active/incomplète reste toujours ouverte).
       const slCollapsed = visTasks.length > 0 && slPct === 100;
       const slElId = 'mis-slot-' + dayId + '-' + sl;
+      const icoHtml = isWeekSlots
+        ? esc(inst.icon || '')
+        : inst.icon || '';
 
       h += '<div class="cl-ws-sg' + (slCollapsed ? ' mis-slot-collapsed' : '') + '" id="' + slElId + '">';
 
       // Slot header
       h += '<div class="cl-ws-sg-hd" onclick="MX.Pages.Checklist._toggleSlotCard(\'' + slElId + '\')" style="cursor:pointer">';
-      h +=   '<div class="cl-ws-sg-ico ' + s.c + '">' + s.e + '</div>';
+      h +=   '<div class="cl-ws-sg-ico" style="background:' + esc(inst.color || '#6B7280') + '33;color:' + esc(inst.color || '#6B7280') + '">' + icoHtml + '</div>';
       h +=   '<div class="cl-ws-sg-info">';
-      h +=     '<div class="cl-ws-sg-lbl">' + esc(s.l) + '<span class="cl-ws-sg-time">' + (_slotTimes[sl] || '') + '</span></div>';
+      h +=     '<div class="cl-ws-sg-lbl">' + esc(inst.name) + '<span class="cl-ws-sg-time">' + (inst.start || inst.end ? esc(inst.start) + ' – ' + esc(inst.end) : '') + '</span></div>';
       h +=     '<div class="cl-ws-sg-sub">' + slDone + '/' + visTasks.length + ' tâches</div>';
       h +=   '</div>';
       h +=   '<div class="cl-ws-sg-pct ' + (slPct>=80?'g':slPct>=40?'o':'r') + '">' + slPct + '%</div>';
@@ -225,8 +267,19 @@
       h += '</div>';
       h += '<div class="mis-slot-collapsible">';
 
-      // Assignment row
-      if (canAll) {
+      // Assignment row — pour week_slots, lecture seule + renvoi vers
+      // Gestion semaine tech (source unique d'écriture, évite deux UI
+      // divergentes pour la même donnée) ; comportement legacy inchangé.
+      if (isWeekSlots) {
+        if (canAll) {
+          h += '<div class="cl-ws-asgn-row">' +
+            (slAsn ? '<span class="cl-ws-asgn-chip">' + esc(slAsn) + '</span>' : '<span style="font-size:11px;color:var(--text3)">Non assigné</span>') +
+            '<button style="margin-left:8px;font-size:10px;background:none;border:1px solid var(--border2);border-radius:6px;padding:3px 8px;color:var(--cyan);cursor:pointer" onclick="MX.showPage(\'gestion-semaine-tech\')"><i class="fas fa-pen"></i> Gérer</button>' +
+            '</div>';
+        } else if (slAsn) {
+          h += '<div class="cl-ws-asgn-row"><i class="fas fa-user" style="color:var(--text3);font-size:10px"></i>&nbsp;<span class="cl-ws-asgn-chip">' + esc(slAsn) + '</span></div>';
+        }
+      } else if (canAll) {
         if (isToday) {
           const claimName = (slDailyClaim && slDailyClaim.name) || '';
           const lockIcon  = (slDailyClaim && slDailyClaim.lockedBy) ? '<i class="fas fa-lock" style="color:var(--orange);font-size:10px"></i> ' : '';
@@ -257,7 +310,7 @@
         h += '<div class="cl-ws-sg-tasks">';
         visTasks.forEach(function(t) {
           const tKey    = dayId + '_' + sl + '_' + t.id;
-          const isChk   = !!state.checks[MX.checkKey(dayId, sl, t.id, MX.checkOwnerId(dayId, sl, t))];
+          const isChk   = !!t.done;
           const hasNote = !!((state.notes || {})[tKey]);
           const isSel   = _clWsSelKey === tKey;
           const hasAsgn = !!(t.assignedTo || slAsn);
@@ -373,10 +426,11 @@
   }
 
   function _clWsOpen(dayId, slot, taskId, animate) {
-    const { state, DAYS, SLOTS, esc } = MX;
-    const key  = dayId + '_' + slot + '_' + taskId;
-    const task = (state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
-    if (!task) return;
+    const { state, DAYS, esc } = MX;
+    const key   = dayId + '_' + slot + '_' + taskId;
+    const found = _findTask(dayId, slot, taskId);
+    if (!found) return;
+    const task  = found.task;
 
     _clWsSelKey = key;
 
@@ -385,16 +439,11 @@
       el.classList.toggle('cl-ws-tr--sel', el.id === 'cl-ws-tr-' + taskId);
     });
 
-    const isChecked = !!state.checks[MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task))];
+    const isChecked = !!task.done;
     const note      = (state.notes || {})[key] || '';
     const day       = DAYS.find(function(d) { return d.id === dayId; });
-    const s         = SLOTS[slot] || { l: slot, e: '', c: '', icon: '' };
     const cu        = state.currentUser;
-    const isToday   = dayId === MX.todayId();
-    const asn       = isToday
-      ? (((state.dailyClaims || {})[slot] || {}).name || '')
-      : (state.assignments[dayId + '_' + slot] || '');
-    const effectiveAsn = task.assignedTo || asn || '';
+    const effectiveAsn = found.assignee;
     const canNote   = !!(cu || MX.Auth.isAdmin());
 
     const rp = document.getElementById('cl-ws-rp');
@@ -406,8 +455,11 @@
       : '<span class="cl-ws-status-badge cl-ws-status-badge--todo"><i class="fas fa-clock"></i> À faire</span>';
 
     // Meta badges
+    const slotIconHtml = found.source === 'week_slots'
+      ? '<span style="font-size:11px;margin-right:3px">' + esc(found.icon) + '</span>'
+      : '<i class="fas ' + (found.icon || 'fa-circle') + '" style="font-size:10px;margin-right:3px"></i>';
     let metaHtml = '<div class="cl-ws-meta-row">';
-    metaHtml += '<span class="cl-ws-mb cl-ws-mb--slot"><i class="fas ' + (s.icon || 'fa-circle') + '" style="font-size:10px;margin-right:3px"></i>' + esc(s.l) + '</span>';
+    metaHtml += '<span class="cl-ws-mb cl-ws-mb--slot">' + slotIconHtml + esc(found.label) + '</span>';
     if (effectiveAsn) metaHtml += '<span class="cl-ws-mb cl-ws-mb--tech"><i class="fas fa-user" style="font-size:10px;margin-right:3px"></i>' + esc(effectiveAsn) + '</span>';
     if (day) metaHtml += '<span class="cl-ws-mb cl-ws-mb--date"><i class="fas fa-calendar-day" style="font-size:10px;margin-right:3px"></i>' + esc(day.l) + '</span>';
     metaHtml += '</div>';
@@ -476,8 +528,8 @@
   async function _clWsToggle(dayId, slot, taskId) {
     await toggle(dayId, slot, taskId);
     const key       = dayId + '_' + slot + '_' + taskId;
-    const task      = (MX.state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
-    const isChecked = !!MX.state.checks[MX.checkKey(dayId, slot, taskId, MX.checkOwnerId(dayId, slot, task))];
+    const found     = _findTask(dayId, slot, taskId);
+    const isChecked = !!(found && found.task.done);
     // Update left panel row stripe + checkbox
     const row = document.getElementById('cl-ws-tr-' + taskId);
     if (row) {
@@ -493,7 +545,8 @@
 
   function _clWsBlockTask(dayId, slot, taskId) {
     const { esc } = MX;
-    const task = (MX.state.tasks[dayId + '_' + slot] || []).find(function(t) { return t.id === taskId; });
+    const found = _findTask(dayId, slot, taskId);
+    const task  = found ? found.task : null;
     document.getElementById('m-title').textContent = 'Mission impossible';
     document.getElementById('m-sub').innerHTML =
       '<div style="font-size:13px;color:var(--text2);margin-bottom:10px">' +
@@ -599,6 +652,30 @@
 
   async function toggle(dayId, slot, taskId) {
     const state = MX.state;
+
+    // ── Créneau week_slots (Gestion semaine tech) — la coche vit sur la
+    // tâche de l'instance elle-même, jamais dans config/checks (une seule
+    // personne par instance, pas de résolution de propriétaire à faire). ──
+    const wk = state.weekSlots;
+    const dayInstances = wk && wk.days ? wk.days[dayId] : null;
+    const inst = dayInstances && dayInstances.find(i => i.id === slot);
+    if (inst) {
+      const wsTask = (inst.tasks || []).find(t => t.id === taskId);
+      if (!wsTask) return;
+      const newDone = !wsTask.done;
+      wsTask.done = newDone; // mutation locale immédiate (optimiste)
+      const cu2        = state.currentUser;
+      const actorName2 = cu2 ? cu2.name : (state.adminUser ? state.adminUser.email : "inconnu");
+      try {
+        await MX.DB.setWeekSlotTaskDone(wk.weekKey, dayId, slot, taskId, newDone, actorName2);
+        MX.DB.addLog({ workerName: actorName2, action: newDone ? "check" : "uncheck", taskText: wsTask.text, dayId, slot }).catch(() => {});
+      } catch (e) {
+        wsTask.done = !newDone; // rollback
+        MX.toast("Erreur lors de la validation", true);
+      }
+      return;
+    }
+
     const task     = (state.tasks[`${dayId}_${slot}`] || []).find(t => t.id === taskId);
     const ownerId  = MX.checkOwnerId(dayId, slot, task);
     const key      = MX.checkKey(dayId, slot, taskId, ownerId);
@@ -1036,27 +1113,20 @@
   function renderWeekly() {
     const mc = document.getElementById('main-content');
     if (!mc) return;
-    const { state, DAYS, getDaySlots, esc } = MX;
+    const { state, DAYS, esc } = MX;
     const cu = state.currentUser;
     const todayId = MX.todayId ? MX.todayId() : (DAYS[0] && DAYS[0].id);
 
+    // Source unique (priorité week_slots/legacy déjà tranchée par
+    // getEffectiveDaySchedule) — ne suppose plus jamais exactement 3
+    // créneaux : un jour peut en avoir 0, 1 ou plusieurs (voir audit Phase 3).
     const dayStats = DAYS.map(day => {
-      let dt = 0, dd = 0;
-      (getDaySlots(day.id) || []).forEach(sl => {
-        const tasks = state.tasks[`${day.id}_${sl}`] || [];
-        const asn = (day.id === todayId && state.dailyClaims && state.dailyClaims[sl])
-          ? (state.dailyClaims[sl].name || state.assignments[`${day.id}_${sl}`] || '')
-          : (state.assignments[`${day.id}_${sl}`] || '');
-        if (!cu || asn === cu.name || tasks.some(t => t.assignedTo === cu.name)) {
-          tasks.forEach(t => {
-            if (!cu || asn === cu.name || t.assignedTo === cu.name) {
-              dt++;
-              if (state.checks[MX.checkKey(day.id, sl, t.id, MX.checkOwnerId(day.id, sl, t))]) dd++;
-            }
-          });
-        }
-      });
-      return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : -1 };
+      const sched = MX.getEffectiveDaySchedule(day.id);
+      const mine  = MX.myInstancesFromSchedule(sched, cu ? cu.name : null);
+      const dt = mine.reduce((s, i) => s + i.total, 0);
+      const dd = mine.reduce((s, i) => s + i.done, 0);
+      const label = mine.length === 1 ? mine[0].name : (mine.length > 1 ? mine.length + ' créneaux' : '');
+      return { day, dt, dd, pct: dt ? Math.round(dd / dt * 100) : -1, label };
     });
 
     const wTotal = dayStats.reduce((s, d) => s + d.dt, 0);
@@ -1093,7 +1163,7 @@
     }
 
     h += `<div class="cl-week-grid">`;
-    dayStats.forEach(({ day, dt, dd, pct }) => {
+    dayStats.forEach(({ day, dt, dd, pct, label }) => {
       const isT = day.id === todayId;
       const pctC = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--orange)' : 'var(--red)';
       let cls = 'cl-week-day';
@@ -1105,6 +1175,7 @@
 
       h += `<div class="${cls}" onclick="MX.showPage('${esc(day.id)}')">
         <div class="cl-day-name">${esc(day.l)}</div>
+        ${label ? `<div style="font-size:9px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(label)}</div>` : ''}
         ${isT ? '<div class="cl-day-today-b">Auj.</div>' : ''}
         ${pct >= 0
           ? `<div class="cl-day-pct" style="color:${pctC}">${pct}%</div>

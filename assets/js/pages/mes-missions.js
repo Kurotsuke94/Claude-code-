@@ -691,15 +691,11 @@
       return (m.isPmp || m.missionType === 'pmp') && !m.done && _isNew(m.id);
     }).length;
 
-    // ── REFONTE : données de la colonne latérale (calculées une seule fois,
-    // indépendamment de l'onglet actif, à partir des données déjà chargées —
-    // aucune nouvelle requête Firestore) ──
-    var sideSlots = ['matin', 'journee', 'soir'].map(function (slotKey) {
-      var si = SLOT_INFO[slotKey];
-      var slotTasks = checklistTasks.filter(function (t) { return t.slot === slotKey && t.mine; });
-      var slotDone  = slotTasks.filter(function (t) { return t.done; }).length;
-      return { key: slotKey, si: si, total: slotTasks.length, done: slotDone };
-    });
+    // ── Colonne latérale "Créneaux" — les VRAIS créneaux de la journée pour
+    // ce technicien (0, 1 ou plusieurs), jamais 3 lignes fixes matin/
+    // journée/soir. Source unique : getEffectiveDaySchedule() (priorité
+    // week_slots/legacy déjà tranchée, jamais les deux mélangées). ──
+    var sideSlots = MX.myInstancesFromSchedule(MX.getEffectiveDaySchedule(MX.todayId()), cu ? cu.name : null);
     var sideUrgentPmp = myMissions.filter(function (t) {
       return t.missionType === 'pmp' && !t.done && getMissionStatus(t) === 'late';
     }).length;
@@ -1202,10 +1198,14 @@
 
     h += '<div class="mtv-side-section">'
       + '<div class="mtv-side-hd"><i class="fas fa-layer-group"></i><span>Créneaux</span></div>';
+    if (!sideSlots.length) {
+      h += '<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun créneau aujourd\'hui</div>';
+    }
     sideSlots.forEach(function (s) {
+      var timeLbl = s.start || s.end ? (e(s.start) + (s.start || s.end ? ' – ' : '') + e(s.end)) : '';
       h += '<div class="mtv-side-slot" onclick="MX.MM.setTab(\'checklist\')">'
-        + '<span class="mtv-side-slot-ico">' + s.si.icon + '</span>'
-        + '<div class="mtv-side-slot-info"><span class="mtv-side-slot-lbl">' + e(s.si.l) + '</span><span class="mtv-side-slot-time">' + e(s.si.sub) + '</span></div>'
+        + '<span class="mtv-side-slot-ico">' + e(s.icon || '') + '</span>'
+        + '<div class="mtv-side-slot-info"><span class="mtv-side-slot-lbl">' + e(s.name) + '</span><span class="mtv-side-slot-time">' + timeLbl + '</span></div>'
         + '<span class="mtv-side-slot-ct">' + s.done + '/' + s.total + '</span>'
         + '<i class="fas fa-chevron-right mtv-side-slot-chev"></i>'
         + '</div>';

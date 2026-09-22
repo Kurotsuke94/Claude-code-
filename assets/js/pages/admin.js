@@ -1129,17 +1129,12 @@
 
   // ── WEEK ──
   function renderWeek() {
-    const { state, DAYS, getDaySlots, esc } = MX;
-    let totalAll = 0, doneAll = 0;
-    DAYS.forEach(d => {
-      getDaySlots(d.id).forEach(sl => {
-        (state.tasks[`${d.id}_${sl}`] || []).forEach(t => {
-          totalAll++;
-          if (state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))]) doneAll++;
-        });
-      });
-    });
-    const pct = totalAll ? Math.round(doneAll / totalAll * 100) : 0;
+    const { state, esc } = MX;
+    // Même source que _buildWeekStats()/generateReport() (priorité
+    // week_slots/legacy déjà tranchée) — ce badge ne doit jamais afficher
+    // un pourcentage différent du rapport PDF pour la même semaine.
+    const stats = _buildWeekStats();
+    const totalAll = stats.totalTasks, doneAll = stats.doneTasks, pct = stats.pct;
     return `<div class="week-ctrl">
       <div style="font-size:14px;font-weight:600;margin-bottom:6px">Gestion de la semaine</div>
       <div class="wc-badge"><i class="fas fa-calendar-week"></i> ${esc(state.weekLabel)}</div>
@@ -1492,17 +1487,13 @@
     ]);
   }
   function _buildWeekStats() {
-    const { DAYS, getDaySlots, state } = MX;
+    const { DAYS } = MX;
     let totalAll = 0, doneAll = 0;
     const days = {};
     DAYS.forEach(d => {
+      const schedule = MX.getEffectiveDaySchedule(d.id);
       let dTotal = 0, dDone = 0;
-      getDaySlots(d.id).forEach(sl => {
-        (state.tasks[`${d.id}_${sl}`] || []).forEach(t => {
-          dTotal++;
-          if (state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))]) dDone++;
-        });
-      });
+      schedule.instances.forEach(inst => { dTotal += inst.total; dDone += inst.done; });
       totalAll += dTotal;
       doneAll  += dDone;
       days[d.id] = { label: d.l, total: dTotal, done: dDone, pct: dTotal ? Math.round(dDone / dTotal * 100) : 0 };
@@ -2062,20 +2053,23 @@
 
   // ── REPORT ──
   function generateReport() {
-    const { state, DAYS, SLOTS, getDaySlots, esc } = MX;
+    const { state, DAYS, esc } = MX;
     const date = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
+    // Source unique par jour (priorité week_slots/legacy déjà tranchée par
+    // getEffectiveDaySchedule) — le rapport couvre désormais aussi les
+    // créneaux arbitraires (Jour férié, Astreinte…) préparés via Gestion
+    // semaine tech, sans jamais dupliquer avec le legacy sur un même jour.
     let taskRows = '';
     DAYS.forEach(d => {
-      getDaySlots(d.id).forEach(sl => {
-        const tasks = state.tasks[`${d.id}_${sl}`] || [];
-        if (!tasks.length) return;
-        const s = SLOTS[sl];
-        tasks.forEach(t => {
-          const checked = !!state.checks[MX.checkKey(d.id, sl, t.id, MX.checkOwnerId(d.id, sl, t))];
-          const note    = (state.notes || {})[`${d.id}_${sl}_${t.id}`] || "";
+      const schedule = MX.getEffectiveDaySchedule(d.id);
+      schedule.instances.forEach(inst => {
+        if (!inst.tasks.length) return;
+        inst.tasks.forEach(t => {
+          const checked = !!t.done;
+          const note    = (state.notes || {})[`${d.id}_${inst.id}_${t.id}`] || "";
           taskRows += `<tr class="${checked ? 'done' : ''}">
-            <td>${d.l}</td><td>${s.l}</td>
+            <td>${d.l}</td><td>${inst.name}</td>
             <td>${t.text}${note ? `<br><small style="color:#888;font-style:italic">${note}</small>` : ''}</td>
             <td style="text-align:center;color:#00a070;font-weight:700">${checked ? '✓' : ''}</td>
           </tr>`;

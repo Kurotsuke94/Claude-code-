@@ -471,14 +471,15 @@
 
   function _renderDailyChallenge(uid) {
     if (!uid) return `<div style="font-size:12px;color:var(--text3);margin-top:12px;text-align:center">Connectez-vous pour participer</div>`;
+    // Source unique (priorité week_slots/legacy déjà tranchée) — un
+    // technicien dont la journée vient entièrement de Gestion semaine tech
+    // doit pouvoir atteindre 100% et réclamer le bonus, sans double compter
+    // une éventuelle donnée legacy résiduelle sur le même jour.
     const todayId  = MX.todayId();
+    const uname    = _currentUserName();
+    const mine     = MX.myInstancesFromSchedule(MX.getEffectiveDaySchedule(todayId), uname);
     let total = 0, done = 0;
-    MX.getDaySlots(todayId).forEach(sl => {
-      (MX.state.tasks[`${todayId}_${sl}`] || []).forEach(t => {
-        total++;
-        if (MX.state.checks[MX.checkKey(todayId, sl, t.id, MX.checkOwnerId(todayId, sl, t))]) done++;
-      });
-    });
+    mine.forEach(inst => { total += inst.total; done += inst.done; });
     const complete = total > 0 && done === total;
     const pct      = total ? Math.round(done / total * 100) : 0;
     const todayKey = 'mx_daily_bonus_' + uid + '_' + new Date().toISOString().slice(0, 10);

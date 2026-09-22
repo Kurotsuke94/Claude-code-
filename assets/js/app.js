@@ -765,23 +765,17 @@
     const state   = MX.state;
     const e       = MX.esc;
     const todayId = MX.todayId ? MX.todayId() : '';
-    const slots   = ['matin', 'journee', 'soir'];
-    const SLOT_LABELS = { matin: {l:'Matin',icon:'☀️'}, journee: {l:'Après-midi',icon:'🌤️'}, soir: {l:'Soir',icon:'🌙'} };
 
-    // ── Today progress ──
+    // ── Programmation effective du jour — source UNIQUE pour "Résumé
+    // journée" et "Planning" ci-dessous, pour qu'ils ne puissent plus jamais
+    // se contredire (priorité week_slots/legacy déjà tranchée par
+    // getEffectiveDaySchedule, voir audit Phase 3). ──
+    const todaySchedule = MX.getEffectiveDaySchedule(todayId);
+    const todayInstances = todaySchedule.instances;
     let total = 0, done = 0;
-    slots.forEach(function(slot) {
-      var tasks = state.tasks[todayId + '_' + slot] || [];
-      total += tasks.length;
-      tasks.forEach(function(t) {
-        if (state.checks[MX.checkKey(todayId, slot, t.id, MX.checkOwnerId(todayId, slot, t))]) done++;
-      });
-    });
+    todayInstances.forEach(function(inst) { total += inst.total; done += inst.done; });
     const pct    = total ? Math.round(done / total * 100) : 0;
     const pctCol = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f97316' : '#3b82f6';
-
-    // ── Planning / daily claims ──
-    const claims = state.dailyClaims || {};
 
     // ── Missions (interventions + PMP from admin view) ──
     const missions  = state.missions || [];
@@ -811,35 +805,20 @@
       + '</div>'
       + '</div>';
 
-    // ── Planning ──
-    // Priorité à Gestion semaine tech (state.weekSlots, affectation réelle
-    // et datée) ; repli sur l'ancien mécanisme (dailyClaims/assignments)
-    // uniquement pour les semaines pas encore préparées via le nouvel écran.
-    var wkSlotsToday = (state.weekSlots && state.weekSlots.days && state.weekSlots.days[todayId]) || null;
+    // ── Planning — mêmes instances que "Résumé journée" ci-dessus, jamais
+    // une source différente (c'est exactement l'incohérence corrigée). ──
     h += '<div class="dxp-section">'
       + '<div class="dxp-hd"><i class="fas fa-calendar-days dxp-ico"></i><span>Planning</span></div>';
-    if (wkSlotsToday) {
-      if (!wkSlotsToday.length) {
-        h += '<div style="font-size:11px;color:var(--text3);padding:2px 0">Aucun créneau aujourd\'hui</div>';
-      }
-      wkSlotsToday.forEach(function(inst) {
-        h += '<div class="dxp-slot-row">'
-          + '<span class="dxp-slot-ico">' + e(inst.icon || '') + '</span>'
-          + '<span class="dxp-slot-lbl">' + e(inst.name) + '</span>'
-          + '<span class="dxp-slot-user">' + (inst.userName ? e(inst.userName) : '<span style="color:var(--text3)">—</span>') + '</span>'
-          + '</div>';
-      });
-    } else {
-      slots.forEach(function(slot) {
-        var si = SLOT_LABELS[slot];
-        var assignee = (claims[slot] && claims[slot].name) || (state.assignments && state.assignments[todayId + '_' + slot]) || '';
-        h += '<div class="dxp-slot-row">'
-          + '<span class="dxp-slot-ico">' + si.icon + '</span>'
-          + '<span class="dxp-slot-lbl">' + e(si.l) + '</span>'
-          + '<span class="dxp-slot-user">' + (assignee ? e(assignee) : '<span style="color:var(--text3)">—</span>') + '</span>'
-          + '</div>';
-      });
+    if (!todayInstances.length) {
+      h += '<div style="font-size:11px;color:var(--text3);padding:2px 0">Aucun créneau aujourd\'hui</div>';
     }
+    todayInstances.forEach(function(inst) {
+      h += '<div class="dxp-slot-row">'
+        + '<span class="dxp-slot-ico">' + e(inst.icon || '') + '</span>'
+        + '<span class="dxp-slot-lbl">' + e(inst.name) + '</span>'
+        + '<span class="dxp-slot-user">' + (inst.userName ? e(inst.userName) : '<span style="color:var(--text3)">—</span>') + '</span>'
+        + '</div>';
+    });
     h += '</div>';
 
     // ── Interventions ──
@@ -1781,9 +1760,14 @@
     // null et l'ancien mécanisme (dailyClaims ci-dessus) prend le relais.
     DB.listenWeekSlots(MX.weekKeyOf(new Date()), data => {
       state.weekSlots = data;
-      if (state.currentPage === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
-      if (state.currentPage === "home") Pages.Home && Pages.Home.render();
-      if (state.currentPage === "gestion-semaine-tech") Pages.GestSemaine && Pages.GestSemaine.render();
+      const cp = state.currentPage;
+      if (cp === "mes-missions") Pages.MesMissions && Pages.MesMissions.render();
+      if (cp === "home") Pages.Home && Pages.Home.render();
+      if (cp === "gestion-semaine-tech") Pages.GestSemaine && Pages.GestSemaine.render();
+      if (cp === "rewards") Pages.Rewards && Pages.Rewards.render && Pages.Rewards.render();
+      if (cp === "today-cl") Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
+      if (MX.DAYS.find(d => d.id === cp)) Pages.Checklist.render(cp);
+      buildDxPanel();
     });
 
     // ── Planning suggestions for today ──

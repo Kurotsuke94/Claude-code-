@@ -163,6 +163,109 @@
     return "Semaine du " + fmt(mon) + " au " + fmt(sun) + " " + sun.getFullYear();
   }
 
+  // ── PROGRAMMATION EFFECTIVE D'UN JOUR (Gestion semaine tech vs legacy) ──
+  // Logique de lecture UNIQUE, réutilisée par tous les écrans (Mes missions,
+  // Checklist classique/hebdo, Accueil, Rewards, Rapport PDF) au lieu de
+  // réimplémenter la même priorité 8 fois. Priorité stricte, jamais un
+  // mélange des deux sources pour un même jour (voir audit Phase 3) :
+  //   - state.weekSlots (semaine RÉELLE en cours uniquement — les écrans
+  //     concernés ici ne portent jamais sur une autre semaine que celle
+  //     actuellement chargée par le listener global d'app.js) contient une
+  //     préparation pour ce jour (days[dayId] non vide) → SOURCE UNIQUE,
+  //     le legacy est totalement ignoré pour CE jour, même s'il contient
+  //     encore des données résiduelles.
+  //   - Sinon → repli intégral sur l'ancien système à 3 créneaux fixes
+  //     (dailyClaims si aujourd'hui, sinon assignments), synthétisé sous la
+  //     même forme normalisée pour que les appelants n'aient qu'un seul
+  //     format à connaître.
+  // Ne fait AUCUNE écriture — lecture seule, jamais d'auto-attribution.
+  const _LEGACY_SLOT_META = {
+    matin:   { start: "08:00", end: "16:33", color: "#FDE047" },
+    journee: { start: "10:00", end: "18:33", color: "#3B82F6" },
+    soir:    { start: "13:00", end: "21:33", color: "#EF4444" },
+  };
+  function getEffectiveDaySchedule(dayId) {
+    const state = window.MX && window.MX.state;
+    if (!state) return { source: "none", dayId, weekKey: null, dateStr: null, instances: [] };
+    const dateStr = checkDateForDay(dayId);
+    const weekKey = checkWeekOf(dateStr);
+    const isToday = dayId === todayId();
+
+    const wk = state.weekSlots;
+    const wkMatches = !!(wk && wk.weekKey === weekKey);
+    const wkDayInstances = wkMatches && wk.days ? wk.days[dayId] : null;
+
+    if (wkDayInstances && wkDayInstances.length) {
+      const instances = wkDayInstances.map(function (inst) {
+        const tasks = (inst.tasks || []).map(function (t) {
+          return { id: t.id, text: t.text || "", done: !!t.done, assignedTo: null };
+        });
+        const total = tasks.length;
+        const done  = tasks.filter(function (t) { return t.done; }).length;
+        return {
+          id: inst.id, templateId: inst.templateId || null,
+          name: inst.name || "", icon: inst.icon || "", color: inst.color || "#6B7280",
+          start: inst.start || "", end: inst.end || "",
+          userId: inst.userId || null, userName: inst.userName || "",
+          tasks: tasks, total: total, done: done, pct: total ? Math.round(done / total * 100) : 0,
+        };
+      });
+      return { source: "week_slots", dayId: dayId, weekKey: weekKey, dateStr: dateStr, instances: instances };
+    }
+
+    // Repli legacy — synthèse à partir des 3 créneaux historiques fixes.
+    const slots  = getDaySlots(dayId) || ["matin", "journee", "soir"];
+    const claims = state.dailyClaims || {};
+    const instances = slots.map(function (slot) {
+      const slotTasks = state.tasks[dayId + "_" + slot] || [];
+      const userName = isToday
+        ? ((claims[slot] && claims[slot].name) || (state.assignments && state.assignments[dayId + "_" + slot]) || "")
+        : ((state.assignments && state.assignments[dayId + "_" + slot]) || "");
+      const meta = _LEGACY_SLOT_META[slot] || {};
+      const s = SLOTS[slot] || { l: slot, e: "" };
+      const tasks = slotTasks.map(function (t) {
+        return {
+          id: t.id, text: t.text || "",
+          done: !!state.checks[checkKey(dayId, slot, t.id, checkOwnerId(dayId, slot, t))],
+          assignedTo: t.assignedTo || null,
+        };
+      });
+      const total = tasks.length;
+      const done  = tasks.filter(function (t) { return t.done; }).length;
+      return {
+        id: slot, templateId: null,
+        name: s.l, icon: s.e, color: meta.color || "#6B7280",
+        start: meta.start || "", end: meta.end || "",
+        userId: null, userName: userName,
+        tasks: tasks, total: total, done: done, pct: total ? Math.round(done / total * 100) : 0,
+      };
+    });
+    return { source: "legacy", dayId: dayId, weekKey: weekKey, dateStr: dateStr, instances: instances };
+  }
+
+  // Filtre les instances d'une programmation pour un technicien donné —
+  // gère les deux façons d'appartenir à une tâche : être le titulaire du
+  // créneau entier (userName, seul cas possible pour week_slots) ou avoir
+  // une affectation individuelle (assignedTo, uniquement legacy — un
+  // technicien peut posséder une tâche isolée dans un créneau qui n'est pas
+  // le sien). Une instance partiellement possédée (via assignedTo) revient
+  // amputée de ses seules tâches concernées, jamais de la totalité.
+  function myInstancesFromSchedule(schedule, userName) {
+    if (!schedule || !userName) return [];
+    const out = [];
+    (schedule.instances || []).forEach(function (inst) {
+      if (inst.userName === userName) { out.push(inst); return; }
+      const mine = (inst.tasks || []).filter(function (t) { return t.assignedTo === userName; });
+      if (!mine.length) return;
+      const total = mine.length, done = mine.filter(function (t) { return t.done; }).length;
+      out.push(Object.assign({}, inst, {
+        tasks: mine, total: total, done: done, pct: total ? Math.round(done / total * 100) : 0,
+        userName: userName, partial: true,
+      }));
+    });
+    return out;
+  }
+
   function avatarBg(name) {
     const cols = ["#2D1B69","#0D2D5C","#052010","#3A1A00","#3B0A0A","#1E1400","#0A1628"];
     let h = 0;
@@ -394,6 +497,7 @@
     esc, fmtTime, mkWeekLabel, todayId, getDaySlots,
     checkKey, checkOwnerId, checkDateForDay, checkWeekOf,
     weekKeyOf, mondayOfWeekKey, dateForWeekDay, weekLabelOf,
+    getEffectiveDaySchedule, myInstancesFromSchedule,
     avatarBg, avatarFg, avatarTxt, chipHtml, userColors, userAvatarHtml, badgeTag, _contrastColor, progressClass, alertLevel, hashPin,
     toast, showModal, closeModal,
     ThemeManager
