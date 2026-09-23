@@ -93,7 +93,6 @@
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
     if (id === "fournisseurs") return _renderStub("Fournisseurs", "fa-truck", "La gestion des fournisseurs sera disponible prochainement.");
-    if (id === "equipe")       return Pages.Equipe ? Pages.Equipe.render() : null;
     if (id === "documents")    return Pages.Bible ? Pages.Bible.render() : _renderStub("Bible Maintix", "fa-book", "Chargement…");
     if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
     if (id === "mx-doc")       return Pages.MxDoc      ? Pages.MxDoc.render()      : _renderStub("MX Doc",             "fa-file-contract", "Chargement…");
@@ -233,7 +232,6 @@
     'interventions': { icon: 'fa-wrench',          l: 'Interventions' },
     'pmp':           { icon: 'fa-screwdriver-wrench', l: 'Maintenance PMP' },
     'utilisateurs':  { icon: 'fa-users',           l: 'Utilisateurs' },
-    'equipe':        { icon: 'fa-users-gear',      l: 'Équipe' },
     'badges':        { icon: 'fa-medal',           l: 'Badges' },
     'corbeille':     { icon: 'fa-trash-can',       l: 'Corbeille' },
     'mx-doc':        { icon: 'fa-file-contract',   l: 'MX Doc' },
@@ -538,13 +536,10 @@
       }
       let aItems = "";
       aItems += _sec("PILOTAGE");
-      aItems += _tabBtn("tasks",          "fa-chart-bar",        "Tableau Responsable");
       aItems += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
       aItems += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
-      aItems += _tabBtn("week",           "fa-calendar-week",    "Gestion Semaines");
 
       aItems += _sec("ÉQUIPE");
-      aItems += _tabBtn("team",           "fa-users-gear",       "Gestion Équipe");
       aItems += _tabBtn("users",          "fa-users",            "Utilisateurs");
       aItems += _tabBtn("roles",          "fa-shield-halved",    "Rôles");
 
@@ -1864,7 +1859,7 @@
     await _loadFavsFromFirestore().catch(() => {});
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
-    const _extraPages = new Set(["mes-missions","consommations","interventions","equipe","org-resp"]);
+    const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp"]);
     MX.showPage(_urlPage && (NAV.some(n => n && n.id === _urlPage) || _extraPages.has(_urlPage)) ? _urlPage : "home");
 
     // Presence heartbeat every 2 minutes
@@ -3239,12 +3234,9 @@
     const canAll = MX.Auth.canSeeAll();
     let items = '';
     items += '<div class="mbn-pmenu-sec">PILOTAGE</div>';
-    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'tasks\')"><i class="fas fa-chart-bar"></i><span>Tableau Responsable</span></button>';
     items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'org-resp\')"><i class="fas fa-clipboard-list"></i><span>Organisation Responsable</span></button>';
-    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'week\')"><i class="fas fa-calendar-week"></i><span>Gestion Semaines</span></button>';
     if (canAll) {
       items += '<div class="mbn-pmenu-sec">ÉQUIPE</div>';
-      items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'team\')"><i class="fas fa-users-gear"></i><span>Gestion Équipe</span></button>';
       items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'users\')"><i class="fas fa-users"></i><span>Utilisateurs</span></button>';
       items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'roles\')"><i class="fas fa-shield-halved"></i><span>Rôles</span></button>';
       items += '<div class="mbn-pmenu-sec">SUPERVISION</div>';

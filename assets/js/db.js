@@ -158,7 +158,6 @@
     await R.assignments().update({ [`${dayId}_${slot}`]: name });
   }
   async function setTasks(dayId, slot, items) { await R.tasks(`${dayId}_${slot}`).set({ items }); }
-  async function saveTeams(data)      { await R.teams().set(data); }
   async function saveAlerts(data)     { await R.alerts().set(data); }
   async function resetChecks()        { await R.checks().set({}); }
   async function newWeek(label, num)  { await R.week().set({ label, num }); await resetChecks(); }
@@ -1438,7 +1437,7 @@
     listenUsers, listenLogs, listenTransfers, listenMissions,
     listenNotes, listenHistory,
     setCheck, setAssignment, setTasks,
-    saveTeams, saveAlerts, resetChecks, newWeek,
+    saveAlerts, resetChecks, newWeek,
     addProduct, updateProduct, deleteProduct,
     uploadMessageImage, sendMessage, deleteMessage,
     listenPlanning, uploadPlanningImage, savePlanning, clearPlanning,

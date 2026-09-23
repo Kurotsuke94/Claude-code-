@@ -1,6 +1,5 @@
 (function () {
-  let aTab = "tasks";
-  let aDay = "lundi";
+  let aTab = "users";
   let _editMissionId  = null;
   let _adminJournal   = [];
   let _journalUnsub   = null;
@@ -84,8 +83,6 @@
     if (_lsTab) { aTab = _lsTab; localStorage.removeItem("mx_admin_tab"); }
 
     const allTabs = [
-      { id: "tasks",          label: "📋 Tâches Responsable" },
-      { id: "team",           label: "👥 Gestion Équipe"     },
       { id: "users",          label: "👤 Utilisateurs"       },
       { id: "roles",          label: "🛡️ Rôles"             },
       { id: "alerts",         label: "🔔 Alertes"            },
@@ -100,10 +97,11 @@
     ];
     const tabs = allTabs.filter(t => isAdmin || !t.adminOnly);
 
-    if (aTab === "missions" || aTab === "orders") aTab = "tasks";
+    if (aTab === "missions" || aTab === "orders") aTab = "users";
     if (aTab === "games-admin" || aTab === "players-admin") aTab = "badges-admin";
-    if (aTab === "admin-journal" || aTab === "absences" || aTab === "msgs") aTab = "tasks";
-    if (isResp && (aTab === "pin" || aTab === "superadmin")) aTab = "tasks";
+    if (aTab === "admin-journal" || aTab === "absences" || aTab === "msgs") aTab = "users";
+    if (isResp && (aTab === "pin" || aTab === "superadmin")) aTab = "users";
+    if (aTab === "tasks" || aTab === "team") aTab = "users";
 
     // Start admin journal listener on first use
     if (aTab === 'admin-journal' && !_journalUnsub) {
@@ -132,8 +130,6 @@
       </div>
       <div class="page-body">`;
 
-    if (aTab === "tasks")                        h += renderTasks();
-    if (aTab === "team")                         h += renderTeam();
     if (aTab === "users")                        h += renderUsers();
     if (aTab === "roles")                        h += renderRoles();
     if (aTab === "alerts")                       h += renderAlerts();
@@ -149,69 +145,6 @@
     h += `</div>`;
     el.innerHTML = h;
     if (aTab === "superadmin" && isAdmin) { _hotelLoadForm(); _verLoad(); }
-  }
-
-  // ── TASKS ──
-  function renderTasks() {
-    const { state, DAYS, SLOTS, esc, getDaySlots } = MX;
-    const day   = DAYS.find(d => d.id === aDay);
-    const slots = getDaySlots(aDay);
-    let h = `<div class="dpills">`;
-    DAYS.forEach(d => {
-      const cnt = getDaySlots(d.id).reduce((acc, sl) => acc + (state.tasks[`${d.id}_${sl}`] || []).length, 0);
-      h += `<button class="dpill ${aDay===d.id?'on':''}" onclick="MX.Pages.Admin.setDay('${d.id}')">${esc(d.l)} <span class="pc">${cnt}</span></button>`;
-    });
-    h += `</div>
-      <div class="copy-bar">
-        <label>Copier depuis</label>
-        <select class="csel" id="cpfrom">
-          ${DAYS.filter(d => d.id !== aDay).map(d => `<option value="${d.id}">${esc(d.l)}</option>`).join('')}
-        </select>
-        <button class="cbtn" onclick="MX.Pages.Admin.copyTasks()"><i class="fas fa-arrow-right"></i> Copier</button>
-      </div>`;
-
-    slots.forEach(sl => {
-      const s     = SLOTS[sl];
-      const tasks = state.tasks[`${aDay}_${sl}`] || [];
-      h += `<div class="tecard">
-        <div class="tehd ${s.c}">
-          <span class="sbadge ${s.c}">${s.e} ${s.l}</span>
-          <span style="font-size:11px;color:var(--text2);margin-left:auto">${tasks.length} tâche${tasks.length!==1?'s':''}</span>
-        </div>`;
-      tasks.forEach(t => {
-        h += `<div class="terow">
-          <input class="fi fi-sm" style="flex:1" value="${esc(t.text)}"
-            oninput="MX.Pages.Admin.editTask('${aDay}','${sl}','${t.id}',this.value)">
-          <button class="icon-btn del" onclick="MX.Pages.Admin.rmTask('${aDay}','${sl}','${t.id}')"><i class="fas fa-trash"></i></button>
-        </div>`;
-      });
-      h += `<div style="padding:8px 14px"><button class="dash-btn" onclick="MX.Pages.Admin.addTask('${aDay}','${sl}')"><i class="fas fa-plus"></i> Ajouter</button></div>
-      </div>`;
-    });
-    return h;
-  }
-
-  // ── TEAM ──
-  function renderTeam() {
-    const { state, SLOTS, esc, TEAM_COLORS, avatarBg, avatarFg } = MX;
-    let h = "";
-    ["matin","journee","soir"].forEach(sl => {
-      const s = SLOTS[sl];
-      h += `<div class="tecard">
-        <div class="tehd ${s.c}"><span class="sbadge ${s.c}">${s.e} ${s.l}</span></div>`;
-      (state.teams[sl] || []).forEach((name, i) => {
-        const nc = TEAM_COLORS[name] || { bg: avatarBg(name), fg: avatarFg(name) };
-        h += `<div class="terow">
-          ${name ? `<span class="chip" style="background:${nc.bg};color:${nc.fg};min-width:60px;text-align:center">${esc(name)||'?'}</span>` : ''}
-          <input class="fi fi-sm" style="flex:1" placeholder="Prénom…" value="${esc(name)}"
-            oninput="MX.Pages.Admin.editTeam('${sl}',${i},this.value)">
-          <button class="icon-btn del" onclick="MX.Pages.Admin.rmTeam('${sl}',${i})"><i class="fas fa-trash"></i></button>
-        </div>`;
-      });
-      h += `<div style="padding:8px 14px"><button class="dash-btn" onclick="MX.Pages.Admin.addTeam('${sl}')"><i class="fas fa-plus"></i> Ajouter</button></div>
-      </div>`;
-    });
-    return h;
   }
 
   // ── MISSIONS ──
@@ -1241,59 +1174,6 @@
 
   // ── ACTIONS ──
   function setTab(t) { aTab = t; render(); }
-  function setDay(d) { aDay = d; render(); }
-
-  function editTask(dayId, sl, taskId, val) {
-    const t = (MX.state.tasks[`${dayId}_${sl}`] || []).find(x => x.id === taskId);
-    if (t) t.text = val;
-    _sched(`tasks_${dayId}_${sl}`, () => _autoSaveSlot(dayId, sl));
-  }
-  function addTask(dayId, sl) {
-    const tasks = MX.state.tasks[`${dayId}_${sl}`] || [];
-    tasks.push({ id: MX.uuid(), text: "", order: tasks.length });
-    MX.state.tasks[`${dayId}_${sl}`] = tasks;
-    render();
-  }
-  function rmTask(dayId, sl, taskId) {
-    MX.state.tasks[`${dayId}_${sl}`] = (MX.state.tasks[`${dayId}_${sl}`] || []).filter(t => t.id !== taskId);
-    render();
-    _autoSaveSlot(dayId, sl);
-  }
-  async function _autoSaveSlot(dayId, sl) {
-    MX.syncStart && MX.syncStart();
-    try {
-      const items = MX.state.tasks[`${dayId}_${sl}`] || [];
-      await MX.DB.setTasks(dayId, sl, items.map((t, i) => ({ ...t, order: i })));
-      MX.syncEnd && MX.syncEnd();
-    } catch(e) { MX.syncFail && MX.syncFail(); }
-  }
-  async function saveTasks() {
-    const { DAYS, getDaySlots } = MX;
-    const slots = getDaySlots(aDay);
-    for (const sl of slots) { await _autoSaveSlot(aDay, sl); }
-  }
-  async function copyTasks() {
-    const from = (document.getElementById("cpfrom") || {}).value;
-    if (!from) return;
-    MX.getDaySlots(aDay).forEach(sl => {
-      MX.state.tasks[`${aDay}_${sl}`] = (MX.state.tasks[`${from}_${sl}`] || []).map(t => ({ ...t, id: MX.uuid() }));
-    });
-    render();
-    MX.toast("Copié ✓");
-  }
-
-  function editTeam(sl, i, val) {
-    (MX.state.teams[sl] || [])[i] = val;
-    _sched('team', _autoSaveTeam);
-  }
-  function addTeam(sl) { (MX.state.teams[sl] = MX.state.teams[sl] || []).push(""); render(); }
-  function rmTeam(sl, i) { (MX.state.teams[sl] || []).splice(i, 1); render(); _autoSaveTeam(); }
-  async function _autoSaveTeam() {
-    MX.syncStart && MX.syncStart();
-    try { await MX.DB.saveTeams(MX.state.teams); MX.syncEnd && MX.syncEnd(); }
-    catch(e) { MX.syncFail && MX.syncFail(); }
-  }
-  async function saveTeam() { await _autoSaveTeam(); }
 
   async function addMission(createdBy) {
     const text       = (document.getElementById("ms-text")     || {}).value?.trim() || "";
@@ -2740,9 +2620,7 @@ ${msgs.map(m => `<tr><td style="font-weight:600">${m.author||'?'}</td><td>${m.ti
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
   window.MX.Pages.Admin = {
-    render, setTab, setDay,
-    editTask, addTask, rmTask, saveTasks, copyTasks,
-    editTeam, addTeam, rmTeam, saveTeam,
+    render, setTab,
     updUser, addUser, delUser, saveUsers,
     togAlert, updAlert, saveAlerts,
     delMsg,
