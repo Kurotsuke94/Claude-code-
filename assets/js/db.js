@@ -1271,21 +1271,40 @@
   // données INITIALES du nouveau système de modèles, réutilisant les mêmes
   // libellés/émojis que MX.SLOTS et les mêmes tâches par défaut que MX.DEFT
   // (helpers.js) — aucun contenu inventé, uniquement porté dans la nouvelle
-  // structure. N'écrit rien si la collection contient déjà des modèles
-  // (première ouverture de l'écran uniquement, jamais en écrasement).
+  // structure.
+  //
+  // Vérification INDIVIDUELLE par modèle standard (champ stable
+  // isDefaultSeed, jamais par name) : un responsable qui renomme "Matin"
+  // en autre chose, ou change son icône/couleur/horaire, ne doit jamais
+  // provoquer la recréation d'un doublon — seul isDefaultSeed identifie
+  // un modèle standard, name/icon/color/start/end restent librement
+  // modifiables sans perdre ce statut. Ne crée QUE les modèles standards
+  // manquants ; n'écrase jamais un modèle déjà présent.
+  //
+  // Résilience : une erreur Firestore ici (ex. règles pas encore
+  // déployées) est journalisée via _fsError comme les autres listeners,
+  // mais ne doit JAMAIS interrompre la suite de l'init() de app.js —
+  // setupListeners() (tâches, utilisateurs, missions...) doit continuer
+  // à s'exécuter même si ce seed échoue.
   async function initShiftTemplateDefaults() {
-    const snap = await R_SHIFT_TPL().limit(1).get();
-    if (!snap.empty) return;
     const DEFT = (window.MX && window.MX.DEFT) || {};
     const mk = (text, i) => ({ id: uuid(), text, order: i });
     const defaults = [
-      { name: 'Matin',   icon: '☀️', color: '#FDE047', start: '08:00', end: '16:33', active: true, order: 0, tasks: (DEFT.matin   || []).map(mk) },
-      { name: 'Journée', icon: '🌤',  color: '#3B82F6', start: '10:00', end: '18:33', active: true, order: 1, tasks: (DEFT.journee || []).map(mk) },
-      { name: 'Soir',    icon: '🌙', color: '#EF4444', start: '13:00', end: '21:33', active: true, order: 2, tasks: (DEFT.soir    || []).map(mk) },
+      { isDefaultSeed: 'matin',   name: 'Matin',   icon: '☀️', color: '#FDE047', start: '08:00', end: '16:33', active: true, order: 0, tasks: (DEFT.matin   || []).map(mk) },
+      { isDefaultSeed: 'journee', name: 'Journée', icon: '🌤',  color: '#3B82F6', start: '10:00', end: '18:33', active: true, order: 1, tasks: (DEFT.journee || []).map(mk) },
+      { isDefaultSeed: 'soir',    name: 'Soir',    icon: '🌙', color: '#EF4444', start: '13:00', end: '21:33', active: true, order: 2, tasks: (DEFT.soir    || []).map(mk) },
     ];
-    const batch = db.batch();
-    defaults.forEach(t => batch.set(R_SHIFT_TPL().doc(), Object.assign({}, t, { createdAt: FV.serverTimestamp() })));
-    await batch.commit();
+    try {
+      const snap = await R_SHIFT_TPL().get();
+      const existingSeeds = new Set(snap.docs.map(d => d.data().isDefaultSeed).filter(Boolean));
+      const missing = defaults.filter(t => !existingSeeds.has(t.isDefaultSeed));
+      if (!missing.length) return;
+      const batch = db.batch();
+      missing.forEach(t => batch.set(R_SHIFT_TPL().doc(), Object.assign({}, t, { createdAt: FV.serverTimestamp() })));
+      await batch.commit();
+    } catch (e) {
+      _fsError('shift_templates')(e);
+    }
   }
 
   // ── ROLES (MÉTIERS) ──

@@ -443,5 +443,23 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
 
+    // ── GESTION SEMAINE TECH — SHIFT_TEMPLATES (catalogue de créneaux) ───────
+    // Créée en Phase 2 (ea0c29e) sans règle associée — collection restée
+    // inaccessible en production jusqu'à ce correctif (voir diagnostic
+    // Phase 3-bis). delete utilisé (suppression d'un modèle par le
+    // responsable/admin, db.js deleteShiftTemplate).
+    match /shift_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── GESTION SEMAINE TECH — WEEK_SLOTS (affectations datées) ──────────────
+    // Même oubli que shift_templates ci-dessus. Toutes les écritures sont des
+    // set()/set(merge:true) sur le document de la semaine (db.js) — jamais de
+    // delete de document (le retrait d'un créneau est un update du tableau
+    // days.{dayId}) — pas de suppression autorisée ici.
+    match /week_slots/{docId} {
+      allow read, create, update: if true;
+    }
+
   }
 }
