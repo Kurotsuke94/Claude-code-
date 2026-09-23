@@ -29,6 +29,8 @@
   let _editingTplId    = null; // id du modèle en cours d'édition (modal), 'new' pour création
   let _editTasks        = [];  // tâches du modèle en cours d'édition (état local du formulaire)
   let _resizeBound      = false;
+  let _showMissions     = false; // affichage détaillé des tâches (répartition temporaire) — non persisté, réinitialisé à chaque visite
+  let _dragTask         = null;  // { dayId, fromInstanceId, taskId } — drag & drop desktop en cours
 
   function _canEdit() { return !!(window.MX && MX.Auth && MX.Auth.canSeeAll && MX.Auth.canSeeAll()); }
 
@@ -123,6 +125,9 @@
         h += '<button class="primary-btn" style="width:auto;background:var(--orange);border-color:var(--orange)" onclick="MX.Pages.GestSemaine._newWeek()"><i class="fas fa-plus"></i> Nouvelle semaine</button>';
       }
       h += '<button class="cl-quick-btn" style="width:auto" onclick="MX.Pages.GestSemaine._openCopyWeekModal()"><i class="fas fa-copy"></i> Copier la semaine</button>';
+      if (_weekData) {
+        h += '<button class="cl-quick-btn" style="width:auto' + (_showMissions ? ';background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan-border)' : '') + '" onclick="MX.Pages.GestSemaine._toggleShowMissions()"><i class="fas fa-eye' + (_showMissions ? '-slash' : '') + '"></i> ' + (_showMissions ? 'Masquer les missions' : 'Afficher les missions') + '</button>';
+      }
       h += '</div>';
 
       if (_weekLoading && !_weekData) {
@@ -154,6 +159,7 @@
       '" onclick="MX.Pages.GestSemaine._setTab(\'' + id + '\')">' + label + '</button>';
   }
   function _setTab(t) { _tab = t; render(); }
+  function _toggleShowMissions() { _showMissions = !_showMissions; render(); }
 
   // ── WEEK NAVIGATION ──────────────────────────────────────────────────────
   function _prevWeek() {
@@ -210,6 +216,20 @@
     return MX.state.adminUser ? (MX.state.adminUser.email || 'admin') : (MX.state.currentUser ? MX.state.currentUser.name : 'resp');
   }
 
+  // Nombre de tâches "personnalisées" (déplacées manuellement, movedFrom
+  // présent) sur une journée — calculé depuis les données déjà chargées,
+  // aucune lecture supplémentaire. Sert à l'indicateur ⚡ et à activer le
+  // bouton "Réinitialiser les modifications".
+  function _dayMovedCount(list) {
+    return (list || []).reduce((n, inst) => n + (inst.tasks || []).filter(t => t.movedFrom).length, 0);
+  }
+
+  function _dayMovedBadge(list, dayId) {
+    const n = _dayMovedCount(list);
+    if (!n) return '';
+    return ' <span style="font-size:10px;font-weight:700;color:var(--orange);background:rgba(249,115,22,.12);border-radius:6px;padding:2px 6px;white-space:nowrap;cursor:pointer" title="Réinitialiser les déplacements de cette journée" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmResetDayMoves(\'' + dayId + '\')">⚡ ' + n + ' personnalisée' + (n > 1 ? 's' : '') + '</span>';
+  }
+
   // ── WEEK GRID — DESKTOP ──────────────────────────────────────────────────
   function _renderWeekGridDesktop() {
     const esc  = MX.esc;
@@ -219,7 +239,8 @@
     MX.DAYS.forEach(day => {
       const dateStr = MX.dateForWeekDay(_viewWeekKey, day.id);
       const dLbl = new Date(dateStr + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-      h += '<th style="text-align:left;padding:8px;font-size:12px;color:var(--text2);font-weight:700">' + esc(day.l) + '<div style="font-size:10px;color:var(--text3);font-weight:400">' + esc(dLbl) + '</div></th>';
+      const list = (days[day.id] || []);
+      h += '<th style="text-align:left;padding:8px;font-size:12px;color:var(--text2);font-weight:700">' + esc(day.l) + '<div style="font-size:10px;color:var(--text3);font-weight:400">' + esc(dLbl) + '</div>' + _dayMovedBadge(list, day.id) + '</th>';
     });
     h += '</tr></thead><tbody><tr style="vertical-align:top">';
     MX.DAYS.forEach(day => {
@@ -243,7 +264,7 @@
       const dLbl = new Date(dateStr + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
       const list = (days[day.id] || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
       h += '<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:12px;padding:10px">';
-      h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">' + esc(day.l) + ' <span style="font-weight:400;color:var(--text3);font-size:11px">' + esc(dLbl) + '</span></div>';
+      h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">' + esc(day.l) + ' <span style="font-weight:400;color:var(--text3);font-size:11px">' + esc(dLbl) + '</span>' + _dayMovedBadge(list, day.id) + '</div>';
       if (!list.length) h += '<div style="font-size:11px;color:var(--text3);padding:4px 0 8px">Aucun créneau</div>';
       list.forEach(inst => { h += _renderInstanceCard(day.id, inst); });
       h += _addCellBtn(day.id);
@@ -261,7 +282,13 @@
     const userOpts = _users().map(u =>
       '<option value="' + esc(u.id) + '"' + (u.id === inst.userId ? ' selected' : '') + '>' + esc(u.name) + '</option>'
     ).join('');
-    return '<div style="background:var(--bg4);border:1px solid var(--border2);border-left:4px solid ' + esc(color) + ';border-radius:10px;padding:9px;margin-bottom:8px">' +
+    const cardId = 'gst-card-' + esc(dayId) + '_' + esc(inst.id);
+    return '<div id="' + cardId + '" style="background:var(--bg4);border:1px solid var(--border2);border-left:4px solid ' + esc(color) + ';border-radius:10px;padding:9px;margin-bottom:8px"' +
+      (_showMissions ? (
+        ' ondragover="event.preventDefault();MX.Pages.GestSemaine._onCardDragOver(event,\'' + cardId + '\')"' +
+        ' ondragleave="MX.Pages.GestSemaine._onCardDragLeave(event,\'' + cardId + '\')"' +
+        ' ondrop="MX.Pages.GestSemaine._onCardDrop(event,\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + cardId + '\')"'
+      ) : '') + '>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
         '<span>' + esc(inst.icon || '') + '</span>' +
         '<span style="font-size:12px;font-weight:700;flex:1">' + esc(inst.name) + '</span>' +
@@ -271,8 +298,62 @@
       '<select style="width:100%;font-size:11px;padding:4px 6px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text1);margin-bottom:6px" onchange="MX.Pages.GestSemaine._setAssignee(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',this.value)">' +
         '<option value="">— Non assigné —</option>' + userOpts +
       '</select>' +
-      '<div style="font-size:10px;color:var(--text3)">' + doneCount + '/' + taskCount + ' tâches</div>' +
+      (_showMissions ? _renderMissionsList(dayId, inst) : '<div style="font-size:10px;color:var(--text3)">' + doneCount + '/' + taskCount + ' tâches</div>') +
       '</div>';
+  }
+
+  // Liste détaillée des tâches d'une instance, affichée uniquement en mode
+  // "Afficher les missions". Chaque tâche est draggable (desktop) ET
+  // cliquable (ouvre le panneau de déplacement — seule méthode utilisable
+  // au doigt sur mobile/tablette, voir _openMoveTaskModal). Une tâche
+  // marquée movedFrom affiche en plus un bouton de restauration directe.
+  function _renderMissionsList(dayId, inst) {
+    const esc   = MX.esc;
+    const tasks = (inst.tasks || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (!tasks.length) return '<div style="font-size:10px;color:var(--text3);padding:4px 0">Aucune tâche</div>';
+    let h = '<div style="display:flex;flex-direction:column;gap:3px">';
+    tasks.forEach(t => {
+      const moved = !!t.movedFrom;
+      h += '<div draggable="true"' +
+        ' ondragstart="MX.Pages.GestSemaine._onTaskDragStart(event,\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + esc(t.id) + '\')"' +
+        ' ondragend="MX.Pages.GestSemaine._onTaskDragEnd(event)"' +
+        ' onclick="MX.Pages.GestSemaine._openMoveTaskModal(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + esc(t.id) + '\')"' +
+        ' style="display:flex;align-items:center;gap:5px;padding:3px 4px;border-radius:5px;cursor:grab;font-size:11px' + (moved ? ';background:rgba(249,115,22,.10)' : '') + '"' +
+        ' title="Cliquer pour déplacer cette mission">' +
+        '<i class="fas ' + (t.done ? 'fa-square-check' : 'fa-square') + '" style="color:' + (t.done ? 'var(--green)' : 'var(--text3)') + ';font-size:10px;flex-shrink:0"></i>' +
+        '<span style="flex:1;' + (t.done ? 'text-decoration:line-through;color:var(--text3)' : '') + '">' + esc(t.text) + '</span>';
+      if (moved) {
+        h += '<button title="Restaurer l\'emplacement d\'origine" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmRestoreTask(\'' + esc(dayId) + '\',\'' + esc(t.id) + '\',\'' + esc(t.text) + '\')" style="background:none;border:none;color:var(--orange);cursor:pointer;font-size:10px;flex-shrink:0"><i class="fas fa-rotate-left"></i></button>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  // ── DRAG & DROP (desktop) ────────────────────────────────────────────────
+  function _onTaskDragStart(event, dayId, fromInstanceId, taskId) {
+    _dragTask = { dayId, fromInstanceId, taskId };
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', taskId);
+  }
+  function _onTaskDragEnd() { _dragTask = null; }
+  function _onCardDragOver(event, cardId) {
+    const el = document.getElementById(cardId);
+    if (el) { el.style.outline = '2px dashed var(--cyan)'; el.style.outlineOffset = '-2px'; el.style.background = 'var(--cyan-dim)'; }
+  }
+  function _onCardDragLeave(event, cardId) {
+    const el = document.getElementById(cardId);
+    if (el) { el.style.outline = ''; el.style.background = ''; }
+  }
+  async function _onCardDrop(event, dayId, toInstanceId, cardId) {
+    event.preventDefault();
+    _onCardDragLeave(event, cardId);
+    const drag = _dragTask;
+    _dragTask = null;
+    if (!drag || drag.dayId !== dayId) return; // sécurité : jamais de déplacement inter-jours depuis cette interface
+    if (drag.fromInstanceId === toInstanceId) return; // déposé sur son propre créneau
+    await _performMove(dayId, drag.fromInstanceId, toInstanceId, drag.taskId);
   }
 
   function _addCellBtn(dayId) {
@@ -296,6 +377,128 @@
       { label: 'Retirer', cls: 'danger', fn: async () => {
         try { await MX.DB.deleteWeekSlotInstance(_wk(), dayId, instanceId, _actorName()); MX.toast('Créneau retiré'); }
         catch (e) { MX.toast('Erreur', true); }
+      } },
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  // ── RÉPARTITION TEMPORAIRE DES MISSIONS ─────────────────────────────────
+  // Panneau de déplacement — méthode UNIQUE utilisable au doigt (mobile/
+  // tablette), et méthode secondaire toujours disponible sur desktop en
+  // complément du drag & drop natif (voir étape 4 de la demande : le drag
+  // & drop ne doit jamais être la seule méthode). Toujours réservé
+  // admin/responsable — _canEdit() revérifié avant toute écriture, jamais
+  // uniquement parce que le bouton qui l'ouvre n'est déjà rendu que pour
+  // ces rôles.
+  function _openMoveTaskModal(dayId, fromInstanceId, taskId) {
+    if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
+    const esc  = MX.esc;
+    const days = (_weekData && _weekData.days) || {};
+    const list = days[dayId] || [];
+    const fromInst = list.find(i => i.id === fromInstanceId);
+    const task     = fromInst && (fromInst.tasks || []).find(t => t.id === taskId);
+    if (!fromInst || !task) return;
+    const others = list.filter(i => i.id !== fromInstanceId);
+    if (!others.length) { MX.toast('Aucun autre créneau ce jour-là pour déplacer cette mission', true); return; }
+
+    document.getElementById('m-title').textContent = 'Déplacer une mission';
+    let body = '<div style="font-size:12px;color:var(--text2);margin-bottom:2px">Mission</div>' +
+      '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(task.text) + '</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:2px">Créneau actuel</div>' +
+      '<div style="font-size:13px;margin-bottom:14px">' + esc(fromInst.icon || '') + ' ' + esc(fromInst.name) + ' — ' + esc(fromInst.start || '') + (fromInst.start || fromInst.end ? ' → ' : '') + esc(fromInst.end || '') + '</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Déplacer vers…</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:4px">';
+    others.forEach((inst, i) => {
+      body += '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border2);border-radius:10px;cursor:pointer;font-size:13px">' +
+        '<input type="radio" name="mtm-dest" value="' + esc(inst.id) + '"' + (i === 0 ? ' checked' : '') + ' style="width:18px;height:18px">' +
+        '<span style="flex:1"><strong>' + esc(inst.icon || '') + ' ' + esc(inst.name) + '</strong><br><span style="color:var(--text3);font-size:11px">' + esc(inst.start || '') + (inst.start || inst.end ? ' – ' : '') + esc(inst.end || '') + '</span></span>' +
+        '</label>';
+    });
+    body += '</div>';
+    document.getElementById('m-sub').innerHTML = body;
+    document.getElementById('m-actions').innerHTML =
+      '<button class="modal-btn confirm" onclick="MX.Pages.GestSemaine._doMoveTaskFromModal(\'' + esc(dayId) + '\',\'' + esc(fromInstanceId) + '\',\'' + esc(taskId) + '\')"><i class="fas fa-arrow-right-arrow-left"></i> Déplacer la mission</button>' +
+      '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
+    document.getElementById('modal-bg').classList.add('show');
+  }
+
+  function _doMoveTaskFromModal(dayId, fromInstanceId, taskId) {
+    const sel = document.querySelector('input[name="mtm-dest"]:checked');
+    if (!sel) return;
+    const toInstanceId = sel.value;
+    MX.closeModal();
+    _performMove(dayId, fromInstanceId, toInstanceId, taskId);
+  }
+
+  // Cœur du déplacement, partagé par le drag & drop (desktop) et le panneau
+  // (mobile/desktop). Si le créneau destination appartient à un AUTRE
+  // technicien que la source, l'affectation n'est JAMAIS transférée
+  // silencieusement : confirmation explicite requise avant d'écrire quoi
+  // que ce soit (étape 8 de la demande).
+  async function _performMove(dayId, fromInstanceId, toInstanceId, taskId) {
+    if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
+    const days = (_weekData && _weekData.days) || {};
+    const list = days[dayId] || [];
+    const fromInst = list.find(i => i.id === fromInstanceId);
+    const toInst   = list.find(i => i.id === toInstanceId);
+    const task     = fromInst && (fromInst.tasks || []).find(t => t.id === taskId);
+    if (!fromInst || !toInst || !task) { MX.toast('Erreur : créneau ou tâche introuvable', true); return; }
+
+    const run = async () => {
+      try {
+        await MX.DB.moveWeekSlotTask(_wk(), dayId, fromInstanceId, toInstanceId, taskId, _actorName());
+        MX.DB.addLog({
+          workerName: _actorName(), action: 'assign',
+          taskText: '« ' + task.text + ' » : ' + fromInst.name + ' → ' + toInst.name,
+          dayId, slot: toInstanceId,
+        }).catch(() => {});
+        MX.toast('✓ Mission déplacée — « ' + task.text + ' » ' + fromInst.name + ' → ' + toInst.name);
+      } catch (e) {
+        MX.toast('Erreur lors du déplacement — la mission n\'a pas bougé', true);
+        render(); // ré-affiche l'état réel (celui de _weekData, jamais modifié en local avant confirmation Firestore)
+      }
+    };
+
+    if (toInst.userName && fromInst.userName && toInst.userName !== fromInst.userName) {
+      MX.showModal(
+        'Créneau destination attribué à un autre technicien',
+        'Le créneau « ' + toInst.name + ' » est attribué à ' + toInst.userName + '. Déplacer cette mission vers ce créneau ?',
+        [
+          { label: 'Confirmer', cls: 'confirm', fn: run },
+          { label: 'Annuler', cls: 'cancel' }
+        ]
+      );
+      return;
+    }
+    await run();
+  }
+
+  function _confirmRestoreTask(dayId, taskId, taskText) {
+    if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
+    MX.showModal('Restaurer l\'emplacement d\'origine ?', '« ' + taskText + ' » retournera dans son créneau d\'origine.', [
+      { label: 'Restaurer', cls: 'confirm', fn: async () => {
+        try {
+          await MX.DB.restoreWeekSlotTask(_wk(), dayId, taskId, _actorName());
+          MX.toast('✓ Mission restaurée à son emplacement d\'origine');
+        } catch (e) { MX.toast('Erreur lors de la restauration', true); render(); }
+      } },
+      { label: 'Annuler', cls: 'cancel' }
+    ]);
+  }
+
+  function _confirmResetDayMoves(dayId) {
+    if (!_canEdit()) return;
+    if (_blockIfPastWeek(_wk())) return;
+    const day = MX.DAYS.find(d => d.id === dayId);
+    MX.showModal('Réinitialiser les modifications ?', 'Les déplacements manuels de ' + (day ? day.l : dayId) + ' seront annulés — chaque mission déplacée retournera dans son créneau d\'origine. Les coches et affectations ne sont pas affectées.', [
+      { label: 'Réinitialiser', cls: 'confirm', fn: async () => {
+        try {
+          await MX.DB.resetWeekSlotDayMoves(_wk(), dayId, _actorName());
+          MX.toast('✓ Journée réinitialisée');
+        } catch (e) { MX.toast('Erreur lors de la réinitialisation', true); render(); }
       } },
       { label: 'Annuler', cls: 'cancel' }
     ]);
@@ -567,5 +770,9 @@
     _openTemplateEditor, _saveTemplateFromEditor, _deleteTemplateConfirm, _duplicateTemplateAction,
     _addEditTask, _removeEditTask,
     getTodayAssignmentFor,
+    _toggleShowMissions,
+    _onTaskDragStart, _onTaskDragEnd, _onCardDragOver, _onCardDragLeave, _onCardDrop,
+    _openMoveTaskModal, _doMoveTaskFromModal,
+    _confirmRestoreTask, _confirmResetDayMoves,
   };
 })();

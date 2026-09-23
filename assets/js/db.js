@@ -956,21 +956,158 @@
   // nouvelles instances (nouveaux id), jamais de référence partagée avec la
   // semaine source : modifier la copie ne touche jamais l'originale, et vice
   // versa. Les tâches repartent toutes à "non faites" (done:false).
+  // Les déplacements manuels (movedFrom, voir moveWeekSlotTask ci-dessous)
+  // sont une personnalisation TEMPORAIRE de la semaine source — une copie
+  // vers une autre semaine doit repartir de la configuration normale du
+  // modèle, jamais reproduire le déplacement. Pour chaque tâche marquée
+  // movedFrom, la copie la replace donc dans SA COPIE de l'instance
+  // d'origine (jamais dans l'instance d'origine de la semaine SOURCE, qui
+  // n'est ni lue ni modifiée), sans le marqueur movedFrom. Si l'instance
+  // d'origine a elle-même été retirée de la semaine source entre-temps
+  // (deleteWeekSlotInstance), aucune reconstruction n'est tentée : la
+  // tâche reste, dans la copie, là où elle se trouvait au moment de la
+  // copie — seule façon de ne jamais perdre une tâche. `warnings` liste
+  // ces cas pour que l'appelant (ou un test) puisse les signaler.
   async function copyWeekSlots(fromWeekKey, toWeekKey, toWeekLabel, actor) {
     const snap = await R_WEEK_SLOTS().doc(fromWeekKey).get();
     if (!snap.exists) throw new Error('Semaine source introuvable');
     const src = snap.data();
     const newDays = {};
+    const warnings = [];
     Object.keys(src.days || {}).forEach(dayId => {
-      newDays[dayId] = (src.days[dayId] || []).map(inst => Object.assign({}, inst, {
-        id: uuid(),
-        tasks: (inst.tasks || []).map(t => Object.assign({}, t, { done: false })),
+      const srcList = src.days[dayId] || [];
+      const idMap = {};
+      srcList.forEach(inst => { idMap[inst.id] = uuid(); });
+
+      const perInstanceTasks = {};
+      srcList.forEach(inst => { perInstanceTasks[idMap[inst.id]] = []; });
+
+      srcList.forEach(inst => {
+        (inst.tasks || []).forEach(t => {
+          const copiedTask = Object.assign({}, t, { done: false });
+          delete copiedTask.movedFrom;
+          if (t.movedFrom) {
+            const originNewId = idMap[t.movedFrom];
+            if (originNewId) {
+              perInstanceTasks[originNewId].push(copiedTask);
+            } else {
+              // Instance d'origine introuvable dans la source — pas de
+              // perte : la tâche reste dans son instance actuelle, sans
+              // le marqueur temporaire (elle redevient une tâche normale
+              // de cette instance dans la copie).
+              perInstanceTasks[idMap[inst.id]].push(copiedTask);
+              warnings.push({ dayId, taskId: t.id, taskText: t.text, missingOriginInstanceId: t.movedFrom, keptInInstanceId: idMap[inst.id] });
+            }
+          } else {
+            perInstanceTasks[idMap[inst.id]].push(copiedTask);
+          }
+        });
+      });
+
+      newDays[dayId] = srcList.map(inst => Object.assign({}, inst, {
+        id: idMap[inst.id],
+        tasks: perInstanceTasks[idMap[inst.id]].map((t, i) => Object.assign({}, t, { order: i })),
       }));
     });
     await R_WEEK_SLOTS().doc(toWeekKey).set({
       weekKey: toWeekKey, weekLabel: toWeekLabel || toWeekKey, days: newDays,
       createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
     });
+    return { warnings };
+  }
+
+  // ── RÉPARTITION TEMPORAIRE DES MISSIONS (Gestion semaine tech) ───────────
+  // Déplace une tâche d'une instance de créneau vers une autre, TOUJOURS au
+  // sein du même jour (aucune validation de "même jour" ici : c'est à
+  // l'appelant de ne jamais passer un dayId différent — voir gestion-semaine
+  // -tech.js, qui ne construit jamais d'appel inter-jours). N'écrit QUE
+  // week_slots/{weekKey} — jamais shift_templates : la tâche déplacée est
+  // une copie déjà figée dans l'instance, le modèle source n'est jamais lu
+  // ni modifié par cette fonction.
+  //
+  // movedFrom mémorise l'instance D'ORIGINE (celle où la tâche a été copiée
+  // depuis le modèle la toute première fois) : un second déplacement ne
+  // l'écrase PAS, pour que "Restaurer l'emplacement d'origine" retrouve
+  // toujours le bon créneau même après plusieurs déplacements successifs.
+  // Écriture ATOMIQUE unique (un seul .set) : retrait de la source et ajout
+  // en destination sont dans le même document, donc dans la même requête —
+  // jamais d'état intermédiaire "tâche nulle part"/"tâche aux deux endroits"
+  // visible côté Firestore.
+  async function moveWeekSlotTask(weekKey, dayId, fromInstanceId, toInstanceId, taskId, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = days[dayId] || [];
+    const fromInst = list.find(i => i.id === fromInstanceId);
+    const toInst   = list.find(i => i.id === toInstanceId);
+    if (!fromInst || !toInst) throw new Error('Créneau introuvable');
+    const task = (fromInst.tasks || []).find(t => t.id === taskId);
+    if (!task) throw new Error('Tâche introuvable');
+    const movedTask = Object.assign({}, task, {
+      order: (toInst.tasks || []).length,
+      movedFrom: task.movedFrom || fromInstanceId,
+    });
+    const newList = list.map(inst => {
+      if (inst.id === fromInstanceId) return Object.assign({}, inst, { tasks: (inst.tasks || []).filter(t => t.id !== taskId) });
+      if (inst.id === toInstanceId)   return Object.assign({}, inst, { tasks: (inst.tasks || []).concat([movedTask]) });
+      return inst;
+    });
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: newList }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+  }
+
+  // Remet une tâche déplacée dans son instance d'origine (movedFrom) et
+  // efface le marqueur — une fois restaurée, la tâche redevient une tâche
+  // normale de son créneau d'origine, indiscernable d'une tâche jamais
+  // déplacée. Ne fait rien (throw) si la tâche n'a jamais été déplacée ou
+  // si son instance d'origine n'existe plus (ex. créneau retiré entre
+  // temps) — jamais de perte de tâche silencieuse dans ce cas.
+  async function restoreWeekSlotTask(weekKey, dayId, taskId, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = days[dayId] || [];
+    let fromInst = null, task = null;
+    list.forEach(inst => { const t = (inst.tasks || []).find(x => x.id === taskId); if (t) { fromInst = inst; task = t; } });
+    if (!fromInst || !task || !task.movedFrom) throw new Error('Rien à restaurer pour cette tâche');
+    const toInst = list.find(i => i.id === task.movedFrom);
+    if (!toInst) throw new Error('Créneau d\'origine introuvable (a peut-être été retiré)');
+    const restoredTask = Object.assign({}, task, { order: (toInst.tasks || []).length });
+    delete restoredTask.movedFrom;
+    const newList = list.map(inst => {
+      if (inst.id === fromInst.id)  return Object.assign({}, inst, { tasks: (inst.tasks || []).filter(t => t.id !== taskId) });
+      if (inst.id === task.movedFrom) return Object.assign({}, inst, { tasks: (inst.tasks || []).concat([restoredTask]) });
+      return inst;
+    });
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: newList }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
+  }
+
+  // Annule TOUS les déplacements manuels d'une journée en restaurant chaque
+  // tâche marquée movedFrom vers son instance d'origine — jamais une
+  // reconstruction depuis shift_templates (qui écraserait les coches, les
+  // affectations et toute tâche ajoutée manuellement). Une tâche dont
+  // l'instance d'origine n'existe plus reste où elle est (pas de perte).
+  async function resetWeekSlotDayMoves(weekKey, dayId, actor) {
+    const snap = await R_WEEK_SLOTS().doc(weekKey).get();
+    const days = (snap.exists && snap.data().days) || {};
+    const list = days[dayId] || [];
+    const byId = {};
+    list.forEach(inst => { byId[inst.id] = (inst.tasks || []).slice(); });
+    list.forEach(inst => {
+      (inst.tasks || []).forEach(t => {
+        if (t.movedFrom && byId[t.movedFrom]) {
+          byId[inst.id] = byId[inst.id].filter(x => x.id !== t.id);
+          const restored = Object.assign({}, t, { order: byId[t.movedFrom].length });
+          delete restored.movedFrom;
+          byId[t.movedFrom] = byId[t.movedFrom].concat([restored]);
+        }
+      });
+    });
+    const newList = list.map(inst => Object.assign({}, inst, { tasks: byId[inst.id] }));
+    await R_WEEK_SLOTS().doc(weekKey).set({
+      days: { [dayId]: newList }, updatedAt: FV.serverTimestamp(), updatedBy: actor || ''
+    }, { merge: true });
   }
 
   const R_ABS = () => db.collection('absences');
@@ -1459,6 +1596,7 @@
     listenShiftTemplates, addShiftTemplate, updateShiftTemplate, deleteShiftTemplate, duplicateShiftTemplate, initShiftTemplateDefaults,
     listenWeekSlots, getWeekSlots, ensureWeekSlots, loadTemplateIntoWeekDay,
     setWeekSlotAssignee, setWeekSlotTaskDone, deleteWeekSlotInstance, copyWeekSlots,
+    moveWeekSlotTask, restoreWeekSlotTask, resetWeekSlotDayMoves,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,
