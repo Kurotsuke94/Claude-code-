@@ -58,8 +58,11 @@ async function openGst(page) {
   await page.waitForTimeout(250);
 }
 async function showMissions(page) {
-  await page.evaluate(() => { if (!MX.Pages.GestSemaine) return; const html = document.getElementById('main-content').innerHTML; if (!/Masquer les missions/.test(html)) MX.Pages.GestSemaine._toggleShowMissions(); });
+  await page.evaluate(() => { if (!MX.Pages.GestSemaine) return; const btn = document.querySelector('.gst-repart-btn'); if (btn && !btn.classList.contains('gst-repart-btn--active')) MX.Pages.GestSemaine._toggleShowMissions(); });
   await page.waitForTimeout(150);
+}
+async function movePanelOpen(page) {
+  return page.evaluate(() => { const r = document.getElementById('gst-move-panel-root'); return !!r && r.style.display !== 'none'; });
 }
 
 (async () => {
@@ -133,11 +136,11 @@ async function showMissions(page) {
     // Journée → Soir via le panneau (clic sur la tâche)
     await page.click('#gst-card-' + todayId + '_' + rJournee.instId + ' div[draggable="true"]');
     await page.waitForTimeout(200);
-    let modalHtml = await page.evaluate(() => document.getElementById('m-sub').innerHTML);
+    let modalHtml = await page.evaluate(() => document.getElementById('gst-mvp-panel').innerHTML);
     ok('3.1 Panneau ouvert avec les 2 autres créneaux en choix', /Matin/.test(modalHtml) && /Soir/.test(modalHtml));
     // sélectionner "Soir"
-    await page.evaluate((soirId) => { document.querySelector('input[name="mtm-dest"][value="' + soirId + '"]').checked = true; }, rSoir.instId);
-    await page.click('button.modal-btn.confirm');
+    await page.evaluate((soirId) => { MX.Pages.GestSemaine._selectMoveDest(soirId); }, rSoir.instId);
+    await page.click('#gst-mvp-panel button.modal-btn.confirm');
     await page.waitForTimeout(300);
     let doc = await getWeekDoc(page, wk);
     ok('3.2 "Journée tâche 1" déplacée vers Soir', doc.days[todayId].find(i => i.id === rSoir.instId).tasks.some(t => t.text === 'Journée tâche 1'));
@@ -150,8 +153,8 @@ async function showMissions(page) {
     await page.waitForSelector(soirTaskSel);
     await page.click(soirTaskSel);
     await page.waitForTimeout(200);
-    await page.evaluate((matinId) => { const el = document.querySelector('input[name="mtm-dest"][value="' + matinId + '"]'); if (el) el.checked = true; }, rMatin.instId);
-    await page.click('button.modal-btn.confirm');
+    await page.evaluate((matinId) => { if (document.querySelector('[data-mvp-option="' + matinId + '"]')) MX.Pages.GestSemaine._selectMoveDest(matinId); }, rMatin.instId);
+    await page.click('#gst-mvp-panel button.modal-btn.confirm');
     await page.waitForTimeout(300);
     doc = await getWeekDoc(page, wk);
     ok('4.1 "Soir tâche 1" déplacée vers Matin', doc.days[todayId].find(i => i.id === rMatin.instId).tasks.some(t => t.text === 'Soir tâche 1'));
@@ -317,7 +320,7 @@ async function showMissions(page) {
     await showMissions(page);
     await page.click('#gst-card-' + todayId + '_' + rSrc.instId + ' div[draggable="true"]');
     await page.waitForTimeout(200);
-    const modalOpen = await page.evaluate(() => document.getElementById('modal-bg').classList.contains('show'));
+    const modalOpen = await movePanelOpen(page);
     ok('17.4 Le panneau ne s\'ouvre pas (aucune autre instance CE jour-là ⇒ aucune destination inter-jours possible)', !modalOpen);
     await ctx.close();
   }
@@ -343,7 +346,7 @@ async function showMissions(page) {
     ok('18.1 Un technicien est redirigé hors de Gestion semaine tech (comportement existant, non cassé)', redirected);
     await page.evaluate((a) => { if (MX.Pages.GestSemaine && MX.Pages.GestSemaine._openMoveTaskModal) MX.Pages.GestSemaine._openMoveTaskModal(a.dayId, a.from, a.taskId); }, { dayId: todayId, from: rSrc.instId, taskId });
     await page.waitForTimeout(150);
-    const modalShown = await page.evaluate(() => document.getElementById('modal-bg').classList.contains('show'));
+    const modalShown = await movePanelOpen(page);
     ok('18.2 _openMoveTaskModal() appelée par un technicien ne fait rien (_canEdit() rejette)', !modalShown);
     doc = await getWeekDoc(page, wk);
     ok('18.3 Aucune tâche déplacée', !doc.days[todayId].find(i => i.id === rDst.instId).tasks.some(t => t.id === taskId));
@@ -356,7 +359,7 @@ async function showMissions(page) {
     await showMissions(page);
     await page.click('#gst-card-' + todayId + '_' + rSrc.instId + ' div[draggable="true"]');
     await page.waitForTimeout(150);
-    ok('19.2 Le panneau de déplacement s\'ouvre bien pour la responsable', await page.evaluate(() => document.getElementById('modal-bg').classList.contains('show')));
+    ok('19.2 Le panneau de déplacement s\'ouvre bien pour la responsable', await movePanelOpen(page));
     await ctx.close();
   }
 
@@ -401,7 +404,7 @@ async function showMissions(page) {
     await showMissions(page);
     await page.click('#gst-card-' + todayId + '_' + rSrc.instId + ' div[draggable="true"]');
     await page.waitForTimeout(200);
-    await page.click('button.modal-btn.confirm'); // confirme le déplacement dans le panneau
+    await page.click('#gst-mvp-panel button.modal-btn.confirm'); // confirme le déplacement dans le panneau
     await page.waitForTimeout(250);
     const confirmModalHtml = await page.evaluate(() => document.getElementById('m-sub') ? document.getElementById('m-sub').innerHTML : '');
     ok('22.1 Une confirmation supplémentaire apparaît, mentionnant Jordan', /Jordan/.test(confirmModalHtml));

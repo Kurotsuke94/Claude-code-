@@ -126,9 +126,19 @@
       }
       h += '<button class="cl-quick-btn" style="width:auto" onclick="MX.Pages.GestSemaine._openCopyWeekModal()"><i class="fas fa-copy"></i> Copier la semaine</button>';
       if (_weekData) {
-        h += '<button class="cl-quick-btn" style="width:auto' + (_showMissions ? ';background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan-border)' : '') + '" onclick="MX.Pages.GestSemaine._toggleShowMissions()"><i class="fas fa-eye' + (_showMissions ? '-slash' : '') + '"></i> ' + (_showMissions ? 'Masquer les missions' : 'Afficher les missions') + '</button>';
+        h += '<button class="cl-quick-btn gst-repart-btn' + (_showMissions ? ' gst-repart-btn--active' : '') + '" style="width:auto' + (_showMissions ? ';background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan-border)' : '') + '" onclick="MX.Pages.GestSemaine._toggleShowMissions()"><i class="fas ' + (_showMissions ? 'fa-square-check' : 'fa-square') + '"></i> Répartition des missions</button>';
       }
       h += '</div>';
+
+      // ── Indicateur de mode — le mode Répartition doit être clairement
+      // identifiable (point 1 de la demande), pas seulement via l'état du
+      // bouton lui-même. ──
+      if (_weekData && _showMissions) {
+        h += '<div class="gst-mode-chip" style="display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--cyan);background:var(--cyan-dim);border:1px solid var(--cyan-border);border-radius:10px;padding:8px 14px;margin-bottom:16px">' +
+          '<i class="fas fa-arrows-up-down-left-right"></i> Mode Répartition des missions' +
+          '<span style="font-weight:400;color:var(--text2)">— glissez une mission ou cliquez dessus pour la déplacer</span>' +
+          '</div>';
+      }
 
       if (_weekLoading && !_weekData) {
         h += '<div style="text-align:center;padding:30px;color:var(--text3)"><i class="fas fa-spinner fa-spin"></i> Chargement…</div>';
@@ -227,7 +237,7 @@
   function _dayMovedBadge(list, dayId) {
     const n = _dayMovedCount(list);
     if (!n) return '';
-    return ' <span style="font-size:10px;font-weight:700;color:var(--orange);background:rgba(249,115,22,.12);border-radius:6px;padding:2px 6px;white-space:nowrap;cursor:pointer" title="Réinitialiser les déplacements de cette journée" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmResetDayMoves(\'' + dayId + '\')">⚡ ' + n + ' personnalisée' + (n > 1 ? 's' : '') + '</span>';
+    return ' <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--orange);background:rgba(249,115,22,.14);border:1px solid rgba(249,115,22,.3);border-radius:8px;padding:4px 9px;white-space:nowrap;cursor:pointer" title="Réinitialiser les déplacements de cette journée" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmResetDayMoves(\'' + dayId + '\')">⚡ ' + n + ' personnalisée' + (n > 1 ? 's' : '') + '</span>';
   }
 
   // ── WEEK GRID — DESKTOP ──────────────────────────────────────────────────
@@ -279,26 +289,35 @@
     const color = inst.color || '#6B7280';
     const taskCount = (inst.tasks || []).length;
     const doneCount = (inst.tasks || []).filter(t => t.done).length;
+    const movedInCount = (inst.tasks || []).filter(t => t.movedFrom).length;
     const userOpts = _users().map(u =>
       '<option value="' + esc(u.id) + '"' + (u.id === inst.userId ? ' selected' : '') + '>' + esc(u.name) + '</option>'
     ).join('');
     const cardId = 'gst-card-' + esc(dayId) + '_' + esc(inst.id);
-    return '<div id="' + cardId + '" style="background:var(--bg4);border:1px solid var(--border2);border-left:4px solid ' + esc(color) + ';border-radius:10px;padding:9px;margin-bottom:8px"' +
+    // Mode Répartition : cartes légèrement agrandies (point 2 de la demande)
+    // pour rester lisibles avec des lignes de mission plus grandes en dessous.
+    const pad     = _showMissions ? '14px' : '9px';
+    const nameFs  = _showMissions ? '15px' : '12px';
+    const iconFs  = _showMissions ? '20px' : '14px';
+    return '<div id="' + cardId + '" data-day-id="' + esc(dayId) + '" data-inst-id="' + esc(inst.id) + '" class="gst-inst-card" style="background:var(--bg4);border:1px solid var(--border2);border-left:4px solid ' + esc(color) + ';border-radius:10px;padding:' + pad + ';margin-bottom:10px;transition:opacity .15s,outline .1s"' +
       (_showMissions ? (
         ' ondragover="event.preventDefault();MX.Pages.GestSemaine._onCardDragOver(event,\'' + cardId + '\')"' +
         ' ondragleave="MX.Pages.GestSemaine._onCardDragLeave(event,\'' + cardId + '\')"' +
         ' ondrop="MX.Pages.GestSemaine._onCardDrop(event,\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + cardId + '\')"'
       ) : '') + '>' +
-      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
-        '<span>' + esc(inst.icon || '') + '</span>' +
-        '<span style="font-size:12px;font-weight:700;flex:1">' + esc(inst.name) + '</span>' +
-        '<button title="Retirer" onclick="MX.Pages.GestSemaine._removeInstance(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px"><i class="fas fa-xmark"></i></button>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+        '<span style="font-size:' + iconFs + '">' + esc(inst.icon || '') + '</span>' +
+        '<span style="font-size:' + nameFs + ';font-weight:700;flex:1;' + (_showMissions ? 'text-transform:uppercase;letter-spacing:.02em' : '') + '">' + esc(inst.name) + '</span>' +
+        '<button title="Retirer" onclick="MX.Pages.GestSemaine._removeInstance(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:4px"><i class="fas fa-xmark"></i></button>' +
       '</div>' +
-      '<div style="font-size:10px;color:var(--text3);margin-bottom:6px;font-family:var(--ffm)">' + esc(inst.start || '') + (inst.start || inst.end ? ' – ' : '') + esc(inst.end || '') + '</div>' +
-      '<select style="width:100%;font-size:11px;padding:4px 6px;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text1);margin-bottom:6px" onchange="MX.Pages.GestSemaine._setAssignee(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',this.value)">' +
+      '<div style="font-size:' + (_showMissions ? '12px' : '10px') + ';color:var(--text3);margin-bottom:6px;font-family:var(--ffm)">' + esc(inst.start || '') + (inst.start || inst.end ? ' – ' : '') + esc(inst.end || '') + '</div>' +
+      '<select style="width:100%;font-size:11px;padding:' + (_showMissions ? '7px 8px' : '4px 6px') + ';border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--text1);margin-bottom:8px;min-height:' + (_showMissions ? '36px' : 'auto') + '" onchange="MX.Pages.GestSemaine._setAssignee(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',this.value)">' +
         '<option value="">— Non assigné —</option>' + userOpts +
       '</select>' +
-      (_showMissions ? _renderMissionsList(dayId, inst) : '<div style="font-size:10px;color:var(--text3)">' + doneCount + '/' + taskCount + ' tâches</div>') +
+      (_showMissions ? _renderMissionsList(dayId, inst) :
+        '<div style="font-size:10px;color:var(--text3)">' + doneCount + '/' + taskCount + ' tâches</div>' +
+        (movedInCount ? '<div style="font-size:10px;font-weight:700;color:var(--orange);margin-top:3px">⚡ ' + movedInCount + ' personnalisée' + (movedInCount > 1 ? 's' : '') + '</div>' : '')
+      ) +
       '</div>';
   }
 
@@ -307,23 +326,40 @@
   // cliquable (ouvre le panneau de déplacement — seule méthode utilisable
   // au doigt sur mobile/tablette, voir _openMoveTaskModal). Une tâche
   // marquée movedFrom affiche en plus un bouton de restauration directe.
+  // Nom du créneau d'origine d'une tâche déplacée (movedFrom), pour la
+  // sous-ligne "⚡ Déplacé depuis {origine}". Le créneau d'origine peut avoir
+  // été retiré entre-temps (voir tests 26.x sur copyWeekSlots) — dans ce cas
+  // on retombe sur un libellé générique plutôt que de planter l'affichage.
+  function _originInstanceName(dayId, instanceId) {
+    const days = (_weekData && _weekData.days) || {};
+    const list = days[dayId] || [];
+    const origin = list.find(i => i.id === instanceId);
+    return origin ? (origin.icon ? origin.icon + ' ' : '') + origin.name : 'un autre créneau';
+  }
+
   function _renderMissionsList(dayId, inst) {
     const esc   = MX.esc;
     const tasks = (inst.tasks || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
-    if (!tasks.length) return '<div style="font-size:10px;color:var(--text3);padding:4px 0">Aucune tâche</div>';
-    let h = '<div style="display:flex;flex-direction:column;gap:3px">';
+    if (!tasks.length) return '<div style="font-size:11px;color:var(--text3);padding:6px 2px">Aucune tâche dans ce créneau</div>';
+    let h = '<div style="display:flex;flex-direction:column;gap:6px">';
     tasks.forEach(t => {
       const moved = !!t.movedFrom;
+      const subtitle = moved ? '⚡ Déplacé depuis ' + esc(_originInstanceName(dayId, t.movedFrom)) : 'Mission technique';
       h += '<div draggable="true"' +
+        ' data-task-row="1"' +
         ' ondragstart="MX.Pages.GestSemaine._onTaskDragStart(event,\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + esc(t.id) + '\')"' +
         ' ondragend="MX.Pages.GestSemaine._onTaskDragEnd(event)"' +
         ' onclick="MX.Pages.GestSemaine._openMoveTaskModal(\'' + esc(dayId) + '\',\'' + esc(inst.id) + '\',\'' + esc(t.id) + '\')"' +
-        ' style="display:flex;align-items:center;gap:5px;padding:3px 4px;border-radius:5px;cursor:grab;font-size:11px' + (moved ? ';background:rgba(249,115,22,.10)' : '') + '"' +
-        ' title="Cliquer pour déplacer cette mission">' +
-        '<i class="fas ' + (t.done ? 'fa-square-check' : 'fa-square') + '" style="color:' + (t.done ? 'var(--green)' : 'var(--text3)') + ';font-size:10px;flex-shrink:0"></i>' +
-        '<span style="flex:1;' + (t.done ? 'text-decoration:line-through;color:var(--text3)' : '') + '">' + esc(t.text) + '</span>';
+        ' style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:9px;cursor:grab;min-height:44px;border:1px solid ' + (moved ? 'rgba(249,115,22,.35)' : 'var(--border2)') + (moved ? ';background:rgba(249,115,22,.10)' : ';background:var(--bg3)') + '"' +
+        ' title="Cliquer ou glisser pour déplacer cette mission">' +
+        '<i class="fas fa-grip-vertical" style="color:var(--text3);font-size:13px;flex-shrink:0" title="Glisser pour déplacer"></i>' +
+        '<i class="fas ' + (t.done ? 'fa-square-check' : 'fa-square') + '" style="color:' + (t.done ? 'var(--green)' : 'var(--text3)') + ';font-size:14px;flex-shrink:0"></i>' +
+        '<span style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:700;' + (t.done ? 'text-decoration:line-through;color:var(--text3)' : '') + '">' + (moved ? '⚡ ' : '') + esc(t.text) + '</div>' +
+          '<div style="font-size:11px;color:' + (moved ? 'var(--orange)' : 'var(--text3)') + ';font-weight:' + (moved ? '700' : '400') + ';margin-top:2px">' + subtitle + '</div>' +
+        '</span>';
       if (moved) {
-        h += '<button title="Restaurer l\'emplacement d\'origine" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmRestoreTask(\'' + esc(dayId) + '\',\'' + esc(t.id) + '\',\'' + esc(t.text) + '\')" style="background:none;border:none;color:var(--orange);cursor:pointer;font-size:10px;flex-shrink:0"><i class="fas fa-rotate-left"></i></button>';
+        h += '<button title="Restaurer l\'emplacement d\'origine" onclick="event.stopPropagation();MX.Pages.GestSemaine._confirmRestoreTask(\'' + esc(dayId) + '\',\'' + esc(t.id) + '\',\'' + esc(t.text) + '\')" style="background:none;border:1px solid rgba(249,115,22,.4);color:var(--orange);cursor:pointer;font-size:11px;font-weight:700;flex-shrink:0;border-radius:7px;padding:8px 10px;min-height:36px;white-space:nowrap"><i class="fas fa-rotate-left"></i> Restaurer</button>';
       }
       h += '</div>';
     });
@@ -332,25 +368,70 @@
   }
 
   // ── DRAG & DROP (desktop) ────────────────────────────────────────────────
+  // Retour visuel demandé (étape 4) : au démarrage du glisser, les créneaux
+  // du même jour autres que la source sont mis en évidence (cible
+  // compatible) et tout le reste (autre jour) est atténué. Un survol
+  // affiche en plus une zone "Déposer la mission ici" généreuse à l'intérieur
+  // du créneau ciblé. La miniature sous le curseur est celle générée
+  // nativement par le navigateur pour tout élément draggable — aucune
+  // image de glisser personnalisée n'est nécessaire.
   function _onTaskDragStart(event, dayId, fromInstanceId, taskId) {
     _dragTask = { dayId, fromInstanceId, taskId };
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', taskId);
+    document.querySelectorAll('.gst-inst-card').forEach(el => {
+      const sameDay  = el.getAttribute('data-day-id') === dayId;
+      const isSource = sameDay && el.getAttribute('data-inst-id') === fromInstanceId;
+      if (isSource) {
+        el.style.opacity = '.5';
+      } else if (sameDay) {
+        el.style.outline = '2px dashed var(--cyan-border)';
+        el.style.outlineOffset = '-2px';
+      } else {
+        el.style.opacity = '.35';
+      }
+    });
   }
-  function _onTaskDragEnd() { _dragTask = null; }
+  function _onTaskDragEnd() {
+    _dragTask = null;
+    document.querySelectorAll('.gst-inst-card').forEach(el => {
+      el.style.opacity = '';
+      el.style.outline = '';
+      el.style.background = '';
+      const ph = el.querySelector('.gst-drop-placeholder');
+      if (ph) ph.remove();
+    });
+  }
   function _onCardDragOver(event, cardId) {
+    event.preventDefault();
     const el = document.getElementById(cardId);
-    if (el) { el.style.outline = '2px dashed var(--cyan)'; el.style.outlineOffset = '-2px'; el.style.background = 'var(--cyan-dim)'; }
+    if (!el || !_dragTask) return;
+    if (el.getAttribute('data-inst-id') === _dragTask.fromInstanceId) return; // pas de dépôt sur sa propre carte
+    el.style.outline = '2px dashed var(--cyan)';
+    el.style.outlineOffset = '-2px';
+    el.style.background = 'var(--cyan-dim)';
+    if (!el.querySelector('.gst-drop-placeholder')) {
+      const ph = document.createElement('div');
+      ph.className = 'gst-drop-placeholder';
+      ph.style.cssText = 'margin-top:6px;padding:12px;border:2px dashed var(--cyan);border-radius:9px;text-align:center;font-size:12px;font-weight:700;color:var(--cyan);background:var(--cyan-dim)';
+      ph.textContent = '↓ Déposer la mission ici';
+      el.appendChild(ph);
+    }
   }
   function _onCardDragLeave(event, cardId) {
     const el = document.getElementById(cardId);
-    if (el) { el.style.outline = ''; el.style.background = ''; }
+    if (!el) return;
+    if (event.relatedTarget && el.contains(event.relatedTarget)) return; // reste dans la même carte (survol d'un enfant)
+    const compatible = !!(_dragTask && el.getAttribute('data-day-id') === _dragTask.dayId && el.getAttribute('data-inst-id') !== _dragTask.fromInstanceId);
+    el.style.outline = compatible ? '2px dashed var(--cyan-border)' : '';
+    el.style.background = '';
+    const ph = el.querySelector('.gst-drop-placeholder');
+    if (ph) ph.remove();
   }
   async function _onCardDrop(event, dayId, toInstanceId, cardId) {
     event.preventDefault();
-    _onCardDragLeave(event, cardId);
     const drag = _dragTask;
-    _dragTask = null;
+    _onTaskDragEnd(); // nettoie tout le retour visuel (atténuation, contours, placeholder)
     if (!drag || drag.dayId !== dayId) return; // sécurité : jamais de déplacement inter-jours depuis cette interface
     if (drag.fromInstanceId === toInstanceId) return; // déposé sur son propre créneau
     await _performMove(dayId, drag.fromInstanceId, toInstanceId, drag.taskId);
@@ -390,6 +471,41 @@
   // admin/responsable — _canEdit() revérifié avant toute écriture, jamais
   // uniquement parce que le bouton qui l'ouvre n'est déjà rendu que pour
   // ces rôles.
+  // Panneau custom (PAS le petit modal générique MX.showModal — étape 5/6 de
+  // la demande) : racine persistante créée à la volée au premier usage,
+  // backdrop en frère (pas parent) du panneau pour que les clics dans le
+  // panneau ne remontent jamais jusqu'au backdrop et ne le ferment pas.
+  // Bascule desktop (panneau latéral droit) / mobile (feuille du bas) selon
+  // window.innerWidth AU MOMENT DE L'OUVERTURE — cohérent avec le reste du
+  // fichier qui n'utilise jamais de media queries CSS.
+  const MVP_BREAKPOINT = 760;
+
+  function _ensureMovePanelRoot() {
+    if (document.getElementById('gst-move-panel-root')) return;
+    const root = document.createElement('div');
+    root.id = 'gst-move-panel-root';
+    root.style.cssText = 'display:none;position:fixed;inset:0;z-index:2000';
+    root.innerHTML =
+      '<div id="gst-mvp-backdrop" onclick="MX.Pages.GestSemaine._closeMovePanel()" style="position:absolute;inset:0;background:rgba(0,0,0,.55)"></div>' +
+      '<div id="gst-mvp-panel" role="dialog" aria-label="Déplacer une mission"></div>';
+    document.body.appendChild(root);
+  }
+
+  function _closeMovePanel() {
+    const root = document.getElementById('gst-move-panel-root');
+    if (root) root.style.display = 'none';
+  }
+
+  function _selectMoveDest(instId) {
+    document.querySelectorAll('#gst-mvp-panel [data-mvp-option]').forEach(el => {
+      const selected = el.getAttribute('data-mvp-option') === instId;
+      el.style.borderColor = selected ? 'var(--cyan)' : 'var(--border2)';
+      el.style.background  = selected ? 'var(--cyan-dim)' : 'transparent';
+      const radio = el.querySelector('input[type="radio"]');
+      if (radio) radio.checked = selected;
+    });
+  }
+
   function _openMoveTaskModal(dayId, fromInstanceId, taskId) {
     if (!_canEdit()) return;
     if (_blockIfPastWeek(_wk())) return;
@@ -402,32 +518,55 @@
     const others = list.filter(i => i.id !== fromInstanceId);
     if (!others.length) { MX.toast('Aucun autre créneau ce jour-là pour déplacer cette mission', true); return; }
 
-    document.getElementById('m-title').textContent = 'Déplacer une mission';
-    let body = '<div style="font-size:12px;color:var(--text2);margin-bottom:2px">Mission</div>' +
-      '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(task.text) + '</div>' +
-      '<div style="font-size:12px;color:var(--text2);margin-bottom:2px">Créneau actuel</div>' +
-      '<div style="font-size:13px;margin-bottom:14px">' + esc(fromInst.icon || '') + ' ' + esc(fromInst.name) + ' — ' + esc(fromInst.start || '') + (fromInst.start || fromInst.end ? ' → ' : '') + esc(fromInst.end || '') + '</div>' +
-      '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Déplacer vers…</div>' +
-      '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:4px">';
+    _ensureMovePanelRoot();
+    const mobile = window.innerWidth < MVP_BREAKPOINT;
+    const panel = document.getElementById('gst-mvp-panel');
+    panel.style.cssText = (mobile
+      ? 'position:absolute;left:0;right:0;bottom:0;max-height:85vh;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.4)'
+      : 'position:absolute;top:0;right:0;bottom:0;width:min(440px,92vw);box-shadow:-8px 0 30px rgba(0,0,0,.4)') +
+      ';background:var(--bg2);display:flex;flex-direction:column;overflow:hidden';
+
+    let optionsHtml = '';
     others.forEach((inst, i) => {
-      body += '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border2);border-radius:10px;cursor:pointer;font-size:13px">' +
-        '<input type="radio" name="mtm-dest" value="' + esc(inst.id) + '"' + (i === 0 ? ' checked' : '') + ' style="width:18px;height:18px">' +
-        '<span style="flex:1"><strong>' + esc(inst.icon || '') + ' ' + esc(inst.name) + '</strong><br><span style="color:var(--text3);font-size:11px">' + esc(inst.start || '') + (inst.start || inst.end ? ' – ' : '') + esc(inst.end || '') + '</span></span>' +
+      optionsHtml +=
+        '<label data-mvp-option="' + esc(inst.id) + '" style="display:flex;align-items:center;gap:12px;padding:14px;border:2px solid var(--border2);border-radius:12px;cursor:pointer;margin-bottom:10px;min-height:44px" onclick="MX.Pages.GestSemaine._selectMoveDest(\'' + esc(inst.id) + '\')">' +
+          '<input type="radio" name="mtm-dest" value="' + esc(inst.id) + '"' + (i === 0 ? ' checked' : '') + ' style="width:20px;height:20px;flex-shrink:0">' +
+          '<span style="flex:1;min-width:0">' +
+            '<div style="font-size:14px;font-weight:700">' + esc(inst.icon || '') + ' ' + esc(inst.name) + '</div>' +
+            '<div style="font-size:12px;color:var(--text3);margin-top:2px">' + esc(inst.userName || 'Non assigné') + ' · ' + esc(inst.start || '') + (inst.start || inst.end ? ' – ' : '') + esc(inst.end || '') + '</div>' +
+          '</span>' +
         '</label>';
     });
-    body += '</div>';
-    document.getElementById('m-sub').innerHTML = body;
-    document.getElementById('m-actions').innerHTML =
-      '<button class="modal-btn confirm" onclick="MX.Pages.GestSemaine._doMoveTaskFromModal(\'' + esc(dayId) + '\',\'' + esc(fromInstanceId) + '\',\'' + esc(taskId) + '\')"><i class="fas fa-arrow-right-arrow-left"></i> Déplacer la mission</button>' +
-      '<button class="modal-btn cancel" onclick="MX.closeModal()">Annuler</button>';
-    document.getElementById('modal-bg').classList.add('show');
+
+    panel.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border2);flex-shrink:0">' +
+        '<div style="font-size:13px;font-weight:800;letter-spacing:.04em;color:var(--text2)">DÉPLACER UNE MISSION</div>' +
+        '<button onclick="MX.Pages.GestSemaine._closeMovePanel()" title="Fermer" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:22px;line-height:1;width:44px;height:44px;flex-shrink:0">×</button>' +
+      '</div>' +
+      '<div style="padding:20px;overflow-y:auto;flex:1">' +
+        '<div style="font-size:17px;font-weight:800;margin-bottom:18px">' + esc(task.text) + '</div>' +
+        '<div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--text3);margin-bottom:6px">ACTUELLEMENT</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border2);border-radius:10px;background:var(--bg3);margin-bottom:24px">' +
+          '<span style="font-size:18px">' + esc(fromInst.icon || '') + '</span>' +
+          '<span style="flex:1"><div style="font-size:13px;font-weight:700">' + esc(fromInst.name) + '</div><div style="font-size:11px;color:var(--text3);margin-top:2px">' + esc(fromInst.start || '') + (fromInst.start || fromInst.end ? ' – ' : '') + esc(fromInst.end || '') + '</div></span>' +
+        '</div>' +
+        '<div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--text3);margin-bottom:8px">DÉPLACER VERS</div>' +
+        optionsHtml +
+      '</div>' +
+      '<div style="display:flex;gap:10px;padding:16px 20px;border-top:1px solid var(--border2);flex-shrink:0">' +
+        '<button class="modal-btn cancel" onclick="MX.Pages.GestSemaine._closeMovePanel()" style="flex:1;min-height:46px">Annuler</button>' +
+        '<button class="modal-btn confirm" onclick="MX.Pages.GestSemaine._doMoveTaskFromModal(\'' + esc(dayId) + '\',\'' + esc(fromInstanceId) + '\',\'' + esc(taskId) + '\')" style="flex:1;min-height:46px"><i class="fas fa-arrow-right-arrow-left"></i> Déplacer</button>' +
+      '</div>';
+
+    document.getElementById('gst-move-panel-root').style.display = 'block';
+    _selectMoveDest(others[0].id);
   }
 
   function _doMoveTaskFromModal(dayId, fromInstanceId, taskId) {
-    const sel = document.querySelector('input[name="mtm-dest"]:checked');
+    const sel = document.querySelector('#gst-mvp-panel input[name="mtm-dest"]:checked');
     if (!sel) return;
     const toInstanceId = sel.value;
-    MX.closeModal();
+    _closeMovePanel();
     _performMove(dayId, fromInstanceId, toInstanceId, taskId);
   }
 
@@ -772,7 +911,7 @@
     getTodayAssignmentFor,
     _toggleShowMissions,
     _onTaskDragStart, _onTaskDragEnd, _onCardDragOver, _onCardDragLeave, _onCardDrop,
-    _openMoveTaskModal, _doMoveTaskFromModal,
+    _openMoveTaskModal, _doMoveTaskFromModal, _closeMovePanel, _selectMoveDest,
     _confirmRestoreTask, _confirmResetDayMoves,
   };
 })();
