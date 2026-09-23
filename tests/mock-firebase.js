@@ -90,11 +90,13 @@
         },
       };
     }
-    // Simule UNIQUEMENT la règle firestore.rules "config/adminSession :
-    // écriture réservée au super-admin" — pas un moteur de règles générique,
-    // seulement ce document précis, pour que les tests B/I (admin normal
-    // rejeté) reflètent fidèlement la vraie contrainte serveur.
+    // Simule UNIQUEMENT les règles firestore.rules "config/adminSession" et
+    // "config/navigation_visibility" (écriture réservée au super-admin) —
+    // pas un moteur de règles générique, seulement ces documents précis,
+    // pour que les tests d'admin normal rejeté reflètent fidèlement la
+    // vraie contrainte serveur (voir firestore.rules).
     var SUPER_ADMIN_EMAIL_MOCK = 'keyzeur94460@hotmail.fr';
+    var SUPER_ADMIN_ONLY_DOCS = { adminSession: true, navigation_visibility: true };
     // Simule un refus firestore.rules générique sur une collection entière
     // (ex. un test qui veut reproduire "shift_templates sans règle" sans
     // dépendre d'un vrai moteur de règles). Piloté depuis le test via
@@ -110,7 +112,7 @@
       return err;
     }
     function _checkAdminSessionWriteAllowed(path, id) {
-      if (path.length === 1 && path[0] === 'config' && id === 'adminSession') {
+      if (path.length === 1 && path[0] === 'config' && SUPER_ADMIN_ONLY_DOCS[id]) {
         var u = window.__mockAuth && window.__mockAuth.currentUser;
         if (!u || u.isAnonymous || u.email !== SUPER_ADMIN_EMAIL_MOCK) {
           var err = new Error('Missing or insufficient permissions.');

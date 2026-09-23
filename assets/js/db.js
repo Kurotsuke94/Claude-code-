@@ -1259,6 +1259,22 @@
       .onSnapshot(snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }
 
+  // ── VISIBILITÉ DES MODULES (Super Admin) ──
+  // Doc config/navigation_visibility : { <itemId>: { tech: bool, responsable: bool } }.
+  // Écriture réservée au Super Admin côté firestore.rules — voir
+  // assets/js/pages/nav-visibility.js pour la page d'édition et
+  // assets/js/app.js (buildNav) pour la consommation.
+  function listenNavVisibility(cb) {
+    return db.collection('config').doc('navigation_visibility')
+      .onSnapshot(snap => cb(snap.exists ? snap.data() : null), () => cb(null));
+  }
+  async function saveNavVisibility(data, actor) {
+    await db.collection('config').doc('navigation_visibility').set(
+      Object.assign({}, data, { updatedAt: FV.serverTimestamp(), updatedBy: actor || '' }),
+      { merge: true }
+    );
+  }
+
   // ── NOTIFICATIONS ──
   const R_NOTIFS = () => db.collection('notifications');
 
@@ -1611,6 +1627,7 @@
     getHotelConfig, saveHotelConfig,
     getVersions, saveVersions,
     listenMaintenance, saveMaintenance, logDeploy, listenDeployLog,
+    listenNavVisibility, saveNavVisibility,
     getRecentBibleArticles,
     listenBadges, listenUserBadges,
     addBadge, updateBadge, deleteBadge,

@@ -39,11 +39,13 @@ service cloud.firestore {
 
     // ────────────────────────────────────────────────────────────────────────
     // HELPER : Super-admin — UN seul compte Firebase Auth, en dur ici (pas de
-    // custom claims/Cloud Functions dans ce projet). Sert uniquement à
-    // restreindre l'écriture de config/adminSession (mécanisme de révocation
-    // forcée des sessions admin) : aucun autre document ni aucune autre
-    // fonctionnalité ne doit dépendre de ce helper. Ne PAS l'utiliser comme
-    // substitut/alias de isAdmin() ailleurs dans ce fichier.
+    // custom claims/Cloud Functions dans ce projet). Restreint l'écriture des
+    // documents explicitement réservés au Super Admin : config/adminSession
+    // (révocation forcée des sessions admin) et config/navigation_visibility
+    // (visibilité des menus par profil). N'utiliser ce helper QUE pour ces
+    // fonctionnalités explicitement Super-Admin-only ; ne PAS l'utiliser
+    // comme substitut/alias de isAdmin() pour des fonctionnalités ouvertes à
+    // tout admin/responsable ailleurs dans ce fichier.
     // ────────────────────────────────────────────────────────────────────────
     function isSuperAdmin() {
       return isAdmin() && request.auth.token.email == 'keyzeur94460@hotmail.fr';
@@ -73,9 +75,21 @@ service cloud.firestore {
     // Lecture   : libre (listeners db.js, Cloud Functions)
     // Écriture  : Admin uniquement (Firebase Auth)
     // Suppression : JAMAIS — configuration structurelle de l'application
+    //
+    // IMPORTANT — sémantique réelle des règles Firestore : quand plusieurs
+    // blocs "match" correspondent au même chemin (ex. ce bloc générique ET
+    // le bloc précis config/navigation_visibility plus bas), Firestore
+    // AUTORISE la requête si N'IMPORTE LEQUEL des blocs correspondants
+    // l'autorise (union/OR — PAS "le plus précis l'emporte"). Un bloc précis
+    // plus restrictif ne fait donc RIEN tant que ce bloc générique reste
+    // permissif pour ce même docId : il faut l'exclure explicitement ici.
+    // docId != 'navigation_visibility' : cette configuration (Visibilité des
+    // modules) a sa propre règle Super-Admin-only plus bas — sans cette
+    // exclusion, N'IMPORTE QUEL admin Firebase pourrait la modifier via ce
+    // bloc générique, contournant silencieusement la restriction.
     match /config/{docId} {
       allow read: if true;
-      allow create, update: if isAdmin();
+      allow create, update: if isAdmin() && docId != 'navigation_visibility';
       // delete : interdit — aucune suppression de config
 
       // Sous-collection : config/maintenance/deploy_log
@@ -119,6 +133,23 @@ service cloud.firestore {
     // SEUL super-admin — plus restrictif que /config/{docId} (isAdmin()),
     // donc prend le pas dessus pour ce document précis.
     match /config/adminSession {
+      allow read: if true;
+      allow create, update: if isSuperAdmin();
+    }
+
+    // config/navigation_visibility : configuration de visibilité des menus
+    // par profil (technicien/responsable), gérée depuis l'écran Super Admin
+    // "Visibilité des modules" (voir assets/js/pages/nav-visibility.js).
+    // Lecture libre (tout client doit pouvoir filtrer sa propre navigation) ;
+    // écriture réservée au SEUL super-admin. Le bloc /config/{docId}
+    // ci-dessus exclut explicitement ce docId de son propre "allow write" —
+    // sans cette exclusion, sa condition isAdmin() (union/OR avec ce bloc-
+    // ci, voir commentaire plus haut) permettrait à N'IMPORTE QUEL admin
+    // Firebase d'écrire ce document malgré cette règle. Un admin Firebase
+    // non-super-admin ne doit jamais pouvoir modifier cette configuration,
+    // y compris par appel direct à l'API — vérifié par
+    // tests/firestore_rules_navigation_visibility_test.js (émulateur réel).
+    match /config/navigation_visibility {
       allow read: if true;
       allow create, update: if isSuperAdmin();
     }

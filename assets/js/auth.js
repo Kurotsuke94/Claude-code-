@@ -9,13 +9,16 @@
   // déclenchement asynchrone du listener).
   let _switchingToPin = false;
 
-  // ── SUPER-ADMIN (révocation forcée des sessions admin) ──
+  // ── SUPER-ADMIN ──
   // UN seul compte, en dur — même valeur que isSuperAdmin() dans
-  // firestore.rules, qui est la vraie source de vérité côté serveur. Ceci
-  // ne sert qu'à l'affichage du bouton côté client (UX) ; la sécurité réelle
-  // est appliquée par les règles Firestore sur config/adminSession, jamais
-  // par cette seule vérification client. Portée strictement limitée à ce
-  // mécanisme — ne remplace jamais isAdmin() ailleurs.
+  // firestore.rules, qui est la vraie source de vérité côté serveur. Ceci ne
+  // sert qu'à l'affichage/aux garde-fous côté client (UX) ; la sécurité
+  // réelle est toujours appliquée par les règles Firestore correspondantes
+  // (config/adminSession, config/navigation_visibility, …), jamais par cette
+  // seule vérification client. Utilisé pour gater les fonctionnalités
+  // explicitement réservées au Super Admin (révocation forcée des sessions
+  // admin, Visibilité des modules, …) — ne remplace jamais isAdmin() ailleurs
+  // pour les fonctionnalités ouvertes à tout admin/responsable.
   var SUPER_ADMIN_EMAIL = 'keyzeur94460@hotmail.fr';
   function isSuperAdmin() {
     var u = window.MX.state.adminUser;

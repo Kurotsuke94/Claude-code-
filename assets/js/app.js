@@ -97,6 +97,7 @@
     if (id === "corbeille")    return Pages.Corbeille ? Pages.Corbeille.render() : _renderStub("Corbeille", "fa-trash-can", "Chargement…");
     if (id === "mx-doc")       return Pages.MxDoc      ? Pages.MxDoc.render()      : _renderStub("MX Doc",             "fa-file-contract", "Chargement…");
     if (id === "mx-room-list") return Pages.MxRoomList ? Pages.MxRoomList.render() : _renderStub("Liste de chambres", "fa-hotel",         "Chargement…");
+    if (id === "nav-visibility") return Pages.NavVisibility ? Pages.NavVisibility.render() : null;
     if (id === "ios-diag") {
       if (!MX.Auth || !MX.Auth.isAdmin || !MX.Auth.isAdmin()) { MX.showPage("home"); return; }
       return Pages.IosDiag ? Pages.IosDiag.render() : _renderStub("Diagnostic Push", "fa-stethoscope", "Chargement…");
@@ -235,6 +236,7 @@
     'badges':        { icon: 'fa-medal',           l: 'Badges' },
     'corbeille':     { icon: 'fa-trash-can',       l: 'Corbeille' },
     'mx-doc':        { icon: 'fa-file-contract',   l: 'MX Doc' },
+    'nav-visibility':{ icon: 'fa-eye',             l: 'Visibilité des modules' },
   };
 
   let _favsCache = null;
@@ -440,10 +442,11 @@
     const clPages = ["today-cl", "mes-missions", ...DAYS.map(d => d.id)];
     h += `<div class="sx-modules">`;
     h += `<div class="sx-mod-sep"><span class="sx-lbl">Modules</span></div>`;
-    if (_see('checklist'))    { h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages }); _dbgAdd("Missions"); }
-    if (_see('counters'))     { h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" }); _dbgAdd("Compteurs"); }
-    if (_see('interventions')){ h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" }); _dbgAdd("Interventions"); }
-    if (_see('planning'))     { h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true }); _dbgAdd("Planning"); }
+    const _nv = MX.NavVisibility ? MX.NavVisibility.shouldShow : () => true;
+    if (_see('checklist')    && _nv('mes-missions'))  { h += _item("mes-missions",  "fa-list-check",    "Missions",      { favable: true, matchPages: clPages }); _dbgAdd("Missions"); }
+    if (_see('counters')     && _nv('consommations')) { h += _item("consommations", "fa-gauge-high",    "Compteurs",     { favable: true, fn: "MX.showCsoTab('compteurs')" }); _dbgAdd("Compteurs"); }
+    if (_see('interventions')&& _nv('interventions')) { h += _item("interventions", "fa-wrench",        "Interventions", { favable: true, dynBadge: "int" }); _dbgAdd("Interventions"); }
+    if (_see('planning')     && _nv('planning'))      { h += _item("planning",      "fa-calendar-days", "Planning",      { favable: true }); _dbgAdd("Planning"); }
     h += `</div>`;
 
     // ── DIVIDER ──
@@ -451,15 +454,15 @@
 
     // ── 📦 Gestion ──
     let gestItems = "";
-    if (_see('resources')) { gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true }); _dbgAdd("Gestion > Ressources"); }
-    if (_see('messages'))  { gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true }); _dbgAdd("Gestion > Journal"); }
+    if (_see('resources') && _nv('documents')) { gestItems += _item("documents", "fa-book",     "Ressources",  { sub: true, favable: true }); _dbgAdd("Gestion > Ressources"); }
+    if (_see('messages')  && _nv('msgs'))      { gestItems += _item("msgs",      "fa-book-open", "Journal",    { sub: true, badge: true, favable: true }); _dbgAdd("Gestion > Journal"); }
     if (gestItems) {
       h += _group("fa-cube", "sx-group-ico--cyan", "Gestion", "gest", "toggleNavGest", _gestOpen, gestItems, "documents", "Ressources");
       _dbgAdd("[Groupe] Gestion");
     }
 
     // ── 📦 Stock ──
-    if (_see('stock')) {
+    if (_see('stock') && _nv('stock')) {
       let stockItems = "";
       [
         { tab: "overview",  icon: "fa-grip",          l: "Vue d'ensemble" },
@@ -480,7 +483,7 @@
     }
 
     // ── 📊 Analyses ──
-    if (_see('counters') || _see('consumption')) {
+    if ((_see('counters') || _see('consumption')) && _nv('anly')) {
       let anlyItems = "";
       [
         { tab: "dashboard",   icon: "fa-gauge",          l: "Accueil" },
@@ -496,7 +499,7 @@
     }
 
     // ── 🛠️ Maintenance PMP (respOnly) ──
-    if (canAll) {
+    if (canAll && _nv('maint')) {
       var pmpItems = '';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'dashboard\')" title="Tableau de bord PMP"><i class="fas fa-gauge sx-ico"></i><span class="sx-lbl">Tableau de bord</span></button>';
       pmpItems += '<button class="sx-item sx-sub" onclick="MX.showPmpTab(\'equipements\')" title="Équipements PMP"><i class="fas fa-wrench sx-ico"></i><span class="sx-lbl">Équipements</span></button>';
@@ -512,7 +515,7 @@
     }
 
     // ── 📄 MX Doc (respOnly) ──
-    if (canAll) {
+    if (canAll && _nv('mxdoc')) {
       var mxdItems = '';
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'modeles\')"    title="Mes modèles MX Doc"><i class="fas fa-layer-group sx-ico"></i><span class="sx-lbl">Mes modèles</span></button>';
       mxdItems += '<button class="sx-item sx-sub" onclick="MX.showMxDocTab(\'historique\')" title="Historique MX Doc"><i class="fas fa-clock-rotate-left sx-ico"></i><span class="sx-lbl">Historique</span></button>';
@@ -535,35 +538,54 @@
         return `<div class="sx-sec-sep"><span>${label}</span></div>`;
       }
       let aItems = "";
-      aItems += _sec("PILOTAGE");
-      aItems += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
-      aItems += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
 
+      // Sous-sections dont chaque élément est soumis à la config de
+      // visibilité (Super Admin) EN PLUS des conditions existantes — jamais
+      // à leur place. Titre de sous-section masqué si tous ses éléments le
+      // sont (aucune famille vide affichée, voir MX.NavVisibility).
+      let secPilotage = "";
+      if (_nv('org-resp'))             secPilotage += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
+      if (_nv('gestion-semaine-tech')) secPilotage += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
+      if (secPilotage) aItems += _sec("PILOTAGE") + secPilotage;
+
+      // ÉQUIPE : jamais configurable (menus purement administratifs, restent
+      // protégés par les rôles existants uniquement — voir audit §13).
       aItems += _sec("ÉQUIPE");
       aItems += _tabBtn("users",          "fa-users",            "Utilisateurs");
       aItems += _tabBtn("roles",          "fa-shield-halved",    "Rôles");
 
-      aItems += _sec("SUPERVISION");
-      aItems += _tabBtn("alerts",         "fa-bell",             "Alertes");
-      aItems += _tabBtn("alertes-config", "fa-bell-concierge",   "Config Alertes");
-      aItems += _tabBtn("logs",           "fa-chart-line",       "Activité");
-      aItems += _tabBtn("history",        "fa-clock-rotate-left","Historique");
+      let secSupervision = "";
+      if (_nv('alerts'))         secSupervision += _tabBtn("alerts",         "fa-bell",             "Alertes");
+      if (_nv('alertes-config')) secSupervision += _tabBtn("alertes-config", "fa-bell-concierge",   "Config Alertes");
+      if (_nv('logs'))           secSupervision += _tabBtn("logs",           "fa-chart-line",       "Activité");
+      if (_nv('history'))        secSupervision += _tabBtn("history",        "fa-clock-rotate-left","Historique");
+      if (secSupervision) aItems += _sec("SUPERVISION") + secSupervision;
 
-      aItems += _sec("MAINTENANCE");
-      aItems += _pageBtn("pmp",           "fa-screwdriver-wrench","Maintenance PMP");
+      // "Maintenance PMP" pointe vers la même page ('pmp') que le groupe
+      // dédié ci-dessus — même clé de visibilité ('maint') pour les deux.
+      let secMaintenance = "";
+      if (_nv('maint')) secMaintenance += _pageBtn("pmp", "fa-screwdriver-wrench", "Maintenance PMP");
+      if (secMaintenance) aItems += _sec("MAINTENANCE") + secMaintenance;
 
-      aItems += _sec("CONNAISSANCES");
-      aItems += _tabBtn("bible-admin",    "fa-book-open",        "Validation Bible");
-      aItems += _tabBtn("badges-admin",   "fa-medal",            "Badges");
+      let secConnaissances = "";
+      if (_nv('bible-admin'))  secConnaissances += _tabBtn("bible-admin",  "fa-book-open", "Validation Bible");
+      if (_nv('badges-admin')) secConnaissances += _tabBtn("badges-admin", "fa-medal",     "Badges");
+      if (secConnaissances) aItems += _sec("CONNAISSANCES") + secConnaissances;
 
-      aItems += _sec("DONNÉES");
-      aItems += _pageBtn("corbeille",     "fa-trash-can",        "Corbeille & Archives");
+      let secDonnees = "";
+      if (_nv('corbeille')) secDonnees += _pageBtn("corbeille", "fa-trash-can", "Corbeille & Archives");
+      if (secDonnees) aItems += _sec("DONNÉES") + secDonnees;
 
       if (isAdmin) {
         aItems += `<div class="sx-admin-sep"><span>Super Admin</span></div>`;
         aItems += _tabBtn("superadmin",   "fa-hotel",           "Hôtels & Config");
         aItems += _tabBtn("pin",          "fa-key",             "Codes PIN & Accès");
         aItems += `<button class="sx-item sx-sub" onclick="MX.PwaDebug && MX.PwaDebug.open()" title="Diagnostic PWA"><i class="fas fa-wrench sx-ico"></i><span class="sx-lbl">Diagnostic PWA</span><span class="sx-count">DEBUG</span></button>`;
+        // "Visibilité des modules" : réservé au VRAI Super Admin, jamais à
+        // un admin Firebase quelconque — isAdmin() seul ne suffit pas ici.
+        if (MX.Auth.isSuperAdmin && MX.Auth.isSuperAdmin()) {
+          aItems += _pageBtn("nav-visibility", "fa-eye", "Visibilité des modules");
+        }
       }
       const _alertCnt = window.MX.Alerts ? MX.Alerts.activeCount() : (MX.state.triggeredAlerts || []).filter(a => !a.acknowledged).length;
       const _alertBadge = _alertCnt ? `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:inline-flex">${_alertCnt}</span>` : `<span class="sx-dyn-badge" id="sxdb_alert-badge" style="display:none"></span>`;
@@ -668,10 +690,10 @@
     const allCl  = ["today-cl", "mes-missions", ...dayIds];
     let bot = `<div class="mbn-bar">`;
     bot += `<button class="mbn-btn${cur==="home"?" mbn-act":""}" onclick="MX.showPage('home')"><i class="fas fa-house"></i><span>Accueil</span></button>`;
-    bot += `<button class="mbn-btn${allCl.includes(cur)?" mbn-act":""}" onclick="MX.showPage('mes-missions')"><i class="fas fa-list-check"></i><span>Missions</span></button>`;
+    if (_see('checklist') && _nv('mes-missions')) bot += `<button class="mbn-btn${allCl.includes(cur)?" mbn-act":""}" onclick="MX.showPage('mes-missions')"><i class="fas fa-list-check"></i><span>Missions</span></button>`;
     bot += `<button class="mbn-fab" id="mbn-fab-btn" onclick="MX.openFabMenu()"><i class="fas fa-plus"></i></button>`;
-    bot += `<button class="mbn-btn${cur==="consommations"?" mbn-act":""}" onclick="MX.showCsoTab('compteurs')"><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
-    bot += `<button class="mbn-btn${cur==="planning"?" mbn-act":""}" onclick="MX.showPage('planning')"><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
+    if (_see('counters') && _nv('consommations')) bot += `<button class="mbn-btn${cur==="consommations"?" mbn-act":""}" onclick="MX.showCsoTab('compteurs')"><i class="fas fa-gauge-high"></i><span>Compteurs</span></button>`;
+    if (_see('planning') && _nv('planning')) bot += `<button class="mbn-btn${cur==="planning"?" mbn-act":""}" onclick="MX.showPage('planning')"><i class="fas fa-calendar-days"></i><span>Planning</span></button>`;
     bot += `</div>`;
     botNav.innerHTML = bot;
 
@@ -1619,6 +1641,16 @@
     DB.listenRoles(list => {
       state.roles = list;
       buildNav();
+    });
+
+    // Visibilité des modules (Super Admin) — écoute temps réel : erreur/
+    // absence de document => cb(null), donc state.navVisibility reste
+    // undefined et MX.NavVisibility.shouldShow() retombe sur "tout visible"
+    // (valeurs par défaut, voir assets/js/pages/nav-visibility.js).
+    DB.listenNavVisibility(cfg => {
+      state.navVisibility = cfg || null;
+      buildNav();
+      if (state.currentPage === 'nav-visibility' && MX.Pages.NavVisibility) MX.Pages.NavVisibility.render();
     });
 
     DB.listenAlertRules(list => {
