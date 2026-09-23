@@ -8,6 +8,10 @@
   // vient tout juste d'être choisi (race entre auth.signOut() et le
   // déclenchement asynchrone du listener).
   let _switchingToPin = false;
+  // true entre l'appel à auth.signInWithEmailAndPassword() dans login() et
+  // la fin de cette même tentative (succès ou échec) — voir le commentaire
+  // détaillé au point d'utilisation dans onAuthStateChanged() plus bas.
+  let _explicitAdminLoginInFlight = false;
 
   // ── SUPER-ADMIN ──
   // UN seul compte, en dur — même valeur que isSuperAdmin() dans
@@ -167,7 +171,26 @@
     // même valide côté SDK, n'est PAS autorisée à s'exposer côté app.
     // Vérifié AVANT toute assignation d'état/UI — aucun rendu admin, aucune
     // navigation admin, aucun _onLogin() ne doit jamais se produire ici.
-    if (candidateAdmin && !_isAdminSessionEnvelopeValid(candidateAdmin.uid)) {
+    //
+    // EXCEPTION — _explicitAdminLoginInFlight : le SDK Firebase Auth déclenche
+    // ce onAuthStateChanged AVANT que la promesse de
+    // auth.signInWithEmailAndPassword() dans login() ne se résolve (vérifié
+    // empiriquement contre l'émulateur Auth réel — l'écart est de quelques
+    // millisecondes mais systématique, pas une rare condition de course).
+    // _writeAdminSessionEnvelope() n'a donc jamais eu la moindre chance de
+    // s'exécuter avant ce contrôle lors d'un login FRAIS : sans cette
+    // exception, CETTE vérification rejetait inconditionnellement chaque
+    // connexion admin, y compris la plus légitime qui soit (login() vient
+    // littéralement de réussir). L'exception ne s'applique qu'à la fenêtre
+    // stricte ouverte par login() lui-même — une session réellement
+    // restaurée (reload, retour de background) ne passe jamais par ce
+    // drapeau et reste pleinement soumise au contrôle d'enveloppe.
+    if (candidateAdmin && _explicitAdminLoginInFlight) {
+      // Rien à faire ici : on laisse tomber jusqu'à l'assignation normale
+      // ci-dessous. login() écrira l'enveloppe juste après (comportement
+      // inchangé), la rendant valide pour les prochains contrôles
+      // périodiques (_checkAdminSessionExpiry, retour au premier plan).
+    } else if (candidateAdmin && !_isAdminSessionEnvelopeValid(candidateAdmin.uid)) {
       console.warn('[Auth] Session admin Firebase restaurée mais enveloppe locale absente/expirée — refus et déconnexion.');
       window.MX.state.adminUser = null;
       _clearAdminSessionEnvelope();
@@ -529,6 +552,11 @@
     err.classList.add("hidden");
 
     try {
+      // Ouvre la fenêtre d'exception lue par onAuthStateChanged() — voir le
+      // commentaire détaillé là-bas. Doit être positionné AVANT l'appel,
+      // car onAuthStateChanged peut se déclencher avant même que ce await
+      // ne rende la main ici (vérifié empiriquement contre l'émulateur).
+      _explicitAdminLoginInFlight = true;
       const cred = await auth.signInWithEmailAndPassword(email, pass);
       // Ancre la fenêtre de validité de la session admin applicative (2h
       // fixes, voir plus haut) sur CETTE authentification explicite —
@@ -543,6 +571,7 @@
       err.textContent = "Email ou mot de passe incorrect.";
       err.classList.remove("hidden");
     } finally {
+      _explicitAdminLoginInFlight = false;
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Se connecter';
     }
