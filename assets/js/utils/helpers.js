@@ -198,7 +198,7 @@
     if (wkDayInstances && wkDayInstances.length) {
       const instances = wkDayInstances.map(function (inst) {
         const tasks = (inst.tasks || []).map(function (t) {
-          return { id: t.id, text: t.text || "", done: !!t.done, assignedTo: null };
+          return { id: t.id, text: t.text || "", done: !!t.done, assignedTo: null, movedFrom: t.movedFrom || null };
         });
         const total = tasks.length;
         const done  = tasks.filter(function (t) { return t.done; }).length;

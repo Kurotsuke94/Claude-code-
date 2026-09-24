@@ -245,6 +245,13 @@
     var schedule = MX.getEffectiveDaySchedule(todayId);
     if (schedule.source === 'week_slots') {
       var myInstances = MX.myInstancesFromSchedule(schedule, cu.name);
+      // Nom du créneau d'origine pour l'affichage "⚡ Déplacée depuis {origine}"
+      // (mission.movedFrom = id de l'instance source, voir moveWeekSlotTask) —
+      // résolu contre TOUTES les instances du jour (schedule.instances), pas
+      // seulement celles du technicien courant, car la source peut appartenir
+      // à un autre technicien.
+      var instNameById = {};
+      (schedule.instances || []).forEach(function (i) { instNameById[i.id] = i.name || ''; });
       myInstances.forEach(function (inst) {
         (inst.tasks || []).forEach(function (task) {
           result.push({
@@ -253,6 +260,8 @@
             done: !!task.done, note: '', fromUser: null,
             mine: true, unassigned: false, missionType: 'checklist', accepted: true,
             zone: '', subZone: '', estimatedDuration: '', dueDate: todayId, sortOrder: 0,
+            movedFrom: task.movedFrom || null,
+            movedFromName: task.movedFrom ? (instNameById[task.movedFrom] || '') : '',
           });
         });
       });
@@ -673,35 +682,20 @@
     // Partition
     var myMissions     = allTasks.filter(function (t) { return t.mine && t.accepted !== false && !t.unassigned; });
     var newMissions    = allTasks.filter(function (t) { return t.mine && t.accepted === false && !t.done; });
-    var availableTasks = checklistTasks.filter(function (t) { return t.unassigned; });
 
     // Stats
     var totalCount  = myMissions.length;
     var doneCount   = myMissions.filter(function (t) { return t.done; }).length;
     var todoCount   = myMissions.filter(function (t) { return !t.done; }).length;
-    var urgentCount = myMissions.filter(function (t) { return t.priority === 'haute' || t.priority === 'critique'; }).length;
-    // REFONTE : "En cours" / "En retard" réutilisent getMissionStatus() déjà
-    // existant (aucun nouveau calcul de statut) pour les 4 cartes KPI.
-    var progressCount = myMissions.filter(function (t) { return getMissionStatus(t) === 'progress'; }).length;
-    var lateCount     = myMissions.filter(function (t) { return getMissionStatus(t) === 'late'; }).length;
     var newCount    = newMissions.length;
     var pct         = totalCount ? Math.round(doneCount / totalCount * 100) : 0;
     var pctCol      = pct >= 80 ? TC.checklist : pct >= 40 ? '#f97316' : TC.intervention;
 
-    // Tab counts
+    // Tab counts (alimentent la barre de filtres segmentée)
     var clCount   = myMissions.filter(function (t) { return t.missionType === 'checklist';    }).length;
     var intCount  = myMissions.filter(function (t) { return t.missionType === 'intervention'; }).length;
     var pmpCount  = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; }).length;
     var toutCount = myMissions.filter(function (t) { return !t.done; }).length;
-
-    // Unseen badges
-    var unseenInt = _allMissions.filter(function (m) {
-      var mt = m.isPmp ? 'pmp' : (m.missionType || 'intervention');
-      return mt === 'intervention' && !m.done && _isNew(m.id);
-    }).length;
-    var unseenPmp = _allMissions.filter(function (m) {
-      return (m.isPmp || m.missionType === 'pmp') && !m.done && _isNew(m.id);
-    }).length;
 
     // ── Colonne latérale "Créneaux" — les VRAIS créneaux de la journée pour
     // ce technicien (0, 1 ou plusieurs), jamais 3 lignes fixes matin/
@@ -730,8 +724,6 @@
     // ── Confetti canvas ─────────────────────────
     h += '<canvas id="mm-confetti-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none"></canvas>';
 
-    h += '<div class="mtv-layout"><div class="mtv-main">';
-
     // ── Hero ──────────────────────────────────────
     h += '<div class="mm-v3-hero mtv-hero">'
       + '<div class="mm-v3-hero-av" style="background:' + avBg + ';color:' + avFg + '">' + e(inits) + '</div>'
@@ -749,37 +741,19 @@
     h += '<button class="mtv-today-btn" onclick="MX.MM.render()"><i class="fas fa-calendar-day"></i> Aujourd\'hui</button>';
     h += '</div>';
 
-    // ── KPI cards (réutilise le style admin .mis-kpi-*) ──
-    h += '<div class="mis-kpi-row mtv-kpi-row">'
-      + '<div class="mis-kpi-card mis-kpi-card--main"><div class="mis-kpi-ico"><i class="fas fa-list-check"></i></div>'
-      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + todoCount + '</div><div class="mis-kpi-l">Tâches à réaliser</div><div class="mis-kpi-sub">aujourd\'hui</div></div></div>'
-      + '<div class="mis-kpi-card mis-kpi-card--green"><div class="mis-kpi-ico"><i class="fas fa-check"></i></div>'
-      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + doneCount + '</div><div class="mis-kpi-l">Terminées</div><div class="mis-kpi-sub">aujourd\'hui</div></div></div>'
-      + '<div class="mis-kpi-card mis-kpi-card--orange"><div class="mis-kpi-ico"><i class="fas fa-clock"></i></div>'
-      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + progressCount + '</div><div class="mis-kpi-l">En cours</div></div></div>'
-      + '<div class="mis-kpi-card mis-kpi-card--red"><div class="mis-kpi-ico"><i class="fas fa-triangle-exclamation"></i></div>'
-      + '<div class="mis-kpi-body"><div class="mis-kpi-n">' + lateCount + '</div><div class="mis-kpi-l">En retard</div><div class="mis-kpi-sub">à traiter</div></div></div>'
+    // ── Progression de la journée + 3 KPI — remplace l'ancienne rangée de
+    // 4 cartes mis-kpi ; mêmes données déjà calculées ci-dessus (todoCount/
+    // doneCount/totalCount/pct), aucun nouveau calcul de statut. ──
+    h += '<div class="mm-cp-progress">'
+      + '<div class="mm-cp-progress-hd"><span>Progression de la journée</span><strong style="color:' + pctCol + '">' + pct + '%</strong></div>'
+      + '<div class="mtv-side-prog-track mm-cp-progress-track"><div class="mtv-side-prog-fill" style="width:' + pct + '%;background:' + pctCol + '"></div></div>'
+      + '<div class="mm-cp-progress-sub">' + doneCount + ' / ' + totalCount + ' mission' + (totalCount > 1 ? 's' : '') + ' terminée' + (totalCount > 1 ? 's' : '') + '</div>'
       + '</div>';
-
-    // ── 4-Tab navigation (Tout / Missions / PMP / Interventions) ──
-    var TABS = [
-      { id: 'tout',         icon: 'fa-table-cells-large', l: 'Tout',          count: toutCount, badge: 0,         col: 'var(--cyan)'  },
-      { id: 'checklist',    icon: 'fa-clipboard-check',   l: 'Missions',      count: clCount,   badge: 0,         col: TC.checklist    },
-      { id: 'pmp',          icon: 'fa-screwdriver-wrench',l: 'PMP',           count: pmpCount,  badge: unseenPmp, col: TC.pmp          },
-      { id: 'intervention', icon: 'fa-wrench',            l: 'Interventions', count: intCount,  badge: unseenInt, col: TC.intervention },
-    ];
-    h += '<div class="mtv-tabs">';
-    TABS.forEach(function (tab) {
-      var active = _activeTab === tab.id;
-      h += '<button class="mtv-tab' + (active ? ' mtv-tab--active' : '') + '"'
-        + (active ? ' style="background:' + tab.col + '"' : ' style="--tab-col:' + tab.col + '"')
-        + ' onclick="MX.MM.setTab(\'' + tab.id + '\')">'
-        + '<i class="fas ' + tab.icon + '"></i><span>' + e(tab.l) + '</span>'
-        + '<span class="mtv-tab-ct">' + tab.count + '</span>'
-        + (tab.badge > 0 ? '<span class="mm-v3-tab-badge">' + tab.badge + '</span>' : '')
-        + '</button>';
-    });
-    h += '</div>';
+    h += '<div class="mm-cp-kpis">'
+      + '<div class="mm-cp-kpi"><i class="fas fa-check" style="color:' + TC.checklist + '"></i><strong>' + doneCount + '</strong><span>Terminées</span></div>'
+      + '<div class="mm-cp-kpi"><i class="fas fa-list-check" style="color:' + TC.urgence + '"></i><strong>' + todoCount + '</strong><span>Restantes</span></div>'
+      + '<div class="mm-cp-kpi"><i class="fas fa-layer-group" style="color:var(--text2)"></i><strong>' + totalCount + '</strong><span>Total</span></div>'
+      + '</div>';
 
     // ── Nouvelles missions ────────────────────────
     if (newCount) {
@@ -791,12 +765,51 @@
       h += '</div></div>';
     }
 
+    // Bravo + confetti quand plus aucune mission du jour n'est à faire
+    // (réutilise todoCount/totalCount déjà calculés, aucun nouveau calcul).
+    if (totalCount > 0 && todoCount === 0) {
+      h += '<div class="mm-v3-congrats">'
+        + '<div class="mm-v3-congrats-ico">🏆</div>'
+        + '<div class="mm-v3-congrats-ttl">Toutes les missions terminées !</div>'
+        + '<div class="mm-v3-congrats-sub">Félicitations ' + e(fname) + ' !</div>'
+        + '</div>';
+      setTimeout(function () { if (typeof _confetti === 'function') _confetti(); }, 200);
+    }
+
+    // ══════════════════════════════════════════════
+    // COCKPIT 3 COLONNES — CE QUE JE DOIS FAIRE / CE QUE JE FAIS / MA JOURNÉE
+    // Les 4 anciens onglets (Tout/Missions/PMP/Interventions) deviennent 4
+    // FILTRES sur UNE seule liste + UN seul panneau central (validé) —
+    // _activeTab porte toujours la même valeur qu'avant ('tout'|'checklist'|
+    // 'intervention'|'pmp'), seule sa représentation visuelle change.
+    // ══════════════════════════════════════════════
+    h += '<div class="mtv-layout mm-cp-layout">';
+
+    // ── Colonne gauche : CE QUE JE DOIS FAIRE ──
+    h += '<div class="mm-cp-left">'
+      + '<div class="mm-cp-col-ttl"><i class="fas fa-list-check"></i> Ce que je dois faire</div>';
+
+    var CP_FILTERS = [
+      { id: 'tout',         l: 'Tout',          count: toutCount },
+      { id: 'checklist',    l: 'Checklist',     count: clCount   },
+      { id: 'intervention', l: 'Interventions', count: intCount  },
+      { id: 'pmp',          l: 'PMP',           count: pmpCount  },
+    ];
+    h += '<div class="mm-cp-filterbar">';
+    CP_FILTERS.forEach(function (f) {
+      var active = _activeTab === f.id;
+      h += '<button class="mm-cp-filter-btn' + (active ? ' mm-cp-filter-btn--active' : '') + '" data-tab="' + f.id + '" onclick="MX.MM._cpSetFilter(\'' + f.id + '\')">'
+        + e(f.l) + (f.count > 0 ? ' <span class="mm-cp-filter-ct">' + f.count + '</span>' : '')
+        + '</button>';
+    });
+    h += '</div>';
+
     // ── Toolbar: search + Filtres + filter pills ──
-    h += '<div class="mm-v3-toolbar">'
+    h += '<div class="mm-v3-toolbar mm-cp-toolbar">'
       + '<div class="mtv-toolbar-row">'
       + '<div class="mm-v3-search-wrap">'
       + '<i class="fas fa-magnifying-glass mm-v3-search-ico"></i>'
-      + '<input class="mm-v3-search-inp" type="text" placeholder="Rechercher une tâche…" value="' + e(_searchQuery) + '" oninput="MX.MM._doMmSearch(this.value)">'
+      + '<input class="mm-v3-search-inp" type="text" placeholder="Rechercher une mission…" value="' + e(_searchQuery) + '" oninput="MX.MM._doMmSearch(this.value)">'
       + (_searchQuery ? '<button class="mm-v3-search-clr" onclick="MX.MM._doMmSearch(\'\')" title="Effacer"><i class="fas fa-times"></i></button>' : '')
       + '</div>'
       + '<button class="mtv-filters-btn' + (_filtersOpen || _activeFilter !== 'all' ? ' mtv-filters-btn--active' : '') + '" onclick="MX.MM.toggleFilters()">'
@@ -819,431 +832,17 @@
     }
     h += '</div>';
 
-    // ── Content ───────────────────────────────────
-    h += '<div class="mm-v3-content">';
+    h += '<div class="mm-cp-list" id="mm-cp-list">' + _renderCockpitList(myMissions, todayISO) + '</div>';
+    h += '</div>'; // mm-cp-left
 
-    if (_activeTab === 'checklist') {
-      // ── Affectation automatique du jour — plus aucune prise de créneau ──
-      // Le technicien ne choisit jamais son créneau. Un groupe "Votre
-      // créneau du jour" est rendu PAR INSTANCE week_slots (0, 1 ou
-      // plusieurs — un même technicien peut être affecté à plusieurs
-      // créneaux le même jour, voir audit Mes missions), même source que
-      // _getChecklistTasks() (getEffectiveDaySchedule/myInstancesFromSchedule).
-      // Repli sur le créneau legacy réclamé (dailyClaims) uniquement pour un
-      // jour jamais préparé via Gestion semaine tech.
-      var mmSchedule = MX.getEffectiveDaySchedule(MX.todayId());
-      var slotGroups = [];
-      if (mmSchedule.source === 'week_slots') {
-        MX.myInstancesFromSchedule(mmSchedule, cu ? cu.name : null).forEach(function (inst) {
-          slotGroups.push({ key: inst.id, name: inst.name, icon: inst.icon || '', start: inst.start || '', end: inst.end || '' });
-        });
-      } else {
-        var asg = _getTodayAssignment();
-        if (asg) {
-          var si = SLOT_INFO[asg.slot];
-          slotGroups.push({ key: asg.slot, name: si.l, icon: si.icon, start: '', end: '' });
-        }
-      }
+    // ── Colonne centrale : CE QUE JE FAIS ──
+    h += '<div class="mm-cp-center">'
+      + '<div id="mm-cp-detail">' + _renderCpDetail(_selectedCardId) + '</div>'
+      + '</div>';
 
-      if (slotGroups.length) {
-        slotGroups.forEach(function (g) {
-          var mSlotTasks = checklistTasks.filter(function (t) { return t.slot === g.key && t.mine; });
-          var mSlotDone = mSlotTasks.filter(function (t) { return t.done; }).length;
-          var mSlotPct  = mSlotTasks.length ? Math.round(mSlotDone / mSlotTasks.length * 100) : 0;
-          var barCol    = mSlotPct === 100 ? TC.checklist : mSlotPct >= 50 ? '#f97316' : TC.intervention;
-
-          h += '<div class="mm-v3-slot-group">'
-            + '<div class="mm-v3-slot-hd">'
-            + '<span class="mm-v3-slot-icon">' + e(g.icon) + '</span>'
-            + '<span class="mm-v3-slot-name">' + e(g.name) + '</span>'
-            + '<span class="mm-v3-slot-sub">' + e(g.start) + (g.start || g.end ? ' – ' : '') + e(g.end) + '</span>';
-          if (mSlotTasks.length) {
-            h += '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + mSlotPct + '%;background:' + barCol + '"></div></div>'
-              + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + mSlotDone + '/' + mSlotTasks.length + '</span>';
-          }
-          h += '</div>';
-
-          h += '<div class="mm-v3-slot-status mm-v3-slot-status--mine">'
-            + '<span><i class="fas fa-check-circle"></i> Votre créneau du jour</span>'
-            + '</div>';
-
-          var slotFiltered = _applyFilters(mSlotTasks, todayISO);
-          if (mSlotTasks.length === 0) {
-            h += '<div class="mm-v3-slot-empty">Aucune tâche dans ce créneau.</div>';
-          } else if (slotFiltered.length === 0) {
-            h += '<div class="mm-v3-slot-empty">Aucune tâche ne correspond aux filtres actifs.</div>';
-          } else {
-            h += '<div class="mm-v3-cards">';
-            slotFiltered.forEach(function (task) { h += _checklistCard(task); });
-            h += '</div>';
-          }
-          h += '</div>';
-        });
-      } else {
-        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">⚠️</div>'
-          + '<div class="mm-v3-empty-ttl">Aucun créneau attribué</div>'
-          + '<div class="mm-v3-empty-sub">Vous n\'avez pas de créneau attribué pour aujourd\'hui.<br>Veuillez contacter votre responsable.</div></div>';
-      }
-
-      // Congrats + confetti when all done
-      if (clCount > 0 && myMissions.filter(function (t) { return t.missionType === 'checklist' && !t.done; }).length === 0) {
-        h += '<div class="mm-v3-congrats">'
-          + '<div class="mm-v3-congrats-ico">🏆</div>'
-          + '<div class="mm-v3-congrats-ttl">Toutes les missions terminées !</div>'
-          + '<div class="mm-v3-congrats-sub">Félicitations ' + e(fname) + ' !</div>'
-          + '</div>';
-        setTimeout(function () { if (typeof _confetti === 'function') _confetti(); }, 200);
-      }
-
-    } else if (_activeTab === 'intervention') {
-      var intTasks  = myMissions.filter(function (t) { return t.missionType === 'intervention'; });
-      var intFilt   = _applyFilters(intTasks, todayISO);
-      if (intFilt.length === 0) {
-        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">🔧</div>'
-          + '<div class="mm-v3-empty-ttl">' + (intTasks.length === 0 ? 'Aucune intervention assignée' : 'Aucune intervention ne correspond') + '</div>'
-          + '<div class="mm-v3-empty-sub">' + (intTasks.length === 0 ? 'Pas d\'intervention pour aujourd\'hui.' : 'Ajustez les filtres.') + '</div></div>';
-      } else {
-        h += '<div class="mm-v3-cards">';
-        intFilt.forEach(function (task) { h += _interventionCard(task); });
-        h += '</div>';
-      }
-
-    } else if (_activeTab === 'pmp') {
-      // ── Classification PMP (v1.1.05) ───────────────
-      var curName2    = cu ? cu.name : '';
-      var pmpAllTasks = myMissions.filter(function (t) { return t.missionType === 'pmp' && !t.done; });
-      var q2 = _searchQuery ? _searchQuery.toLowerCase() : '';
-      if (q2) {
-        pmpAllTasks = pmpAllTasks.filter(function (t) {
-          var pd = t.pmpData || {};
-          return (pd.equipmentName || t.text || '').toLowerCase().indexOf(q2) !== -1
-            || (pd.zone || t.zone || '').toLowerCase().indexOf(q2) !== -1;
-        });
-      }
-
-      // Counters for debug block (before classification)
-      var _dbgFirestore  = _allMissions.filter(function (m) { return m.isPmp || m.missionType === 'pmp' || m.category === 'pmp'; }).length;
-      var _dbgAllTasks   = allTasks.filter(function (t) { return t.missionType === 'pmp'; }).length;
-      var _dbgMyMissions = myMissions.filter(function (t) { return t.missionType === 'pmp'; }).length;
-
-      // Classify each mission into exactly one category
-      var todayPmp    = [];
-      var upcomingPmp = [];
-      var inProgPmp   = [];
-      var urgentPmp   = [];
-      var fallbackPmp = []; // should always stay empty
-
-      pmpAllTasks.forEach(function (t) {
-        var d       = _normalizeMissionDate(t);
-        var running = _isPmpRunning(t, curName2);
-        var late    = _isPmpLate(t, todayISO, curName2);
-        var todayM  = _isPmpToday(t, todayISO, curName2);
-        var future  = _isPmpFuture(t, todayISO, curName2);
-        var cat     = _getPmpCategory(t, todayISO, curName2);
-        var isFallback = (!running && !late && !todayM && !future);
-
-        console.log('[PMP] classement —', (t.text || t.id), {
-          id: t.id, dueDate: d, rawPmpDueDate: (t.pmpData||{}).dueDate,
-          today: todayM, future: future, running: running, late: late,
-          done: t.done, assignedTo: (t.assignedTo||null), takenBy: (t.takenBy||null),
-          categorie: cat + (isFallback ? ' (FALLBACK)' : '')
-        });
-
-        if (!running && !late && !todayM && !future) {
-          console.warn('[PMP] Mission non classée', t);
-        }
-
-        if (cat === 'inprogress') inProgPmp.push(t);
-        else if (cat === 'urgent')    urgentPmp.push(t);
-        else if (cat === 'upcoming')  upcomingPmp.push(t);
-        else { todayPmp.push(t); if (isFallback) fallbackPmp.push(t.id); }
-      });
-
-      // [PMP AUDIT] — trace Firestore → filtres → classification → rendu
-      console.group('[PMP AUDIT] ' + new Date().toLocaleTimeString());
-      console.log('Étape 1 | Firestore _allMissions PMP  :', _dbgFirestore);
-      console.log('Étape 2 | allTasks (buildTasks) PMP   :', _dbgAllTasks);
-      console.log('Étape 3 | myMissions PMP (incl. done) :', _dbgMyMissions);
-      console.log('Étape 4 | pmpAllTasks (non-terminées) :', pmpAllTasks.length);
-      console.log('Étape 5 | Classification ->',
-        { aujourd_hui: todayPmp.length, a_venir: upcomingPmp.length,
-          en_cours: inProgPmp.length,    urgent: urgentPmp.length, fallback: fallbackPmp.length });
-      if (fallbackPmp.length > 0) console.warn('[PMP AUDIT] \u26a0 Missions sans categorie :', fallbackPmp);
-      console.log('Étape 6 | Onglet actif :', _pmpSubTab, '| upcomingRange :', _upcomingRange + ' j');
-      console.log('Étape 7 | pmpAllTasks détail :',
-        pmpAllTasks.map(function (t) {
-          return { id: t.id, text: (t.text || '').slice(0, 30),
-            dueDate: _normalizeMissionDate(t), takenBy: t.takenBy || null,
-            cat: _getPmpCategory(t, todayISO, curName2) };
-        }));
-      console.groupEnd();
-
-      // Visual debug block
-      h += '<details class="pmp-debug-block" style="margin:8px 12px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border1);border-radius:8px;font-size:11px;color:var(--text3);font-family:monospace;">'
-        + '<summary style="cursor:pointer;color:var(--text2);font-weight:600;font-size:12px;">🔍 Debug flux PMP</summary>'
-        + '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;">'
-        + '<span>Firestore PMP :</span><strong style="color:var(--cyan)">' + _dbgFirestore + '</strong>'
-        + '<span>allTasks PMP :</span><strong style="color:var(--cyan)">' + _dbgAllTasks + '</strong>'
-        + '<span>myMissions PMP :</span><strong style="color:var(--cyan)">' + _dbgMyMissions + '</strong>'
-        + '<span>Non-terminées :</span><strong style="color:var(--cyan)">' + pmpAllTasks.length + '</strong>'
-        + '<span>Aujourd\'hui :</span><strong>' + todayPmp.length + '</strong>'
-        + '<span>À venir :</span><strong>' + upcomingPmp.length + '</strong>'
-        + '<span>En cours :</span><strong>' + inProgPmp.length + '</strong>'
-        + '<span>Urgent :</span><strong>' + urgentPmp.length + '</strong>'
-        + '</div>';
-      // Per-mission diagnostic table
-      if (pmpAllTasks.length > 0) {
-        h += '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">';
-        pmpAllTasks.forEach(function (t) {
-          var d       = _normalizeMissionDate(t);
-          var running = _isPmpRunning(t, curName2);
-          var late    = _isPmpLate(t, todayISO, curName2);
-          var todayM  = _isPmpToday(t, todayISO, curName2);
-          var future  = _isPmpFuture(t, todayISO, curName2);
-          var cat     = _getPmpCategory(t, todayISO, curName2);
-          var isFb    = (!running && !late && !todayM && !future);
-          var catLabel = cat === 'today' ? 'Aujourd\'hui' + (isFb ? ' ⚠️ FALLBACK' : '')
-            : cat === 'upcoming' ? 'À venir' : cat === 'inprogress' ? 'En cours' : 'Urgent';
-          h += '<div style="margin-bottom:6px;padding:4px 0;border-bottom:1px solid var(--border)">'
-            + '<strong>' + MX.esc(t.text || t.id) + '</strong><br>'
-            + 'id : ' + MX.esc(t.id) + '<br>'
-            + 'dueDate normalisé : ' + (d || '<em>vide</em>') + '<br>'
-            + 'rawPmpData.dueDate : ' + MX.esc(String((t.pmpData||{}).dueDate||'')) + '<br>'
-            + 'today:' + todayM + ' future:' + future + ' running:' + running + ' late:' + late + '<br>'
-            + 'done:' + t.done + ' assignedTo:' + (t.assignedTo||'null') + ' takenBy:' + (t.takenBy||'null') + '<br>'
-            + '<strong style="color:var(--cyan)">→ catégorie : ' + catLabel + '</strong>'
-            + '</div>';
-        });
-        h += '</div>';
-      }
-      h += '</details>';
-
-      h += _pmpSubTabBar({ today: todayPmp.length, upcoming: upcomingPmp.length, inprogress: inProgPmp.length, urgent: urgentPmp.length });
-
-      if (_pmpSubTab === 'today') {
-        // Banner alerting the tech about late PMP missions visible in the "Urgent" sub-tab
-        if (urgentPmp.length > 0) {
-          h += '<div class="mm-pmp-late-banner" onclick="MX.MM.setPmpSubTab(\'urgent\')">'
-            + '<i class="fas fa-triangle-exclamation"></i>'
-            + ' <strong>' + urgentPmp.length + '</strong> maintenance' + (urgentPmp.length > 1 ? 's' : '') + ' en retard'
-            + ' <span class="mm-pmp-late-link">Voir <i class="fas fa-arrow-right"></i></span>'
-            + '</div>';
-        }
-        if (todayPmp.length === 0) {
-          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">☀️</div>'
-            + '<div class="mm-v3-empty-ttl">Aucune maintenance aujourd\'hui</div>'
-            + '<div class="mm-v3-empty-sub">Pas de PMP prévu pour aujourd\'hui.</div></div>';
-        } else {
-          h += '<div class="mm-v3-cards">';
-          todayPmp.forEach(function (t) { h += _pmpCardToday(t, fallbackPmp); });
-          h += '</div>';
-        }
-      } else if (_pmpSubTab === 'upcoming') {
-        if (urgentPmp.length > 0) {
-          h += '<div class="mm-pmp-late-banner" onclick="MX.MM.setPmpSubTab(\'urgent\')">'
-            + '<i class="fas fa-triangle-exclamation"></i>'
-            + ' <strong>' + urgentPmp.length + '</strong> maintenance' + (urgentPmp.length > 1 ? 's' : '') + ' en retard'
-            + ' <span class="mm-pmp-late-link">Voir <i class="fas fa-arrow-right"></i></span>'
-            + '</div>';
-        }
-        // Range = filtre d'affichage uniquement — toutes les missions futures sont classées ici
-        var upcomingDueDisplay = _addDaysMM(todayISO, _upcomingRange);
-        var upcomingInRange    = upcomingPmp.filter(function (t) { return _normalizeMissionDate(t) <= upcomingDueDisplay; });
-        var upcomingBeyond     = upcomingPmp.filter(function (t) { return _normalizeMissionDate(t) > upcomingDueDisplay; });
-        h += '<div class="pmp-upcoming-range">';
-        [7, 15, 30].forEach(function (n) {
-          h += '<button class="pmp-upcoming-range-btn' + (_upcomingRange === n ? ' pmp-upcoming-range-btn--active' : '') + '"'
-            + ' onclick="MX.MM.setUpcomingRange(' + n + ')">' + n + ' j</button>';
-        });
-        h += '<button class="pmp-upcoming-range-btn' + (_upcomingRange === 365 ? ' pmp-upcoming-range-btn--active' : '') + '"'
-          + ' onclick="MX.MM.setUpcomingRange(365)">Tout</button>';
-        h += '</div>';
-        if (upcomingPmp.length === 0) {
-          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📅</div>'
-            + '<div class="mm-v3-empty-ttl">Aucune maintenance à venir</div>'
-            + '<div class="mm-v3-empty-sub">Aucun PMP planifié dans le futur.</div></div>';
-        } else {
-          // When no missions fall within the selected range, show a banner before the beyond-range cards
-          if (upcomingInRange.length === 0 && upcomingBeyond.length > 0) {
-            h += '<div class="pmp-beyond-hint">'
-              + '<i class="fas fa-calendar-xmark"></i> '
-              + 'Aucun PMP dans les ' + _upcomingRange + ' prochains jours — '
-              + upcomingBeyond.length + ' planifié' + (upcomingBeyond.length > 1 ? 's' : '') + ' au-delà'
-              + '</div>';
-          }
-          if (upcomingInRange.length > 0) {
-            h += '<div class="mm-v3-cards">';
-            upcomingInRange.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
-            h += '</div>';
-          }
-          if (upcomingBeyond.length > 0) {
-            h += '<div class="pmp-beyond-label">+ ' + upcomingBeyond.length + ' PMP au-delà de ' + _upcomingRange + ' jours</div>'
-              + '<div class="mm-v3-cards">';
-            upcomingBeyond.forEach(function (t) { h += _pmpCardUpcoming(t, todayISO); });
-            h += '</div>';
-          }
-        }
-      } else if (_pmpSubTab === 'inprogress') {
-        if (inProgPmp.length === 0) {
-          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">⚙️</div>'
-            + '<div class="mm-v3-empty-ttl">Aucune maintenance en cours</div>'
-            + '<div class="mm-v3-empty-sub">Prenez une maintenance pour la démarrer.</div></div>';
-        } else {
-          h += '<div class="mm-v3-cards">';
-          inProgPmp.forEach(function (t) { h += _pmpCardInProgress(t); });
-          h += '</div>';
-        }
-      } else if (_pmpSubTab === 'urgent') {
-        if (urgentPmp.length === 0) {
-          h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">✅</div>'
-            + '<div class="mm-v3-empty-ttl">Aucune urgence</div>'
-            + '<div class="mm-v3-empty-sub">Bravo ! Tous les PMP sont dans les délais.</div></div>';
-        } else {
-          h += '<div class="mm-v3-cards">';
-          urgentPmp.forEach(function (t) { h += _pmpCardUrgent(t, todayISO); });
-          h += '</div>';
-        }
-      }
-
-    } else if (_activeTab === 'tout') {
-      // ── Espace de travail quotidien — tous types fusionnés, groupés par créneau ──
-      var TOUT_VALID_SLOTS = ['matin', 'journee', 'soir'];
-      var toutAll      = myMissions;
-      var hasToutContent = false;
-
-      h += '<div class="mtv-content-hd">'
-        + '<span class="mtv-content-hd-ico">📌</span>'
-        + '<div><div class="mtv-content-hd-ttl">Mes tâches du jour</div>'
-        + '<div class="mtv-content-hd-sub">' + toutAll.length + ' tâche' + (toutAll.length !== 1 ? 's' : '') + ' · ' + e(dateStr) + '</div></div>'
-        + '</div>';
-
-      // Build card map once for all event handlers (also includes noSlot items)
-      _buildToutCardMap(toutAll);
-
-      TOUT_VALID_SLOTS.forEach(function (slotKey) {
-        var si        = SLOT_INFO[slotKey];
-        var slotItems = toutAll.filter(function (t) { return t.slot === slotKey; });
-        if (slotItems.length === 0) return;
-        hasToutContent = true;
-
-        var slotTotal = slotItems.length;
-        var slotDone  = slotItems.filter(function (t) { return t.done; }).length;
-        var barPct    = Math.round(slotDone / slotTotal * 100);
-        var barCol    = barPct === 100 ? TC.checklist : barPct >= 50 ? '#f97316' : TC.intervention;
-
-        // Time estimates from estimatedDuration fields
-        var slotTotMin = 0, slotRemMin = 0;
-        slotItems.forEach(function (t) {
-          var d = _parseDuration(t.estimatedDuration);
-          slotTotMin += d;
-          if (!t.done) slotRemMin += d;
-        });
-
-        h += '<div class="mm-v3-slot-group" id="mm-slot-' + e(slotKey) + '">'
-          + '<div class="mm-v3-slot-hd">'
-          + '<span class="mm-v3-slot-icon">' + si.icon + '</span>'
-          + '<span class="mm-v3-slot-name">' + e(si.l) + '</span>'
-          + '<span class="mm-v3-slot-sub">' + e(si.sub) + '</span>'
-          + '</div>'
-          // Stats row: tasks · remaining time · percentage
-          + '<div class="mm-tc-slot-stats">'
-          + '<div class="mm-tc-slot-stats-left">'
-          + '<span class="mm-tc-slot-ct">' + slotTotal + ' tâche' + (slotTotal > 1 ? 's' : '') + '</span>'
-          + (slotRemMin > 0 ? '<span class="mm-tc-slot-rem"><i class="fas fa-clock"></i> ' + _fmtMinutes(slotRemMin) + ' restantes</span>' : '')
-          + '</div>'
-          + '<span class="mm-tc-slot-pct" style="color:' + barCol + '">' + barPct + '%</span>'
-          + '</div>'
-          + '<div class="mm-v3-slot-prog-wrap" style="margin:0 0 8px">'
-          + '<div class="mm-v3-slot-prog-fill" style="width:' + barPct + '%;background:' + barCol + ';transition:width .4s"></div>'
-          + '</div>';
-
-        // Slot completion banner
-        if (barPct === 100 && slotTotal > 0) {
-          var nextSlotKey = TOUT_VALID_SLOTS[TOUT_VALID_SLOTS.indexOf(slotKey) + 1];
-          var nextSI      = nextSlotKey ? SLOT_INFO[nextSlotKey] : null;
-          var nextItems   = nextSlotKey ? toutAll.filter(function (t) { return t.slot === nextSlotKey; }) : [];
-          h += '<div class="mm-tc-slot-done-banner">'
-            + '<i class="fas fa-circle-check"></i> Créneau terminé — Excellent travail !'
-            + (nextItems.length && nextSI
-              ? ' <button class="mm-tc-next-slot-btn" onclick="var el=document.getElementById(\'mm-slot-' + nextSlotKey + '\');if(el)el.scrollIntoView({behavior:\'smooth\'})">'
-                + nextSI.icon + ' ' + nextSI.l + ' →</button>'
-              : '')
-            + '</div>';
-        }
-
-        h += '<div class="mm-v3-cards">';
-        slotItems.forEach(function (t) { h += _toutCard(t); });
-        h += '</div></div>';
-      });
-
-      // Non-planifié bucket (missions from Firestore have slot = missionType, e.g. 'pmp')
-      var noSlotItems = toutAll.filter(function (t) { return TOUT_VALID_SLOTS.indexOf(t.slot) === -1; });
-      if (noSlotItems.length > 0) {
-        hasToutContent = true;
-        h += '<div class="mm-v3-slot-group">'
-          + '<div class="mm-v3-slot-hd">'
-          + '<span class="mm-v3-slot-icon">📌</span>'
-          + '<span class="mm-v3-slot-name">Non planifié</span>'
-          + '</div>'
-          + '<div class="mm-v3-cards">';
-        noSlotItems.forEach(function (t) { h += _toutCard(t); });
-        h += '</div></div>';
-      }
-
-      if (!hasToutContent) {
-        h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
-          + '<div class="mm-v3-empty-ttl">Journée vide</div>'
-          + '<div class="mm-v3-empty-sub">Aucun élément planifié pour aujourd\'hui.</div></div>';
-      }
-    }
-
-    h += '</div>'; // mm-v3-content
-    h += '</div>'; // mtv-main
-
-    // ── Colonne latérale (desktop) — passe sous le contenu en mobile ──
-    h += '<aside class="mtv-side">'
-      + '<div class="mtv-side-section">'
-      + '<div class="mtv-side-hd"><i class="fas fa-calendar-day"></i><span>Journée du jour</span></div>'
-      + '<div class="mtv-side-prog-track"><div class="mtv-side-prog-fill" style="width:' + pct + '%;background:' + pctCol + '"></div></div>'
-      + '<div class="mtv-side-stats">'
-      + '<div class="mtv-side-stat"><strong style="color:' + TC.checklist + '">' + doneCount + '</strong><span>Terminées</span></div>'
-      + '<div class="mtv-side-stat"><strong style="color:' + TC.urgence + '">' + todoCount + '</strong><span>Restantes</span></div>'
-      + '<div class="mtv-side-stat"><strong>' + totalCount + '</strong><span>Total</span></div>'
-      + '</div></div>';
-
-    h += '<div class="mtv-side-section">'
-      + '<div class="mtv-side-hd"><i class="fas fa-layer-group"></i><span>Créneaux</span></div>';
-    if (!sideSlots.length) {
-      h += '<div style="font-size:11px;color:var(--text3);padding:4px 0">Aucun créneau aujourd\'hui</div>';
-    }
-    sideSlots.forEach(function (s) {
-      var timeLbl = s.start || s.end ? (e(s.start) + (s.start || s.end ? ' – ' : '') + e(s.end)) : '';
-      h += '<div class="mtv-side-slot" onclick="MX.MM.setTab(\'checklist\')">'
-        + '<span class="mtv-side-slot-ico">' + e(s.icon || '') + '</span>'
-        + '<div class="mtv-side-slot-info"><span class="mtv-side-slot-lbl">' + e(s.name) + '</span><span class="mtv-side-slot-time">' + timeLbl + '</span></div>'
-        + '<span class="mtv-side-slot-ct">' + s.done + '/' + s.total + '</span>'
-        + '<i class="fas fa-chevron-right mtv-side-slot-chev"></i>'
-        + '</div>';
-    });
-    h += '</div>';
-
-    if (sideUrgentInt > 0 || sideUrgentPmp > 0) {
-      h += '<div class="mtv-side-section">'
-        + '<div class="mtv-side-hd"><i class="fas fa-triangle-exclamation" style="color:' + TC.urgence + '"></i><span>À traiter en priorité</span></div>';
-      if (sideUrgentPmp > 0) {
-        h += '<div class="mtv-side-alert" onclick="MX.MM.setTab(\'pmp\')">'
-          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentPmp + '</span>'
-          + '<span>PMP en retard</span><i class="fas fa-chevron-right"></i></div>';
-      }
-      if (sideUrgentInt > 0) {
-        h += '<div class="mtv-side-alert" onclick="MX.MM.setTab(\'intervention\')">'
-          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentInt + '</span>'
-          + '<span>Intervention' + (sideUrgentInt > 1 ? 's' : '') + ' urgente' + (sideUrgentInt > 1 ? 's' : '') + '</span><i class="fas fa-chevron-right"></i></div>';
-      }
-      h += '</div>';
-    }
-    h += '</aside>';
-    h += '</div>'; // mtv-layout
+    // ── Colonne droite : MA JOURNÉE ──
+    h += '<aside class="mm-cp-right">' + _renderCpRight(sideSlots, doneCount, todoCount, totalCount, pct, pctCol, sideUrgentPmp, sideUrgentInt) + '</aside>';
+    h += '</div>'; // mm-cp-layout
 
     // ── Bandeau motivant ──
     h += '<div class="mtv-banner">'
@@ -1260,6 +859,323 @@
 
     h += '</div>'; // mm-v3-wrap
     return h;
+  }
+
+  // ══════════════════════════════════════════════
+  // COCKPIT — data layer (groupement par créneau, liste, sélection)
+  // Réutilise myMissions/_getChecklistTasks/_getAllTasks/_applyFilters/
+  // getMissionStatus/_toutCardMap/_quickValidate/_quickComment/_quickSignal/
+  // _openModuleForCard/_signalerAnomalie tels quels — aucune nouvelle
+  // logique métier, uniquement de la présentation.
+  // ══════════════════════════════════════════════
+
+  var _selectedCardId = null; // cardId actuellement affiché dans le panneau central
+
+  function _cpBuildGroups() {
+    var cu = MX.state.currentUser;
+    var mmSchedule = MX.getEffectiveDaySchedule(MX.todayId());
+    var groups = [];
+    if (mmSchedule.source === 'week_slots') {
+      MX.myInstancesFromSchedule(mmSchedule, cu ? cu.name : null).forEach(function (inst) {
+        groups.push({ key: inst.id, name: inst.name, icon: inst.icon || '', start: inst.start || '', end: inst.end || '', color: inst.color || '' });
+      });
+    } else {
+      var asg = _getTodayAssignment();
+      if (asg) {
+        var si = SLOT_INFO[asg.slot] || { l: asg.slot, icon: '' };
+        groups.push({ key: asg.slot, name: si.l, icon: si.icon || '', start: '', end: '', color: '' });
+      }
+    }
+    return groups;
+  }
+
+  function _cpGroupBlock(g, items) {
+    var e = MX.esc;
+    var total  = items.length;
+    var done   = items.filter(function (t) { return t.done; }).length;
+    var pct    = total ? Math.round(done / total * 100) : 0;
+    var barCol = pct === 100 ? TC.checklist : pct >= 50 ? '#f97316' : TC.intervention;
+    var accent = g.color || barCol;
+    var h = '<div class="mm-v3-slot-group mm-cp-group" id="mm-cp-grp-' + e(g.key) + '">'
+      + '<div class="mm-v3-slot-hd mm-cp-group-hd" style="--grp-accent:' + accent + '">'
+      + (g.icon ? '<span class="mm-v3-slot-icon">' + e(g.icon) + '</span>' : '')
+      + '<span class="mm-v3-slot-name">' + e(g.name) + '</span>'
+      + (g.start || g.end ? '<span class="mm-v3-slot-sub">' + e(g.start) + (g.start || g.end ? ' – ' : '') + e(g.end) + '</span>' : '')
+      + '<div class="mm-v3-slot-prog-wrap"><div class="mm-v3-slot-prog-fill" style="width:' + pct + '%;background:' + barCol + '"></div></div>'
+      + '<span class="mm-v3-slot-ct" style="color:' + barCol + '">' + done + '/' + total + '</span>'
+      + '</div>'
+      + '<div class="mm-cp-rows">';
+    items.forEach(function (t) { h += _cpRow(t, accent); });
+    h += '</div></div>';
+    return h;
+  }
+
+  // getMissionStatus() compare _normalizeMissionDate() (attend une date ISO
+  // ou un Timestamp) à la date du jour — jamais exercé jusqu'ici pour les
+  // missions checklist, dont le dueDate vaut MX.todayId() (un identifiant de
+  // jour type "jeudi", pas une date ISO), ce qui le ferait toujours retomber
+  // sur 'future'. Une mission checklist n'existe QUE pour le jour courant
+  // (_getChecklistTasks ne lit jamais un autre jour) : son statut réel est
+  // donc toujours 'today' (ou 'done'), sans appeler _normalizeMissionDate.
+  function _cpStatus(t) {
+    if (t.missionType === 'checklist') return t.done ? 'done' : 'today';
+    return getMissionStatus(t);
+  }
+
+  function _cpRow(t, accent) {
+    var e      = MX.esc;
+    var status = _cpStatus(t);
+    var moved  = !!t.movedFrom;
+    var sel    = _selectedCardId === t.id;
+    var typeInfo = TOUT_TYPE_INFO[t.missionType] || TOUT_TYPE_INFO.tache;
+    var metaBits = [];
+    if (moved) {
+      metaBits.push('<i class="fas fa-bolt"></i> Déplacée depuis ' + e(t.movedFromName || '…'));
+    } else {
+      metaBits.push(e(typeInfo.l) + (t.zone ? ' · ' + e(t.zone) : ''));
+    }
+    if (t.done) metaBits.push('Terminé');
+    var cls = 'mm-cp-row'
+      + (t.done ? ' mm-cp-row--done' : '')
+      + (moved ? ' mm-cp-row--moved' : '')
+      + (!t.done && status === 'late' ? ' mm-cp-row--late' : '')
+      + (sel ? ' mm-cp-row--sel' : '');
+    return '<div class="' + cls + '" id="tc-' + e(t.id) + '" data-id="' + e(t.id) + '" style="--row-accent:' + (accent || '#94a3b8') + '" onclick="MX.MM._cpSelectCard(\'' + e(t.id) + '\')">'
+      + '<button class="mm-cp-check mm-tc-quick-v' + (t.done ? ' mm-tc-quick-v--done' : '') + '"' + (t.done ? ' disabled' : '') + ' onclick="event.stopPropagation();MX.MM._quickValidate(\'' + e(t.id) + '\')" title="' + (t.done ? 'Validé' : 'Valider') + '" aria-label="Valider">'
+      + '<i class="fas fa-square mm-cp-check-off"></i><i class="fas fa-square-check mm-cp-check-on"></i>'
+      + '</button>'
+      + '<div class="mm-cp-row-body">'
+      + '<div class="mm-cp-row-title">' + e(t.text || '(sans titre)') + '</div>'
+      + '<div class="mm-cp-row-meta">' + metaBits.join(' · ') + '</div>'
+      + '</div>'
+      + (!t.done && status === 'late' ? '<span class="mm-cp-row-flag" title="En retard"></span>' : '')
+      + '</div>';
+  }
+
+  function _renderCockpitList(myMissions, todayISO) {
+    var groups  = _cpBuildGroups();
+    var visible = _applyFilters(myMissions.filter(function (t) { return _activeTab === 'tout' || t.missionType === _activeTab; }), todayISO);
+    _buildToutCardMap(myMissions);
+    var h = '', any = false;
+    groups.forEach(function (g) {
+      var items = visible.filter(function (t) { return t.missionType === 'checklist' && t.slot === g.key; });
+      if (items.length) { any = true; h += _cpGroupBlock(g, items); }
+    });
+    var intItems = visible.filter(function (t) { return t.missionType === 'intervention'; });
+    if (intItems.length) { any = true; h += _cpGroupBlock({ key: '__intervention', name: 'Interventions', icon: '🔧', color: TC.intervention }, intItems); }
+    var pmpItems = visible.filter(function (t) { return t.missionType === 'pmp'; });
+    if (pmpItems.length) { any = true; h += _cpGroupBlock({ key: '__pmp', name: 'Maintenances PMP', icon: '🛠', color: TC.pmp }, pmpItems); }
+    if (!any) {
+      h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
+        + '<div class="mm-v3-empty-ttl">' + (myMissions.length === 0 ? 'Aucune mission' : 'Rien à afficher') + '</div>'
+        + '<div class="mm-v3-empty-sub">' + (myMissions.length === 0 ? 'Aucun élément planifié pour aujourd\'hui.' : 'Ajustez le filtre ou les critères de recherche.') + '</div></div>';
+    }
+    return h;
+  }
+
+  function _renderCpDetail(cardId) {
+    var e = MX.esc;
+    var t = cardId ? _toutCardMap[cardId] : null;
+    if (!t) {
+      return '<button class="mm-cp-d-close mm-cp-d-close--mobile" onclick="MX.MM._cpCloseSheet()"><i class="fas fa-chevron-left"></i> Retour à la liste</button>'
+        + '<div class="mm-cp-detail-empty">'
+        + '<div class="mm-cp-detail-empty-ico">📋</div>'
+        + '<div class="mm-cp-detail-empty-ttl">Sélectionnez une mission</div>'
+        + '<div class="mm-cp-detail-empty-sub">Cliquez sur une mission à gauche pour afficher son détail ici.</div>'
+        + '</div>';
+    }
+    var typeInfo   = TOUT_TYPE_INFO[t.missionType] || TOUT_TYPE_INFO.tache;
+    var status     = _cpStatus(t);
+    var STATUS_MAP = {
+      done:     { l: 'Terminé',   col: TC.checklist },
+      late:     { l: 'En retard', col: TC.urgence   },
+      progress: { l: 'En cours',  col: '#f97316'    },
+      today:    { l: 'À faire',   col: '#3b82f6'    },
+      future:   { l: 'À venir',   col: '#94a3b8'    },
+    };
+    var statusInfo = STATUS_MAP[status] || STATUS_MAP.today;
+    var pd = t.pmpData || {};
+    var techName = t.takenBy || t.assignedTo || (MX.state.currentUser ? MX.state.currentUser.name : '');
+    if (Array.isArray(techName)) techName = techName.join(', ');
+
+    var h = '<button class="mm-cp-d-close mm-cp-d-close--mobile" onclick="MX.MM._cpCloseSheet()"><i class="fas fa-chevron-left"></i> Retour à la liste</button>';
+
+    // Titre et badge dans des lignes indépendantes (jamais dans la même ligne
+    // flex) : un titre long doit pouvoir passer sur plusieurs lignes sans
+    // jamais chevaucher le badge de statut.
+    h += '<div class="mm-cp-d-hd">'
+      + '<div class="mm-cp-d-hd-top">'
+      + '<div class="mm-cp-d-hd-ico" style="background:' + typeInfo.color + '22;color:' + typeInfo.color + '"><i class="fas ' + typeInfo.icon + '"></i></div>'
+      + '<div class="mm-cp-d-title">' + e(pd.equipmentName || t.text || '(sans titre)') + '</div>'
+      + '</div>'
+      + '<div class="mm-cp-d-hd-bottom">'
+      + '<div class="mm-cp-d-sub">'
+      + (t.slot && SLOT_INFO[t.slot] ? e(SLOT_INFO[t.slot].l) + ' · ' : '')
+      + ((t.start || t.end) ? e(t.start || '') + (t.start || t.end ? '–' : '') + e(t.end || '') + ' · ' : '')
+      + e(techName || '')
+      + '</div>'
+      + '<span class="mm-cp-d-badge" style="background:' + statusInfo.col + '22;color:' + statusInfo.col + '">' + e(statusInfo.l) + '</span>'
+      + '</div>'
+      + '</div>';
+
+    if (t.movedFrom) {
+      h += '<div class="mm-cp-d-moved"><i class="fas fa-bolt"></i> Déplacée depuis ' + e(t.movedFromName || '—') + '</div>';
+    }
+
+    var desc = t.description || t.desc || pd.description || '';
+    if (desc && String(desc).trim()) {
+      h += '<div class="mm-cp-d-section"><div class="mm-cp-d-section-hd">Description</div>'
+        + '<div class="mm-cp-d-desc">' + e(desc) + '</div></div>';
+    }
+
+    var items = pd.checklistItems || [];
+    if (items.length) {
+      var completed = t.completedChecklist || {};
+      var canEdit   = !t.done;
+      var toggleFn  = t._source === 'pmp_interventions' ? '_toggleCheckDirect' : '_toggleCheck';
+      h += '<div class="mm-cp-d-section"><div class="mm-cp-d-section-hd">Checklist</div><div class="mm-cp-d-checklist">';
+      items.forEach(function (it, idx) {
+        var ck = completed[String(idx)] || completed[idx];
+        h += '<label class="mm-cp-ck-item' + (ck ? ' mm-cp-ck-item--done' : '') + '">'
+          + '<input type="checkbox"' + (ck ? ' checked' : '') + (canEdit ? '' : ' disabled')
+          + ' onchange="MX.MM.' + toggleFn + '(\'' + e(t.id) + '\',' + idx + ',this.checked)">'
+          + '<span>' + e(it.text || it) + '</span></label>';
+      });
+      h += '</div></div>';
+    }
+
+    var infoRows = [];
+    // Une mission checklist a dueDate = MX.todayId() (identifiant de jour,
+    // ex. "jeudi"), pas une date ISO — elle n'existe de toute façon que pour
+    // aujourd'hui (_getChecklistTasks), donc _todayISO() est la vraie date.
+    infoRows.push(['Date', _fmtDate(t.missionType === 'checklist' ? _todayISO() : (t.dueDate || _todayISO()))]);
+    if (t.slot && SLOT_INFO[t.slot]) infoRows.push(['Créneau', SLOT_INFO[t.slot].l]);
+    infoRows.push(['Catégorie', typeInfo.l]);
+    var site = pd.zone || t.zone || '';
+    if (site) infoRows.push(['Site', site + ((pd.subZone || t.subZone) ? ' · ' + (pd.subZone || t.subZone) : '')]);
+    if (t.priority && t.priority !== 'normale') infoRows.push(['Priorité', t.priority]);
+    if (t.estimatedDuration) infoRows.push(['Durée estimée', t.estimatedDuration]);
+    h += '<div class="mm-cp-d-section"><div class="mm-cp-d-section-hd">Informations</div><div class="mm-cp-d-info-grid">';
+    infoRows.forEach(function (r) {
+      h += '<div class="mm-cp-d-info-row"><span>' + e(r[0]) + '</span><strong>' + e(r[1]) + '</strong></div>';
+    });
+    h += '</div></div>';
+
+    h += '<div class="mm-cp-d-actions">';
+    if (!t.done) {
+      h += '<button class="mm-cp-act mm-cp-act--main" onclick="MX.MM._quickValidate(\'' + e(t.id) + '\')"><i class="fas fa-check"></i> Terminer</button>';
+    }
+    h += '<button class="mm-cp-act" onclick="MX.MM._quickComment(\'' + e(t.id) + '\')"><i class="fas fa-note-sticky"></i> Ajouter une note</button>';
+    if (t.missionType === 'pmp' && t._source === 'pmp_interventions') {
+      h += '<button class="mm-cp-act mm-cp-act--warn" onclick="MX.MM._signalerAnomalie(\'' + e(t._pmpId) + '\',\'' + e(pd.equipmentName || '') + '\',\'' + e(pd.zone || '') + '\')"><i class="fas fa-triangle-exclamation"></i> Signaler un problème</button>';
+    } else {
+      h += '<button class="mm-cp-act mm-cp-act--warn" onclick="MX.MM._quickSignal(\'' + e(t.id) + '\')"><i class="fas fa-triangle-exclamation"></i> Signaler un problème</button>';
+    }
+    if (t.missionType === 'intervention' || t.missionType === 'pmp') {
+      h += '<button class="mm-cp-act mm-cp-act--ghost" onclick="MX.MM._openModuleForCard(\'' + e(t.id) + '\')"><i class="fas fa-up-right-and-down-left-from-center"></i> Détails complets</button>';
+    }
+    h += '</div>';
+
+    return h;
+  }
+
+  function _renderCpRight(sideSlots, doneCount, todoCount, totalCount, pct, pctCol, sideUrgentPmp, sideUrgentInt) {
+    var e = MX.esc;
+    var h = '<div class="mm-cp-right-section">'
+      + '<div class="mtv-side-hd"><i class="fas fa-calendar-day"></i><span>Ma journée</span></div>';
+    if (!sideSlots.length) {
+      h += '<div class="mm-cp-right-empty">Aucun créneau aujourd\'hui</div>';
+    }
+    sideSlots.forEach(function (s) {
+      var timeLbl = s.start || s.end ? (e(s.start) + (s.start || s.end ? ' – ' : '') + e(s.end)) : '';
+      h += '<div class="mtv-side-slot" onclick="MX.MM._cpGoToSlot(\'' + e(s.id) + '\')">'
+        + '<span class="mtv-side-slot-ico">' + e(s.icon || '') + '</span>'
+        + '<div class="mtv-side-slot-info"><span class="mtv-side-slot-lbl">' + e(s.name) + '</span><span class="mtv-side-slot-time">' + timeLbl + '</span></div>'
+        + '<span class="mtv-side-slot-ct">' + s.done + '/' + s.total + '</span>'
+        + '<i class="fas fa-chevron-right mtv-side-slot-chev"></i>'
+        + '</div>';
+    });
+    h += '</div>';
+
+    h += '<div class="mm-cp-right-section">'
+      + '<div class="mtv-side-hd"><i class="fas fa-chart-simple"></i><span>Statistiques</span></div>'
+      + '<div class="mtv-side-prog-track"><div class="mtv-side-prog-fill" style="width:' + pct + '%;background:' + pctCol + '"></div></div>'
+      + '<div class="mtv-side-stats">'
+      + '<div class="mtv-side-stat"><strong style="color:' + TC.checklist + '">' + doneCount + '</strong><span>Terminées</span></div>'
+      + '<div class="mtv-side-stat"><strong style="color:' + TC.urgence + '">' + todoCount + '</strong><span>Restantes</span></div>'
+      + '<div class="mtv-side-stat"><strong>' + totalCount + '</strong><span>Total</span></div>'
+      + '</div></div>';
+
+    if (sideUrgentInt > 0 || sideUrgentPmp > 0) {
+      h += '<div class="mm-cp-right-section">'
+        + '<div class="mtv-side-hd"><i class="fas fa-triangle-exclamation" style="color:' + TC.urgence + '"></i><span>À traiter en priorité</span></div>';
+      if (sideUrgentPmp > 0) {
+        h += '<div class="mtv-side-alert" onclick="MX.MM._cpSetFilter(\'pmp\')">'
+          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentPmp + '</span>'
+          + '<span>PMP en retard</span><i class="fas fa-chevron-right"></i></div>';
+      }
+      if (sideUrgentInt > 0) {
+        h += '<div class="mtv-side-alert" onclick="MX.MM._cpSetFilter(\'intervention\')">'
+          + '<span class="mtv-side-alert-n" style="background:' + TC.urgence + '">' + sideUrgentInt + '</span>'
+          + '<span>Intervention' + (sideUrgentInt > 1 ? 's' : '') + ' urgente' + (sideUrgentInt > 1 ? 's' : '') + '</span><i class="fas fa-chevron-right"></i></div>';
+      }
+      h += '</div>';
+    }
+    return h;
+  }
+
+  // ── Filtre : rerend UNIQUEMENT la liste de gauche (#mm-cp-list), jamais
+  // toute la page — le panneau central garde son contenu (_toutCardMap
+  // couvre toujours myMissions en entier, quel que soit le filtre actif). ──
+  function _cpSetFilter(tab) {
+    if (_activeTab === tab) return;
+    _activeTab = tab;
+    _markTabSeen(tab);
+    var todayISO       = _todayISO();
+    var checklistTasks = _getChecklistTasks();
+    var allTasks       = _getAllTasks(checklistTasks);
+    var myMissions      = allTasks.filter(function (t) { return t.mine && t.accepted !== false && !t.unassigned; });
+    var listEl = document.getElementById('mm-cp-list');
+    if (listEl) listEl.innerHTML = _renderCockpitList(myMissions, todayISO);
+    document.querySelectorAll('.mm-cp-filter-btn').forEach(function (b) {
+      b.classList.toggle('mm-cp-filter-btn--active', b.getAttribute('data-tab') === tab);
+    });
+  }
+
+  // ── Sélection : rerend UNIQUEMENT le panneau central (#mm-cp-detail),
+  // jamais toute la page. ──
+  function _cpSelectCard(cardId) {
+    if (_selectedCardId === cardId) return;
+    var prevId = _selectedCardId;
+    _selectedCardId = cardId;
+    if (prevId) {
+      var prevEl = document.getElementById('tc-' + prevId);
+      if (prevEl) prevEl.classList.remove('mm-cp-row--sel');
+    }
+    var newEl = document.getElementById('tc-' + cardId);
+    if (newEl) newEl.classList.add('mm-cp-row--sel');
+    var panel = document.getElementById('mm-cp-detail');
+    if (panel) panel.innerHTML = _renderCpDetail(cardId);
+    if (window.innerWidth < 860) document.body.classList.add('mm-cp-sheet-open');
+  }
+
+  function _cpCloseSheet() {
+    document.body.classList.remove('mm-cp-sheet-open');
+  }
+
+  // ── Clic sur un créneau de "Ma journée" → montre ce créneau à gauche
+  // (change le filtre si besoin, puis scrolle/pulse le groupe correspondant),
+  // sans jamais ouvrir de nouvel onglet ni recharger la page. ──
+  function _cpGoToSlot(slotKey) {
+    var needsFilterSwitch = _activeTab === 'intervention' || _activeTab === 'pmp';
+    if (needsFilterSwitch) _cpSetFilter('tout');
+    setTimeout(function () {
+      var el = document.getElementById('mm-cp-grp-' + slotKey);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.classList.add('mm-cp-group--pulse');
+      setTimeout(function () { el.classList.remove('mm-cp-group--pulse'); }, 900);
+    }, needsFilterSwitch ? 60 : 0);
   }
 
   // ══════════════════════════════════════════════
@@ -3431,6 +3347,8 @@
     _allMissions = []; _assignedMissions = []; _unassignedPmpMissions = [];
     _orgTasks = []; _intDocs = []; _pmpDocs = [];
     _timerState = null; _expandedCardId = null; _toutCardMap = {};
+    _selectedCardId = null;
+    try { document.body.classList.remove('mm-cp-sheet-open'); } catch (e) {}
   }
 
   // ══════════════════════════════════════════════
@@ -3640,6 +3558,9 @@
     _triggerPmpDirectPhoto: _triggerPmpDirectPhoto, _onPmpDirectPh: _onPmpDirectPh,
     _signalerAnomalie: _signalerAnomalie, _doSignalerAnomalie: _doSignalerAnomalie,
     _destroy: _destroy,
+    // Cockpit (refonte UX)
+    _cpSetFilter: _cpSetFilter, _cpSelectCard: _cpSelectCard,
+    _cpCloseSheet: _cpCloseSheet, _cpGoToSlot: _cpGoToSlot,
   };
   window.MX.MM = window.MX.Pages.MesMissions;
 })();
