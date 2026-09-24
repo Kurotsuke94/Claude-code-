@@ -6,6 +6,7 @@
   var _corbeille  = [];
   var _archives   = [];
   var _loaded     = false;
+  var _selected   = {}; // clé `${col}|${id}` -> true — sélection multiple, jamais persistée
 
   var COLS = [
     { col: 'missions',          label: 'Mission',          icon: 'fa-list-check',          color: '#22c55e' },
@@ -71,6 +72,31 @@
     return list;
   }
 
+  // ── SÉLECTION MULTIPLE ───────────────────────────────────────────────────
+  function _selKey(col, id) { return col + '|' + id; }
+
+  // Retire du set toute clé qui ne correspond plus à un élément actuellement
+  // affiché (onglet/filtre courants) — jamais d'ID sélectionné fantôme après
+  // changement d'onglet, de filtre, ou une action qui fait disparaître des
+  // éléments de la vue (restauration/archivage/suppression, y compris par
+  // un autre poste via les listeners temps réel).
+  function _pruneSelection(items) {
+    var keep = {};
+    items.forEach(function (it) {
+      var k = _selKey(it._col, it.id);
+      if (_selected[k]) keep[k] = true;
+    });
+    _selected = keep;
+  }
+
+  function _selectedCount() { return Object.keys(_selected).length; }
+
+  function _selectedItems(items) {
+    return items.filter(function (it) { return !!_selected[_selKey(it._col, it.id)]; });
+  }
+
+  function _cnt(n, singular, plural) { return n + ' ' + (n > 1 ? plural : singular); }
+
   function _render() {
     var mc = document.getElementById('main-content');
     if (!mc) return;
@@ -78,6 +104,9 @@
     var items     = _sortedItems();
     var dateField = _tab === 'corbeille' ? 'trashedAt'  : 'archivedAt';
     var byField   = _tab === 'corbeille' ? 'trashedBy'  : 'archivedBy';
+
+    _pruneSelection(items);
+    var selCount = _selectedCount();
 
     // ── Header ──
     var h = '<div class="corb-page">';
@@ -109,13 +138,38 @@
            '<p>' + (_tab === 'corbeille' ? 'La corbeille est vide' : 'Aucun élément archivé') + '</p>' +
            '</div>';
     } else {
+      // ── Barre d'actions en masse — jamais affichée sans élément (voir
+      // ci-dessus, ce bloc n'est atteint que si items.length > 0). ──
+      var bulkLabel = selCount > 0 ? _cnt(selCount, 'sélectionné', 'sélectionnés') : 'Tout sélectionner';
+      h += '<div class="corb-bulkbar' + (selCount > 0 ? ' corb-bulkbar--active' : '') + '">' +
+           '<label class="corb-check corb-check--all" title="Tout sélectionner / désélectionner">' +
+           '<input type="checkbox" id="corb-select-all" onclick="MX._corbToggleSelAll()">' +
+           '<span class="corb-check-box"></span>' +
+           '<span class="corb-bulk-lbl">' + bulkLabel + '</span>' +
+           '</label>';
+      if (selCount > 0) {
+        var bulkActions = '<button class="corb-btn corb-btn--restore" onclick="MX._corbBulkRestore()">' +
+                           '<i class="fas fa-rotate-left"></i> Restaurer</button>';
+        if (_tab === 'corbeille') {
+          bulkActions += '<button class="corb-btn corb-btn--archive" onclick="MX._corbBulkArchive()">' +
+                         '<i class="fas fa-box-archive"></i> Archiver</button>';
+        }
+        if (isAdmin) {
+          bulkActions += '<button class="corb-btn corb-btn--purge corb-btn--purge-wide" onclick="MX._corbBulkPurge()">' +
+                         '<i class="fas fa-trash-can"></i> Supprimer</button>';
+        }
+        h += '<div class="corb-bulkbar-actions">' + bulkActions + '</div>';
+      }
+      h += '</div>';
+
       h += '<div class="corb-list">';
       items.forEach(function (item) {
-        var name   = MX.esc(_nameOf(item));
-        var type   = MX.esc(_typeOf(item));
-        var date   = _dateOf(item, dateField);
-        var by     = MX.esc(item[byField] || '—');
-        var reason = (_tab === 'corbeille' && item.trashReason) ? ('<span class="corb-reason">' + MX.esc(item.trashReason) + '</span>') : '';
+        var name    = MX.esc(_nameOf(item));
+        var type    = MX.esc(_typeOf(item));
+        var date    = _dateOf(item, dateField);
+        var by      = MX.esc(item[byField] || '—');
+        var reason  = (_tab === 'corbeille' && item.trashReason) ? ('<span class="corb-reason">' + MX.esc(item.trashReason) + '</span>') : '';
+        var isSel   = !!_selected[_selKey(item._col, item.id)];
 
         var actRestore = '<button class="corb-btn corb-btn--restore" onclick="MX._corbRestore(\'' + item._col + '\',\'' + item.id + '\')">' +
                          '<i class="fas fa-rotate-left"></i> Restaurer</button>';
@@ -128,7 +182,11 @@
             '<i class="fas fa-trash-can"></i></button>'
           : '';
 
-        h += '<div class="corb-item">' +
+        h += '<div class="corb-item' + (isSel ? ' corb-item--sel' : '') + '">' +
+             '<label class="corb-check corb-check--item" title="Sélectionner">' +
+             '<input type="checkbox"' + (isSel ? ' checked' : '') + ' onclick="event.stopPropagation();MX._corbToggleSel(\'' + item._col + '\',\'' + item.id + '\')">' +
+             '<span class="corb-check-box"></span>' +
+             '</label>' +
              '<div class="corb-item-ico" style="background:' + item._colColor + '22;color:' + item._colColor + '">' +
              '<i class="fas ' + item._colIcon + '"></i></div>' +
              '<div class="corb-item-body">' +
@@ -148,11 +206,37 @@
 
     h += '</div>'; // .corb-page
     mc.innerHTML = h;
+
+    // Case "Tout sélectionner" tri-état — indeterminate ne s'exprime qu'en
+    // propriété DOM, jamais en attribut HTML.
+    var selectAllEl = document.getElementById('corb-select-all');
+    if (selectAllEl) {
+      var total = items.length;
+      selectAllEl.checked = total > 0 && selCount === total;
+      selectAllEl.indeterminate = selCount > 0 && selCount < total;
+    }
   }
 
   // ── Global action handlers ──
-  window.MX._corbTab = function (tab) { _tab = tab; _filterType = 'all'; _render(); };
-  window.MX._corbFilter = function (type) { _filterType = type; _render(); };
+  window.MX._corbTab = function (tab) { _tab = tab; _filterType = 'all'; _selected = {}; _render(); };
+  window.MX._corbFilter = function (type) { _filterType = type; _selected = {}; _render(); };
+
+  // ── Sélection multiple ──
+  window.MX._corbToggleSel = function (col, id) {
+    var k = _selKey(col, id);
+    if (_selected[k]) delete _selected[k]; else _selected[k] = true;
+    _render();
+  };
+  window.MX._corbToggleSelAll = function () {
+    var items = _sortedItems();
+    var allSelected = items.length > 0 && items.every(function (it) { return !!_selected[_selKey(it._col, it.id)]; });
+    if (allSelected) {
+      _selected = {};
+    } else {
+      items.forEach(function (it) { _selected[_selKey(it._col, it.id)] = true; });
+    }
+    _render();
+  };
 
   window.MX._corbRestore = async function (col, id) {
     try {
@@ -180,6 +264,87 @@
             if (ok !== false) MX.toast('Supprimé définitivement');
           } catch (e) { MX.toast('Erreur : ' + (e.message || ''), true); }
         }},
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+  };
+
+  // ── Actions en masse ─────────────────────────────────────────────────────
+  // Réutilisent exactement MX.Trash (restoreMany/archiveMany/purgeMany, voir
+  // assets/js/trash.js) — mêmes champs, mêmes contrôles d'accès que les
+  // actions individuelles ci-dessus, jamais de logique parallèle.
+  function _bulkRefs() {
+    return _selectedItems(_sortedItems()).map(function (it) { return { col: it._col, id: it.id }; });
+  }
+
+  window.MX._corbBulkRestore = function () {
+    var refs = _bulkRefs();
+    if (!refs.length) return;
+    MX.showModal({
+      title: 'Restaurer ' + _cnt(refs.length, 'élément', 'éléments') + ' ?',
+      sub: '',
+      actions: [
+        { label: 'Restaurer', cls: 'confirm', fn: async function () {
+          try {
+            var res = await MX.Trash.restoreMany(refs);
+            _selected = {};
+            if (res.failed.length) {
+              MX.toast(res.succeeded.length + ' restauré(s), ' + res.failed.length + ' échec(s)', true);
+            } else {
+              MX.toast(_cnt(res.succeeded.length, 'élément restauré', 'éléments restaurés') + '.');
+            }
+            _render();
+          } catch (e) { MX.toast('Erreur restauration : ' + (e.message || ''), true); }
+        } },
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+  };
+
+  window.MX._corbBulkArchive = function () {
+    var refs = _bulkRefs();
+    if (!refs.length) return;
+    MX.showModal({
+      title: 'Archiver ' + _cnt(refs.length, 'élément', 'éléments') + ' ?',
+      sub: '',
+      actions: [
+        { label: 'Archiver', cls: 'confirm', fn: async function () {
+          try {
+            var res = await MX.Trash.archiveMany(refs);
+            _selected = {};
+            if (res.failed.length) {
+              MX.toast(res.succeeded.length + ' archivé(s), ' + res.failed.length + ' échec(s)', true);
+            } else {
+              MX.toast(_cnt(res.succeeded.length, 'élément archivé', 'éléments archivés') + '.');
+            }
+            _render();
+          } catch (e) { MX.toast('Erreur archivage : ' + (e.message || ''), true); }
+        } },
+        { label: 'Annuler', cls: 'cancel' },
+      ],
+    });
+  };
+
+  window.MX._corbBulkPurge = function () {
+    if (!MX.Auth.isAdmin()) return; // filet de sécurité — le bouton n'est déjà rendu que pour l'admin
+    var refs = _bulkRefs();
+    if (!refs.length) return;
+    MX.showModal({
+      title: 'Supprimer définitivement ' + _cnt(refs.length, 'élément', 'éléments') + ' ?',
+      sub: 'Cette action est irréversible.',
+      actions: [
+        { label: 'Supprimer définitivement', cls: 'danger', fn: async function () {
+          try {
+            var res = await MX.Trash.purgeMany(refs);
+            _selected = {};
+            if (res.failed.length) {
+              MX.toast(res.succeeded.length + ' supprimé(s), ' + res.failed.length + ' échec(s)', true);
+            } else {
+              MX.toast(_cnt(res.succeeded.length, 'élément supprimé définitivement', 'éléments supprimés définitivement') + '.');
+            }
+            _render();
+          } catch (e) { MX.toast('Erreur suppression : ' + (e.message || ''), true); }
+        } },
         { label: 'Annuler', cls: 'cancel' },
       ],
     });

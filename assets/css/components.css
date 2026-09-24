@@ -18510,6 +18510,76 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .corb-btn--archive:hover { background: var(--accent); color: #fff; }
 .corb-btn--purge { color: var(--red, #ef4444); border-color: var(--red, #ef4444); padding: 5px 8px; }
 .corb-btn--purge:hover { background: var(--red, #ef4444); color: #fff; }
+.corb-btn--purge-wide { padding: 5px 10px; }
+
+/* Sélection multiple — case à cocher, cible tactile ≥ 44px (label entier
+   cliquable ; l'input réel reste visuellement masqué mais fonctionnel). */
+.corb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+  margin: -4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+.corb-check input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.corb-check-box {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 2px solid var(--border2);
+  background: var(--bg3);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.corb-check-box::after {
+  content: '';
+  position: absolute;
+  left: 6px; top: 2px;
+  width: 5px; height: 9px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(40deg);
+  opacity: 0;
+}
+.corb-check input:checked ~ .corb-check-box,
+.corb-check input:indeterminate ~ .corb-check-box {
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+.corb-check input:checked ~ .corb-check-box::after { opacity: 1; }
+.corb-check input:indeterminate ~ .corb-check-box::after {
+  opacity: 1; left: 4px; top: 8px; width: 10px; height: 0;
+  border-right: none; border-bottom: 2px solid #fff; transform: none;
+}
+.corb-bulk-lbl { font-size: 13px; font-weight: 600; color: var(--text2); white-space: nowrap; }
+
+/* Barre d'actions en masse */
+.corb-bulkbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.corb-bulkbar--active { border-color: var(--cyan-border, var(--cyan)); }
+.corb-bulkbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.corb-item--sel { border-color: var(--cyan-border, var(--cyan)); background: var(--cyan-dim, var(--bg3)); }
 
 /* Empty state */
 .corb-empty {
@@ -18530,6 +18600,13 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .corb-item { flex-wrap: wrap; }
   .corb-item-actions { width: 100%; justify-content: flex-end; }
   .corb-btn--restore, .corb-btn--archive { flex: 1; justify-content: center; }
+
+  /* Barre d'actions en masse — les boutons passent sur leur propre ligne
+     plutôt que de créer un débordement horizontal (jamais de scroll
+     horizontal global, voir corb-bulkbar-actions ci-dessous). */
+  .corb-bulkbar { padding: 10px 12px; }
+  .corb-bulkbar-actions { width: 100%; }
+  .corb-bulkbar-actions .corb-btn { flex: 1; justify-content: center; min-width: 0; }
 }
 
 

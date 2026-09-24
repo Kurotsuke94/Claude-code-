@@ -101,7 +101,9 @@
     // (ex. un test qui veut reproduire "shift_templates sans règle" sans
     // dépendre d'un vrai moteur de règles). Piloté depuis le test via
     // window.__mockDenyColl = {shift_templates: true} — n'affecte rien
-    // d'autre que les collections explicitement listées.
+    // d'autre que les collections explicitement listées. Couvre set(),
+    // update() ET delete() (une vraie règle "deny" bloque toute écriture,
+    // pas seulement set()).
     function _deniedColl(path) {
       var deny = window.__mockDenyColl || {};
       return path.length >= 1 && !!deny[path[0]];
@@ -153,6 +155,7 @@
           return Promise.resolve();
         },
         update: function (data) {
+          if (_deniedColl(path)) return Promise.reject(_denyErr());
           var c = ensureColl(path);
           var cur = Object.assign({}, c[id] || {});
           Object.keys(data).forEach(function (k) {
@@ -163,7 +166,10 @@
           fire(path); fireDoc(path, id);
           return Promise.resolve();
         },
-        delete: function () { var c = ensureColl(path); delete c[id]; fire(path); fireDoc(path, id); return Promise.resolve(); },
+        delete: function () {
+          if (_deniedColl(path)) return Promise.reject(_denyErr());
+          var c = ensureColl(path); delete c[id]; fire(path); fireDoc(path, id); return Promise.resolve();
+        },
         onSnapshot: function (cb) {
           var k = full.join('/');
           docListeners[k] = docListeners[k] || [];
