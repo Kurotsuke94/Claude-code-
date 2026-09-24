@@ -94,6 +94,74 @@
     if (MX.Pages.Conso && MX.Pages.Conso.ensureLoaded) MX.Pages.Conso.ensureLoaded(_reRenderIfStillHome);
   }
 
+  // ── Météo (Open-Meteo, via assets/js/utils/weather.js) ──
+  // status: 'unconfigured' | 'loading' | 'ok' | 'error'. Ne bloque jamais le
+  // rendu de l'Accueil : on affiche l'état courant puis on redemande un
+  // rendu quand la promesse se résout (si toujours sur l'Accueil).
+  var _weather = { status: 'unconfigured', data: null, forKey: null };
+  function _ensureWeatherLoaded(cfg) {
+    var lat = cfg && typeof cfg.lat === 'number' ? cfg.lat : null;
+    var lon = cfg && typeof cfg.lon === 'number' ? cfg.lon : null;
+    if (lat === null || lon === null) { _weather = { status: 'unconfigured', data: null, forKey: null }; return; }
+    var key = lat + ',' + lon;
+    if (_weather.forKey === key && _weather.status !== 'unconfigured') return; // déjà chargé/en cours pour ces coordonnées
+    _weather = { status: 'loading', data: null, forKey: key };
+    if (!MX.Weather || !MX.Weather.getCurrent) { _weather = { status: 'error', data: null, forKey: key }; return; }
+    MX.Weather.getCurrent(lat, lon).then(function (data) {
+      if (_weather.forKey !== key) return; // config changée entre-temps
+      _weather = { status: data ? 'ok' : 'error', data: data, forKey: key };
+      if (MX.state.currentPage === 'home') render();
+    });
+  }
+
+  // isAdmin (strict, PAS canSeeAll) : la configuration météo (config/hotel_config)
+  // est réservée Admin côté Firestore — le bouton et le message détaillé ne
+  // doivent apparaître qu'à un Admin, pour rester cohérents avec ce qui est
+  // réellement modifiable (voir _renderEtablissement dans settings.js).
+  function _weatherWidgetHtml(cfg, isAdmin) {
+    var cityLabel = (cfg && cfg.cityLabel) ? cfg.cityLabel : '';
+    if (_weather.status === 'unconfigured') {
+      if (!isAdmin) {
+        return '<div class="acc-weather acc-weather--empty">' +
+          '<i class="fas fa-cloud-sun"></i>' +
+          '<div class="acc-weather-txt">' +
+            '<div class="acc-weather-line">Météo non configurée</div>' +
+          '</div>' +
+        '</div>';
+      }
+      return '<div class="acc-weather acc-weather--empty">' +
+        '<i class="fas fa-cloud-sun"></i>' +
+        '<div class="acc-weather-txt">' +
+          '<div class="acc-weather-line">Météo</div>' +
+          '<div class="acc-weather-sub">Localisation non configurée</div>' +
+        '</div>' +
+        '<button class="acc-weather-cfg" onclick="window._settingsTab=\'etablissement\';MX.showPage(\'parametres\')">Configurer la météo <i class="fas fa-arrow-right"></i></button>' +
+      '</div>';
+    }
+    if (_weather.status === 'loading') {
+      return '<div class="acc-weather acc-weather--loading">' +
+        '<i class="fas fa-spinner fa-spin"></i>' +
+        '<div class="acc-weather-txt"><div class="acc-weather-line">Météo</div><div class="acc-weather-sub">Chargement…</div></div>' +
+      '</div>';
+    }
+    if (_weather.status === 'error') {
+      return '<div class="acc-weather acc-weather--error">' +
+        '<i class="fas fa-cloud-sun"></i>' +
+        '<div class="acc-weather-txt"><div class="acc-weather-line">Météo</div><div class="acc-weather-sub">Données météo temporairement indisponibles</div></div>' +
+      '</div>';
+    }
+    var d = _weather.data;
+    return '<div class="acc-weather acc-weather--ok">' +
+      '<i class="fas ' + d.icon + '"></i>' +
+      '<div class="acc-weather-txt">' +
+        '<div class="acc-weather-line"><span class="acc-weather-temp">' + d.temp + '°</span> ' + MX.esc(d.label) + '</div>' +
+        '<div class="acc-weather-sub">' + (cityLabel ? MX.esc(cityLabel) + ' · ' : '') +
+          (d.tempMin !== null && d.tempMax !== null ? d.tempMin + '° / ' + d.tempMax + '°' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   function _priorityRow(level, icon, title, subtitle, badge, onclick) {
     var cls = level === 'urgent' ? 'acc-pr--urgent' : level === 'important' ? 'acc-pr--important' : 'acc-pr--plan';
     return '<button class="acc-pr-row ' + cls + '" onclick="' + onclick + '">' +
@@ -107,19 +175,11 @@
     '</button>';
   }
 
-  function _objRow(label, cur, total, unit, colorClass, onclick) {
-    var pct = total > 0 ? Math.round(cur / total * 100) : (total === 0 && cur === 0 ? 100 : 0);
-    var restantes = Math.max(0, total - cur);
-    var valTxt = (cur === null || total === null) ? '—' : (cur + ' / ' + total);
-    return '<div class="acc-obj-row"' + (onclick ? ' onclick="' + onclick + '" style="cursor:pointer"' : '') + '>' +
-      '<div class="acc-obj-top">' +
-        '<span class="acc-obj-label">' + MX.esc(label) + '</span>' +
-        '<span class="acc-obj-val">' + valTxt + '</span>' +
-        '<span class="acc-obj-pct ' + colorClass + '">' + (cur === null ? '—' : pct + '%') + '</span>' +
-      '</div>' +
-      '<div class="acc-obj-bar"><div class="acc-obj-fill ' + colorClass + '" style="width:' + (cur === null ? 0 : pct) + '%"></div></div>' +
-      (cur !== null && total !== null ? '<div class="acc-obj-rest">' + restantes + ' restante' + (restantes > 1 ? 's' : '') + '</div>' : '') +
-    '</div>';
+  function _annDate(a) {
+    var raw = a && a.createdAt;
+    if (!raw) return 0;
+    var d = typeof raw.toDate === 'function' ? raw.toDate() : new Date(raw);
+    return d.getTime() || 0;
   }
 
   function render() {
@@ -128,6 +188,7 @@
     var esc   = MX.esc;
 
     _ensureDataLoaded();
+    _ensureWeatherLoaded(state.hotelConfig);
 
     // ── Rôle ──
     var isAdmin = MX.Auth && MX.Auth.isAdmin && MX.Auth.isAdmin();
@@ -207,6 +268,9 @@
     var intLate   = intItems.filter(function (iv) { return iv.effStatus === 'en_retard'; });
     var intToday  = intItems.filter(function (iv) { return iv.startDate === todayISO; });
     var intTodayDone = intToday.filter(function (iv) { return iv.effStatus === 'terminee'; }).length;
+    var intVisible = _see('interventions');
+    var intOpenCount    = intVisible ? intItems.filter(function (iv) { return iv.effStatus !== 'terminee' && iv.effStatus !== 'annulee'; }).length : null;
+    var intWaitingCount = intVisible ? intItems.filter(function (iv) { return iv.effStatus === 'planifiee' || iv.effStatus === 'affectee'; }).length : null;
 
     // ════════════════════════════════════════════════════════════════════
     // DONNÉES RÉELLES — PMP / Checklists (moteur pmp.js, getStats()/getLateItems())
@@ -251,12 +315,32 @@
     var perfGrade = (perfScore !== null) ? (perfScore >= 80 ? { l: 'Bon niveau', col: '#22c55e' } : perfScore >= 60 ? { l: 'Niveau moyen', col: '#f97316' } : { l: 'À améliorer', col: '#ef4444' }) : null;
 
     // ════════════════════════════════════════════════════════════════════
+    // DONNÉES RÉELLES — Annonces (collection `announcements`, déjà chargée
+    // globalement dans state.announcements — voir messages.js). Aucun
+    // nouveau listener : on réutilise tel quel. Tri : épinglées d'abord,
+    // puis les plus récentes.
+    // ════════════════════════════════════════════════════════════════════
+    var Msgs = MX.Pages && MX.Pages.Messages;
+    var ANN_T = (Msgs && Msgs.ANN_TYPES) || {};
+    var announcements = (state.announcements || []).slice().sort(function (a, b) {
+      var pa = a.pinned ? 1 : 0, pb = b.pinned ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return _annDate(b) - _annDate(a);
+    });
+    var announcementsShown = announcements.slice(0, 4);
+
+    // ════════════════════════════════════════════════════════════════════
+    // DONNÉES RÉELLES — Retards consolidés (missions + interventions + PMP)
+    // ════════════════════════════════════════════════════════════════════
+    var retardsTotal = missionsLate.length + intLate.length + (pmpVisible && pmpStats ? pmpStats.enRetard : 0);
+
+    // ════════════════════════════════════════════════════════════════════
     // DONNÉES RÉELLES — Dernières activités (collection `logs`, admin.js le fait déjà)
     // ════════════════════════════════════════════════════════════════════
     var LOG_LABEL = { check: 'a validé une tâche', uncheck: 'a annulé une tâche', assign: 'a assigné une tâche', claim: 'a pris un créneau', unclaim: 'a rendu un créneau' };
     var LOG_ICON  = { check: 'fa-check-circle', uncheck: 'fa-rotate-left', assign: 'fa-user-check', claim: 'fa-hand', unclaim: 'fa-hand' };
     var LOG_COLOR = { check: 'var(--green)', uncheck: 'var(--red)', assign: 'var(--cyan)', claim: 'var(--jour)', unclaim: 'var(--text3)' };
-    var recentLogs = (state.logs || []).slice(0, 8);
+    var recentLogs = (state.logs || []).slice(0, 5);
 
     // ════════════════════════════════════════════════════════════════════
     // KPI HEADER
@@ -337,6 +421,7 @@
         '<div class="acc-greeting">' + greeting + ', ' + esc(firstName) + ' 👋</div>' +
         '<div class="acc-header-date">' + dayFr + ' ' + dateFr + (weekLabel ? ' · ' + esc(weekLabel) : '') + ' · ' + momentJour + '</div>' +
       '</div>' +
+      _weatherWidgetHtml(state.hotelConfig, isAdmin) +
       '<div class="acc-kpi-row">' +
         '<button class="acc-kpi acc-kpi--red" onclick="MX.showAdminTab(\'alerts\')"><i class="fas fa-triangle-exclamation"></i><span class="acc-kpi-v">' + urgencesCount + '</span><span class="acc-kpi-l">Urgences</span></button>' +
         (_see('checklist') ? '<button class="acc-kpi acc-kpi--orange" onclick="MX.showPage(\'mes-missions\')"><i class="fas fa-clipboard-list"></i><span class="acc-kpi-v">' + missionsAujourdhuiCount + '</span><span class="acc-kpi-l">Missions<br>Aujourd\'hui</span></button>' : '') +
@@ -345,14 +430,15 @@
       '</div>' +
     '</div>';
 
-    // ── GRID PRINCIPALE ──
+    // ── GRID PRINCIPALE (paires main/side alignées ligne par ligne, cf.
+    //    ordre imposé en mobile ci-dessous via CSS `order`) ──
     h += '<div class="acc-grid">';
 
     // Colonne principale (gauche, plus large)
     h += '<div class="acc-col acc-col-main">';
 
     // 🚨 Priorités du jour
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-triangle-exclamation" style="color:var(--red)"></i> Priorités du jour</span>' +
+    h += '<div class="acc-card acc-card-priorities"><div class="acc-card-head"><span><i class="fas fa-triangle-exclamation" style="color:var(--red)"></i> Priorités du jour</span>' +
       (priorities.length ? '<button class="acc-card-link" onclick="MX.showAdminTab(\'alerts\')">Voir toutes les priorités (' + priorities.length + ')</button>' : '') +
     '</div>';
     if (!prioritiesShown.length) {
@@ -362,29 +448,8 @@
     }
     h += '</div>';
 
-    // 📋 Ma journée
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-list-check" style="color:var(--cyan)"></i> Ma journée</span>' +
-      '<button class="acc-card-link" onclick="MX.showPage(\'planning\')">Voir le planning</button>' +
-    '</div>';
-    if (!dayItems.length) {
-      h += '<div class="acc-empty"><i class="fas fa-mug-hot"></i><span>Rien de planifié aujourd\'hui</span></div>';
-    } else {
-      h += '<div class="acc-day-list">';
-      dayItems.forEach(function (it) {
-        var stC = it.status === 'terminee' ? 'acc-day-ic--done' : it.status === 'en_retard' ? 'acc-day-ic--late' : it.status === 'en_cours' ? 'acc-day-ic--prog' : 'acc-day-ic--todo';
-        h += '<div class="acc-day-row">' +
-          '<span class="acc-day-time">' + (it.label || '—') + '</span>' +
-          '<span class="acc-day-ic ' + stC + '"><i class="fas ' + (STATUS_ICON[it.status] || 'fa-circle') + '"></i></span>' +
-          '<span class="acc-day-title">' + esc(it.title) + '</span>' +
-          '<span class="acc-day-status">' + (STATUS_LABEL[it.status] || '') + '</span>' +
-        '</div>';
-      });
-      h += '</div>';
-    }
-    h += '</div>';
-
     // 📊 Performance générale
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-gauge-high" style="color:#4F7CFF"></i> Performance générale</span>' +
+    h += '<div class="acc-card acc-card-energie"><div class="acc-card-head"><span><i class="fas fa-gauge-high" style="color:#4F7CFF"></i> Performance générale</span>' +
       '<button class="acc-card-link" onclick="MX.showCsoTab(\'dashboard\')">Voir les stats</button>' +
     '</div>';
     if (!csoReady) {
@@ -406,23 +471,71 @@
     }
     h += '</div>';
 
+    // 🔧 État maintenance (interventions ouvertes/urgentes/en attente + retards consolidés)
+    if (intVisible || pmpVisible || _see('checklist')) {
+      h += '<div class="acc-card acc-card-maintenance"><div class="acc-card-head"><span><i class="fas fa-wrench" style="color:#6D4CFF"></i> État maintenance</span>' +
+        (intVisible ? '<button class="acc-card-link" onclick="MX.showIntTab(\'gestion\')">Voir les interventions</button>' : '') +
+      '</div>';
+      h += '<div class="acc-maint-grid">' +
+        '<div class="acc-maint-kpi"><span class="acc-maint-v">' + (intOpenCount === null ? '—' : intOpenCount) + '</span><span class="acc-maint-l">Ouvertes</span></div>' +
+        '<div class="acc-maint-kpi acc-maint-kpi--red"><span class="acc-maint-v">' + (intVisible ? intUrgent.length : '—') + '</span><span class="acc-maint-l">Urgentes</span></div>' +
+        '<div class="acc-maint-kpi"><span class="acc-maint-v">' + (intWaitingCount === null ? '—' : intWaitingCount) + '</span><span class="acc-maint-l">En attente</span></div>' +
+        '<div class="acc-maint-kpi ' + (retardsTotal > 0 ? 'acc-maint-kpi--orange' : '') + '"><span class="acc-maint-v">' + retardsTotal + '</span><span class="acc-maint-l">Retards</span></div>' +
+      '</div></div>';
+    }
+
+    // 📋 Ma journée
+    h += '<div class="acc-card acc-card-day"><div class="acc-card-head"><span><i class="fas fa-list-check" style="color:var(--cyan)"></i> Ma journée</span>' +
+      '<button class="acc-card-link" onclick="MX.showPage(\'planning\')">Voir le planning</button>' +
+    '</div>';
+    if (!dayItems.length) {
+      h += '<div class="acc-empty"><i class="fas fa-mug-hot"></i><span>Rien de planifié aujourd\'hui</span></div>';
+    } else {
+      h += '<div class="acc-day-list">';
+      dayItems.forEach(function (it) {
+        var stC = it.status === 'terminee' ? 'acc-day-ic--done' : it.status === 'en_retard' ? 'acc-day-ic--late' : it.status === 'en_cours' ? 'acc-day-ic--prog' : 'acc-day-ic--todo';
+        h += '<div class="acc-day-row">' +
+          '<span class="acc-day-time">' + (it.label || '—') + '</span>' +
+          '<span class="acc-day-ic ' + stC + '"><i class="fas ' + (STATUS_ICON[it.status] || 'fa-circle') + '"></i></span>' +
+          '<span class="acc-day-title">' + esc(it.title) + '</span>' +
+          '<span class="acc-day-status">' + (STATUS_LABEL[it.status] || '') + '</span>' +
+        '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+
     h += '</div>'; // end acc-col-main
 
     // Colonne latérale (droite)
     h += '<div class="acc-col acc-col-side">';
 
-    // ⚡ Actions rapides
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-bolt" style="color:var(--orange)"></i> Actions rapides</span></div>';
-    h += '<div class="acc-actions-grid">';
-    if (_see('checklist')) h += '<button class="acc-action" onclick="MX.showPage(\'mes-missions\')"><i class="fas fa-plus"></i><span>Nouvelle mission</span></button>';
-    if (_see('interventions')) h += '<button class="acc-action" onclick="MX.showPage(\'interventions\')"><i class="fas fa-wrench"></i><span>Nouvelle intervention</span></button>';
-    if (stockVisible) h += '<button class="acc-action" onclick="MX.showOrdersTab(\'scan\')"><i class="fas fa-qrcode"></i><span>Scanner QR code</span></button>';
-    if (stockVisible) h += '<button class="acc-action" onclick="MX.showPage(\'orders\')"><i class="fas fa-box"></i><span>Gérer le stock</span></button>';
-    h += '</div></div>';
+    // 📢 Annonces (réutilise state.announcements — aucun nouveau listener)
+    h += '<div class="acc-card acc-card-announcements"><div class="acc-card-head"><span><i class="fas fa-bullhorn" style="color:#F59E0B"></i> Annonces</span>' +
+      '<button class="acc-card-link" onclick="MX.showPage(\'msgs\')">Voir toutes les annonces</button>' +
+    '</div>';
+    if (!announcementsShown.length) {
+      h += '<div class="acc-empty"><i class="fas fa-comment-slash"></i><span>Aucune annonce pour le moment</span></div>';
+    } else {
+      h += '<div class="acc-ann-list">';
+      announcementsShown.forEach(function (a) {
+        var meta = ANN_T[a.type] || { icon: 'fa-circle-info', label: 'Information', c: 'var(--text3)', cd: 'var(--bg4)' };
+        var txt = a.title || a.content || '';
+        h += '<div class="acc-ann-row" onclick="MX.showPage(\'msgs\')">' +
+          '<span class="acc-ann-ic" style="color:' + meta.c + ';background:' + meta.cd + '"><i class="fas ' + meta.icon + '"></i></span>' +
+          '<div class="acc-ann-body">' +
+            '<div class="acc-ann-title">' + (a.pinned ? '<i class="fas fa-thumbtack acc-ann-pin"></i> ' : '') + esc(txt) + '</div>' +
+            '<div class="acc-ann-sub">' + esc(a.authorName || 'Anonyme') + ' · ' + MX.fmtTime(a.createdAt) + '</div>' +
+          '</div>' +
+        '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
 
     // 📦 Stock critique
     if (stockVisible) {
-      h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-box" style="color:#4F7CFF"></i> Stock critique</span>' +
+      h += '<div class="acc-card acc-card-stock"><div class="acc-card-head"><span><i class="fas fa-box" style="color:#4F7CFF"></i> Stock critique</span>' +
         '<button class="acc-card-link" onclick="MX.showOrdersTab(\'toorder\')">Voir tout le stock</button>' +
       '</div>';
       if (!criticalProducts.length) {
@@ -440,31 +553,17 @@
       h += '</div>';
     }
 
-    // 🎯 Objectifs opérationnels
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-bullseye" style="color:#6D4CFF"></i> Objectifs opérationnels</span></div>';
-    h += '<div class="acc-obj-list">';
-    if (pmpVisible) {
-      if (pmpStats) {
-        h += _objRow('PMP / Checklists (ce mois-ci)', pmpStats.realisees, pmpStats.thisMonthCount, '', 'acc-c-green', "MX.showPmpTab('dashboard')");
-      } else {
-        h += _objRow('PMP / Checklists', null, null, '', 'acc-c-green', "MX.showPmpTab('dashboard')");
-      }
-    }
-    if (_see('interventions')) {
-      if (intReady) h += _objRow('Interventions (aujourd\'hui)', intTodayDone, intToday.length, '', 'acc-c-blue', "MX.showIntTab('gestion')");
-      else h += _objRow('Interventions (aujourd\'hui)', null, null, '', 'acc-c-blue', "MX.showIntTab('gestion')");
-    }
-    if (_see('checklist')) {
-      h += _objRow('Missions (aujourd\'hui)', missionsTodayDone, missionsTodayTotal, '', 'acc-c-purple', "MX.showPage('mes-missions')");
-    }
-    var retardsTotal = missionsLate.length + intLate.length + (pmpVisible && pmpStats ? pmpStats.enRetard : 0);
-    h += '<div class="acc-obj-row"><div class="acc-obj-top"><span class="acc-obj-label">Retards</span>' +
-      '<span class="acc-obj-val">' + retardsTotal + ' / 0</span>' +
-      '<span class="acc-obj-pct ' + (retardsTotal === 0 ? 'acc-c-green' : 'acc-c-red') + '">' + (retardsTotal === 0 ? 'Objectif atteint' : 'À traiter') + '</span></div></div>';
+    // ⚡ Actions rapides
+    h += '<div class="acc-card acc-card-actions"><div class="acc-card-head"><span><i class="fas fa-bolt" style="color:var(--orange)"></i> Actions rapides</span></div>';
+    h += '<div class="acc-actions-grid">';
+    if (_see('checklist')) h += '<button class="acc-action" onclick="MX.showPage(\'mes-missions\')"><i class="fas fa-plus"></i><span>Nouvelle mission</span></button>';
+    if (_see('interventions')) h += '<button class="acc-action" onclick="MX.showPage(\'interventions\')"><i class="fas fa-wrench"></i><span>Nouvelle intervention</span></button>';
+    if (stockVisible) h += '<button class="acc-action" onclick="MX.showOrdersTab(\'scan\')"><i class="fas fa-qrcode"></i><span>Scanner QR code</span></button>';
+    if (stockVisible) h += '<button class="acc-action" onclick="MX.showPage(\'orders\')"><i class="fas fa-box"></i><span>Gérer le stock</span></button>';
     h += '</div></div>';
 
     // 🕐 Dernières activités
-    h += '<div class="acc-card"><div class="acc-card-head"><span><i class="fas fa-clock" style="color:var(--cyan)"></i> Dernières activités</span>' +
+    h += '<div class="acc-card acc-card-activity"><div class="acc-card-head"><span><i class="fas fa-clock" style="color:var(--cyan)"></i> Dernières activités</span>' +
       (isAdmin ? '<button class="acc-card-link" onclick="MX.showAdminTab(\'logs\')">Voir tout</button>' : '') +
     '</div>';
     if (!recentLogs.length) {

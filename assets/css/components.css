@@ -17613,6 +17613,16 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .pe-stt-actions { display: flex; gap: 10px; flex-wrap: wrap; padding: 4px 0; }
 .stt-section-intro { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 4px; }
 
+/* ── Établissement (localisation météo) ── */
+.etb-stt-wrap { display: flex; flex-direction: column; gap: 16px; }
+.etb-stt-card { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.etb-field-row { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 10px; }
+.etb-field-lbl { font-size: 13px; color: var(--text2); font-weight: 500; }
+.etb-stt-actions { display: flex; gap: 10px; flex-wrap: wrap; padding-top: 4px; }
+@media (max-width: 520px) {
+  .etb-field-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
 /* ── Performance V3 : ref-badge ─────────────────────────────────────────── */
 .pe-ref-badge { font-size: 11px; color: var(--text3); margin-top: 6px; display: flex; align-items: center; gap: 4px; }
 .pe-ref-badge i { color: var(--blue, #3b82f6); }
@@ -25033,8 +25043,29 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   background: var(--bg2); border: 1px solid var(--border); border-radius: var(--rx);
   padding: 18px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
 }
+.acc-header-greet { flex: 1 1 auto; min-width: 200px; }
 .acc-greeting { font-size: 20px; font-weight: 800; color: var(--text); font-family: var(--ffs); }
 .acc-header-date { font-size: 12.5px; color: var(--text2); margin-top: 4px; font-family: var(--ffm); }
+
+/* ── Météo (widget hero, dans le header) ── */
+.acc-weather {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; flex-shrink: 0;
+}
+.acc-weather i { font-size: 22px; color: var(--text3); flex-shrink: 0; }
+.acc-weather--ok i { color: #4F9CFF; }
+.acc-weather-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.acc-weather-line { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.acc-weather-temp { font-size: 15px; font-weight: 800; font-family: var(--ffm); }
+.acc-weather-sub { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-weather-cfg {
+  background: none; border: none; color: var(--cyan); font-size: 11px; font-weight: 700;
+  font-family: var(--ffs); cursor: pointer; padding: 0; white-space: nowrap; margin-left: 4px;
+}
+.acc-weather-cfg:hover { text-decoration: underline; }
+.acc-weather--loading i { animation: none; }
+
 .acc-kpi-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .acc-kpi {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -25159,20 +25190,33 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .acc-stock-name { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-stock-qty { font-size: 11px; color: var(--orange); font-weight: 700; font-family: var(--ffm); flex-shrink: 0; }
 
-/* ── Objectifs opérationnels ── */
-.acc-obj-list { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; }
-.acc-obj-row:last-child { padding-bottom: 0; }
-.acc-obj-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.acc-obj-label { flex: 1; min-width: 0; font-size: 12px; color: var(--text2); font-family: var(--ffs); }
-.acc-obj-val { font-size: 11.5px; font-family: var(--ffm); color: var(--text); }
-.acc-obj-pct { font-size: 11px; font-weight: 800; font-family: var(--ffm); min-width: 34px; text-align: right; }
-.acc-obj-bar { height: 6px; border-radius: 4px; background: var(--bg4); overflow: hidden; }
-.acc-obj-fill { height: 100%; border-radius: 4px; transition: width 300ms ease; }
-.acc-obj-rest { font-size: 10.5px; color: var(--text3); margin-top: 4px; font-family: var(--ffm); }
-.acc-c-green  { color: var(--green); } .acc-obj-fill.acc-c-green  { background: var(--green); }
-.acc-c-blue   { color: #4F7CFF; }      .acc-obj-fill.acc-c-blue   { background: #4F7CFF; }
-.acc-c-purple { color: #6D4CFF; }      .acc-obj-fill.acc-c-purple { background: #6D4CFF; }
-.acc-c-red    { color: var(--red); }   .acc-obj-fill.acc-c-red    { background: var(--red); }
+/* ── Annonces ── */
+.acc-ann-list { display: flex; flex-direction: column; }
+.acc-ann-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); cursor: pointer; font-family: var(--ffs);
+}
+.acc-ann-row:last-child { border-bottom: none; }
+.acc-ann-row:hover { background: var(--bg3); }
+.acc-ann-ic {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.acc-ann-body { flex: 1; min-width: 0; }
+.acc-ann-title { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-ann-pin { color: var(--orange); font-size: 10px; }
+.acc-ann-sub { font-size: 11px; color: var(--text3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── État maintenance ── */
+.acc-maint-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px 16px; }
+.acc-maint-kpi {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px;
+}
+.acc-maint-v { font-size: 19px; font-weight: 800; font-family: var(--ffm); color: var(--text); line-height: 1; }
+.acc-maint-l { font-size: 10px; color: var(--text3); text-align: center; margin-top: 3px; }
+.acc-maint-kpi--red .acc-maint-v    { color: var(--red); }
+.acc-maint-kpi--orange .acc-maint-v { color: var(--orange); }
 
 /* ── Dernières activités ── */
 .acc-feed-list { display: flex; flex-direction: column; }
@@ -25186,17 +25230,35 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .acc-feed-what { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .acc-feed-time { font-size: 10px; color: var(--text3); flex-shrink: 0; white-space: nowrap; font-family: var(--ffm); }
 
-/* ── Responsive : tablette / mobile ── */
+/* ── Responsive : tablette / mobile ──
+   En dessous de 1080px, la grille 2 colonnes (paires ligne par ligne,
+   cf. commentaire GRID PRINCIPALE dans home.js) devient une colonne
+   unique. `.acc-col-main`/`.acc-col-side` s'effacent (display:contents)
+   pour que les cartes deviennent des enfants flex directs de `.acc-grid`,
+   réordonnées explicitement (`order`) selon l'ordre mobile demandé :
+   Priorités → Annonces → Énergie → Stock → État maintenance →
+   Actions rapides → Ma journée → Dernières activités. ── */
 @media (max-width: 1080px) {
-  .acc-grid { grid-template-columns: 1fr; }
+  .acc-grid { display: flex; flex-direction: column; gap: 16px; }
+  .acc-col-main, .acc-col-side { display: contents; }
+  .acc-card-priorities    { order: 1; }
+  .acc-card-announcements { order: 2; }
+  .acc-card-energie       { order: 3; }
+  .acc-card-stock         { order: 4; }
+  .acc-card-maintenance   { order: 5; }
+  .acc-card-actions       { order: 6; }
+  .acc-card-day           { order: 7; }
+  .acc-card-activity      { order: 8; }
 }
 @media (max-width: 900px) {
   .acc-header { flex-direction: column; align-items: stretch; padding: 16px; }
+  .acc-weather { width: 100%; }
   .acc-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .acc-kpi { min-width: 0; padding: 10px 8px; }
   .acc-greeting { font-size: 18px; }
   .acc-perf-wrap { flex-direction: column; align-items: flex-start; gap: 14px; }
   .acc-perf-mini { width: 100%; }
+  .acc-maint-grid { grid-template-columns: repeat(2, 1fr); }
   /* CORRECTIF (libellé/valeur collés sur mobile) : "Coût énergie" +
      "Donnée indisponible" ne tiennent pas sur une seule ligne en dessous de
      ~430px. On empile label au-dessus de la valeur plutôt que de tronquer

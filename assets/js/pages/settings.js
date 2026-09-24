@@ -29,6 +29,7 @@
     { id: 'apropos',       icon: 'fa-circle-info',      l: 'À propos' },
     { id: 'maintenance',   icon: 'fa-wrench',           l: 'Maintenance', adminOnly: true },
     { id: 'energie',       icon: 'fa-bolt-lightning',   l: 'Performance énergie', adminOnly: true },
+    { id: 'etablissement', icon: 'fa-location-dot',     l: 'Établissement', adminOnly: true },
     { id: 'push-diag',    icon: 'fa-stethoscope',      l: 'Diagnostic Push', adminOnly: true },
   ];
 
@@ -1595,6 +1596,75 @@
   }
 
 
+  // ── ÉTABLISSEMENT — Localisation pour la météo de l'Accueil ──
+  // Admin uniquement (pas canSeeAll) : la règle Firestore config/hotel_config
+  // reste strictement Admin-only (voir firestore.rules) — le gate UI doit
+  // rester cohérent avec elle, sinon un Responsable verrait un formulaire
+  // qu'il ne peut jamais réellement enregistrer.
+  function _renderEtablissement() {
+    const isAdmin = MX.Auth.isAdmin && MX.Auth.isAdmin();
+    if (!isAdmin) return '<div class="stt-card"><p>Accès réservé à l\'administrateur.</p></div>';
+
+    const cfg = MX.state.hotelConfig || {};
+    const lat = (typeof cfg.lat === 'number') ? cfg.lat : '';
+    const lon = (typeof cfg.lon === 'number') ? cfg.lon : '';
+    const cityLabel = cfg.cityLabel || '';
+
+    window._sttSaveEtablissement = async function() {
+      const latVal = parseFloat(document.getElementById('etb-lat').value);
+      const lonVal = parseFloat(document.getElementById('etb-lon').value);
+      const cityVal = document.getElementById('etb-city').value.trim();
+      if (isNaN(latVal) || latVal < -90 || latVal > 90 || isNaN(lonVal) || lonVal < -180 || lonVal > 180) {
+        MX.toast('Latitude/longitude invalides', true);
+        return;
+      }
+      try {
+        await MX.DB.saveHotelConfig({ lat: latVal, lon: lonVal, cityLabel: cityVal });
+        MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { lat: latVal, lon: lonVal, cityLabel: cityVal });
+        MX.toast('Localisation enregistrée');
+        if (MX.state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+      } catch (err) { MX.toast('Erreur sauvegarde', true); console.error(err); }
+    };
+
+    window._sttClearEtablissement = async function() {
+      if (!confirm('Retirer la localisation configurée ? La météo ne s\'affichera plus sur l\'Accueil.')) return;
+      try {
+        await MX.DB.saveHotelConfig({ lat: firebase.firestore.FieldValue.delete(), lon: firebase.firestore.FieldValue.delete(), cityLabel: firebase.firestore.FieldValue.delete() });
+        MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { lat: null, lon: null, cityLabel: null });
+        MX.toast('Localisation retirée');
+        MX.Pages.Settings._showSection('etablissement');
+        if (MX.state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+      } catch (err) { MX.toast('Erreur', true); console.error(err); }
+    };
+
+    return '<div class="etb-stt-wrap">' +
+      '<div class="stt-section-intro">' +
+        'Renseignez les coordonnées géographiques de l\'établissement pour afficher la météo locale sur l\'Accueil.<br>' +
+        'Astuce&nbsp;: cherchez l\'adresse de l\'établissement sur une carte en ligne, un clic droit sur le point exact affiche généralement sa latitude et sa longitude.' +
+      '</div>' +
+      '<div class="stt-card etb-stt-card">' +
+        '<div class="stt-section-head"><i class="fas fa-location-dot"></i> Localisation</div>' +
+        '<div class="etb-field-row">' +
+          '<label class="etb-field-lbl" for="etb-city">Ville affichée</label>' +
+          '<input class="fi" id="etb-city" type="text" placeholder="Ex. Annecy" value="' + String(cityLabel).replace(/"/g,'&quot;') + '">' +
+        '</div>' +
+        '<div class="etb-field-row">' +
+          '<label class="etb-field-lbl" for="etb-lat">Latitude</label>' +
+          '<input class="fi" id="etb-lat" type="number" step="0.0001" min="-90" max="90" placeholder="Ex. 45.8992" value="' + lat + '">' +
+        '</div>' +
+        '<div class="etb-field-row">' +
+          '<label class="etb-field-lbl" for="etb-lon">Longitude</label>' +
+          '<input class="fi" id="etb-lon" type="number" step="0.0001" min="-180" max="180" placeholder="Ex. 6.1294" value="' + lon + '">' +
+        '</div>' +
+        '<div class="etb-stt-actions">' +
+          '<button class="primary-btn" onclick="window._sttSaveEtablissement()"><i class="fas fa-check"></i> Enregistrer</button>' +
+          (cfg.lat != null ? '<button class="cso-ibtn" onclick="window._sttClearEtablissement()"><i class="fas fa-trash"></i> Retirer la localisation</button>' : '') +
+        '</div>' +
+      '</div>' +
+      '</div>';
+  }
+
+
   function _renderMaintenance() {
     const d = _maintData || {};
     const active = !!d.active;
@@ -1699,6 +1769,7 @@
       diagnostic:    _renderDiagnostic,
       maintenance:   _renderMaintenance,
       energie:       _renderEnergie,
+      etablissement: _renderEtablissement,
       'push-diag':   _renderPushDiag,
     };
     if (id === 'maintenance') _maintInit();

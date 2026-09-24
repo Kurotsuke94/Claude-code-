@@ -955,6 +955,10 @@
     _react, _pin, _del,
     _toggleReplies, _sendReply, _delReply,
     _readers, _createIntervention,
-    _pickFile, _removeFile, _onDrop, _openImg
+    _pickFile, _removeFile, _onDrop, _openImg,
+    // Table icône/libellé/couleur par type d'annonce — exposée pour être
+    // réutilisée telle quelle par l'Accueil (carte Annonces), sans dupliquer
+    // cette taxonomie ailleurs.
+    ANN_TYPES: T,
   };
 })();

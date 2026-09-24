@@ -1814,9 +1814,10 @@
       MX.Notifs.onUpdate(list);
     });
 
-    // ── Hotel config (nom, couleurs) ──
+    // ── Hotel config (nom, couleurs, localisation météo) ──
     DB.getHotelConfig().then(cfg => {
       if (cfg) state.hotelConfig = cfg;
+      if (state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
     }).catch(() => {});
   }
 
