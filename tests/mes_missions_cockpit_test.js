@@ -369,6 +369,50 @@ async function noHorizScroll(page) {
     await ctx.close();
   }
 
+  // ═══ 15. Uniformisation Responsable — même cockpit que Technicien ═══
+  // (bug : canSeeAll()==true routait vers l'ancienne vue Checklist.renderForRole,
+  // corrigé dans render()/_rerenderIfActive() pour se baser sur currentUser).
+  {
+    console.log('\n--- 15. Responsable → même cockpit que Technicien ---');
+    const r = await newCtx();
+    ctx = r.ctx; page = r.page;
+    todayId = await evalPage(page, () => MX.todayId());
+    await seedInstance(page, todayId, { name: 'Supervision', icon: '📋', userName: 'Sophie', tasks: ['Contrôle qualité hebdo'] });
+    await seedIntervention(page, { title: 'Audit sécurité', description: 'Vérification trimestrielle', userName: 'Sophie', priority: 'normale', zone: 'Site' });
+    await pinLogin(page, 'sophie', '9999');
+    await page.evaluate(() => { MX.showPage('mes-missions'); });
+    await page.waitForTimeout(500);
+    let html = await mainHtml(page);
+    ok('15.1 Sophie (responsable) obtient le cockpit (.mm-cp-layout), pas l\'ancienne vue', /mm-cp-layout/.test(html));
+    ok('15.2 Structure identique : filtres TOUT/CHECKLIST/INTERVENTIONS/PMP présents', await page.evaluate(() => ['tout','checklist','intervention','pmp'].every(t => !!document.querySelector('.mm-cp-filter-btn[data-tab="' + t + '"]'))));
+    ok('15.3 Structure identique : panneau central présent (#mm-cp-detail)', await page.evaluate(() => !!document.getElementById('mm-cp-detail')));
+    ok('15.4 Structure identique : colonne "Ma journée" présente', /Ma journée/.test(html));
+    ok('15.5 Sophie voit ses propres missions ("Contrôle qualité hebdo")', /Contrôle qualité hebdo/.test(html));
+    ok('15.6 Sophie voit sa propre intervention ("Audit sécurité")', /Audit sécurité/.test(html));
+    ok('15.7 Sophie ne voit PAS les missions d\'un autre technicien (pas de fuite de données)', !/Vérifier CTA|Relever températures/.test(html));
+    ok('15.8 canSeeAll() reste vrai pour Sophie (permissions Responsable non modifiées)', await page.evaluate(() => MX.Auth.canSeeAll() === true));
+    // Sélection + validation fonctionnent aussi pour un Responsable (même comportement que Technicien)
+    const rowSel = await page.evaluate(() => {
+      const row = Array.from(document.querySelectorAll('.mm-cp-row')).find(r => /Contrôle qualité hebdo/.test(r.textContent));
+      return row ? '#' + row.id : null;
+    });
+    await clickSafe(page, rowSel);
+    await page.waitForTimeout(150);
+    html = await page.evaluate(() => document.getElementById('mm-cp-detail').innerHTML);
+    ok('15.9 Sélection d\'une mission fonctionne pour un Responsable (panneau rempli)', /Contrôle qualité hebdo/.test(html));
+    await ctx.close();
+  }
+
+  // ═══ 16. Technicien → toujours le cockpit (non-régression du routage) ═══
+  {
+    console.log('\n--- 16. Technicien → cockpit (non-régression) ---');
+    await setupCockpit();
+    let html = await mainHtml(page);
+    ok('16.1 Kevin (technicien) obtient toujours le cockpit', /mm-cp-layout/.test(html));
+    ok('16.2 canSeeAll() reste faux pour Kevin (permissions Technicien non modifiées)', await page.evaluate(() => MX.Auth.canSeeAll() === false));
+    await ctx.close();
+  }
+
   await browser.close();
   console.log('\n' + (failures ? failures + ' test(s) ont échoué.' : 'Tous les tests du cockpit "Mes missions" passent.'));
   process.exit(failures ? 1 : 0);

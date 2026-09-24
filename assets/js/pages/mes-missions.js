@@ -120,7 +120,11 @@
   }
 
   function _rerenderIfActive() {
-    if (!MX.Auth.canSeeAll() && MX.state.currentUser) {
+    // Même critère que render() : le cockpit est actif dès qu'il y a un
+    // currentUser (technicien OU responsable), pas seulement quand
+    // !canSeeAll() — sinon les listeners Firestore ne rafraîchissent
+    // jamais le cockpit d'un responsable après son premier rendu.
+    if (MX.state.currentUser) {
       var el = document.getElementById('main-content');
       if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
         var prevSt = el.scrollTop;
@@ -3358,12 +3362,19 @@
   function render() {
     var el = document.getElementById('main-content');
     if (!el) return;
-    if (MX.Auth.canSeeAll()) {
-      return MX.Pages.Checklist.renderForRole
-        ? MX.Pages.Checklist.renderForRole()
+    // Le cockpit est une vue PERSONNELLE ("mes missions") — il s'affiche dès
+    // qu'il y a un currentUser (profil PIN) à qui la résoudre, technicien
+    // OU responsable : le rôle ne détermine plus l'UI, seulement les
+    // permissions/actions à l'intérieur de cette UI (canSeeAll()/isAdmin()/
+    // isResponsable() restent utilisés tels quels par les fonctions d'action
+    // existantes). Seule une session Admin Firebase sans profil PIN
+    // (currentUser absent) n'a pas d'identité personnelle à résoudre et
+    // garde la vue globale existante.
+    if (!MX.state.currentUser) {
+      return MX.Auth.canSeeAll()
+        ? (MX.Pages.Checklist.renderForRole ? MX.Pages.Checklist.renderForRole() : MX.Pages.Checklist.render(MX.todayId()))
         : MX.Pages.Checklist.render(MX.todayId());
     }
-    if (!MX.state.currentUser) return MX.Pages.Checklist.render(MX.todayId());
     _loadMissions();
     el.innerHTML = _renderTech();
   }
