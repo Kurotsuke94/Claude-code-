@@ -25196,22 +25196,19 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .acc-day-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acc-day-status { font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
 
-/* ── Performance générale ── */
-.acc-perf-wrap { display: flex; align-items: center; gap: 20px; padding: 18px 16px; flex-wrap: wrap; }
-.acc-perf-score { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }
-.acc-perf-ring {
-  --pct: 0;
-  width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  background: conic-gradient(var(--green) calc(var(--pct)*1%), var(--bg4) 0);
-  position: relative;
+/* ── Performance du mois — même famille visuelle que .acc-maint-* (quad-KPI
+   "État maintenance") pour rester cohérent avec le reste du cockpit. ── */
+.acc-perfm-title { display: flex; flex-direction: column; line-height: 1.25; gap: 1px; }
+.acc-perfm-sub { font-size: 10.5px; font-weight: 600; color: var(--text3); }
+.acc-perfm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px 16px; }
+.acc-perfm-kpi {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px;
 }
-.acc-perf-ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--bg2); }
-.acc-perf-num { position: relative; font-size: 22px; font-weight: 800; font-family: var(--ffm); color: var(--text); }
-.acc-perf-unit { position: relative; font-size: 10px; color: var(--text3); margin-left: 1px; }
-.acc-perf-label { font-size: 11.5px; font-weight: 700; font-family: var(--ffs); }
-.acc-perf-mini { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 8px; }
-.acc-perf-mrow { display: flex; justify-content: space-between; font-size: 12.5px; font-family: var(--ffs); color: var(--text2); }
-.acc-perf-mrow strong { color: var(--text); font-family: var(--ffm); font-size: 12px; }
+.acc-perfm-ic { font-size: 14px; color: #4F7CFF; margin-bottom: 2px; }
+.acc-perfm-v { font-size: 17px; font-weight: 800; font-family: var(--ffm); color: var(--text); line-height: 1.15; text-align: center; }
+.acc-perfm-v--na { font-size: 10.5px; font-weight: 600; color: var(--text3); font-family: var(--ffs); }
+.acc-perfm-l { font-size: 10px; color: var(--text3); text-align: center; margin-top: 3px; }
 
 /* ── Actions rapides ── */
 .acc-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 16px; }
@@ -25302,14 +25299,8 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .acc-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .acc-kpi { min-width: 0; padding: 10px 8px; }
   .acc-greeting { font-size: 18px; }
-  .acc-perf-wrap { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .acc-perf-mini { width: 100%; }
   .acc-maint-grid { grid-template-columns: repeat(2, 1fr); }
-  /* CORRECTIF (libellé/valeur collés sur mobile) : "Coût énergie" +
-     "Donnée indisponible" ne tiennent pas sur une seule ligne en dessous de
-     ~430px. On empile label au-dessus de la valeur plutôt que de tronquer
-     le texte — contenu et calculs inchangés. */
-  .acc-perf-mrow { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .acc-perfm-grid { grid-template-columns: repeat(2, 1fr); }
   .acc-day-time { width: 58px; font-size: 10px; }
   .acc-actions-grid { grid-template-columns: repeat(2, 1fr); }
 }

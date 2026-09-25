@@ -257,6 +257,92 @@
     return count ? Math.round(sum / count) : null;
   }
 
+  // ── Ratio réel mensuel — moteur officiel (déplacé depuis _tPerformance,
+  // logique strictement inchangée, pour être exposé via MX.Pages.Conso et
+  // réutilisé tel quel par l'Accueil). Calcul explicitement demandé : index
+  // de fin de mois − index de début de mois (jamais une moyenne de ratios
+  // journaliers/mensuels), sur les compteurs généraux CONFIGURÉS uniquement
+  // (_perfCfg.ref_meters — même source que _refMeterIds, aucune nouvelle
+  // source de vérité). "Non configuré" si rien n'est sélectionné pour ce
+  // type — jamais de repli silencieux sur un autre compteur. Le ratio final
+  // réutilise computeRatio (MX.CsoCalc). ──
+  function _cliForDate(d) {
+    var v = _clients[d];
+    if (!v) return 0;
+    return typeof v === 'object' ? (v.count || 0) : v;
+  }
+  function _lastIndexAt(meterId, dateBound, strictBefore) {
+    let best = null;
+    _readings.forEach(r => {
+      if (r.meterId !== meterId || r.index == null) return;
+      const ok = strictBefore ? r.date < dateBound : r.date <= dateBound;
+      if (!ok) return;
+      if (!best || r.date > best.date || (r.date === best.date && _tsMs(r.createdAt) > _tsMs(best.createdAt))) best = r;
+    });
+    return best ? best.index : null;
+  }
+  function _monthBounds(monthKey) {
+    const [y, m] = monthKey.split('-').map(Number);
+    const start = monthKey + '-01';
+    const end   = monthKey + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
+    return { start, end };
+  }
+  function _monthlyClientsTotal(monthKey) {
+    let total = 0, found = false;
+    Object.keys(_clients).forEach(d => {
+      if (d.indexOf(monthKey) === 0) {
+        const v = _cliForDate(d);
+        if (v > 0) { total += v; found = true; }
+      }
+    });
+    return found ? total : null;
+  }
+  // Résout les compteurs GÉNÉRAUX configurés pour un type — jamais le
+  // fallback de _refMeterIds() (qui renverrait tous les compteurs du
+  // type si rien n'est configuré). Revérifie aussi le type réel de
+  // chaque compteur référencé : si la config pointe vers un compteur
+  // dont le type a changé/été supprimé, il est exclu plutôt que de
+  // mélanger des unités incompatibles.
+  function _generalMeterIds(type) {
+    const cfg = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
+    if (!Array.isArray(cfg) || !cfg.length) return [];
+    return cfg.filter(id => {
+      const m = _meters.find(x => x.id === id);
+      return m && m.type === type;
+    });
+  }
+  // Index de début = dernier relevé STRICTEMENT avant le 1er du mois ;
+  // index de fin = dernier relevé au plus tard le dernier jour du mois.
+  // Ni l'un ni l'autre n'exige un relevé daté DANS le mois lui-même —
+  // jamais une somme des champs `consumption` du mois (sumConsumption*
+  // est volontairement écarté ici, cf. commentaire de _buildMonthlyRatioNav).
+  // Statuts renvoyés : no_meter / insufficient / incoherent / ok.
+  function _monthlyConsoStatus(type, monthKey) {
+    const ids = _generalMeterIds(type);
+    if (!ids.length) return { status: 'no_meter' };
+    const { start, end } = _monthBounds(monthKey);
+    let total = 0;
+    for (const id of ids) {
+      const startIdx = _lastIndexAt(id, start, true);
+      const endIdx   = _lastIndexAt(id, end, false);
+      if (startIdx === null || endIdx === null) return { status: 'insufficient' };
+      const delta = endIdx - startIdx;
+      if (delta < 0) return { status: 'incoherent' };
+      total += delta;
+    }
+    return { status: 'ok', conso: Math.round(total * 1000) / 1000 };
+  }
+  // Clients et consommation sont calculés indépendamment l'un de l'autre
+  // (l'absence de clients ne doit pas masquer une consommation réelle
+  // disponible, et inversement) ; seul le ratio final dépend des deux.
+  function _monthlyRealRatio(type, monthKey) {
+    const consoRes = _monthlyConsoStatus(type, monthKey);
+    const clients  = _monthlyClientsTotal(monthKey);
+    const ratio = (consoRes.status === 'ok' && clients !== null)
+      ? computeRatio(type, consoRes.conso, clients) : null;
+    return { consoStatus: consoRes.status, conso: consoRes.conso ?? null, clients, ratio };
+  }
+
 
 
   // ── HELPERS ──
@@ -3764,13 +3850,6 @@
     });
     if (!investigateHtml) investigateHtml = '<div class="pe-no-alert"><i class="fas fa-check-circle" style="color:#22c55e"></i> Rien à investiguer sur cette période</div>';
 
-    // ── Helper: client count for a date ──
-    function _cliForDate(d) {
-      var v = _clients[d];
-      if (!v) return 0;
-      return typeof v === 'object' ? (v.count || 0) : v;
-    }
-
     // ── Helper: check configured alert rules for a date, returns array of triggered alerts ──
     function _getTriggeredAlerts(date) {
       const rules = (_perfCfg.alert_rules && _perfCfg.alert_rules.rules) || [];
@@ -3818,84 +3897,11 @@
 
     // ── Monthly evolution chart (SVG bar) ──
     // ── Ratio réel mensuel — navigation mois par mois ──────────────────────
-    // Remplace l'ancien graphique SVG. Calcul explicitement demandé :
-    // index de fin de mois − index de début de mois (jamais une moyenne de
-    // ratios journaliers/mensuels), sur les compteurs généraux CONFIGURÉS
-    // uniquement (_perfCfg.ref_meters — même source que _refMeterIds,
-    // aucune nouvelle source de vérité). "Non configuré" si rien n'est
-    // sélectionné pour ce type — jamais de repli silencieux sur un autre
-    // compteur. Le ratio final réutilise computeRatio (MX.CsoCalc).
-    function _lastIndexAt(meterId, dateBound, strictBefore) {
-      let best = null;
-      _readings.forEach(r => {
-        if (r.meterId !== meterId || r.index == null) return;
-        const ok = strictBefore ? r.date < dateBound : r.date <= dateBound;
-        if (!ok) return;
-        if (!best || r.date > best.date || (r.date === best.date && _tsMs(r.createdAt) > _tsMs(best.createdAt))) best = r;
-      });
-      return best ? best.index : null;
-    }
-    function _monthBounds(monthKey) {
-      const [y, m] = monthKey.split('-').map(Number);
-      const start = monthKey + '-01';
-      const end   = monthKey + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
-      return { start, end };
-    }
-    function _monthlyClientsTotal(monthKey) {
-      let total = 0, found = false;
-      Object.keys(_clients).forEach(d => {
-        if (d.indexOf(monthKey) === 0) {
-          const v = _cliForDate(d);
-          if (v > 0) { total += v; found = true; }
-        }
-      });
-      return found ? total : null;
-    }
-    // Résout les compteurs GÉNÉRAUX configurés pour un type — jamais le
-    // fallback de _refMeterIds() (qui renverrait tous les compteurs du
-    // type si rien n'est configuré). Revérifie aussi le type réel de
-    // chaque compteur référencé : si la config pointe vers un compteur
-    // dont le type a changé/été supprimé, il est exclu plutôt que de
-    // mélanger des unités incompatibles.
-    function _generalMeterIds(type) {
-      const cfg = (_perfCfg.ref_meters && _perfCfg.ref_meters[type]) || [];
-      if (!Array.isArray(cfg) || !cfg.length) return [];
-      return cfg.filter(id => {
-        const m = _meters.find(x => x.id === id);
-        return m && m.type === type;
-      });
-    }
-    // Index de début = dernier relevé STRICTEMENT avant le 1er du mois ;
-    // index de fin = dernier relevé au plus tard le dernier jour du mois.
-    // Ni l'un ni l'autre n'exige un relevé daté DANS le mois lui-même —
-    // jamais une somme des champs `consumption` du mois (sumConsumption*
-    // est volontairement écarté ici, cf. commentaire de _buildMonthlyRatioNav).
-    // Statuts renvoyés : no_meter / insufficient / incoherent / ok.
-    function _monthlyConsoStatus(type, monthKey) {
-      const ids = _generalMeterIds(type);
-      if (!ids.length) return { status: 'no_meter' };
-      const { start, end } = _monthBounds(monthKey);
-      let total = 0;
-      for (const id of ids) {
-        const startIdx = _lastIndexAt(id, start, true);
-        const endIdx   = _lastIndexAt(id, end, false);
-        if (startIdx === null || endIdx === null) return { status: 'insufficient' };
-        const delta = endIdx - startIdx;
-        if (delta < 0) return { status: 'incoherent' };
-        total += delta;
-      }
-      return { status: 'ok', conso: Math.round(total * 1000) / 1000 };
-    }
-    // Clients et consommation sont calculés indépendamment l'un de l'autre
-    // (l'absence de clients ne doit pas masquer une consommation réelle
-    // disponible, et inversement) ; seul le ratio final dépend des deux.
-    function _monthlyRealRatio(type, monthKey) {
-      const consoRes = _monthlyConsoStatus(type, monthKey);
-      const clients  = _monthlyClientsTotal(monthKey);
-      const ratio = (consoRes.status === 'ok' && clients !== null)
-        ? computeRatio(type, consoRes.conso, clients) : null;
-      return { consoStatus: consoRes.status, conso: consoRes.conso ?? null, clients, ratio };
-    }
+    // _lastIndexAt/_monthBounds/_monthlyClientsTotal/_generalMeterIds/
+    // _monthlyConsoStatus/_monthlyRealRatio ont été déplacées à la portée du
+    // module (voir plus haut, juste après _calcPerfScore) pour être exposées
+    // via MX.Pages.Conso et réutilisées par l'Accueil — même logique, aucune
+    // formule modifiée. Elles restent utilisées ici exactement comme avant.
     const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
     function _monthLabel(monthKey) {
       const [y, m] = monthKey.split('-').map(Number);
@@ -5939,6 +5945,13 @@
     // que celles utilisées en interne par l'onglet Performance, aucune
     // formule dupliquée.
     _calcPerfScore, _getGrade, _perfRatio, _perfConso, _refMeterIds,
+    // Moteur "Ratio réel mensuel" (1er du mois → aujourd'hui, index de
+    // compteurs généraux configurés) — mêmes fonctions que celles utilisées
+    // en interne par l'onglet Performance pour son calcul mensuel officiel,
+    // désormais réutilisables par l'Accueil pour garantir un résultat
+    // identique sur la même période.
+    _monthlyRealRatio, _monthlyConsoStatus, _monthlyClientsTotal,
+    _lastIndexAt, _monthBounds, _generalMeterIds, _cliForDate,
     // Déclenche le chargement (idempotent, _load() est déjà gardé par
     // _loaded) et prévient l'appelant une fois meters+readings+clients
     // réellement disponibles (évite un score/consommation à 0 avant que

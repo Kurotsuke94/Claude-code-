@@ -294,25 +294,48 @@
     var activeAlerts = (state.triggeredAlerts || []).filter(function (a) { return !a.acknowledged && a.status !== 'resolved'; });
 
     // ════════════════════════════════════════════════════════════════════
-    // DONNÉES RÉELLES — Performance / Énergie / Eau (moteur consommations.js)
+    // DONNÉES RÉELLES — Performance DU MOIS (moteur "Ratio réel mensuel" de
+    // consommations.js : MX.Pages.Conso._monthlyRealRatio/_monthlyConsoStatus/
+    // _monthlyClientsTotal — mêmes fonctions, même calcul, même période que
+    // le widget "Score énergétique" du module Compteurs/Performance :
+    // 1er du mois → aujourd'hui, sur les compteurs généraux explicitement
+    // configurés, JAMAIS de repli silencieux sur tous les compteurs du type
+    // (voir _generalMeterIds). Type retenu : eau_froide — c'est aussi le
+    // type de référence du widget "Score énergétique" de Ratios, ce qui
+    // garantit un résultat strictement identique entre Accueil et Ratios
+    // pour la même période. Aucun nouveau listener Firestore : Conso a déjà
+    // chargé readings/clients ; _ensureReadingsFrom/_ensureClientsFrom
+    // (déjà exposées, déjà utilisées par Ratios pour ce même calcul) ne
+    // déclenchent qu'un éventuel complément ponctuel (.get(), pas un
+    // listener) si l'historique déjà en mémoire ne couvre pas encore le
+    // début du mois.
     // ════════════════════════════════════════════════════════════════════
     var Conso = MX.Pages && MX.Pages.Conso;
     var csoReady = Conso && Conso.isReady && Conso.isReady();
-    var perfScore = null, waterTotal = null, waterRatio = null, csoState = null;
-    if (Conso && csoReady) {
-      csoState = Conso._getCsoState();
-      perfScore = Conso._calcPerfScore ? Conso._calcPerfScore(todayISO) : null;
-      var efToday = Conso._perfConso ? Conso._perfConso('eau_froide', todayISO) : null;
-      var ecToday = Conso._perfConso ? Conso._perfConso('eau_chaude', todayISO) : null;
-      if (efToday !== null || ecToday !== null) {
-        waterTotal = (efToday || 0) + (ecToday || 0);
-        var cliToday = csoState.clients ? (csoState.clients[todayISO] || 0) : 0;
-        if (cliToday > 0 && MX.CsoCalc && MX.CsoCalc.computeRatio) {
-          waterRatio = MX.CsoCalc.computeRatio('eau_froide', waterTotal, cliToday);
-        }
-      }
+    var monthKey   = todayISO.slice(0, 7); // 'YYYY-MM'
+    var monthStart = monthKey + '-01';
+    function _isoMinusDays(iso, n) {
+      var d2 = new Date(iso + 'T00:00:00');
+      d2.setDate(d2.getDate() - n);
+      return _ymdLocal(d2);
     }
-    var perfGrade = (perfScore !== null) ? (perfScore >= 80 ? { l: 'Bon niveau', col: '#22c55e' } : perfScore >= 60 ? { l: 'Niveau moyen', col: '#f97316' } : { l: 'À améliorer', col: '#ef4444' }) : null;
+    var monthlyPerf = null;
+    if (Conso && csoReady) {
+      if (Conso._ensureReadingsFrom) Conso._ensureReadingsFrom(_isoMinusDays(monthStart, 60));
+      if (Conso._ensureClientsFrom)  Conso._ensureClientsFrom(_isoMinusDays(monthStart, 31));
+      monthlyPerf = Conso._monthlyRealRatio ? Conso._monthlyRealRatio('eau_froide', monthKey) : null;
+    }
+    var monthWaterAvailable = !!(monthlyPerf && monthlyPerf.consoStatus === 'ok');
+    var monthWaterConsoTxt  = monthWaterAvailable ? (monthlyPerf.conso.toFixed(2).replace('.', ',') + ' m³') : 'Donnée indisponible';
+    var monthClientsTxt     = (monthlyPerf && monthlyPerf.clients !== null && monthlyPerf.clients > 0)
+      ? monthlyPerf.clients.toLocaleString('fr-FR') : '—';
+    var monthRatioTxt;
+    if (!monthWaterAvailable) monthRatioTxt = 'Donnée indisponible';
+    else if (!monthlyPerf.clients) monthRatioTxt = '—'; // pas de client ce mois — jamais de division par zéro
+    else monthRatioTxt = Math.round(monthlyPerf.ratio) + ' L/client';
+    var perfGrade = (monthWaterAvailable && monthlyPerf.ratio !== null && Conso._getGrade) ? Conso._getGrade('eau_froide', monthlyPerf.ratio) : null;
+    var monthLabel = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'][now.getMonth()];
+    monthLabel = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1) + ' ' + now.getFullYear();
 
     // ════════════════════════════════════════════════════════════════════
     // DONNÉES RÉELLES — Annonces (collection `announcements`, déjà chargée
@@ -458,26 +481,21 @@
     }
     h += '</div>';
 
-    // 📊 Performance générale
-    h += '<div class="acc-card acc-card-energie"><div class="acc-card-head"><span><i class="fas fa-gauge-high" style="color:#4F7CFF"></i> Performance générale</span>' +
+    // 📊 Performance du mois
+    h += '<div class="acc-card acc-card-energie"><div class="acc-card-head">' +
+      '<span><i class="fas fa-gauge-high" style="color:#4F7CFF"></i> <span class="acc-perfm-title"><span>Performance du mois</span><span class="acc-perfm-sub">' + esc(monthLabel) + '</span></span></span>' +
       '<button class="acc-card-link" onclick="MX.showCsoTab(\'dashboard\')">Voir les stats</button>' +
     '</div>';
     if (!csoReady) {
       h += '<div class="acc-empty"><i class="fas fa-spinner fa-spin"></i><span>Chargement des données de consommation…</span></div>';
     } else {
-      h += '<div class="acc-perf-wrap">';
-      h += '<div class="acc-perf-score">' +
-        '<div class="acc-perf-ring" style="--pct:' + (perfScore === null ? 0 : perfScore) + '">' +
-          '<span class="acc-perf-num">' + (perfScore === null ? '—' : perfScore) + '</span><span class="acc-perf-unit">/100</span>' +
-        '</div>' +
-        '<div class="acc-perf-label" style="color:' + (perfGrade ? perfGrade.col : 'var(--text3)') + '">' + (perfGrade ? perfGrade.l : 'Donnée indisponible') + '</div>' +
+      var ratioAvailable = monthRatioTxt.indexOf('L/client') !== -1;
+      h += '<div class="acc-perfm-grid">' +
+        '<div class="acc-perfm-kpi"><i class="fas fa-users acc-perfm-ic"></i><span class="acc-perfm-v">' + monthClientsTxt + '</span><span class="acc-perfm-l">Clients du mois</span></div>' +
+        '<div class="acc-perfm-kpi"><i class="fas fa-droplet acc-perfm-ic"></i><span class="acc-perfm-v' + (monthWaterAvailable ? '' : ' acc-perfm-v--na') + '">' + monthWaterConsoTxt + '</span><span class="acc-perfm-l">Eau consommée</span></div>' +
+        '<div class="acc-perfm-kpi"><i class="fas fa-droplet acc-perfm-ic"></i><span class="acc-perfm-v' + (ratioAvailable ? '' : ' acc-perfm-v--na') + '"' + (ratioAvailable && perfGrade ? ' style="color:' + perfGrade.color + '"' : '') + '>' + monthRatioTxt + '</span><span class="acc-perfm-l">Eau / client</span></div>' +
+        '<div class="acc-perfm-kpi"><i class="fas fa-bolt acc-perfm-ic"></i><span class="acc-perfm-v acc-perfm-v--na">Donnée indisponible</span><span class="acc-perfm-l">Coût énergie</span></div>' +
       '</div>';
-      h += '<div class="acc-perf-mini">' +
-        '<div class="acc-perf-mrow"><span>Eau consommée</span><strong>' + (waterTotal === null ? '—' : waterTotal.toFixed(2).replace('.', ',') + ' m³') + '</strong></div>' +
-        '<div class="acc-perf-mrow"><span>Eau / client</span><strong>' + (waterRatio === null ? '—' : Math.round(waterRatio) + ' L') + '</strong></div>' +
-        '<div class="acc-perf-mrow"><span>Coût énergie</span><strong>Donnée indisponible</strong></div>' +
-      '</div>';
-      h += '</div>';
     }
     h += '</div>';
 
