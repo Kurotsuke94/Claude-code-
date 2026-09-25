@@ -275,10 +275,50 @@
   function authFn() { return authMock; }
   authFn.Auth = { Persistence: { LOCAL: 'local', SESSION: 'session', NONE: 'none' } };
 
+  // ── Storage mock (v8-compat shape) — juste assez fidèle pour tester le
+  // flux upload → getDownloadURL()/refFromURL().delete() sans jamais
+  // toucher un vrai bucket. Les URLs "uploadées"/"supprimées" sont tracées
+  // dans window.__storageLog pour les assertions de test. ──
+  window.__storageLog = { uploads: [], deletes: [] };
+  function storageFn() {
+    return {
+      ref: function (path) {
+        return {
+          put: function (file) {
+            // blob: URL — unique par appel, résolu localement par le navigateur
+            // (zéro E/S réseau, contrairement à un faux hostname externe qui
+            // déclencherait un vrai essai de connexion via le proxy de sortie
+            // dès que la page l'utilise en background-image, avec un risque
+            // de blocage/attente côté navigateur).
+            var url = URL.createObjectURL(file);
+            var task = {};
+            task.on = function (event, onNext, onError, onComplete) {
+              setTimeout(function () {
+                window.__storageLog.uploads.push(url);
+                task.snapshot = { ref: { getDownloadURL: function () { return Promise.resolve(url); } } };
+                if (onComplete) onComplete();
+              }, 0);
+            };
+            return task;
+          },
+        };
+      },
+      refFromURL: function (url) {
+        return {
+          delete: function () {
+            window.__storageLog.deletes.push(url);
+            return Promise.resolve();
+          },
+        };
+      },
+    };
+  }
+
   window.firebase = {
     initializeApp: function () { window.firebase.apps.push({}); },
     apps: [],
     firestore: firestoreFn,
     auth: authFn,
+    storage: storageFn,
   };
 })();

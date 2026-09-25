@@ -1596,7 +1596,13 @@
   }
 
 
-  // ── ÉTABLISSEMENT — Localisation pour la météo de l'Accueil ──
+  // Fichier sélectionné pour la bannière, en attente de confirmation
+  // (aperçu avant validation) — module-level pour survivre au re-render
+  // déclenché par _showSection() lors de la sélection du fichier.
+  var _pendingHeroBannerFile = null;
+  var _pendingHeroBannerPreviewUrl = null;
+
+  // ── ÉTABLISSEMENT — Localisation météo + Bannière d'accueil ──
   // Admin uniquement (pas canSeeAll) : la règle Firestore config/hotel_config
   // reste strictement Admin-only (voir firestore.rules) — le gate UI doit
   // rester cohérent avec elle, sinon un Responsable verrait un formulaire
@@ -1609,6 +1615,126 @@
     const lat = (typeof cfg.lat === 'number') ? cfg.lat : '';
     const lon = (typeof cfg.lon === 'number') ? cfg.lon : '';
     const cityLabel = cfg.cityLabel || '';
+
+    // ── Bannière — sélection locale (aperçu) ──
+    window._sttPickHeroBanner = function() {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/jpeg,image/png,image/webp';
+      inp.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+          MX.toast('Format non supporté (JPG, PNG, WebP uniquement)', true);
+          return;
+        }
+        if (_pendingHeroBannerPreviewUrl) URL.revokeObjectURL(_pendingHeroBannerPreviewUrl);
+        _pendingHeroBannerFile = file;
+        _pendingHeroBannerPreviewUrl = URL.createObjectURL(file);
+        MX.Pages.Settings._showSection('etablissement');
+      };
+      inp.click();
+    };
+    window._sttCancelHeroBannerPick = function() {
+      if (_pendingHeroBannerPreviewUrl) URL.revokeObjectURL(_pendingHeroBannerPreviewUrl);
+      _pendingHeroBannerFile = null;
+      _pendingHeroBannerPreviewUrl = null;
+      MX.Pages.Settings._showSection('etablissement');
+    };
+
+    // ── Bannière — confirmation : ordre de sauvegarde sécurisé ──
+    // 1-2 sélection+compression déjà faites au moment du clic ; 3-4 upload
+    // de la NOUVELLE image et récupération de son URL ; 5-6 sauvegarde
+    // Firestore de la référence, avec vérification explicite du succès
+    // avant toute autre action ; 7 SEULEMENT ENSUITE, best-effort, la
+    // suppression de l'ANCIENNE image. Si l'upload échoue : rien n'est
+    // supprimé. Si la sauvegarde Firestore échoue : la nouvelle image
+    // uploadée est nettoyée et l'ancienne bannière reste active. Si la
+    // suppression de l'ancienne image échoue APRÈS succès de la nouvelle
+    // config : non bloquant, uniquement journalisé (voir deleteHeroBannerImage).
+    window._sttConfirmHeroBanner = async function() {
+      if (!_pendingHeroBannerFile) return;
+      const file = _pendingHeroBannerFile;
+      const btn = document.getElementById('etb-banner-confirm-btn');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Compression…'; }
+      var newUrl = null;
+      try {
+        const compressed = (MX.Pages.Home && MX.Pages.Home._compressImage) ? await MX.Pages.Home._compressImage(file) : file;
+        if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi…';
+        newUrl = await MX.DB.uploadHeroBanner(compressed);
+      } catch (uploadErr) {
+        // Échec AVANT toute écriture Firestore — rien à annuler, rien à supprimer.
+        console.error('[HeroBanner] Échec upload — aucune suppression effectuée', uploadErr);
+        MX.toast('Erreur lors de l\'envoi de la bannière', true);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Enregistrer cette bannière'; }
+        return;
+      }
+      const oldUrl = (MX.state.hotelConfig && MX.state.hotelConfig.heroImageUrl) || null;
+      try {
+        await MX.DB.saveHotelConfig({ heroImageUrl: newUrl });
+      } catch (saveErr) {
+        // Upload réussi mais sauvegarde Firestore échouée : on nettoie LA
+        // NOUVELLE image, on NE TOUCHE PAS à l'ancienne bannière (toujours active).
+        console.error('[HeroBanner] Échec sauvegarde Firestore — nettoyage de la nouvelle image, ancienne bannière conservée', saveErr);
+        await MX.DB.deleteHeroBannerImage(newUrl);
+        MX.toast('Erreur sauvegarde — l\'ancienne bannière est conservée', true);
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Enregistrer cette bannière'; }
+        return;
+      }
+      // Sauvegarde Firestore confirmée réussie : la nouvelle bannière est
+      // désormais active. On nettoie l'état local AVANT de tenter la
+      // suppression de l'ancienne image (best-effort, jamais de rollback).
+      MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: newUrl });
+      if (_pendingHeroBannerPreviewUrl) URL.revokeObjectURL(_pendingHeroBannerPreviewUrl);
+      _pendingHeroBannerFile = null;
+      _pendingHeroBannerPreviewUrl = null;
+      MX.toast('Bannière mise à jour ✓');
+      MX.Pages.Settings._showSection('etablissement');
+      if (MX.state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+      if (oldUrl) MX.DB.deleteHeroBannerImage(oldUrl); // best-effort, non bloquant
+    };
+
+    window._sttRemoveHeroBanner = async function() {
+      if (!confirm('Supprimer la bannière d\'accueil ? Le dégradé Maintix par défaut sera utilisé à la place.')) return;
+      const oldUrl = (MX.state.hotelConfig && MX.state.hotelConfig.heroImageUrl) || null;
+      try {
+        await MX.DB.saveHotelConfig({ heroImageUrl: firebase.firestore.FieldValue.delete() });
+      } catch (err) {
+        MX.toast('Erreur suppression', true); console.error(err);
+        return;
+      }
+      MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: null });
+      MX.toast('Bannière supprimée');
+      MX.Pages.Settings._showSection('etablissement');
+      if (MX.state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+      if (oldUrl) MX.DB.deleteHeroBannerImage(oldUrl); // best-effort, non bloquant
+    };
+
+    var bannerHtml;
+    if (_pendingHeroBannerPreviewUrl) {
+      bannerHtml = '<div class="stt-card etb-stt-card">' +
+        '<div class="stt-section-head"><i class="fas fa-image"></i> Bannière d\'accueil</div>' +
+        '<div class="etb-banner-preview" style="background-image:url(&quot;' + _pendingHeroBannerPreviewUrl + '&quot;)"></div>' +
+        '<div class="stt-section-intro">Aperçu — la bannière n\'est pas encore enregistrée.</div>' +
+        '<div class="etb-stt-actions">' +
+          '<button id="etb-banner-confirm-btn" class="primary-btn etb-banner-confirm-btn" onclick="window._sttConfirmHeroBanner()"><i class="fas fa-check"></i> Enregistrer cette bannière</button>' +
+          '<button class="cso-ibtn etb-banner-cancel-btn" onclick="window._sttCancelHeroBannerPick()"><i class="fas fa-xmark"></i> Annuler</button>' +
+        '</div>' +
+      '</div>';
+    } else {
+      var curBanner = cfg.heroImageUrl || null;
+      bannerHtml = '<div class="stt-card etb-stt-card">' +
+        '<div class="stt-section-head"><i class="fas fa-image"></i> Bannière d\'accueil</div>' +
+        '<div class="stt-section-intro" style="margin-top:-4px">Photo affichée en haut de l\'Accueil pour tous les utilisateurs (fond du bandeau d\'accueil). JPG, PNG ou WebP.</div>' +
+        (curBanner
+          ? '<div class="etb-banner-preview" style="background-image:url(&quot;' + MX.esc(curBanner) + '&quot;)"></div>'
+          : '<div class="etb-banner-preview etb-banner-preview--empty"><i class="fas fa-panorama"></i><span>Aucune bannière — dégradé Maintix par défaut utilisé</span></div>') +
+        '<div class="etb-stt-actions">' +
+          '<button class="primary-btn etb-banner-add-btn" onclick="window._sttPickHeroBanner()"><i class="fas fa-' + (curBanner ? 'rotate' : 'plus') + '"></i> ' + (curBanner ? 'Remplacer' : 'Ajouter une image') + '</button>' +
+          (curBanner ? '<button class="cso-ibtn etb-banner-remove-btn" onclick="window._sttRemoveHeroBanner()"><i class="fas fa-trash"></i> Supprimer</button>' : '') +
+        '</div>' +
+      '</div>';
+    }
 
     window._sttSaveEtablissement = async function() {
       const latVal = parseFloat(document.getElementById('etb-lat').value);
@@ -1661,6 +1787,7 @@
           (cfg.lat != null ? '<button class="cso-ibtn" onclick="window._sttClearEtablissement()"><i class="fas fa-trash"></i> Retirer la localisation</button>' : '') +
         '</div>' +
       '</div>' +
+      bannerHtml +
       '</div>';
   }
 

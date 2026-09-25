@@ -7,14 +7,18 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright');
 const BASE = 'http://127.0.0.1:8811';
 const MOCK_FB = path.join(__dirname, 'mock-firebase.js');
 const SEED    = path.join(__dirname, 'gst_seed.js');
+// URL fixture pour une bannière déjà "existante" — data: URI (zéro E/S
+// réseau, contrairement à un faux hostname externe qui déclencherait un
+// vrai essai de connexion dès que la page l'utilise en background-image).
+const FAKE_OLD_BANNER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
 let failures = 0;
 function ok(label, cond) { if (!cond) { failures++; console.error('FAIL ' + label); } else console.log('ok   ' + label); }
 
 setTimeout(() => {
-  console.error('\nTIMEOUT GLOBAL (120s) — le process est arrêté de force.');
+  console.error('\nTIMEOUT GLOBAL (170s) — le process est arrêté de force.');
   process.exit(1);
-}, 120000);
+}, 170000);
 
 async function bootPage(page) {
   const pageErrors = [];
@@ -342,7 +346,157 @@ async function pinAnnouncement(page, index) {
     }
   }
 
-  // ═══ 13. Non-régression — aucune erreur JS sur les scénarios ci-dessus ═══
+  // Sélectionne un fichier via l'input dynamique créé par _sttPickHeroBanner
+  // (jamais attaché au DOM — on intercepte l'évènement filechooser natif,
+  // seule approche Playwright valable pour un <input> détaché).
+  async function pickBannerFile(page, buttonSelector, filename) {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      clickSafe(page, buttonSelector),
+    ]);
+    await chooser.setFiles({ name: filename || 'banniere.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x01, 0x02, 0x03]) });
+    await page.waitForTimeout(300);
+  }
+
+  // ═══ 14. Bannière — aucune image configurée → dégradé par défaut ═══
+  {
+    console.log('\n--- 14. Bannière — aucune image (dégradé par défaut) ---');
+    for (const u of [{ id: 'sophie', pin: '9999', label: 'Responsable' }, { id: 'kevin', pin: '1111', label: 'Technicien' }]) {
+      ({ ctx, page } = await newCtx());
+      await pinLogin(page, u.id, u.pin);
+      await gotoHome();
+      const hasPhotoClass = await evalPage(page, () => !!document.querySelector('.acc-header.acc-header--photo'));
+      ok('14.' + u.label + ' Pas de classe acc-header--photo sans bannière configurée', !hasPhotoClass);
+      await ctx.close();
+    }
+  }
+
+  // ═══ 15. Bannière — Admin ajoute une image (upload réel via mock Storage) ═══
+  {
+    console.log('\n--- 15. Bannière — Admin ajoute une image ---');
+    ({ ctx, page } = await newCtx());
+    await adminLogin(page, 'admin@maintix.local', 'x');
+    await page.evaluate(() => { window._settingsTab = 'etablissement'; MX.showPage('parametres'); });
+    await page.waitForTimeout(400);
+    let html = await mainHtml(page);
+    ok('15.1 État initial : pas de bannière, bouton "Ajouter une image"', /Ajouter une image/.test(html) && /Aucune bannière/.test(html));
+
+    await pickBannerFile(page, '.etb-banner-add-btn', 'banniere1.jpg');
+    html = await mainHtml(page);
+    ok('15.2 Aperçu affiché avant validation ("Enregistrer cette bannière")', /Enregistrer cette bannière/.test(html) && /n'est pas encore enregistrée/.test(html));
+
+    await clickSafe(page, '.etb-banner-confirm-btn');
+    await page.waitForTimeout(500);
+    html = await mainHtml(page);
+    ok('15.3 Après confirmation : bouton "Remplacer" visible (bannière active)', /Remplacer/.test(html));
+    const uploads = await evalPage(page, () => window.__storageLog.uploads.length);
+    ok('15.4 Un upload Storage a bien eu lieu', uploads === 1);
+    const savedUrl = await evalPage(page, () => window.__mockDb.collection('config').doc('hotel_config').get().then(s => s.data().heroImageUrl));
+    ok('15.5 heroImageUrl bien enregistré dans config/hotel_config', !!savedUrl && savedUrl.indexOf('blob:') === 0);
+
+    await gotoHome();
+    html = await mainHtml(page);
+    ok('15.6 Accueil affiche la classe acc-header--photo', /acc-header--photo/.test(html));
+    ok('15.7 Le style de fond référence bien l\'URL de la bannière', html.indexOf(savedUrl) !== -1);
+    await ctx.close();
+  }
+
+  // ═══ 16. Bannière — remplacement (l'ancienne image n'est supprimée
+  //          qu'APRÈS confirmation de la nouvelle config) ═══
+  {
+    console.log('\n--- 16. Bannière — remplacement ---');
+    ({ ctx, page } = await newCtx());
+    await adminLogin(page, 'admin@maintix.local', 'x');
+    await evalPage(page, (url) => MX.DB.saveHotelConfig({ heroImageUrl: url }).then(() => { MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: url }); }), FAKE_OLD_BANNER);
+    await page.evaluate(() => { window._settingsTab = 'etablissement'; MX.showPage('parametres'); });
+    await page.waitForTimeout(400);
+    let html = await mainHtml(page);
+    ok('16.1 Bouton "Remplacer" visible (bannière déjà configurée)', /Remplacer/.test(html));
+
+    await pickBannerFile(page, '.etb-banner-add-btn', 'banniere2.jpg');
+    await clickSafe(page, '.etb-banner-confirm-btn');
+    await page.waitForTimeout(500);
+    const savedUrl = await evalPage(page, () => window.__mockDb.collection('config').doc('hotel_config').get().then(s => s.data().heroImageUrl));
+    ok('16.2 La nouvelle URL est bien celle enregistrée', savedUrl !== FAKE_OLD_BANNER);
+    const deletes = await evalPage(page, () => window.__storageLog.deletes);
+    ok('16.3 L\'ANCIENNE image a bien été supprimée de Storage (après coup, non bloquant)', deletes.indexOf(FAKE_OLD_BANNER) !== -1);
+    ok('16.4 La nouvelle image n\'a PAS été supprimée', deletes.indexOf(savedUrl) === -1);
+    await ctx.close();
+  }
+
+  // ═══ 17. Bannière — suppression (retour au dégradé par défaut) ═══
+  {
+    console.log('\n--- 17. Bannière — suppression ---');
+    ({ ctx, page } = await newCtx());
+    await adminLogin(page, 'admin@maintix.local', 'x');
+    await evalPage(page, (url) => MX.DB.saveHotelConfig({ heroImageUrl: url }).then(() => { MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: url }); }), FAKE_OLD_BANNER);
+    await page.evaluate(() => { window._settingsTab = 'etablissement'; MX.showPage('parametres'); });
+    await page.waitForTimeout(400);
+    await evalPage(page, () => { window.confirm = () => true; }); // auto-confirme la modale native
+    await clickSafe(page, '.etb-banner-remove-btn');
+    await page.waitForTimeout(400);
+    const html = await mainHtml(page);
+    ok('17.1 Retour à l\'état "Aucune bannière"', /Aucune bannière/.test(html) && /Ajouter une image/.test(html));
+    await gotoHome();
+    const homeHtml = await mainHtml(page);
+    ok('17.2 Accueil revient au dégradé par défaut (pas de acc-header--photo)', !/acc-header--photo/.test(homeHtml));
+    await ctx.close();
+  }
+
+  // ═══ 18. Bannière — visible pour Responsable/Technicien, jamais de contrôle d'édition ═══
+  {
+    console.log('\n--- 18. Bannière visible en lecture seule (Responsable/Technicien) ---');
+    for (const u of [{ id: 'sophie', pin: '9999', label: 'Responsable' }, { id: 'kevin', pin: '1111', label: 'Technicien' }]) {
+      ({ ctx, page } = await newCtx());
+      await pinLogin(page, u.id, u.pin);
+      await evalPage(page, (url) => window.__mockDb.collection('config').doc('hotel_config').set({ heroImageUrl: url }, { merge: true }).then(() => { MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: url }); }), FAKE_OLD_BANNER);
+      await gotoHome();
+      const html = await mainHtml(page);
+      ok('18.' + u.label + '.1 La bannière est visible (acc-header--photo)', /acc-header--photo/.test(html));
+      ok('18.' + u.label + '.2 Aucun bouton d\'édition de bannière sur l\'Accueil', !/etb-banner-add-btn|etb-banner-remove-btn|_sttPickHeroBanner/.test(html));
+      await ctx.close();
+    }
+  }
+
+  // ═══ 19. Bannière — ordre de sauvegarde sécurisé : échec Firestore après
+  //          upload réussi ⇒ nouvelle image nettoyée, ANCIENNE bannière conservée ═══
+  {
+    console.log('\n--- 19. Bannière — échec sauvegarde Firestore (nettoyage sécurisé) ---');
+    ({ ctx, page } = await newCtx());
+    await adminLogin(page, 'admin@maintix.local', 'x');
+    await evalPage(page, (url) => MX.DB.saveHotelConfig({ heroImageUrl: url }).then(() => { MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { heroImageUrl: url }); }), FAKE_OLD_BANNER);
+    await page.evaluate(() => { window._settingsTab = 'etablissement'; MX.showPage('parametres'); });
+    await page.waitForTimeout(400);
+    // Force l'échec de la sauvegarde Firestore pour CE test uniquement.
+    await evalPage(page, () => { window.__origSaveHotelConfig = MX.DB.saveHotelConfig; MX.DB.saveHotelConfig = () => Promise.reject(new Error('mock Firestore failure')); });
+
+    await pickBannerFile(page, '.etb-banner-add-btn', 'banniere-fail.jpg');
+    await clickSafe(page, '.etb-banner-confirm-btn');
+    await page.waitForTimeout(500);
+
+    const uploadsBeforeRestore = await evalPage(page, () => window.__storageLog.uploads.length);
+    ok('19.1 L\'upload Storage a bien eu lieu (avant l\'échec Firestore)', uploadsBeforeRestore === 1);
+    const newUrl = await evalPage(page, () => window.__storageLog.uploads[0]);
+    const deletesAfterFail = await evalPage(page, () => window.__storageLog.deletes.slice());
+    ok('19.2 La NOUVELLE image (échouée) a été nettoyée', deletesAfterFail.indexOf(newUrl) !== -1);
+    ok('19.3 L\'ANCIENNE bannière n\'a PAS été supprimée', deletesAfterFail.indexOf(FAKE_OLD_BANNER) === -1);
+    const stillOldUrl = await evalPage(page, () => window.__mockDb.collection('config').doc('hotel_config').get().then(s => s.data().heroImageUrl));
+    ok('19.4 config/hotel_config référence toujours l\'ANCIENNE bannière', stillOldUrl === FAKE_OLD_BANNER);
+
+    await evalPage(page, () => { MX.DB.saveHotelConfig = window.__origSaveHotelConfig; });
+    await gotoHome();
+    const homeHtml = await mainHtml(page);
+    ok('19.5 L\'Accueil affiche toujours l\'ANCIENNE bannière (aucune régression visible)', homeHtml.indexOf(FAKE_OLD_BANNER) !== -1);
+    await ctx.close();
+  }
+
+  // (Le scoping CSS #dx-panel Accueil-only est couvert par le fichier dédié
+  // tests/accueil_dxpanel_scope_test.js — séparé pour garder cette suite
+  // rapide/fiable : au-delà d'~20 contextes Playwright séquentiels, ce
+  // sandbox devient sujet à des ralentissements réseau de fond indépendants
+  // du code testé, voir commentaire dans ce fichier.)
+
+  // ═══ 21. Non-régression — aucune erreur JS sur les scénarios ci-dessus ═══
   // (chaque bloc a déjà vérifié pageErrors implicitement via son propre contexte fermé sans throw)
 
   console.log('\n' + (failures === 0 ? 'TOUS LES TESTS PASSENT ✓' : failures + ' TEST(S) EN ÉCHEC ✗'));

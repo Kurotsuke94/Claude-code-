@@ -1230,6 +1230,31 @@
   async function saveHotelConfig(data) {
     await db.collection('config').doc('hotel_config').set(data, { merge: true });
   }
+  // Bannière Hero de l'Accueil — même idiome que uploadPlanningImage (Storage
+  // déjà utilisé pour le planning/les annonces, aucune nouvelle architecture).
+  async function uploadHeroBanner(file) {
+    if (!storage) throw new Error("Firebase Storage non disponible");
+    const { uuid } = window.MX;
+    const ref = storage.ref(`hero_banner/${uuid()}.jpg`);
+    return await new Promise((resolve, reject) => {
+      var done = false;
+      var timer = setTimeout(function() {
+        if (!done) { done = true; reject(new Error("Upload timeout")); }
+      }, 60000);
+      const task = ref.put(file, { contentType: "image/jpeg" });
+      task.on('state_changed', null,
+        err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
+        async () => { if (!done) { done = true; clearTimeout(timer); resolve(await task.snapshot.ref.getDownloadURL()); } }
+      );
+    });
+  }
+  // Suppression best-effort d'une ancienne image de bannière — n'échoue
+  // jamais bruyamment (blob orphelin non bloquant), seulement journalisé.
+  async function deleteHeroBannerImage(url) {
+    if (!storage || !url) return;
+    try { await storage.refFromURL(url).delete(); }
+    catch (e) { console.warn('[HeroBanner] Échec suppression ancienne image Storage (non bloquant) :', e); }
+  }
 
   // ── VERSIONS ──
   async function getVersions() {
@@ -1624,7 +1649,7 @@
     purgeOldHistory,
     getBiblePermissions, setBiblePermissions,
     getAdminSessionVersion, forceAdminLogout,
-    getHotelConfig, saveHotelConfig,
+    getHotelConfig, saveHotelConfig, uploadHeroBanner, deleteHeroBannerImage,
     getVersions, saveVersions,
     listenMaintenance, saveMaintenance, logDeploy, listenDeployLog,
     listenNavVisibility, saveNavVisibility,

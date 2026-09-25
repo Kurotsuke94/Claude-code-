@@ -415,13 +415,23 @@
     // ════════════════════════════════════════════════════════════════════
     var h = '<div class="page-body acc-page">';
 
-    // ── HEADER ──
-    h += '<div class="acc-header">' +
-      '<div class="acc-header-greet">' +
-        '<div class="acc-greeting">' + greeting + ', ' + esc(firstName) + ' 👋</div>' +
-        '<div class="acc-header-date">' + dayFr + ' ' + dateFr + (weekLabel ? ' · ' + esc(weekLabel) : '') + ' · ' + momentJour + '</div>' +
+    // ── HERO ── bannière personnalisable (Admin, voir settings.js) ou
+    // dégradé Maintix par défaut si aucune image configurée (§4/§21).
+    var heroImg = (state.hotelConfig && state.hotelConfig.heroImageUrl) || null;
+    var heroStyle = heroImg
+      ? ' style="background-image:linear-gradient(105deg, rgba(8,8,14,.90) 0%, rgba(8,8,14,.60) 45%, rgba(8,8,14,.30) 100%), url(&quot;' + esc(heroImg) + '&quot;)"'
+      : '';
+    h += '<div class="acc-header' + (heroImg ? ' acc-header--photo' : '') + '"' + heroStyle + '>' +
+      '<div class="acc-header-top">' +
+        '<div class="acc-header-greet">' +
+          MX.userAvatarHtml(displayName, { size: 46, radius: 14 }) +
+          '<div class="acc-header-id">' +
+            '<div class="acc-greeting">' + greeting + ', ' + esc(firstName) + ' 👋</div>' +
+            '<div class="acc-header-date">' + dayFr + ' ' + dateFr + (weekLabel ? ' · ' + esc(weekLabel) : '') + ' · ' + momentJour + '</div>' +
+          '</div>' +
+        '</div>' +
+        _weatherWidgetHtml(state.hotelConfig, isAdmin) +
       '</div>' +
-      _weatherWidgetHtml(state.hotelConfig, isAdmin) +
       '<div class="acc-kpi-row">' +
         '<button class="acc-kpi acc-kpi--red" onclick="MX.showAdminTab(\'alerts\')"><i class="fas fa-triangle-exclamation"></i><span class="acc-kpi-v">' + urgencesCount + '</span><span class="acc-kpi-l">Urgences</span></button>' +
         (_see('checklist') ? '<button class="acc-kpi acc-kpi--orange" onclick="MX.showPage(\'mes-missions\')"><i class="fas fa-clipboard-list"></i><span class="acc-kpi-v">' + missionsAujourdhuiCount + '</span><span class="acc-kpi-l">Missions<br>Aujourd\'hui</span></button>' : '') +
@@ -593,5 +603,5 @@
 
   window.MX = window.MX || {};
   window.MX.Pages = window.MX.Pages || {};
-  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan };
+  window.MX.Pages.Home = { render, uploadPlan, clearPlan, openPlan, _compressImage };
 })();

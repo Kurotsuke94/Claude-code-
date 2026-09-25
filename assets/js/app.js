@@ -54,6 +54,7 @@
   window.MX.showPage = function (id) {
     const _prevPage = MX.state.currentPage;
     MX.state.currentPage = id;
+    document.body.dataset.page = id; // ciblage CSS par page (ex. #dx-panel sur l'Accueil) — aucun effet fonctionnel
     if (_prevPage === 'documents' && id !== 'documents') {
       MX.Pages.Bible && MX.Pages.Bible._destroy && MX.Pages.Bible._destroy();
     }
