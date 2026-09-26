@@ -31,6 +31,26 @@
   var _intUnsub      = null;
   var _pmpUnsub      = null;
 
+  // ── Préchauffage (perf V1) — même principe que MX.Pages.Int/Conso/PMP :
+  // _ready ne devient vrai qu'une fois que les 5 listeners de _loadMissions()
+  // ont chacun reçu au moins une réponse (même vide) ; ensureLoaded()/
+  // isReady() exposés en API publique pour que home.js puisse démarrer ces
+  // listeners dès l'Accueil, sans dupliquer la logique métier ni les
+  // requêtes existantes (_missionsLoaded reste l'unique garde anti-doublon).
+  var _ready          = false;
+  var _readyCbs        = [];
+  var _got1            = false; // missions assignedTo == cu.name
+  var _got2            = false; // missions assignedTo == null (PMP dispo)
+  var _gotOrg          = false; // org_tasks
+  var _gotInt          = false; // interventions
+  var _gotPmp          = false; // pmp_interventions
+  function _checkReady() {
+    if (_ready || !_got1 || !_got2 || !_gotOrg || !_gotInt || !_gotPmp) return;
+    _ready = true;
+    var cbs = _readyCbs; _readyCbs = [];
+    cbs.forEach(function (cb) { try { cb(); } catch (e) {} });
+  }
+
   // ── TOUT workspace state ──
   var _expandedCardId  = null;   // card currently expanded
   var _toutCardMap     = {};     // cardId → normalized task (populated on each render)
@@ -124,7 +144,12 @@
     // currentUser (technicien OU responsable), pas seulement quand
     // !canSeeAll() — sinon les listeners Firestore ne rafraîchissent
     // jamais le cockpit d'un responsable après son premier rendu.
-    if (MX.state.currentUser) {
+    // Perf V1 — depuis que MesMissions peut être PRÉCHARGÉE depuis
+    // l'Accueil (voir ensureLoaded()), ces 5 listeners peuvent désormais
+    // recevoir une donnée alors que l'utilisateur est sur une AUTRE page :
+    // sans le contrôle currentPage ci-dessous, ce re-rendu écraserait
+    // #main-content par-dessus la page réellement affichée.
+    if (MX.state.currentUser && MX.state.currentPage === 'mes-missions') {
       var el = document.getElementById('main-content');
       if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
         var prevSt = el.scrollTop;
@@ -148,9 +173,10 @@
         _assignedMissions = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (m) { return !m.inTrash; });
         console.log('[PMP] Listener 1 reçu →', _assignedMissions.length, 'missions assignedTo =', cu.name,
           _assignedMissions.map(function(m){ return {id:m.id, type:m.missionType||m.category, assignedTo:m.assignedTo, takenBy:m.takenBy, done:m.done}; }));
+        _got1 = true; _checkReady();
         _mergeAllMissions();
         _rerenderIfActive();
-      }, function (err) { console.warn('[MM] missions listener:', err.message); });
+      }, function (err) { console.warn('[MM] missions listener:', err.message); _got1 = true; _checkReady(); });
 
     // Listener 2: unassigned PMP missions visible to all techs
     console.log('[MM] Listener 2: missions where assignedTo == null (PMP disponibles)');
@@ -163,9 +189,10 @@
         });
         console.log('[PMP] Listener 2 reçu → status:', snap.docChanges().map(function(c){ return {type:c.type, id:c.doc.id, assignedTo:c.doc.data().assignedTo, takenBy:c.doc.data().takenBy}; }),
           '| raw total:', raw.length, '| PMP non-assignés:', _unassignedPmpMissions.length);
+        _got2 = true; _checkReady();
         _mergeAllMissions();
         _rerenderIfActive();
-      }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); });
+      }, function (err) { console.warn('[MM] unassigned-pmp listener:', err.message); _got2 = true; _checkReady(); });
 
     // Listener 3: org_tasks from Centre de Pilotage (current week, assigned to this tech)
     _orgTasksUnsub = db.collection('org_tasks')
@@ -175,8 +202,9 @@
         _orgTasks = snap.docs
           .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
           .filter(function (t) { return !t.archivedFromActive; });
+        _gotOrg = true; _checkReady();
         _rerenderIfActive();
-      }, function (err) { console.warn('[MM] org_tasks listener:', err.message); });
+      }, function (err) { console.warn('[MM] org_tasks listener:', err.message); _gotOrg = true; _checkReady(); });
 
     // Listener 4: interventions collection (array-contains for multi-tech assignments)
     _intUnsub = db.collection('interventions')
@@ -185,8 +213,9 @@
         _intDocs = snap.docs
           .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
           .filter(function (d) { return !d.inTrash; });
+        _gotInt = true; _checkReady();
         _rerenderIfActive();
-      }, function (err) { console.warn('[MM] interventions listener:', err.message); });
+      }, function (err) { console.warn('[MM] interventions listener:', err.message); _gotInt = true; _checkReady(); });
 
     // Listener 5: pmp_interventions collection (single technician field)
     _pmpUnsub = db.collection('pmp_interventions')
@@ -195,8 +224,9 @@
         _pmpDocs = snap.docs
           .map(function (d) { return Object.assign({ id: d.id }, d.data()); })
           .filter(function (d) { return !d.inTrash; });
+        _gotPmp = true; _checkReady();
         _rerenderIfActive();
-      }, function (err) { console.warn('[MM] pmp_interventions listener:', err.message); });
+      }, function (err) { console.warn('[MM] pmp_interventions listener:', err.message); _gotPmp = true; _checkReady(); });
   }
 
   // ══════════════════════════════════════════════
@@ -745,6 +775,13 @@
     h += '<button class="mtv-today-btn" onclick="MX.MM.render()"><i class="fas fa-calendar-day"></i> Aujourd\'hui</button>';
     h += '</div>';
 
+    // LOADING ≠ EMPTY (perf V1) : indicateur discret tant que les 5 sources
+    // Firestore (missions×2, org_tasks, interventions, pmp_interventions)
+    // n'ont pas toutes répondu — n'affecte aucun calcul, purement visuel.
+    if (!_ready) {
+      h += '<div class="mm-sync-banner"><i class="fas fa-spinner fa-spin"></i> Synchronisation de vos missions…</div>';
+    }
+
     // ── Progression de la journée + 3 KPI — remplace l'ancienne rangée de
     // 4 cartes mis-kpi ; mêmes données déjà calculées ci-dessus (todoCount/
     // doneCount/totalCount/pct), aucun nouveau calcul de statut. ──
@@ -970,9 +1007,14 @@
     var pmpItems = visible.filter(function (t) { return t.missionType === 'pmp'; });
     if (pmpItems.length) { any = true; h += _cpGroupBlock({ key: '__pmp', name: 'Maintenances PMP', icon: '🛠', color: TC.pmp }, pmpItems); }
     if (!any) {
-      h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">📋</div>'
-        + '<div class="mm-v3-empty-ttl">' + (myMissions.length === 0 ? 'Aucune mission' : 'Rien à afficher') + '</div>'
-        + '<div class="mm-v3-empty-sub">' + (myMissions.length === 0 ? 'Aucun élément planifié pour aujourd\'hui.' : 'Ajustez le filtre ou les critères de recherche.') + '</div></div>';
+      // LOADING ≠ EMPTY (perf V1) : tant que les 5 sources Firestore
+      // n'ont pas toutes répondu au moins une fois, "0 mission" ne veut
+      // rien dire — on ne l'affiche comme un véritable état vide qu'une
+      // fois _ready confirmé (voir _checkReady()).
+      var stillLoading = !_ready && myMissions.length === 0;
+      h += '<div class="mm-v3-empty"><div class="mm-v3-empty-ico">' + (stillLoading ? '⏳' : '📋') + '</div>'
+        + '<div class="mm-v3-empty-ttl">' + (stillLoading ? 'Synchronisation de vos missions…' : (myMissions.length === 0 ? 'Aucune mission' : 'Rien à afficher')) + '</div>'
+        + '<div class="mm-v3-empty-sub">' + (stillLoading ? 'Récupération des données en cours…' : (myMissions.length === 0 ? 'Aucun élément planifié pour aujourd\'hui.' : 'Ajustez le filtre ou les critères de recherche.')) + '</div></div>';
     }
     return h;
   }
@@ -3352,6 +3394,8 @@
     _orgTasks = []; _intDocs = []; _pmpDocs = [];
     _timerState = null; _expandedCardId = null; _toutCardMap = {};
     _selectedCardId = null;
+    _ready = false; _readyCbs = [];
+    _got1 = _got2 = _gotOrg = _gotInt = _gotPmp = false;
     try { document.body.classList.remove('mm-cp-sheet-open'); } catch (e) {}
   }
 
@@ -3572,6 +3616,17 @@
     // Cockpit (refonte UX)
     _cpSetFilter: _cpSetFilter, _cpSelectCard: _cpSelectCard,
     _cpCloseSheet: _cpCloseSheet, _cpGoToSlot: _cpGoToSlot,
+    // Préchauffage (perf V1) — même principe que MX.Pages.Int/Conso/PMP.
+    // Déclenche _loadMissions() (déjà gardée par _missionsLoaded, donc
+    // jamais un second jeu de listeners) et prévient l'appelant une fois
+    // les 5 sources chargées.
+    ensureLoaded: function (cb) {
+      _loadMissions();
+      if (_ready) { if (cb) cb(); return; }
+      if (!MX.state.currentUser) { if (cb) cb(); return; } // rien à précharger sans profil PIN
+      if (cb) _readyCbs.push(cb);
+    },
+    isReady: function () { return _ready; },
   };
   window.MX.MM = window.MX.Pages.MesMissions;
 })();

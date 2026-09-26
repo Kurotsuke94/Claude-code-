@@ -1423,7 +1423,24 @@
   // chaque clic sur une pagination interne.
   function _peRefresh() { _rerender(); }
 
+  // LOADING ≠ EMPTY (perf V1) — tant que les 3 listeners dont dépend _ready
+  // (meters/readings/clients, cf. _checkReady()) n'ont pas chacun répondu au
+  // moins une fois, on ne sait pas encore si Compteurs est vide ou juste pas
+  // encore arrivé : on l'affiche explicitement plutôt que de laisser
+  // deviner une interface vide. Dès que _ready passe à vrai (déclenché par
+  // le même _checkReady() qui alimente déjà ensureLoaded()/isReady()), le
+  // prochain _rerender() (déjà appelé par chacun des listeners) affiche
+  // _body() normalement — aucun calcul ni requête n'est modifié ici.
+  function _loadingScreen() {
+    return `<div class="cso-loading-st">
+      <div class="cso-loading-spin"><i class="fas fa-spinner fa-spin"></i></div>
+      <div class="cso-loading-ttl">Chargement de vos compteurs…</div>
+      <div class="cso-loading-sub">Synchronisation avec Firestore en cours…</div>
+    </div>`;
+  }
+
   function _body() {
+    if (!_ready) return _loadingScreen();
     switch (_curTab) {
       case 'compteurs': return _tCompteurs();
       case 'releves':   return _tReleves();

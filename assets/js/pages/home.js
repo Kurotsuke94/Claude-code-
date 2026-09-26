@@ -92,6 +92,33 @@
     if (MX.Pages.PMP && MX.Pages.PMP.ensureLoaded) MX.Pages.PMP.ensureLoaded(_reRenderIfStillHome);
     if (MX.Pages.Int && MX.Pages.Int.ensureLoaded) MX.Pages.Int.ensureLoaded(_reRenderIfStillHome);
     if (MX.Pages.Conso && MX.Pages.Conso.ensureLoaded) MX.Pages.Conso.ensureLoaded(_reRenderIfStillHome);
+    // Perf V1 — Mes Missions n'était préchauffée par rien : ses 5 listeners
+    // ne démarraient qu'à l'ouverture effective de la page, toujours à
+    // froid. Contrairement à PMP/Interventions/Compteurs (requêtes
+    // globales, indépendantes de l'identité), ses requêtes sont PAR
+    // UTILISATEUR — elle ne peut démarrer qu'une fois le profil PIN choisi.
+    // Le tout premier rendu de l'Accueil a lieu AVANT que le sélecteur PIN
+    // ne soit même affiché (currentUser encore absent) : on retente donc
+    // ce seul appel à intervalles courts, séparément de PMP/Int/Conso
+    // ci-dessus, sans jamais toucher auth.js ni la logique de
+    // mes-missions.js — jusqu'à ce qu'un profil soit disponible.
+    _tryPreloadMesMissions();
+  }
+
+  var _mmKickedOff  = false;
+  var _mmTries      = 0;
+  function _tryPreloadMesMissions() {
+    if (_mmKickedOff) return;
+    if (!(MX.Pages.MesMissions && MX.Pages.MesMissions.ensureLoaded)) return;
+    if (!MX.state.currentUser) {
+      if (++_mmTries > 20) return; // ~10s — abandonne (ex. session Admin sans profil PIN)
+      setTimeout(_tryPreloadMesMissions, 500);
+      return;
+    }
+    _mmKickedOff = true;
+    MX.Pages.MesMissions.ensureLoaded(function () {
+      if (MX.state.currentPage === 'home') render();
+    });
   }
 
   // ── Météo (Open-Meteo, via assets/js/utils/weather.js) ──

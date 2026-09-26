@@ -1874,9 +1874,16 @@
     window.addEventListener("appinstalled", () => { MX._canInstall = false; MX._installPrompt = null; });
 
     try {
-      await MX.DB.initDefaults();
-      await MX.DB.initDefaultBadges();
-      await MX.DB.initShiftTemplateDefaults();
+      // Les 3 vérifications de données par défaut touchent des collections
+      // indépendantes (config/week+teams+alerts+assignments+checks+tasks+
+      // products+messages / badges / shift_templates) et n'utilisent jamais
+      // le résultat l'une de l'autre — lancées en parallèle plutôt qu'en
+      // chaîne (perf V1), sans changement de leur logique interne.
+      await Promise.all([
+        MX.DB.initDefaults(),
+        MX.DB.initDefaultBadges(),
+        MX.DB.initShiftTemplateDefaults(),
+      ]);
       setupListeners();
       const _elapsed = performance.now() - _splashStart;
       await new Promise(r => setTimeout(r, Math.max(0, 2400 - _elapsed)));
@@ -1890,11 +1897,17 @@
 
     _lastSyncTime = new Date();
     renderStatusBar();
-    await _loadFavsFromFirestore().catch(() => {});
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
     const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp"]);
     MX.showPage(_urlPage && (NAV.some(n => n && n.id === _urlPage) || _extraPages.has(_urlPage)) ? _urlPage : "home");
+
+    // Favoris — hors du chemin critique du premier rendu (V1 perf) : la nav
+    // s'affiche d'abord avec la dernière valeur connue (_getFavs() retombe
+    // déjà sur _getFavsLocal() tant que _favsCache est null), puis se
+    // reconstruit dès que Firestore confirme la liste réelle. Chargement,
+    // stockage et comportement de _loadFavsFromFirestore() inchangés.
+    _loadFavsFromFirestore().then(() => buildNav()).catch(() => {});
 
     // Presence heartbeat every 2 minutes
     setInterval(() => {
