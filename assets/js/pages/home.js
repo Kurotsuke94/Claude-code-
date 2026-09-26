@@ -266,7 +266,10 @@
     var intItems  = intSum ? intSum.items : [];
     var intUrgent = intItems.filter(function (iv) { return iv.priority === 'urgente' && iv.effStatus !== 'terminee' && iv.effStatus !== 'annulee'; });
     var intLate   = intItems.filter(function (iv) { return iv.effStatus === 'en_retard'; });
-    var intToday  = intItems.filter(function (iv) { return iv.startDate === todayISO; });
+    // Une intervention sans startDate est "immédiate" (mode non planifié) :
+    // elle est ouverte dès sa création et doit apparaître dans Ma journée
+    // du jour même, comme une intervention explicitement datée à aujourd'hui.
+    var intToday  = intItems.filter(function (iv) { return iv.startDate === todayISO || !iv.startDate; });
     var intTodayDone = intToday.filter(function (iv) { return iv.effStatus === 'terminee'; }).length;
     var intVisible = _see('interventions');
     var intOpenCount    = intVisible ? intItems.filter(function (iv) { return iv.effStatus !== 'terminee' && iv.effStatus !== 'annulee'; }).length : null;

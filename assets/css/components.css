@@ -6141,6 +6141,26 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 }
 .int-tp-ck { font-size: 10px; color: #a78bfa; flex-shrink: 0; }
 
+/* ── Planification optionnelle ── */
+.int-sched-toggle {
+  border: 1.5px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  background: var(--bg2); transition: border-color .18s, background .18s;
+}
+.int-sched-toggle.checked { border-color: #7C3AED; background: rgba(124,58,237,.08); }
+.int-sched-toggle-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.int-sched-toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #7C3AED; flex-shrink: 0; cursor: pointer; }
+.int-sched-toggle-txt { display: flex; flex-direction: column; gap: 2px; }
+.int-sched-toggle-txt strong { font-size: 13px; color: var(--text1); font-weight: 700; }
+.int-sched-toggle-txt small { font-size: 11px; color: var(--text3); }
+.int-sched-fields {
+  margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;
+  animation: intSchedOpen .18s ease;
+}
+@keyframes intSchedOpen {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ── View detail ── */
 .int-view-body { display: flex; flex-direction: column; gap: 14px; }
 .int-view-desc {

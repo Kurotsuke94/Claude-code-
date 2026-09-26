@@ -120,6 +120,11 @@
     return iv.status || 'planifiee';
   }
 
+  // Une intervention est "planifiée" si startDate existe — vrai pour les
+  // interventions créées en mode planifié ET pour les anciennes interventions
+  // (qui avaient toujours startDate rempli avant l'ajout du mode immédiat).
+  function _isPlanned(iv) { return !!(iv && iv.startDate); }
+
   function _statusBadge(iv) {
     const st = _effStatus(iv);
     const s  = STATUS[st] || STATUS.planifiee;
@@ -474,7 +479,7 @@
       </div>
       <div class="int-card-meta">
         ${iv.location ? `<span><i class="fas fa-location-dot"></i> ${esc(iv.location)}</span>` : ''}
-        <span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}</span>
+        ${iv.startDate ? `<span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}</span>` : `<span><i class="fas fa-bolt"></i> Non planifiée</span>`}
         ${iv.endDate ? `<span><i class="fas fa-flag-checkered"></i> ${_dtFmt(iv.endDate, iv.endTime)}</span>` : ''}
         <span><i class="fas fa-user"></i> ${esc(iv.createdBy || '—')}</span>
       </div>
@@ -766,6 +771,38 @@
       </div>`;
   }
 
+  // ── PLANIFICATION (optionnelle) ──
+  function _schedFieldsHtml(checked, sd, st, ed, et) {
+    return `<div class="int-sched-toggle${checked ? ' checked' : ''}" id="int-sched-toggle">
+      <label class="int-sched-toggle-row">
+        <input type="checkbox" id="int-f-sched" ${checked ? 'checked' : ''} onchange="MX.Pages.Int._toggleSched(this)">
+        <span class="int-sched-toggle-txt">
+          <strong>Planifier cette intervention</strong>
+          <small>Programmer une date et une heure</small>
+        </span>
+      </label>
+      <div class="int-sched-fields" id="int-sched-fields" style="${checked ? '' : 'display:none'}">
+        <div class="int-form-date-col">
+          <div class="int-form-label">Début</div>
+          <input type="date" id="int-f-sd" class="fi" value="${sd}">
+          <input type="time" id="int-f-st" class="fi" value="${st}">
+        </div>
+        <div class="int-form-date-col">
+          <div class="int-form-label">Fin prévue</div>
+          <input type="date" id="int-f-ed" class="fi" value="${ed}">
+          <input type="time" id="int-f-et" class="fi" value="${et}">
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function _toggleSched(cb) {
+    const wrap = document.getElementById('int-sched-fields');
+    const toggle = document.getElementById('int-sched-toggle');
+    if (wrap) wrap.style.display = cb.checked ? '' : 'none';
+    if (toggle) toggle.classList.toggle('checked', cb.checked);
+  }
+
   function _toggleTech(btn) {
     const name = btn.dataset.tech;
     if (!name) return;
@@ -834,6 +871,10 @@
     const ts = defaultTime || '09:00';
     const eh = Math.min((parseInt(ts.split(':')[0]) || 9) + 1, 22);
     const et = eh.toString().padStart(2, '0') + ':00';
+    // Ouverte depuis un créneau du calendrier → la planification est déjà
+    // l'intention explicite de l'utilisateur, on la pré-coche. Ouverte depuis
+    // le bouton "+" générique → intervention immédiate par défaut (décochée).
+    const planPrechecked = !!(defaultDate || defaultTime);
 
     MX.showModal({
       title: '🔧 Nouvelle intervention',
@@ -845,25 +886,27 @@
         <select id="int-f-prio" class="fi">
           ${Object.entries(PRIO).map(([k, p]) => `<option value="${k}"${k === 'normale' ? ' selected' : ''}>${p.l}</option>`).join('')}
         </select>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <div class="int-form-date-col">
-            <div class="int-form-label">Début</div>
-            <input type="date" id="int-f-sd" class="fi" value="${ds}">
-            <input type="time" id="int-f-st" class="fi" value="${ts}">
-          </div>
-          <div class="int-form-date-col">
-            <div class="int-form-label">Fin prévue</div>
-            <input type="date" id="int-f-ed" class="fi" value="${ds}">
-            <input type="time" id="int-f-et" class="fi" value="${et}">
-          </div>
-        </div>
         ${_canAll() ? _techPicker([]) : ''}
+        ${_schedFieldsHtml(planPrechecked, ds, ts, ds, et)}
         ${_intPhotoHtml(null)}
       </div>`,
       actions: [
         { label: 'Créer', cls: 'confirm', fn: async () => {
           const title = document.getElementById('int-f-title')?.value?.trim();
           if (!title) { MX.toast('Le titre est requis', true); return; }
+          const isPlanned = !!document.getElementById('int-f-sched')?.checked;
+          let schedFields = {};
+          if (isPlanned) {
+            const sd = document.getElementById('int-f-sd')?.value;
+            const st = document.getElementById('int-f-st')?.value;
+            if (!sd || !st) { MX.toast('Date et heure de début requises', true); return; }
+            schedFields = {
+              startDate: sd,
+              startTime: st,
+              endDate:   document.getElementById('int-f-ed')?.value || sd,
+              endTime:   document.getElementById('int-f-et')?.value || '',
+            };
+          }
           const assigned = [..._pickerSel];
           const data = {
             title,
@@ -871,10 +914,7 @@
             location:    document.getElementById('int-f-loc')?.value?.trim() || '',
             priority:    document.getElementById('int-f-prio')?.value || 'normale',
             status:      assigned.length ? 'affectee' : 'planifiee',
-            startDate:   document.getElementById('int-f-sd')?.value || today,
-            startTime:   document.getElementById('int-f-st')?.value || '09:00',
-            endDate:     document.getElementById('int-f-ed')?.value || today,
-            endTime:     document.getElementById('int-f-et')?.value || '10:00',
+            ...schedFields,
             assignedTo:  assigned,
             photo:       _intPhotoB64 || null,
             createdBy:   _author(),
@@ -897,6 +937,8 @@
     _intPhotoB64 = null;
     const iv = _interventions.find(x => x.id === id);
     if (!iv) return;
+    const today = _today();
+    const wasPlanned = _isPlanned(iv);
     MX.showModal({
       title: '✏️ Modifier l\'intervention',
       sub: esc(iv.title),
@@ -910,19 +952,8 @@
         <select id="int-f-status" class="fi">
           ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}"${iv.status === k ? ' selected' : ''}>${s.l}</option>`).join('')}
         </select>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <div class="int-form-date-col">
-            <div class="int-form-label">Début</div>
-            <input type="date" id="int-f-sd" class="fi" value="${iv.startDate || ''}">
-            <input type="time" id="int-f-st" class="fi" value="${iv.startTime || ''}">
-          </div>
-          <div class="int-form-date-col">
-            <div class="int-form-label">Fin prévue</div>
-            <input type="date" id="int-f-ed" class="fi" value="${iv.endDate || ''}">
-            <input type="time" id="int-f-et" class="fi" value="${iv.endTime || ''}">
-          </div>
-        </div>
         ${_techPicker(iv.assignedTo)}
+        ${_schedFieldsHtml(wasPlanned, iv.startDate || today, iv.startTime || '09:00', iv.endDate || iv.startDate || today, iv.endTime || '10:00')}
         ${_intPhotoHtml(iv.photo || null)}
       </div>`,
       actions: [
@@ -932,23 +963,39 @@
           const assigned   = [..._pickerSel];
           const newTechs   = assigned.filter(t => !(iv.assignedTo || []).includes(t));
           const newStatus  = document.getElementById('int-f-status')?.value || iv.status;
+          const isPlanned  = !!document.getElementById('int-f-sched')?.checked;
+          let schedFields, notifDate = null, notifTime = null;
+          if (isPlanned) {
+            const sd = document.getElementById('int-f-sd')?.value;
+            const st = document.getElementById('int-f-st')?.value;
+            if (!sd || !st) { MX.toast('Date et heure de début requises', true); return; }
+            const ed = document.getElementById('int-f-ed')?.value || sd;
+            const et = document.getElementById('int-f-et')?.value || '';
+            schedFields = { startDate: sd, startTime: st, endDate: ed, endTime: et };
+            notifDate = sd; notifTime = st;
+          } else {
+            // Décochée : on retire les champs de planification existants
+            // (compatibilité — une ancienne intervention planifiée peut
+            // redevenir non planifiée), jamais de valeur inventée.
+            schedFields = {
+              startDate: FV.delete(), startTime: FV.delete(),
+              endDate: FV.delete(), endTime: FV.delete(),
+            };
+          }
           const data = {
             title,
             description: document.getElementById('int-f-desc')?.value?.trim() || '',
             location:    document.getElementById('int-f-loc')?.value?.trim() || '',
             priority:    document.getElementById('int-f-prio')?.value || iv.priority,
             status:      newStatus,
-            startDate:   document.getElementById('int-f-sd')?.value || iv.startDate,
-            startTime:   document.getElementById('int-f-st')?.value || iv.startTime,
-            endDate:     document.getElementById('int-f-ed')?.value || iv.endDate,
-            endTime:     document.getElementById('int-f-et')?.value || iv.endTime,
+            ...schedFields,
             assignedTo:  assigned,
             photo:       _intPhotoB64 !== null ? _intPhotoB64 : (iv.photo || null),
             updatedAt:   FV.serverTimestamp(),
           };
           try {
             await DB.int().doc(id).update(data);
-            newTechs.forEach(n => _notifyTech(n, data.title, data.startDate, data.startTime, data.location, data.priority));
+            newTechs.forEach(n => _notifyTech(n, title, notifDate, notifTime, data.location, data.priority));
             MX.toast('Intervention mise à jour');
           } catch(e) { MX.toast('Erreur', true); console.error(e); }
         }},
@@ -985,7 +1032,7 @@
       body: `<div class="int-view-body">
         ${iv.description ? `<div class="int-view-desc">${esc(iv.description)}</div>` : ''}
         ${iv.location ? `<div class="int-view-row"><i class="fas fa-location-dot"></i> ${esc(iv.location)}</div>` : ''}
-        <div class="int-view-dates">
+        ${_isPlanned(iv) ? `<div class="int-view-dates">
           <div class="int-view-date-blk">
             <div class="int-view-date-lbl">Début</div>
             <div class="int-view-date-val">${_dtFmt(iv.startDate, iv.startTime)}</div>
@@ -994,7 +1041,7 @@
             <div class="int-view-date-lbl">Fin prévue</div>
             <div class="int-view-date-val">${iv.endDate ? _dtFmt(iv.endDate, iv.endTime) : '—'}</div>
           </div>
-        </div>
+        </div>` : `<div class="int-view-row"><i class="fas fa-bolt"></i> Intervention non planifiée (ouverte)</div>`}
         <div class="int-view-techs">
           <div class="int-form-label">Techniciens</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${_techAvatars(iv.assignedTo)}</div>
@@ -1203,7 +1250,7 @@
     render, _tab, _getSummary, _setGestionFilter,
     _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
-    _setFilter, _toggleTech, _onIntPhoto,
+    _setFilter, _toggleTech, _toggleSched, _onIntPhoto,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
     // Déclenche le chargement (idempotent, _load() est déjà gardé par
     // _loaded) et prévient l'appelant une fois les données disponibles.
