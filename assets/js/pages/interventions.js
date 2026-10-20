@@ -9,6 +9,8 @@
   let _filterTech   = '';
   let _filterStatus = '';
   let _filterPrio   = '';
+  let _filterSearch = '';
+  let _sortBy       = 'recent'; // 'recent' | 'ancien' | 'priorite'
   let _interventions = [];
   let _transfers     = [];
   let _users         = [];
@@ -17,7 +19,9 @@
   let _readyCbs  = [];
   let _unsubInt  = {};
   let _pickerSel  = [];
+  let _pickerPrio = 'normale';
   let _intPhotoB64 = null;
+  let _intPhotoRemoved = false;
 
   // ── FIRESTORE ──
   const DB = {
@@ -58,16 +62,18 @@
   };
 
   const PRIO = {
-    urgente: { l: 'Urgente',  col: '#EF4444', icon: 'fa-fire' },
-    haute:   { l: 'Haute',    col: '#F97316', icon: 'fa-circle-exclamation' },
-    normale: { l: 'Normale',  col: '#3B82F6', icon: 'fa-circle-dot' },
-    basse:   { l: 'Basse',    col: '#6B7280', icon: 'fa-minus' },
+    urgente: { l: 'Urgente',  col: '#EF4444', bg: 'rgba(239,68,68,.15)',  icon: 'fa-fire' },
+    haute:   { l: 'Haute',    col: '#F97316', bg: 'rgba(249,115,22,.15)', icon: 'fa-circle-exclamation' },
+    normale: { l: 'Normale',  col: '#3B82F6', bg: 'rgba(59,130,246,.15)', icon: 'fa-circle-dot' },
+    basse:   { l: 'Basse',    col: '#6B7280', bg: 'rgba(107,114,128,.15)',icon: 'fa-minus' },
   };
 
   const TABS = [
-    { id: 'gestion',    icon: 'fa-list',          l: 'Gestion',    mob: 'Gestion'    },
+    { id: 'gestion',    icon: 'fa-list',          l: 'Liste',      mob: 'Liste'      },
     { id: 'calendrier', icon: 'fa-calendar-days', l: 'Calendrier', mob: 'Calendrier' },
   ];
+
+  const PRIO_RANK = { urgente: 0, haute: 1, normale: 2, basse: 3 };
 
   const DOW_FR  = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
   const MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -262,19 +268,23 @@
 
     const cu = MX.state.currentUser;
     const myPending = _transfers.filter(t => t.toTech === cu?.name).length;
-    const retardCount = _interventions.filter(iv => _isLate(iv)).length;
 
     mc.innerHTML = `<div class="int-page">
-      <div class="int-tabs">
-        ${TABS.map(t => {
-          const cnt = t.id === 'gestion' ? retardCount : 0;
-          return `<button class="int-tab${_curTab === t.id ? ' active' : ''}" data-tab="${t.id}" onclick="MX.Pages.Int._tab('${t.id}')">
+      <div class="int-hdr">
+        <div class="int-hdr-left">
+          <div class="int-hdr-ico"><i class="fas fa-wrench"></i></div>
+          <div class="int-hdr-txt">
+            <div class="int-hdr-title">Interventions</div>
+            <div class="int-hdr-sub">Gérez et suivez toutes vos interventions terrain</div>
+          </div>
+        </div>
+        <div class="int-view-toggle">
+          ${TABS.map(t => `<button class="int-vt-btn${_curTab === t.id ? ' active' : ''}" data-tab="${t.id}" onclick="MX.Pages.Int._tab('${t.id}')">
             <i class="fas ${t.icon}"></i>
             <span class="int-tab-full">${t.l}</span>
             <span class="int-tab-mob">${t.mob}</span>
-            ${cnt > 0 ? `<span class="int-tab-badge">${cnt}</span>` : ''}
-          </button>`;
-        }).join('')}
+          </button>`).join('')}
+        </div>
       </div>
       ${myPending > 0 ? `<div class="int-xfr-global-banner" onclick="MX.Pages.Int._tab('en_attente')">
         <i class="fas fa-bell"></i> ${myPending} demande${myPending > 1 ? 's' : ''} de prise en charge en attente
@@ -296,7 +306,7 @@
     if (_PILL_MAP[id]) { _curTab = 'gestion'; _gestionFilter = _PILL_MAP[id]; }
     else if (id === 'toutes' || id === 'stats') { _curTab = 'gestion'; _gestionFilter = ''; }
     else { _curTab = id; }
-    document.querySelectorAll('.int-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === _curTab));
+    document.querySelectorAll('.int-vt-btn').forEach(t => t.classList.toggle('active', t.dataset.tab === _curTab));
     const el = document.getElementById('int-body');
     if (el) el.innerHTML = _body();
     const fab = document.getElementById('int-fab');
@@ -312,6 +322,15 @@
 
   // ── TAB: GESTION (unique page avec KPI + pills + liste + stats) ──
   function _tGestion() {
+    // Tant que le premier instantané Firestore n'est pas arrivé, _interventions
+    // est un tableau vide par construction — ça ne veut PAS dire "aucune
+    // intervention". On distingue explicitement "en cours de chargement" de
+    // "chargement confirmé, liste vide" pour ne jamais afficher le second à
+    // la place du premier.
+    if (!_ready) {
+      return `<div class="int-inner">${_emptyState('fa-circle-notch fa-spin', 'Chargement…', 'Récupération des interventions en cours.')}</div>`;
+    }
+
     const cu     = MX.state.currentUser;
     const canAll = _canAll();
 
@@ -322,11 +341,12 @@
 
     // KPI counts always computed from full base — 4 couleurs, jamais
     // confondues avec le retard (purement informatif, voir _isLate()).
-    const nTodo  = base.filter(iv => _effStatus(iv) === 'a_prendre_en_charge').length;
-    const nPause = base.filter(iv => _effStatus(iv) === 'en_pause').length;
-    const nEC    = base.filter(iv => _effStatus(iv) === 'en_cours').length;
-    const nT     = base.filter(iv => _effStatus(iv) === 'terminee').length;
-    const nTot   = base.length;
+    const nTodo   = base.filter(iv => _effStatus(iv) === 'a_prendre_en_charge').length;
+    const nPause  = base.filter(iv => _effStatus(iv) === 'en_pause').length;
+    const nEC     = base.filter(iv => _effStatus(iv) === 'en_cours').length;
+    const nT      = base.filter(iv => _effStatus(iv) === 'terminee').length;
+    const nTot    = base.length;
+    const nRetard = base.filter(iv => _isLate(iv)).length;
 
     // Apply pill filter — 'en_retard' reste un filtre à part (_isLate),
     // jamais un des 4 états de couleur.
@@ -337,6 +357,20 @@
     // Apply toolbar filters
     if (_filterPrio) list = list.filter(iv => iv.priority === _filterPrio);
     if (_filterTech) list = list.filter(iv => (iv.assignedTo || []).includes(_filterTech));
+    if (_filterSearch.trim()) {
+      const q = _filterSearch.trim().toLowerCase();
+      list = list.filter(iv =>
+        (iv.title || '').toLowerCase().includes(q) ||
+        (iv.description || '').toLowerCase().includes(q) ||
+        (iv.location || '').toLowerCase().includes(q) ||
+        (iv.assignedTo || []).some(n => (n || '').toLowerCase().includes(q))
+      );
+    }
+
+    // Tri — 'recent' = ordre naturel (déjà trié par createdAt desc depuis
+    // Firestore), aucune requête supplémentaire nécessaire.
+    if (_sortBy === 'ancien') list = [...list].reverse();
+    else if (_sortBy === 'priorite') list = [...list].sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9));
 
     const techOpts = canAll && _users.length
       ? `<select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('tech',this.value)">
@@ -349,39 +383,45 @@
 
     // ── KPI bar — Total / À prendre en charge / En attente / En cours / Terminées ──
     const kpiDef = [
-      { f: '',                   val: nTot,   lbl: 'Total',               col: 'var(--text1)' },
-      { f: 'a_prendre_en_charge',val: nTodo,  lbl: 'À prendre en charge', col: '#EF4444'       },
-      { f: 'en_pause',           val: nPause, lbl: 'En attente',          col: '#F59E0B'       },
-      { f: 'en_cours',           val: nEC,    lbl: 'En cours',            col: '#22C55E'       },
-      { f: 'terminee',           val: nT,     lbl: 'Terminées',           col: '#3B82F6'       },
+      { f: '',                   val: nTot,   lbl: 'Total',               col: 'var(--cyan)', ico: 'fa-list-check'      },
+      { f: 'a_prendre_en_charge',val: nTodo,  lbl: 'À prendre en charge', col: '#EF4444',      ico: 'fa-triangle-exclamation' },
+      { f: 'en_pause',           val: nPause, lbl: 'En attente / Pause',  col: '#F59E0B',      ico: 'fa-pause'           },
+      { f: 'en_cours',           val: nEC,    lbl: 'En cours',            col: '#22C55E',      ico: 'fa-play'            },
+      { f: 'terminee',           val: nT,     lbl: 'Terminées',           col: '#3B82F6',      ico: 'fa-check'           },
     ];
     let html = `<div class="int-inner">
       <div class="int-kpis">
         ${kpiDef.map(k => `
-          <div class="int-kpi-card${_gestionFilter === k.f ? ' int-kpi-active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${k.f}')">
-            <div class="int-kpi-val" style="color:${k.col}">${k.val}</div>
+          <button type="button" class="int-kpi-card${_gestionFilter === k.f ? ' int-kpi-active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${k.f}')">
+            <div class="int-kpi-ico" style="color:${k.col};background:${k.col}1F"><i class="fas ${k.ico}"></i></div>
+            <div class="int-kpi-val">${k.val}</div>
             <div class="int-kpi-lbl">${k.lbl}</div>
-          </div>`).join('')}
+          </button>`).join('')}
       </div>`;
 
     // ── Filter pills — les 4 couleurs + "Toutes" ; "En retard" préservé
     // comme filtre SÉPARÉ et informatif (_isLate), jamais un 5ᵉ état. ──
     const pillDef = [
-      { f: '',                    l: 'Toutes',               emo: '🔘' },
-      { f: 'a_prendre_en_charge', l: 'À prendre en charge',  emo: '🔴' },
-      { f: 'en_pause',            l: 'En attente',           emo: '🟡' },
-      { f: 'en_cours',            l: 'En cours',             emo: '🟢' },
-      { f: 'terminee',            l: 'Terminées',            emo: '🔵' },
-      { f: 'en_retard',           l: 'En retard',             emo: '⏰' },
+      { f: '',                    l: 'Toutes',               ico: 'fa-circle',               n: nTot    },
+      { f: 'a_prendre_en_charge', l: 'À prendre en charge',  ico: 'fa-triangle-exclamation',  n: nTodo   },
+      { f: 'en_pause',            l: 'En attente',           ico: 'fa-pause',                 n: nPause  },
+      { f: 'en_cours',            l: 'En cours',             ico: 'fa-play',                  n: nEC     },
+      { f: 'terminee',            l: 'Terminées',            ico: 'fa-check',                 n: nT      },
+      { f: 'en_retard',           l: 'En retard',            ico: 'fa-clock',                 n: nRetard },
     ];
     html += `<div class="int-pills">
-      ${pillDef.map(p => `<button class="int-pill${_gestionFilter === p.f ? ' active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${p.f}')">${p.emo} ${p.l}</button>`).join('')}
+      ${pillDef.map(p => `<button class="int-pill${_gestionFilter === p.f ? ' active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${p.f}')"><i class="fas ${p.ico}"></i> ${p.l} <span class="int-pill-n">${p.n}</span></button>`).join('')}
     </div>`;
 
-    // ── Toolbar ──
-    if (techOpts || _filterPrio) {
+    // ── Toolbar : recherche + tri + filtres ──
+    {
       html += `<div class="int-toolbar">
-        <span class="int-count">${list.length} intervention${list.length !== 1 ? 's' : ''}</span>
+        <div class="int-search-wrap">
+          <i class="fas fa-magnifying-glass int-search-ico"></i>
+          <input id="int-f-search" class="int-search-inp" type="text" placeholder="Rechercher une intervention…"
+            value="${esc(_filterSearch)}" oninput="MX.Pages.Int._setFilter('search',this.value)">
+          ${_filterSearch ? `<button type="button" class="int-search-clear" onclick="MX.Pages.Int._setFilter('search','')" aria-label="Effacer la recherche"><i class="fas fa-xmark"></i></button>` : ''}
+        </div>
         <div class="int-toolbar-filters">
           ${techOpts}
           <select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('prio',this.value)">
@@ -390,10 +430,14 @@
               `<option value="${k}"${_filterPrio === k ? ' selected' : ''}>${p.l}</option>`
             ).join('')}
           </select>
+          <select class="int-filter-sel" onchange="MX.Pages.Int._setFilter('sort',this.value)">
+            <option value="recent"${_sortBy === 'recent' ? ' selected' : ''}>Plus récentes</option>
+            <option value="ancien"${_sortBy === 'ancien' ? ' selected' : ''}>Plus anciennes</option>
+            <option value="priorite"${_sortBy === 'priorite' ? ' selected' : ''}>Priorité</option>
+          </select>
         </div>
+        <span class="int-count">${list.length} intervention${list.length !== 1 ? 's' : ''}</span>
       </div>`;
-    } else {
-      html += `<div class="int-toolbar"><span class="int-count">${list.length} intervention${list.length !== 1 ? 's' : ''}</span></div>`;
     }
 
     // ── List ──
@@ -472,9 +516,12 @@
     const isMine = (iv.assignedTo || []).includes(cu?.name);
     const pendingXfr = _transfers.find(t => t.interventionId === iv.id && t.toTech === cu?.name);
 
-    // Boutons selon l'état de couleur — un technicien assigné (isMine) peut
-    // toujours faire progresser son intervention depuis son téléphone, sans
-    // passer par l'admin. "Terminer" ne demande ni chronomètre ni date.
+    // Boutons d'action primaires selon l'état de couleur — un technicien
+    // assigné (isMine) peut toujours faire progresser son intervention
+    // depuis son téléphone, sans passer par l'admin. "Terminer" ne demande
+    // ni chronomètre ni date. Les actions secondaires (Modifier/Annuler/
+    // Supprimer/Transférer) sont regroupées dans le menu "···" (_cardMenu)
+    // pour garder la carte compacte.
     let acts = '';
     if ((canAll || isMine) && st === 'a_prendre_en_charge') {
       acts += `<button class="int-act-btn int-act-btn--green" onclick="event.stopPropagation();MX.Pages.Int._startInt('${iv.id}')"><i class="fas fa-play"></i><span class="int-act-txt"> Prendre en charge</span></button>`;
@@ -487,34 +534,38 @@
       acts += `<button class="int-act-btn int-act-btn--warn" onclick="event.stopPropagation();MX.Pages.Int._pauseInt('${iv.id}')"><i class="fas fa-pause"></i><span class="int-act-txt"> Mettre en pause</span></button>`;
       acts += `<button class="int-act-btn int-act-btn--blue" onclick="event.stopPropagation();MX.Pages.Int._closeInt('${iv.id}')"><i class="fas fa-check"></i><span class="int-act-txt"> Terminer</span></button>`;
     }
-    if (canAll) {
-      acts += `<button class="int-act-btn" onclick="event.stopPropagation();MX.Pages.Int._editInt('${iv.id}')"><i class="fas fa-pen"></i></button>`;
-      if (st !== 'terminee' && st !== 'annulee') {
-        acts += `<button class="int-act-btn int-act-btn--warn" onclick="event.stopPropagation();MX.Pages.Int._cancelInt('${iv.id}')"><i class="fas fa-ban"></i></button>`;
-      }
-      acts += `<button class="int-act-btn int-act-btn--del" onclick="event.stopPropagation();MX.Pages.Int._delInt('${iv.id}')"><i class="fas fa-trash"></i></button>`;
-    } else if (isMine && st !== 'terminee' && st !== 'annulee') {
-      acts += `<button class="int-act-btn" onclick="event.stopPropagation();MX.Pages.Int._transferInt('${iv.id}')"><i class="fas fa-share"></i><span class="int-act-txt"> Transférer</span></button>`;
+    if (st === 'terminee' || st === 'annulee') {
+      acts += `<button class="int-act-btn" onclick="event.stopPropagation();MX.Pages.Int._viewInt('${iv.id}')"><i class="fas fa-eye"></i><span class="int-act-txt"> Voir les détails</span></button>`;
     }
 
+    // Menu "···" — actions secondaires, selon permissions existantes
+    // (inchangées : admin voit Modifier/Annuler/Supprimer, un technicien
+    // assigné voit Transférer).
+    const hasMenu = canAll || (isMine && st !== 'terminee' && st !== 'annulee');
+
     const late = _isLate(iv);
+    const createdD = _tsDate(iv.createdAt);
+    const createdTxt = createdD ? createdD.toLocaleDateString('fr-FR') : '';
 
     return `<div class="int-card" onclick="MX.Pages.Int._viewInt('${iv.id}')" style="border-left:4px solid ${sm.col}">
       <div class="int-card-top">
+        <div class="int-card-ico" style="color:${sm.col};background:${sm.bg}"><i class="fas fa-wrench"></i></div>
         <div class="int-card-title">${esc(iv.title)}</div>
-        <div class="int-card-badges">
-          ${_statusBadge(iv)}
-          ${late ? `<span class="int-badge int-badge--late"><i class="fas fa-clock"></i> En retard</span>` : ''}
-          ${_isLegacyRetardAmbiguous(iv) ? `<span class="int-badge int-badge--legacy" title="Ancien retard automatique (fonctionnalité supprimée) : sa progression d'origine ne peut pas être reconstituée."><i class="fas fa-circle-question"></i> Progression d'origine inconnue</span>` : ''}
-          ${_prioBadge(iv.priority)}
+        <div class="int-card-top-r">
+          ${createdTxt ? `<span class="int-card-created">Créée le ${createdTxt}</span>` : ''}
+          ${hasMenu ? `<button class="int-card-menu-btn" title="Plus d'actions" onclick="event.stopPropagation();MX.Pages.Int._cardMenu('${iv.id}')"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
         </div>
+      </div>
+      <div class="int-card-badges">
+        ${_statusBadge(iv)}
+        ${late ? `<span class="int-badge int-badge--late"><i class="fas fa-clock"></i> En retard</span>` : ''}
+        ${_isLegacyRetardAmbiguous(iv) ? `<span class="int-badge int-badge--legacy" title="Ancien retard automatique (fonctionnalité supprimée) : sa progression d'origine ne peut pas être reconstituée."><i class="fas fa-circle-question"></i> Progression d'origine inconnue</span>` : ''}
+        ${_prioBadge(iv.priority)}
       </div>
       ${iv.description ? `<div class="int-card-desc">${esc(iv.description)}</div>` : ''}
       <div class="int-card-meta">
         ${iv.location ? `<span><i class="fas fa-location-dot"></i> ${esc(iv.location)}</span>` : ''}
-        ${iv.startDate ? `<span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}</span>` : `<span><i class="fas fa-bolt"></i> Aucune date planifiée</span>`}
-        ${iv.endDate ? `<span><i class="fas fa-flag-checkered"></i> ${_dtFmt(iv.endDate, iv.endTime)}</span>` : ''}
-        <span><i class="fas fa-user"></i> ${esc(iv.createdBy || '—')}</span>
+        ${iv.startDate ? `<span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}${iv.endDate ? ' → ' + _dtFmt(iv.endDate, iv.endTime) : ''}</span>` : `<span><i class="fas fa-bolt"></i> Aucune date planifiée</span>`}
       </div>
       <div class="int-card-footer">
         <div class="int-card-techs">${_techAvatars(iv.assignedTo)}</div>
@@ -526,6 +577,29 @@
         <button class="int-xfr-btn int-xfr-btn--no" onclick="event.stopPropagation();MX.Pages.Int._refuseXfr('${pendingXfr.id}')">✗ Refuser</button>
       </div>` : ''}
     </div>`;
+  }
+
+  // ── CARD MENU ("···") — actions secondaires regroupées, mêmes permissions
+  // et mêmes fonctions qu'avant (aucune règle ni droit modifié). ──
+  function _cardMenu(id) {
+    const iv = _interventions.find(x => x.id === id);
+    if (!iv) return;
+    const canAll = _canAll();
+    const cu     = MX.state.currentUser;
+    const isMine = (iv.assignedTo || []).includes(cu?.name);
+    const st     = _effStatus(iv);
+    const actions = [];
+    if (canAll) {
+      actions.push({ label: '✏️ Modifier', cls: 'confirm', fn: () => _editInt(id) });
+      if (st !== 'terminee' && st !== 'annulee') {
+        actions.push({ label: '🚫 Annuler l\'intervention', cls: 'cancel', fn: () => _cancelInt(id) });
+      }
+      actions.push({ label: '🗑️ Supprimer', cls: 'danger', fn: () => _delInt(id) });
+    } else if (isMine && st !== 'terminee' && st !== 'annulee') {
+      actions.push({ label: '↪ Transférer', cls: 'confirm', fn: () => _transferInt(id) });
+    }
+    actions.push({ label: 'Fermer', cls: 'cancel' });
+    MX.showModal({ title: esc(iv.title), sub: 'Actions', body: '', actions });
   }
 
   // ── TAB: CALENDRIER ──
@@ -778,7 +852,27 @@
     if (type === 'tech')   _filterTech   = val;
     if (type === 'status') _filterStatus = val;
     if (type === 'prio')   _filterPrio   = val;
-    _rerender();
+    if (type === 'search') _filterSearch = val;
+    if (type === 'sort')   _sortBy       = val;
+    _rerenderKeepFocus();
+  }
+
+  // Comme la liste entière est reconstruite à chaque frappe dans la
+  // recherche (même principe que les autres filtres du module), on restaure
+  // le focus et la position du curseur du champ de recherche après coup
+  // pour permettre une saisie continue sans perdre le clavier.
+  function _rerenderKeepFocus() {
+    const el = document.getElementById('int-body');
+    if (!el) return;
+    const active = document.activeElement;
+    const wasSearch = active && active.id === 'int-f-search';
+    const selStart = wasSearch ? active.selectionStart : null;
+    const selEnd   = wasSearch ? active.selectionEnd   : null;
+    el.innerHTML = _body();
+    if (wasSearch) {
+      const ni = document.getElementById('int-f-search');
+      if (ni) { ni.focus(); try { ni.setSelectionRange(selStart, selEnd); } catch (e) {} }
+    }
   }
 
   // ── TECHNICIAN PICKER HTML ──
@@ -788,6 +882,10 @@
     const techs = _users.filter(u => u.role === 'technicien' || u.role === 'responsable');
     if (!techs.length) return '';
     return `<div class="int-form-label">Techniciens affectés</div>
+      ${techs.length > 4 ? `<div class="int-tp-search-wrap">
+        <i class="fas fa-magnifying-glass"></i>
+        <input type="text" class="int-tp-search" placeholder="Rechercher un technicien…" oninput="MX.Pages.Int._filterTechPicker(this.value)">
+      </div>` : ''}
       <div class="int-tech-picker" id="int-tp">
         ${techs.map(u => {
           const isSel = _pickerSel.includes(u.name);
@@ -804,24 +902,53 @@
       </div>`;
   }
 
+  function _filterTechPicker(q) {
+    const query = (q || '').trim().toLowerCase();
+    document.querySelectorAll('#int-tp .int-tech-pick-item').forEach(btn => {
+      const name = (btn.dataset.tech || '').toLowerCase();
+      btn.style.display = !query || name.includes(query) ? '' : 'none';
+    });
+  }
+
+  // ── PRIORITÉ (pastilles sélectionnables) ──
+  function _prioPicker(selected) {
+    _pickerPrio = selected || 'normale';
+    return `<div class="int-form-label">Priorité</div>
+      <div class="int-prio-picker" id="int-pp">
+        ${Object.entries(PRIO).map(([k, p]) => `
+          <button type="button" class="int-prio-pick${_pickerPrio === k ? ' selected' : ''}" data-prio="${k}"
+            style="--pc:${p.col};--pcbg:${p.bg}" onclick="MX.Pages.Int._setPrio(this)">
+            <i class="fas ${p.icon}"></i> ${p.l}
+          </button>`).join('')}
+      </div>`;
+  }
+
+  function _setPrio(btn) {
+    const p = btn.dataset.prio;
+    if (!p) return;
+    _pickerPrio = p;
+    document.querySelectorAll('#int-pp .int-prio-pick').forEach(b => b.classList.toggle('selected', b.dataset.prio === p));
+  }
+
   // ── PLANIFICATION (optionnelle) ──
   function _schedFieldsHtml(checked, sd, st, ed, et) {
-    return `<div class="int-sched-toggle${checked ? ' checked' : ''}" id="int-sched-toggle">
-      <label class="int-sched-toggle-row">
-        <input type="checkbox" id="int-f-sched" ${checked ? 'checked' : ''} onchange="MX.Pages.Int._toggleSched(this)">
-        <span class="int-sched-toggle-txt">
-          <strong>Planifier cette intervention</strong>
-          <small>Programmer une date et une heure</small>
-        </span>
-      </label>
+    return `<div class="int-sched-sec">
+      <div class="int-sched-sec-hdr">
+        <div class="int-sched-sec-ttl"><i class="fas fa-calendar-days"></i> Planification <span>(optionnelle)</span></div>
+        <label class="int-switch">
+          <input type="checkbox" id="int-f-sched" ${checked ? 'checked' : ''} onchange="MX.Pages.Int._toggleSched(this)">
+          <span class="int-switch-track"><span class="int-switch-thumb"></span></span>
+        </label>
+      </div>
+      <div class="int-sched-sec-sub">Planifier cette intervention</div>
       <div class="int-sched-fields" id="int-sched-fields" style="${checked ? '' : 'display:none'}">
         <div class="int-form-date-col">
-          <div class="int-form-label">Début</div>
+          <div class="int-form-label">Date de début</div>
           <input type="date" id="int-f-sd" class="fi" value="${sd}">
           <input type="time" id="int-f-st" class="fi" value="${st}">
         </div>
         <div class="int-form-date-col">
-          <div class="int-form-label">Fin prévue</div>
+          <div class="int-form-label">Date de fin</div>
           <input type="date" id="int-f-ed" class="fi" value="${ed}">
           <input type="time" id="int-f-et" class="fi" value="${et}">
         </div>
@@ -831,9 +958,7 @@
 
   function _toggleSched(cb) {
     const wrap = document.getElementById('int-sched-fields');
-    const toggle = document.getElementById('int-sched-toggle');
     if (wrap) wrap.style.display = cb.checked ? '' : 'none';
-    if (toggle) toggle.classList.toggle('checked', cb.checked);
   }
 
   function _toggleTech(btn) {
@@ -855,15 +980,18 @@
 
   // ── PHOTO HELPERS ──
   function _intPhotoHtml(existing) {
-    const prev = existing ? `<img id="int-ph-prev" class="mob-photo-preview" src="${esc(existing)}" alt="Photo">` : `<img id="int-ph-prev" class="mob-photo-preview" style="display:none" alt="Photo">`;
-    return `<div>
-      <div class="int-form-label"><i class="fas fa-camera"></i> Photo (optionnel)</div>
-      <label class="mob-camera-btn">
+    const hasPhoto = !!existing;
+    return `<div class="int-form-sec">
+      <div class="int-form-sec-ttl"><i class="fas fa-camera"></i> Photo (optionnelle)</div>
+      <label class="mob-camera-btn" id="int-ph-picker" style="${hasPhoto ? 'display:none' : ''}">
         <i class="fas fa-camera"></i>
-        <span>Prendre / choisir une photo</span>
+        <span>Cliquer pour choisir une photo</span>
         <input type="file" accept="image/*" capture="environment" onchange="MX.Pages.Int._onIntPhoto(this)" style="display:none">
       </label>
-      ${prev}
+      <div class="int-photo-preview-wrap" id="int-ph-wrap" style="${hasPhoto ? '' : 'display:none'}">
+        <img id="int-ph-prev" class="mob-photo-preview" src="${hasPhoto ? esc(existing) : ''}" alt="Photo">
+        <button type="button" class="int-photo-remove" onclick="MX.Pages.Int._removeIntPhoto()" aria-label="Retirer la photo"><i class="fas fa-xmark"></i></button>
+      </div>
     </div>`;
   }
 
@@ -872,9 +1000,26 @@
     if (!file) return;
     _compressInt(file, 800, 800, 0.72).then(b64 => {
       _intPhotoB64 = b64;
-      const prev = document.getElementById('int-ph-prev');
-      if (prev) { prev.src = b64; prev.style.display = 'block'; }
+      _intPhotoRemoved = false;
+      const prev   = document.getElementById('int-ph-prev');
+      const wrap   = document.getElementById('int-ph-wrap');
+      const picker = document.getElementById('int-ph-picker');
+      if (prev) prev.src = b64;
+      if (wrap) wrap.style.display = '';
+      if (picker) picker.style.display = 'none';
     }).catch(() => MX.toast('Erreur lecture photo', true));
+  }
+
+  // Retrait explicite — distinct de "aucun changement" : _intPhotoRemoved
+  // permet à la sauvegarde de savoir qu'il faut écrire photo:null plutôt
+  // que de conserver la photo existante par défaut.
+  function _removeIntPhoto() {
+    _intPhotoB64 = null;
+    _intPhotoRemoved = true;
+    const wrap   = document.getElementById('int-ph-wrap');
+    const picker = document.getElementById('int-ph-picker');
+    if (wrap) wrap.style.display = 'none';
+    if (picker) picker.style.display = '';
   }
 
   function _compressInt(file, mW, mH, q) {
@@ -899,6 +1044,7 @@
   // ── ACTIONS ──
   function _newInt(defaultDate, defaultTime) {
     _intPhotoB64 = null;
+    _intPhotoRemoved = false;
     const today = _today();
     const ds = defaultDate || today;
     const ts = defaultTime || '09:00';
@@ -910,21 +1056,37 @@
     const planPrechecked = !!(defaultDate || defaultTime);
 
     MX.showModal({
-      title: '🔧 Nouvelle intervention',
+      title: '',
       sub: '',
-      body: `<div class="int-form">
-        <input id="int-f-title" class="fi" placeholder="Titre *" maxlength="120">
-        <textarea id="int-f-desc" class="fi" placeholder="Description" rows="3" style="resize:vertical"></textarea>
-        <input id="int-f-loc" class="fi" placeholder="Localisation" maxlength="80">
-        <select id="int-f-prio" class="fi">
-          ${Object.entries(PRIO).map(([k, p]) => `<option value="${k}"${k === 'normale' ? ' selected' : ''}>${p.l}</option>`).join('')}
-        </select>
-        ${_canAll() ? _techPicker([]) : ''}
+      body: `<div class="int-form int-form-panel">
+        <div class="int-form-hdr">
+          <div class="int-form-hdr-l">
+            <div class="int-form-hdr-ico"><i class="fas fa-wrench"></i></div>
+            <div>
+              <div class="int-form-hdr-ttl">Nouvelle intervention</div>
+              <div class="int-form-hdr-sub">Créez une intervention rapidement</div>
+            </div>
+          </div>
+          <button type="button" class="int-form-close" onclick="MX.closeModal()" aria-label="Fermer"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="int-form-sec">
+          <div class="int-form-sec-ttl"><i class="fas fa-circle-info"></i> Informations générales</div>
+          <div class="int-form-label">Titre *</div>
+          <input id="int-f-title" class="fi int-f-title-main" placeholder="Ex: Remplacement d'une pompe" maxlength="120">
+          <div class="int-form-label">Description</div>
+          <textarea id="int-f-desc" class="fi" placeholder="Décrivez le problème, les actions à réaliser…" rows="3" style="resize:vertical"></textarea>
+          <div class="int-form-label">Localisation</div>
+          <input id="int-f-loc" class="fi" placeholder="Ex: Chaufferie, Bâtiment A, Zone 3…" maxlength="80">
+        </div>
         ${_schedFieldsHtml(planPrechecked, ds, ts, ds, et)}
+        <div class="int-form-sec">
+          ${_prioPicker('normale')}
+        </div>
+        ${_canAll() ? `<div class="int-form-sec">${_techPicker([])}</div>` : ''}
         ${_intPhotoHtml(null)}
       </div>`,
       actions: [
-        { label: 'Créer', cls: 'confirm', fn: async () => {
+        { label: '✓ Créer l\'intervention', cls: 'confirm', fn: async () => {
           const title = document.getElementById('int-f-title')?.value?.trim();
           if (!title) { MX.toast('Le titre est requis', true); return; }
           const isPlanned = !!document.getElementById('int-f-sched')?.checked;
@@ -945,7 +1107,7 @@
             title,
             description: document.getElementById('int-f-desc')?.value?.trim() || '',
             location:    document.getElementById('int-f-loc')?.value?.trim() || '',
-            priority:    document.getElementById('int-f-prio')?.value || 'normale',
+            priority:    _pickerPrio || 'normale',
             // ROUGE — statut initial de toute nouvelle intervention, quels
             // que soient la planification ou les techniciens déjà affectés.
             status:      'a_prendre_en_charge',
@@ -970,29 +1132,49 @@
 
   function _editInt(id) {
     _intPhotoB64 = null;
+    _intPhotoRemoved = false;
     const iv = _interventions.find(x => x.id === id);
     if (!iv) return;
     const today = _today();
     const wasPlanned = _isPlanned(iv);
     MX.showModal({
-      title: '✏️ Modifier l\'intervention',
-      sub: esc(iv.title),
-      body: `<div class="int-form">
-        <input id="int-f-title" class="fi" value="${esc(iv.title)}" maxlength="120">
-        <textarea id="int-f-desc" class="fi" rows="3" style="resize:vertical">${esc(iv.description || '')}</textarea>
-        <input id="int-f-loc" class="fi" value="${esc(iv.location || '')}" maxlength="80">
-        <select id="int-f-prio" class="fi">
-          ${Object.entries(PRIO).map(([k, p]) => `<option value="${k}"${iv.priority === k ? ' selected' : ''}>${p.l}</option>`).join('')}
-        </select>
-        <select id="int-f-status" class="fi">
-          ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}"${_effStatus(iv) === k ? ' selected' : ''}>${s.l}</option>`).join('')}
-        </select>
-        ${_techPicker(iv.assignedTo)}
+      title: '',
+      sub: '',
+      body: `<div class="int-form int-form-panel">
+        <div class="int-form-hdr">
+          <div class="int-form-hdr-l">
+            <div class="int-form-hdr-ico"><i class="fas fa-pen"></i></div>
+            <div>
+              <div class="int-form-hdr-ttl">Modifier l'intervention</div>
+              <div class="int-form-hdr-sub">${esc(iv.title)}</div>
+            </div>
+          </div>
+          <button type="button" class="int-form-close" onclick="MX.closeModal()" aria-label="Fermer"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="int-form-sec">
+          <div class="int-form-sec-ttl"><i class="fas fa-circle-info"></i> Informations générales</div>
+          <div class="int-form-label">Titre *</div>
+          <input id="int-f-title" class="fi int-f-title-main" value="${esc(iv.title)}" maxlength="120">
+          <div class="int-form-label">Description</div>
+          <textarea id="int-f-desc" class="fi" rows="3" style="resize:vertical">${esc(iv.description || '')}</textarea>
+          <div class="int-form-label">Localisation</div>
+          <input id="int-f-loc" class="fi" value="${esc(iv.location || '')}" maxlength="80">
+        </div>
         ${_schedFieldsHtml(wasPlanned, iv.startDate || today, iv.startTime || '09:00', iv.endDate || iv.startDate || today, iv.endTime || '10:00')}
+        <div class="int-form-sec">
+          ${_prioPicker(iv.priority)}
+        </div>
+        <div class="int-form-sec">
+          <div class="int-form-label">Statut</div>
+          <select id="int-f-status" class="fi">
+            ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}"${_effStatus(iv) === k ? ' selected' : ''}>${s.l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="int-form-sec">${_techPicker(iv.assignedTo)}</div>
         ${_intPhotoHtml(iv.photo || null)}
       </div>`,
       actions: [
-        { label: 'Enregistrer', cls: 'confirm', fn: async () => {
+        { label: '✓ Enregistrer', cls: 'confirm', fn: async () => {
           const title = document.getElementById('int-f-title')?.value?.trim();
           if (!title) { MX.toast('Titre requis', true); return; }
           const assigned   = [..._pickerSel];
@@ -1021,11 +1203,11 @@
             title,
             description: document.getElementById('int-f-desc')?.value?.trim() || '',
             location:    document.getElementById('int-f-loc')?.value?.trim() || '',
-            priority:    document.getElementById('int-f-prio')?.value || iv.priority,
+            priority:    _pickerPrio || iv.priority,
             status:      newStatus,
             ...schedFields,
             assignedTo:  assigned,
-            photo:       _intPhotoB64 !== null ? _intPhotoB64 : (iv.photo || null),
+            photo:       _intPhotoRemoved ? null : (_intPhotoB64 !== null ? _intPhotoB64 : (iv.photo || null)),
             updatedAt:   FV.serverTimestamp(),
           };
           try {
@@ -1329,8 +1511,8 @@
   window.MX.Pages.Int = {
     render, _tab, _getSummary, _setGestionFilter,
     _newInt, _editInt, _viewInt, _startInt, _pauseInt, _closeInt, _cancelInt, _delInt,
-    _transferInt, _acceptXfr, _refuseXfr,
-    _setFilter, _toggleTech, _toggleSched, _onIntPhoto,
+    _transferInt, _acceptXfr, _refuseXfr, _cardMenu,
+    _setFilter, _toggleTech, _toggleSched, _setPrio, _filterTechPicker, _onIntPhoto, _removeIntPhoto,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
     // Déclenche le chargement (idempotent, _load() est déjà gardé par
     // _loaded) et prévient l'appelant une fois les données disponibles.

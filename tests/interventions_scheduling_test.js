@@ -333,10 +333,12 @@ async function seedIntervention(page, data) {
     await pinLogin(page, 'sophie', '9999');
     await openNewInt(page);
     const mh = await modalHtml(page);
-    ok('15.1 Bloc photo présent (mode non planifié)', mh.includes('Prendre / choisir une photo'));
+    // Adapté : libellé modernisé lors de la refonte graphique ("Prendre /
+    // choisir une photo" → "Cliquer pour choisir une photo", maquette).
+    ok('15.1 Bloc photo présent (mode non planifié)', mh.includes('Cliquer pour choisir une photo'));
     await checkSched(page, true);
     const mh2 = await modalHtml(page);
-    ok('15.2 Bloc photo toujours présent (mode planifié)', mh2.includes('Prendre / choisir une photo'));
+    ok('15.2 Bloc photo toujours présent (mode planifié)', mh2.includes('Cliquer pour choisir une photo'));
     await ctx.close();
   }
 

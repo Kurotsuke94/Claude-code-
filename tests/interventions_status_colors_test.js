@@ -390,8 +390,11 @@ async function clickCardAction(page, title, labelSubstr) {
     });
     await gotoGestion(page);
     const html = await mainHtml(page);
-    ok('16.1 Aucun badge "En retard" sur une intervention sans date', !/Immédiate jamais en retard[\s\S]{0,200}En retard/.test(html));
-    ok('16.2 Toujours affichée comme ROUGE (à prendre en charge), pas de faux retard', /Immédiate jamais en retard[\s\S]{0,300}À prendre en charge/.test(html));
+    // Adapté : la refonte graphique a inséré "Créée le …" + le menu "···"
+    // entre le titre et les badges, élargissant la fenêtre texte-à-texte
+    // attendue (mesuré : ~510 caractères) — le sens du test est inchangé.
+    ok('16.1 Aucun badge "En retard" sur une intervention sans date', !/Immédiate jamais en retard[\s\S]{0,600}En retard/.test(html));
+    ok('16.2 Toujours affichée comme ROUGE (à prendre en charge), pas de faux retard', /Immédiate jamais en retard[\s\S]{0,600}À prendre en charge/.test(html));
     await ctx.close();
   }
 
@@ -559,6 +562,128 @@ async function clickCardAction(page, title, labelSubstr) {
     const html = await mainHtml(page);
     ok('20.1 Un technicien ne voit que les interventions qui lui sont affectées', html.includes('Pour Kevin seulement') && !html.includes('Pour Jordan seulement'));
     ok('20.2 Aucun bouton Modifier/Annuler/Supprimer pour un technicien (permissions admin inchangées)', !html.includes('fa-pen') && !html.includes('fa-trash'));
+    await ctx.close();
+  }
+
+  // Note (refonte graphique, voir rapport final) : _tGestion() distingue
+  // désormais explicitement "chargement en cours" de "chargement confirmé,
+  // liste vide" (if (!_ready) return <état de chargement>), pour ne jamais
+  // afficher "Aucune intervention" avant que Firestore ait réellement
+  // répondu. Vérifié par relecture du code (_tGestion(), interventions.js) ;
+  // non testable de façon fiable dans ce harnais : l'application appelle
+  // déjà MX.showPage() pendant son propre amorçage (avant même la saisie du
+  // PIN), donc _load() et le setTimeout(0) du mock Firestore se résolvent
+  // systématiquement avant que ce script externe ne puisse revérifier l'état
+  // — la fenêtre réelle ne dure qu'un seul tick JS, trop courte pour être
+  // capturée de façon déterministe via les API de page/connexion exposées.
+
+  // ── 22. Refonte graphique : recherche, tri, filtres, bouton "+" ──
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    await bootPage(page);
+    await pinLogin(page, 'sophie', '9999');
+    await seedIntervention(page, { title: 'Fuite évier cuisine', priority: 'urgente', status: 'a_prendre_en_charge', location: 'Cuisine', assignedTo: ['Kevin'], createdBy: 'Sophie', createdAt: { __sv: 'timestamp' } });
+    await seedIntervention(page, { title: 'Peinture hall', priority: 'basse', status: 'a_prendre_en_charge', location: 'Hall', assignedTo: ['Jordan'], createdBy: 'Sophie', createdAt: { __sv: 'timestamp' } });
+    await gotoGestion(page);
+    await page.waitForTimeout(200);
+
+    // 22.1/22.2 — Recherche (titre, puis localisation)
+    await evalPage(page, () => { const i = document.getElementById('int-f-search'); i.value = 'évier'; i.dispatchEvent(new Event('input')); });
+    await page.waitForTimeout(150);
+    let titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.1 Recherche par titre filtre correctement', titles.length === 1 && titles[0] === 'Fuite évier cuisine');
+    await evalPage(page, () => { const i = document.getElementById('int-f-search'); i.value = 'Hall'; i.dispatchEvent(new Event('input')); });
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.2 Recherche par localisation filtre correctement', titles.length === 1 && titles[0] === 'Peinture hall');
+    // Effacer via le bouton X
+    await evalPage(page, () => MX.Pages.Int._setFilter('search', ''));
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.3 Recherche effacée : les deux cartes réapparaissent', titles.length === 2);
+
+    // 22.4 — Filtre technicien
+    await evalPage(page, () => { const s = document.querySelector('.int-toolbar-filters select'); s.value = 'Jordan'; s.dispatchEvent(new Event('change')); });
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.4 Filtre technicien fonctionne', titles.length === 1 && titles[0] === 'Peinture hall');
+    await evalPage(page, () => MX.Pages.Int._setFilter('tech', ''));
+    await page.waitForTimeout(150);
+
+    // 22.5 — Filtre priorité
+    await evalPage(page, () => MX.Pages.Int._setFilter('prio', 'urgente'));
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.5 Filtre priorité fonctionne', titles.length === 1 && titles[0] === 'Fuite évier cuisine');
+    await evalPage(page, () => MX.Pages.Int._setFilter('prio', ''));
+    await page.waitForTimeout(150);
+
+    // 22.6 — Tri par priorité (urgente avant basse)
+    await evalPage(page, () => MX.Pages.Int._setFilter('sort', 'priorite'));
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.6 Tri "Priorité" place l\'urgente en premier', titles[0] === 'Fuite évier cuisine');
+    await evalPage(page, () => MX.Pages.Int._setFilter('sort', 'ancien'));
+    await page.waitForTimeout(150);
+    titles = await evalPage(page, () => Array.from(document.querySelectorAll('.int-card-title')).map(e => e.textContent));
+    ok('22.7 Tri "Plus anciennes" inverse l\'ordre (la première créée apparaît en premier)', titles[0] === 'Fuite évier cuisine');
+    await evalPage(page, () => MX.Pages.Int._setFilter('sort', 'recent'));
+
+    // 22.8 — Bouton flottant "+" ouvre bien le formulaire (clic réel sur l'élément)
+    await page.click('#int-fab');
+    await page.waitForTimeout(200);
+    const formOpen = await evalPage(page, () => !!document.getElementById('int-f-title'));
+    ok('22.8 Le bouton flottant "+" ouvre le formulaire de création', formOpen);
+    await evalPage(page, () => MX.closeModal());
+    await ctx.close();
+  }
+
+  // ── 23. Zone photo modernisée : ajout, aperçu, retrait explicite ──
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    await bootPage(page);
+    await pinLogin(page, 'sophie', '9999');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const id = await seedIntervention(page, {
+      title: 'Avec photo', priority: 'normale', status: 'a_prendre_en_charge',
+      photo: PNG, assignedTo: [], createdBy: 'Sophie', createdAt: { __sv: 'timestamp' },
+    });
+    await gotoGestion(page);
+    await evalPage(page, (id) => MX.Pages.Int._editInt(id), id);
+    await page.waitForTimeout(200);
+    let state = await evalPage(page, () => ({
+      wrapVisible: document.getElementById('int-ph-wrap').style.display !== 'none',
+      pickerVisible: document.getElementById('int-ph-picker').style.display !== 'none',
+      src: document.getElementById('int-ph-prev').src,
+    }));
+    ok('23.1 Photo existante : aperçu affiché (pas le bouton de sélection)', state.wrapVisible && !state.pickerVisible);
+    ok('23.2 Aperçu affiche bien la photo enregistrée', state.src.startsWith('data:image/png'));
+
+    // Retrait explicite
+    await evalPage(page, () => MX.Pages.Int._removeIntPhoto());
+    await page.waitForTimeout(100);
+    state = await evalPage(page, () => ({
+      wrapVisible: document.getElementById('int-ph-wrap').style.display !== 'none',
+      pickerVisible: document.getElementById('int-ph-picker').style.display !== 'none',
+    }));
+    ok('23.3 Retrait : le sélecteur réapparaît, l\'aperçu disparaît', !state.wrapVisible && state.pickerVisible);
+    await page.click('.modal-actions .modal-btn.confirm');
+    await page.waitForTimeout(150);
+    const doc = await getIntervention(page, id);
+    ok('23.4 Retrait confirmé : photo bien écrite à null en base (pas juste visuel)', doc.photo === null);
+
+    // Nouvelle intervention : pas de photo par défaut, le sélecteur est visible
+    await gotoGestion(page);
+    await evalPage(page, () => MX.Pages.Int._newInt());
+    await page.waitForTimeout(150);
+    const freshState = await evalPage(page, () => ({
+      wrapVisible: document.getElementById('int-ph-wrap').style.display !== 'none',
+      pickerVisible: document.getElementById('int-ph-picker').style.display !== 'none',
+    }));
+    ok('23.5 Nouvelle intervention : sélecteur de photo visible par défaut, aucun aperçu fantôme', !freshState.wrapVisible && freshState.pickerVisible);
+    await evalPage(page, () => MX.closeModal());
     await ctx.close();
   }
 
