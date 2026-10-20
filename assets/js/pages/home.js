@@ -292,7 +292,10 @@
     var intSum    = (_see('interventions') && Int && Int._getSummary) ? Int._getSummary(isTech ? myName : null) : null;
     var intItems  = intSum ? intSum.items : [];
     var intUrgent = intItems.filter(function (iv) { return iv.priority === 'urgente' && iv.effStatus !== 'terminee' && iv.effStatus !== 'annulee'; });
-    var intLate   = intItems.filter(function (iv) { return iv.effStatus === 'en_retard'; });
+    // Refonte couleurs interventions : le retard est désormais une info
+    // calculée (iv.isLate, voir interventions.js:_isLate()), plus jamais une
+    // valeur de effStatus — ne jamais confondre retard et avancement réel.
+    var intLate   = intItems.filter(function (iv) { return iv.isLate; });
     // Une intervention sans startDate est "immédiate" (mode non planifié) :
     // elle est ouverte dès sa création et doit apparaître dans Ma journée
     // du jour même, comme une intervention explicitement datée à aujourd'hui.
@@ -300,7 +303,9 @@
     var intTodayDone = intToday.filter(function (iv) { return iv.effStatus === 'terminee'; }).length;
     var intVisible = _see('interventions');
     var intOpenCount    = intVisible ? intItems.filter(function (iv) { return iv.effStatus !== 'terminee' && iv.effStatus !== 'annulee'; }).length : null;
-    var intWaitingCount = intVisible ? intItems.filter(function (iv) { return iv.effStatus === 'planifiee' || iv.effStatus === 'affectee'; }).length : null;
+    // "En attente" = rouge (à prendre en charge) + jaune (en pause) — les 2
+    // états "pas en cours" du nouveau système à 4 couleurs.
+    var intWaitingCount = intVisible ? intItems.filter(function (iv) { return iv.effStatus === 'a_prendre_en_charge' || iv.effStatus === 'en_pause'; }).length : null;
 
     // ════════════════════════════════════════════════════════════════════
     // DONNÉES RÉELLES — PMP / Checklists (moteur pmp.js, getStats()/getLateItems())
@@ -460,8 +465,8 @@
       if (b.time) return 1;
       return 0;
     });
-    var STATUS_LABEL = { terminee: 'Terminé', en_cours: 'En cours', planifiee: 'À faire', affectee: 'À faire', en_retard: 'En retard', annulee: 'Annulé' };
-    var STATUS_ICON  = { terminee: 'fa-check', en_cours: 'fa-spinner', planifiee: 'fa-circle', affectee: 'fa-circle', en_retard: 'fa-triangle-exclamation', annulee: 'fa-xmark' };
+    var STATUS_LABEL = { terminee: 'Terminé', en_cours: 'En cours', a_prendre_en_charge: 'À faire', en_pause: 'En pause', planifiee: 'À faire', affectee: 'À faire', en_retard: 'En retard', annulee: 'Annulé' };
+    var STATUS_ICON  = { terminee: 'fa-check', en_cours: 'fa-spinner', a_prendre_en_charge: 'fa-circle', en_pause: 'fa-pause', planifiee: 'fa-circle', affectee: 'fa-circle', en_retard: 'fa-triangle-exclamation', annulee: 'fa-xmark' };
 
     // ════════════════════════════════════════════════════════════════════
     // BUILD HTML

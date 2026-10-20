@@ -137,7 +137,10 @@ async function seedIntervention(page, data) {
     await clickConfirm(page);
     let iv = await lastIntervention(page);
     ok('4.1 Un technicien affecté', Array.isArray(iv.assignedTo) && iv.assignedTo.length === 1 && iv.assignedTo[0] === 'Kevin');
-    ok('4.2 Statut "affectee"', iv.status === 'affectee');
+    // Adapté : refonte du modèle de statuts (couleurs) — toute nouvelle intervention
+    // démarre désormais au statut ROUGE unique 'a_prendre_en_charge', qu'elle soit
+    // affectée ou non. 'affectee' n'existe plus comme valeur de statut.
+    ok('4.2 Statut "a_prendre_en_charge" (ROUGE, nouveau modèle)', iv.status === 'a_prendre_en_charge');
 
     // 5. Plusieurs techniciens
     await openNewInt(page);
@@ -156,7 +159,9 @@ async function seedIntervention(page, data) {
     await clickConfirm(page);
     iv = await lastIntervention(page);
     ok('6.1 Aucun technicien affecté', Array.isArray(iv.assignedTo) && iv.assignedTo.length === 0);
-    ok('6.2 Statut "planifiee" (non affectée)', iv.status === 'planifiee');
+    // Adapté : idem — 'planifiee' n'existe plus, toute nouvelle intervention
+    // (affectée ou non) démarre ROUGE 'a_prendre_en_charge'.
+    ok('6.2 Statut "a_prendre_en_charge" (ROUGE, non affectée, nouveau modèle)', iv.status === 'a_prendre_en_charge');
 
     // "Non affectée" visible dans la liste
     await evalPage(page, () => MX.showPage('interventions'));
@@ -203,7 +208,8 @@ async function seedIntervention(page, data) {
     await clickConfirm(page);
     const iv = await lastIntervention(page);
     ok('9.1 Intervention planifiée créée', !!iv);
-    ok('9.2 status "planifiee" (pas de technicien)', iv.status === 'planifiee');
+    // Adapté : idem — nouveau modèle de statuts.
+    ok('9.2 status "a_prendre_en_charge" (ROUGE, nouveau modèle, pas de technicien)', iv.status === 'a_prendre_en_charge');
     ok('10.1 startDate correctement enregistrée', iv.startDate === '2026-09-26');
     ok('10.2 startTime correctement enregistrée', iv.startTime === '09:00');
     ok('10.3 endDate correctement enregistrée', iv.endDate === '2026-09-26');
@@ -262,7 +268,9 @@ async function seedIntervention(page, data) {
     await evalPage(page, (id) => MX.Pages.Int._viewInt(id), legacyUnplannedId);
     await page.waitForTimeout(150);
     mh = await modalHtml(page);
-    ok('13.1 Intervention sans horaire : mention "non planifiée"', /non planifiée/i.test(mh));
+    // Adapté : le libellé exact a changé ("Non planifiée" → "Aucune date planifiée")
+    // conformément à la nouvelle spec d'affichage, le sens reste identique.
+    ok('13.1 Intervention sans horaire : mention "Aucune date planifiée"', /aucune date planifiée/i.test(mh));
     ok('13.2 Intervention sans horaire : pas de date fantôme', !mh.includes('undefined'));
     await evalPage(page, () => MX.closeModal());
     await ctx.close();

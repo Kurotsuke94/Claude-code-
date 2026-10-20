@@ -368,13 +368,18 @@
     if (!canAll && cu && window.MX.Pages && window.MX.Pages.Int) {
       const myIv = MX.Pages.Int._getSummary(cu.name);
       if (myIv.total > 0) {
+        // Refonte couleurs interventions : 4 états (rouge/jaune/vert/bleu) +
+        // "annulee" orthogonal. Anciennes clés conservées (compat, jamais
+        // retournées par effStatus mais inoffensives si jamais lues).
         const ST_C = {
+          a_prendre_en_charge: { l:'À prendre en charge', c:'#EF4444', bg:'rgba(239,68,68,.13)'  },
+          en_pause:            { l:'En pause',             c:'#F59E0B', bg:'rgba(245,158,11,.13)' },
+          en_cours:            { l:'En cours',              c:'#22C55E', bg:'rgba(34,197,94,.13)'  },
+          terminee:            { l:'Terminée',               c:'#3B82F6', bg:'rgba(59,130,246,.13)' },
+          annulee:             { l:'Annulée',                 c:'var(--text3)', bg:'var(--bg4)'     },
           planifiee: { l:'Planifiée', c:'var(--text2)',  bg:'var(--bg4)'          },
           affectee:  { l:'Affectée',  c:'var(--orange)', bg:'var(--orange-dim)'   },
-          en_cours:  { l:'En cours',  c:'#F97316',       bg:'rgba(249,115,22,.13)' },
-          terminee:  { l:'Terminée',  c:'#22C55E',       bg:'rgba(34,197,94,.13)' },
           en_retard: { l:'En retard', c:'var(--red)',     bg:'var(--red-dim)'      },
-          annulee:   { l:'Annulée',   c:'var(--text3)',   bg:'var(--bg4)'          }
         };
         h += '<div class="slot-card" style="border-color:rgba(124,58,237,.3);margin-top:16px">' +
           '<div class="slot-head" style="background:rgba(124,58,237,.1);border-bottom-color:rgba(124,58,237,.3)">' +
@@ -384,7 +389,7 @@
             '<div class="slot-pct" style="background:rgba(124,58,237,.2);color:#a78bfa">' + myIv.total + '</div>' +
           '</div>';
         myIv.items.forEach(function(iv) {
-          const sc = ST_C[iv.effStatus] || ST_C.planifiee;
+          const sc = ST_C[iv.effStatus] || ST_C.a_prendre_en_charge;
           h += '<div class="trow" onclick="MX.showPage(\'interventions\')" style="cursor:pointer">' +
             '<div style="flex:1;min-width:0">' +
               '<div style="font-size:13px;font-weight:600;color:var(--text1)">' + esc(iv.title) + '</div>' +

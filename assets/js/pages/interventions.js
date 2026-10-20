@@ -3,7 +3,7 @@
 
   // ── STATE ──
   let _curTab         = 'gestion';
-  let _gestionFilter  = '';   // pill active: '' | 'en_attente' | 'en_cours' | 'en_retard' | 'terminees'
+  let _gestionFilter  = '';   // pill active: '' | 'a_prendre_en_charge' | 'en_pause' | 'en_cours' | 'terminee' | 'en_retard'
   let _calView   = 'semaine';
   let _calDate   = '';
   let _filterTech   = '';
@@ -44,13 +44,17 @@
   }
 
   // ── METADATA ──
+  // Système de statuts par couleurs (4 états simples pour les techniciens) :
+  // ROUGE = pas encore commencée · JAUNE = en pause/en attente ·
+  // VERT = en cours · BLEU = terminée. "annulee" reste un état orthogonal
+  // (pas une couleur de progression). Le retard n'est PLUS un statut — voir
+  // _isLate() — pour ne jamais confondre avancement réel et échéance.
   const STATUS = {
-    planifiee: { l: 'Planifiée',  col: '#F59E0B', bg: 'rgba(245,158,11,.13)'  },
-    affectee:  { l: 'Affectée',   col: '#3B82F6', bg: 'rgba(59,130,246,.13)'  },
-    en_cours:  { l: 'En cours',   col: '#F97316', bg: 'rgba(249,115,22,.13)'  },
-    terminee:  { l: 'Terminée',   col: '#22C55E', bg: 'rgba(34,197,94,.13)'   },
-    en_retard: { l: 'En retard',  col: '#EF4444', bg: 'rgba(239,68,68,.13)'   },
-    annulee:   { l: 'Annulée',    col: '#6B7280', bg: 'rgba(107,114,128,.13)' },
+    a_prendre_en_charge: { l: 'À prendre en charge', col: '#EF4444', bg: 'rgba(239,68,68,.13)'  },
+    en_pause:            { l: 'En pause',             col: '#F59E0B', bg: 'rgba(245,158,11,.13)' },
+    en_cours:            { l: 'En cours',              col: '#22C55E', bg: 'rgba(34,197,94,.13)'  },
+    terminee:            { l: 'Terminée',               col: '#3B82F6', bg: 'rgba(59,130,246,.13)' },
+    annulee:             { l: 'Annulée',                 col: '#6B7280', bg: 'rgba(107,114,128,.13)' },
   };
 
   const PRIO = {
@@ -111,14 +115,27 @@
     return d.toISOString().slice(0, 10);
   }
 
+  // Bucket de couleur effectif — compatible avec les anciennes valeurs de
+  // statut (jamais de migration destructive : le document Firestore garde sa
+  // valeur brute tant qu'il n'est pas explicitement modifié par un clic ou
+  // une édition). "planifiee"/"affectee" (anciens statuts "pas commencée")
+  // et "en_retard" (ancien statut écrasé par l'ex-_autoRetard — on ne peut
+  // pas reconstruire son état antérieur réel, donc on le traite comme "à
+  // prendre en charge", jamais comme "terminée") retombent tous sur ROUGE.
   function _effStatus(iv) {
-    if (iv.status === 'terminee' || iv.status === 'annulee') return iv.status;
-    const endDt = iv.endDate
-      ? new Date(`${iv.endDate}T${iv.endTime || '23:59'}:00`)
-      : null;
-    if (endDt && endDt < new Date()) return 'en_retard';
-    return iv.status || 'planifiee';
+    const s = iv.status;
+    if (s === 'terminee' || s === 'annulee' || s === 'en_pause' || s === 'en_cours') return s;
+    return 'a_prendre_en_charge';
   }
+
+  // L'ex-_autoRetard() pouvait écraser silencieusement N'IMPORTE QUEL statut
+  // non terminal (y compris "en_cours", une intervention déjà démarrée) par
+  // "en_retard", sans jamais conserver la valeur d'origine. Un document avec
+  // ce statut brut peut donc avoir été démarré ou non — c'est indécidable à
+  // partir des données actuelles. On le classe ROUGE par défaut (plus sûr :
+  // garantit qu'un humain la reprend en main), mais on le signale pour ne
+  // jamais laisser croire à tort que sa progression d'origine est connue.
+  function _isLegacyRetardAmbiguous(iv) { return iv.status === 'en_retard'; }
 
   // Une intervention est "planifiée" si startDate existe — vrai pour les
   // interventions créées en mode planifié ET pour les anciennes interventions
@@ -127,7 +144,7 @@
 
   function _statusBadge(iv) {
     const st = _effStatus(iv);
-    const s  = STATUS[st] || STATUS.planifiee;
+    const s  = STATUS[st] || STATUS.a_prendre_en_charge;
     return `<span class="int-badge" style="background:${s.bg};color:${s.col};border:1px solid ${s.col}40">${s.l}</span>`;
   }
 
@@ -158,7 +175,7 @@
       if (_notifSentIds.has(iv.id)) return;
       const eff = _effStatus(iv);
       // New urgent intervention
-      if (iv.priority === 'urgente' && (eff === 'planifiee' || eff === 'affectee')) {
+      if (iv.priority === 'urgente' && eff === 'a_prendre_en_charge') {
         _notifSentIds.add(iv.id);
         const who = Array.isArray(iv.assignedTo) ? iv.assignedTo[0] : (iv.assignedTo || 'all');
         MX.DB.createNotification({
@@ -171,8 +188,8 @@
           userId: who || 'all',
         }).catch(() => {});
       }
-      // Late intervention
-      if (eff === 'en_retard' && !_notifSentIds.has(iv.id + '_late')) {
+      // Late intervention (purement informatif, calculé — jamais un statut)
+      if (_isLate(iv) && !_notifSentIds.has(iv.id + '_late')) {
         _notifSentIds.add(iv.id + '_late');
         MX.DB.createNotification({
           key: `int_retard_${iv.id}`,
@@ -192,13 +209,18 @@
     if (_loaded) return;
     _loaded = true;
 
+    // BUGFIX : trié par 'createdAt' (toujours présent, même sur une
+    // intervention non planifiée), jamais par 'startDate' — Firestore exclut
+    // silencieusement de orderBy() tout document où le champ trié est absent.
+    // Une intervention sans date (startDate absent par design) disparaissait
+    // donc entièrement de ce listener, et de toute la liste Gestion/
+    // Calendrier qui en dépend, sans jamais remonter d'erreur.
     _unsubInt.int = DB.int()
-      .orderBy('startDate', 'desc')
+      .orderBy('createdAt', 'desc')
       .limit(300)
       .onSnapshot(snap => {
         _interventions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.inTrash);
         _sendIntNotifs(_interventions);
-        _autoRetard();
         if (!_ready) { _ready = true; const cbs = _readyCbs; _readyCbs = []; cbs.forEach(cb => { try { cb(); } catch (e) {} }); }
         _rerender();
       }, _fsErr('interventions'));
@@ -213,24 +235,20 @@
     _users = MX.state.users || [];
   }
 
-  function _autoRetard() {
-    const now = new Date();
-    const toUpdate = [];
-    _interventions.forEach(iv => {
-      if (iv.status === 'terminee' || iv.status === 'annulee' || iv.status === 'en_retard') return;
-      const endDt = iv.endDate ? new Date(`${iv.endDate}T${iv.endTime || '23:59'}:00`) : null;
-      if (endDt && endDt < now) toUpdate.push(iv.id);
-    });
-    if (!toUpdate.length) return;
-    const batch = db.batch();
-    toUpdate.forEach(id => {
-      batch.update(DB.int().doc(id), { status: 'en_retard', updatedAt: FV.serverTimestamp() });
-    });
-    batch.commit().catch(() => {});
+  // Le retard est une information PUREMENT calculée à la lecture — jamais
+  // écrite en base, jamais confondue avec le statut métier (couleur).
+  // Remplace l'ancien _autoRetard() qui écrasait silencieusement le statut
+  // réel par "en_retard" (perte de l'état métier réel, et toute intervention
+  // non planifiée — sans endDate — ne doit jamais être considérée en retard).
+  function _isLate(iv) {
+    if (iv.status === 'terminee' || iv.status === 'annulee') return false;
+    if (!iv.endDate) return false;
+    const endDt = new Date(`${iv.endDate}T${iv.endTime || '23:59'}:00`);
+    return endDt < new Date();
   }
 
   // ── RENDER ──
-  const _PILL_MAP = { en_attente:'en_attente', en_cours:'en_cours', terminees:'terminees', retards:'en_retard' };
+  const _PILL_MAP = { en_attente:'a_prendre_en_charge', en_cours:'en_cours', terminees:'terminee', retards:'en_retard' };
 
   function render() {
     if (window._intStartTab) {
@@ -244,7 +262,7 @@
 
     const cu = MX.state.currentUser;
     const myPending = _transfers.filter(t => t.toTech === cu?.name).length;
-    const retardCount = _interventions.filter(iv => _effStatus(iv) === 'en_retard').length;
+    const retardCount = _interventions.filter(iv => _isLate(iv)).length;
 
     mc.innerHTML = `<div class="int-page">
       <div class="int-tabs">
@@ -302,19 +320,19 @@
       ? [..._interventions]
       : _interventions.filter(iv => (iv.assignedTo || []).includes(cu?.name));
 
-    // KPI counts always computed from full base
-    const nEA  = base.filter(iv => { const s = _effStatus(iv); return s === 'planifiee' || s === 'affectee'; }).length;
-    const nEC  = base.filter(iv => _effStatus(iv) === 'en_cours').length;
-    const nER  = base.filter(iv => _effStatus(iv) === 'en_retard').length;
-    const nT   = base.filter(iv => _effStatus(iv) === 'terminee').length;
-    const nTot = base.length;
+    // KPI counts always computed from full base — 4 couleurs, jamais
+    // confondues avec le retard (purement informatif, voir _isLate()).
+    const nTodo  = base.filter(iv => _effStatus(iv) === 'a_prendre_en_charge').length;
+    const nPause = base.filter(iv => _effStatus(iv) === 'en_pause').length;
+    const nEC    = base.filter(iv => _effStatus(iv) === 'en_cours').length;
+    const nT     = base.filter(iv => _effStatus(iv) === 'terminee').length;
+    const nTot   = base.length;
 
-    // Apply pill filter
+    // Apply pill filter — 'en_retard' reste un filtre à part (_isLate),
+    // jamais un des 4 états de couleur.
     let list = [...base];
-    if      (_gestionFilter === 'en_attente') list = base.filter(iv => { const s = _effStatus(iv); return s === 'planifiee' || s === 'affectee'; });
-    else if (_gestionFilter === 'en_cours')   list = base.filter(iv => _effStatus(iv) === 'en_cours');
-    else if (_gestionFilter === 'en_retard')  list = base.filter(iv => _effStatus(iv) === 'en_retard');
-    else if (_gestionFilter === 'terminees')  list = base.filter(iv => _effStatus(iv) === 'terminee');
+    if      (_gestionFilter === 'en_retard') list = base.filter(iv => _isLate(iv));
+    else if (_gestionFilter)                 list = base.filter(iv => _effStatus(iv) === _gestionFilter);
 
     // Apply toolbar filters
     if (_filterPrio) list = list.filter(iv => iv.priority === _filterPrio);
@@ -329,13 +347,13 @@
          </select>`
       : '';
 
-    // ── KPI bar ──
+    // ── KPI bar — Total / À prendre en charge / En attente / En cours / Terminées ──
     const kpiDef = [
-      { f: '',           val: nTot, lbl: 'Total',       col: 'var(--text1)'   },
-      { f: 'en_attente', val: nEA,  lbl: 'En attente',  col: 'var(--orange)'  },
-      { f: 'en_cours',   val: nEC,  lbl: 'En cours',    col: '#F97316'        },
-      { f: 'en_retard',  val: nER,  lbl: 'En retard',   col: 'var(--red)'     },
-      { f: 'terminees',  val: nT,   lbl: 'Terminées',   col: '#22C55E'        },
+      { f: '',                   val: nTot,   lbl: 'Total',               col: 'var(--text1)' },
+      { f: 'a_prendre_en_charge',val: nTodo,  lbl: 'À prendre en charge', col: '#EF4444'       },
+      { f: 'en_pause',           val: nPause, lbl: 'En attente',          col: '#F59E0B'       },
+      { f: 'en_cours',           val: nEC,    lbl: 'En cours',            col: '#22C55E'       },
+      { f: 'terminee',           val: nT,     lbl: 'Terminées',           col: '#3B82F6'       },
     ];
     let html = `<div class="int-inner">
       <div class="int-kpis">
@@ -346,13 +364,15 @@
           </div>`).join('')}
       </div>`;
 
-    // ── Filter pills ──
+    // ── Filter pills — les 4 couleurs + "Toutes" ; "En retard" préservé
+    // comme filtre SÉPARÉ et informatif (_isLate), jamais un 5ᵉ état. ──
     const pillDef = [
-      { f: '',           l: 'Toutes',     emo: '🟦' },
-      { f: 'en_attente', l: 'En attente', emo: '🟡' },
-      { f: 'en_cours',   l: 'En cours',   emo: '🟢' },
-      { f: 'en_retard',  l: 'En retard',  emo: '🔴' },
-      { f: 'terminees',  l: 'Terminées',  emo: '⚪' },
+      { f: '',                    l: 'Toutes',               emo: '🔘' },
+      { f: 'a_prendre_en_charge', l: 'À prendre en charge',  emo: '🔴' },
+      { f: 'en_pause',            l: 'En attente',           emo: '🟡' },
+      { f: 'en_cours',            l: 'En cours',             emo: '🟢' },
+      { f: 'terminee',            l: 'Terminées',            emo: '🔵' },
+      { f: 'en_retard',           l: 'En retard',             emo: '⏰' },
     ];
     html += `<div class="int-pills">
       ${pillDef.map(p => `<button class="int-pill${_gestionFilter === p.f ? ' active' : ''}" onclick="MX.Pages.Int._setGestionFilter('${p.f}')">${p.emo} ${p.l}</button>`).join('')}
@@ -446,18 +466,26 @@
   // ── INTERVENTION CARD ──
   function _intCard(iv) {
     const st  = _effStatus(iv);
-    const sm  = STATUS[st] || STATUS.planifiee;
+    const sm  = STATUS[st] || STATUS.a_prendre_en_charge;
     const canAll = _canAll();
     const cu     = MX.state.currentUser;
     const isMine = (iv.assignedTo || []).includes(cu?.name);
     const pendingXfr = _transfers.find(t => t.interventionId === iv.id && t.toTech === cu?.name);
 
+    // Boutons selon l'état de couleur — un technicien assigné (isMine) peut
+    // toujours faire progresser son intervention depuis son téléphone, sans
+    // passer par l'admin. "Terminer" ne demande ni chronomètre ni date.
     let acts = '';
-    if ((canAll || isMine) && (st === 'planifiee' || st === 'affectee' || st === 'en_retard')) {
-      acts += `<button class="int-act-btn int-act-btn--blue" onclick="event.stopPropagation();MX.Pages.Int._startInt('${iv.id}')"><i class="fas fa-play"></i><span class="int-act-txt"> Démarrer</span></button>`;
+    if ((canAll || isMine) && st === 'a_prendre_en_charge') {
+      acts += `<button class="int-act-btn int-act-btn--green" onclick="event.stopPropagation();MX.Pages.Int._startInt('${iv.id}')"><i class="fas fa-play"></i><span class="int-act-txt"> Prendre en charge</span></button>`;
+    }
+    if ((canAll || isMine) && st === 'en_pause') {
+      acts += `<button class="int-act-btn int-act-btn--green" onclick="event.stopPropagation();MX.Pages.Int._startInt('${iv.id}')"><i class="fas fa-play"></i><span class="int-act-txt"> Reprendre</span></button>`;
+      acts += `<button class="int-act-btn int-act-btn--blue" onclick="event.stopPropagation();MX.Pages.Int._closeInt('${iv.id}')"><i class="fas fa-check"></i><span class="int-act-txt"> Terminer</span></button>`;
     }
     if ((canAll || isMine) && st === 'en_cours') {
-      acts += `<button class="int-act-btn int-act-btn--green" onclick="event.stopPropagation();MX.Pages.Int._closeInt('${iv.id}')"><i class="fas fa-check"></i><span class="int-act-txt"> Clôturer</span></button>`;
+      acts += `<button class="int-act-btn int-act-btn--warn" onclick="event.stopPropagation();MX.Pages.Int._pauseInt('${iv.id}')"><i class="fas fa-pause"></i><span class="int-act-txt"> Mettre en pause</span></button>`;
+      acts += `<button class="int-act-btn int-act-btn--blue" onclick="event.stopPropagation();MX.Pages.Int._closeInt('${iv.id}')"><i class="fas fa-check"></i><span class="int-act-txt"> Terminer</span></button>`;
     }
     if (canAll) {
       acts += `<button class="int-act-btn" onclick="event.stopPropagation();MX.Pages.Int._editInt('${iv.id}')"><i class="fas fa-pen"></i></button>`;
@@ -469,17 +497,22 @@
       acts += `<button class="int-act-btn" onclick="event.stopPropagation();MX.Pages.Int._transferInt('${iv.id}')"><i class="fas fa-share"></i><span class="int-act-txt"> Transférer</span></button>`;
     }
 
+    const late = _isLate(iv);
+
     return `<div class="int-card" onclick="MX.Pages.Int._viewInt('${iv.id}')" style="border-left:4px solid ${sm.col}">
       <div class="int-card-top">
         <div class="int-card-title">${esc(iv.title)}</div>
         <div class="int-card-badges">
           ${_statusBadge(iv)}
+          ${late ? `<span class="int-badge int-badge--late"><i class="fas fa-clock"></i> En retard</span>` : ''}
+          ${_isLegacyRetardAmbiguous(iv) ? `<span class="int-badge int-badge--legacy" title="Ancien retard automatique (fonctionnalité supprimée) : sa progression d'origine ne peut pas être reconstituée."><i class="fas fa-circle-question"></i> Progression d'origine inconnue</span>` : ''}
           ${_prioBadge(iv.priority)}
         </div>
       </div>
+      ${iv.description ? `<div class="int-card-desc">${esc(iv.description)}</div>` : ''}
       <div class="int-card-meta">
         ${iv.location ? `<span><i class="fas fa-location-dot"></i> ${esc(iv.location)}</span>` : ''}
-        ${iv.startDate ? `<span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}</span>` : `<span><i class="fas fa-bolt"></i> Non planifiée</span>`}
+        ${iv.startDate ? `<span><i class="fas fa-calendar"></i> ${_dtFmt(iv.startDate, iv.startTime)}</span>` : `<span><i class="fas fa-bolt"></i> Aucune date planifiée</span>`}
         ${iv.endDate ? `<span><i class="fas fa-flag-checkered"></i> ${_dtFmt(iv.endDate, iv.endTime)}</span>` : ''}
         <span><i class="fas fa-user"></i> ${esc(iv.createdBy || '—')}</span>
       </div>
@@ -582,7 +615,7 @@
       }
       dayIvs.forEach(iv => {
         const st  = _effStatus(iv);
-        const sm  = STATUS[st] || STATUS.planifiee;
+        const sm  = STATUS[st] || STATUS.a_prendre_en_charge;
         const sTs = iv.startDate === ds ? (iv.startTime || '08:00') : `${CAL_START.toString().padStart(2,'0')}:00`;
         const eTs = (iv.endDate || iv.startDate) === ds ? (iv.endTime || '09:00') : `${(CAL_START + CAL_HRS - 1).toString().padStart(2,'0')}:00`;
         const top = Math.max(0, yOf(sTs));
@@ -642,7 +675,7 @@
     }
     dayIvs.forEach(iv => {
       const st  = _effStatus(iv);
-      const sm  = STATUS[st] || STATUS.planifiee;
+      const sm  = STATUS[st] || STATUS.a_prendre_en_charge;
       const pr  = PRIO[iv.priority] || PRIO.normale;
       const sTs = iv.startDate === viewDate ? (iv.startTime || '08:00') : `${CAL_START.toString().padStart(2,'0')}:00`;
       const eTs = (iv.endDate || iv.startDate) === viewDate ? (iv.endTime || '09:00') : '22:00';
@@ -692,7 +725,7 @@
         <div class="int-cal-cell-dom${isToday ? ' today' : ''}">${cell.getDate()}</div>
         ${shown.map(iv => {
           const st = _effStatus(iv);
-          const sm = STATUS[st] || STATUS.planifiee;
+          const sm = STATUS[st] || STATUS.a_prendre_en_charge;
           return `<div class="int-cal-cell-ev" style="background:${sm.bg};border-left:2px solid ${sm.col};color:${sm.col}"
             onclick="event.stopPropagation();MX.Pages.Int._viewInt('${iv.id}')">${esc(iv.title)}</div>`;
         }).join('')}
@@ -913,7 +946,9 @@
             description: document.getElementById('int-f-desc')?.value?.trim() || '',
             location:    document.getElementById('int-f-loc')?.value?.trim() || '',
             priority:    document.getElementById('int-f-prio')?.value || 'normale',
-            status:      assigned.length ? 'affectee' : 'planifiee',
+            // ROUGE — statut initial de toute nouvelle intervention, quels
+            // que soient la planification ou les techniciens déjà affectés.
+            status:      'a_prendre_en_charge',
             ...schedFields,
             assignedTo:  assigned,
             photo:       _intPhotoB64 || null,
@@ -950,7 +985,7 @@
           ${Object.entries(PRIO).map(([k, p]) => `<option value="${k}"${iv.priority === k ? ' selected' : ''}>${p.l}</option>`).join('')}
         </select>
         <select id="int-f-status" class="fi">
-          ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}"${iv.status === k ? ' selected' : ''}>${s.l}</option>`).join('')}
+          ${Object.entries(STATUS).map(([k, s]) => `<option value="${k}"${_effStatus(iv) === k ? ' selected' : ''}>${s.l}</option>`).join('')}
         </select>
         ${_techPicker(iv.assignedTo)}
         ${_schedFieldsHtml(wasPlanned, iv.startDate || today, iv.startTime || '09:00', iv.endDate || iv.startDate || today, iv.endTime || '10:00')}
@@ -1009,7 +1044,7 @@
     const iv = _interventions.find(x => x.id === id);
     if (!iv) return;
     const st     = _effStatus(iv);
-    const sm     = STATUS[st] || STATUS.planifiee;
+    const sm     = STATUS[st] || STATUS.a_prendre_en_charge;
     const pr     = PRIO[iv.priority] || PRIO.normale;
     const canAll = _canAll();
     const cu     = MX.state.currentUser;
@@ -1018,17 +1053,22 @@
 
     const acts = [];
     if (canAll) acts.push({ label: '✏️ Modifier', cls: 'confirm', fn: () => _editInt(id) });
-    if ((canAll || isMine) && (st === 'planifiee' || st === 'affectee' || st === 'en_retard')) {
-      acts.push({ label: '▶ Démarrer', cls: 'confirm', fn: () => _startInt(id) });
+    if ((canAll || isMine) && st === 'a_prendre_en_charge') {
+      acts.push({ label: '▶ Prendre en charge', cls: 'confirm', fn: () => _startInt(id) });
+    }
+    if ((canAll || isMine) && st === 'en_pause') {
+      acts.push({ label: '▶ Reprendre', cls: 'confirm', fn: () => _startInt(id) });
+      acts.push({ label: '✓ Terminer', cls: 'confirm', fn: () => _closeInt(id) });
     }
     if ((canAll || isMine) && st === 'en_cours') {
-      acts.push({ label: '✓ Clôturer', cls: 'confirm', fn: () => _closeInt(id) });
+      acts.push({ label: '⏸ Mettre en pause', cls: 'cancel', fn: () => _pauseInt(id) });
+      acts.push({ label: '✓ Terminer', cls: 'confirm', fn: () => _closeInt(id) });
     }
     acts.push({ label: 'Fermer', cls: 'cancel' });
 
     MX.showModal({
       title: `${esc(iv.title)}`,
-      sub: `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${_statusBadge(iv)} ${_prioBadge(iv.priority)}</div>`,
+      sub: `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${_statusBadge(iv)} ${_isLate(iv) ? `<span class="int-badge int-badge--late"><i class="fas fa-clock"></i> En retard</span>` : ''} ${_isLegacyRetardAmbiguous(iv) ? `<span class="int-badge int-badge--legacy" title="Ancien retard automatique (fonctionnalité supprimée) : sa progression d'origine ne peut pas être reconstituée."><i class="fas fa-circle-question"></i> Progression d'origine inconnue</span>` : ''} ${_prioBadge(iv.priority)}</div>`,
       body: `<div class="int-view-body">
         ${iv.description ? `<div class="int-view-desc">${esc(iv.description)}</div>` : ''}
         ${iv.location ? `<div class="int-view-row"><i class="fas fa-location-dot"></i> ${esc(iv.location)}</div>` : ''}
@@ -1041,11 +1081,12 @@
             <div class="int-view-date-lbl">Fin prévue</div>
             <div class="int-view-date-val">${iv.endDate ? _dtFmt(iv.endDate, iv.endTime) : '—'}</div>
           </div>
-        </div>` : `<div class="int-view-row"><i class="fas fa-bolt"></i> Intervention non planifiée (ouverte)</div>`}
+        </div>` : `<div class="int-view-row"><i class="fas fa-bolt"></i> Aucune date planifiée (intervention ouverte)</div>`}
         <div class="int-view-techs">
           <div class="int-form-label">Techniciens</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${_techAvatars(iv.assignedTo)}</div>
         </div>
+        ${iv.pauseReason ? `<div class="int-view-row"><i class="fas fa-pause"></i> Motif de pause : ${esc(iv.pauseReason)}</div>` : ''}
         ${iv.completionNotes ? `<div class="int-view-report">
           <div class="int-form-label">Rapport de clôture</div>
           <div class="int-view-desc">${esc(iv.completionNotes)}</div>
@@ -1061,16 +1102,20 @@
     });
   }
 
+  // ROUGE → VERT ("Prendre en charge") ET JAUNE → VERT ("Reprendre") — même
+  // transition de statut, seul le libellé change selon l'état de départ.
   function _startInt(id) {
+    const iv = _interventions.find(x => x.id === id);
+    const wasPaused = iv && _effStatus(iv) === 'en_pause';
     MX.showModal({
-      title: '▶ Démarrer l\'intervention',
+      title: wasPaused ? '▶ Reprendre l\'intervention' : '▶ Prendre en charge',
       sub: 'Elle sera marquée "En cours".',
       body: '',
       actions: [
-        { label: 'Démarrer', cls: 'confirm', fn: async () => {
+        { label: wasPaused ? 'Reprendre' : 'Démarrer', cls: 'confirm', fn: async () => {
           try {
             await DB.int().doc(id).update({ status: 'en_cours', updatedAt: FV.serverTimestamp() });
-            MX.toast('Intervention démarrée');
+            MX.toast(wasPaused ? 'Intervention reprise' : 'Intervention démarrée');
           } catch(e) { MX.toast('Erreur', true); }
         }},
         { label: 'Annuler', cls: 'cancel' }
@@ -1078,10 +1123,42 @@
     });
   }
 
+  // VERT → JAUNE — motif facultatif, conservé et consultable (voir
+  // _viewInt : "Motif de pause"). Jamais de chronomètre, jamais de blocage.
+  function _pauseInt(id) {
+    const iv = _interventions.find(x => x.id === id);
+    MX.showModal({
+      title: '⏸ Mettre en pause',
+      sub: esc(iv?.title || ''),
+      body: `<div class="int-form">
+        <textarea id="int-pause-reason" class="fi" placeholder="Motif (optionnel) : pièce en attente, accès bloqué, prestataire…" rows="3" style="resize:vertical"></textarea>
+      </div>`,
+      actions: [
+        { label: '⏸ Mettre en pause', cls: 'confirm', fn: async () => {
+          const reason = document.getElementById('int-pause-reason')?.value?.trim() || '';
+          try {
+            await DB.int().doc(id).update({
+              status: 'en_pause',
+              pauseReason: reason || null,
+              pausedAt: FV.serverTimestamp(),
+              pausedBy: _author(),
+              updatedAt: FV.serverTimestamp(),
+            });
+            MX.toast('Intervention mise en pause');
+          } catch(e) { MX.toast('Erreur', true); console.error(e); }
+        }},
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+    setTimeout(() => document.getElementById('int-pause-reason')?.focus(), 80);
+  }
+
+  // VERT ou JAUNE → BLEU — jamais de chronomètre, jamais de date de fin
+  // obligatoire ; rapport et temps passé restent facultatifs (un seul écran).
   function _closeInt(id) {
     const iv = _interventions.find(x => x.id === id);
     MX.showModal({
-      title: '✅ Clôturer l\'intervention',
+      title: '✅ Terminer l\'intervention',
       sub: esc(iv?.title || ''),
       body: `<div class="int-form">
         <textarea id="int-close-notes" class="fi" placeholder="Rapport de clôture (optionnel)" rows="4" style="resize:vertical"></textarea>
@@ -1091,7 +1168,7 @@
         </div>
       </div>`,
       actions: [
-        { label: '✓ Clôturer', cls: 'confirm', fn: async () => {
+        { label: '✓ Terminer', cls: 'confirm', fn: async () => {
           const notes   = document.getElementById('int-close-notes')?.value?.trim() || '';
           const timeVal = parseInt(document.getElementById('int-close-time')?.value || '');
           try {
@@ -1103,7 +1180,7 @@
               completedAt: FV.serverTimestamp(),
               updatedAt:   FV.serverTimestamp(),
             });
-            MX.toast('Intervention clôturée ✓');
+            MX.toast('Intervention terminée ✓');
           } catch(e) { MX.toast('Erreur', true); console.error(e); }
         }},
         { label: 'Annuler', cls: 'cancel' }
@@ -1237,18 +1314,21 @@
       : _interventions;
     const eff = iv => _effStatus(iv);
     return {
-      en_attente: ints.filter(iv => { const s = eff(iv); return s === 'planifiee' || s === 'affectee'; }).length,
+      // "en_attente" regroupe les 2 états "pas encore en cours" (rouge +
+      // jaune) — le retard ("en_retard" ci-dessous) reste calculé séparément
+      // via _isLate(), jamais confondu avec l'avancement réel.
+      en_attente: ints.filter(iv => { const s = eff(iv); return s === 'a_prendre_en_charge' || s === 'en_pause'; }).length,
       en_cours:   ints.filter(iv => eff(iv) === 'en_cours').length,
-      en_retard:  ints.filter(iv => eff(iv) === 'en_retard').length,
+      en_retard:  ints.filter(iv => _isLate(iv)).length,
       terminee:   ints.filter(iv => eff(iv) === 'terminee').length,
       total:      ints.length,
-      items:      ints.map(iv => ({ ...iv, effStatus: eff(iv) }))
+      items:      ints.map(iv => ({ ...iv, effStatus: eff(iv), isLate: _isLate(iv) }))
     };
   }
 
   window.MX.Pages.Int = {
     render, _tab, _getSummary, _setGestionFilter,
-    _newInt, _editInt, _viewInt, _startInt, _closeInt, _cancelInt, _delInt,
+    _newInt, _editInt, _viewInt, _startInt, _pauseInt, _closeInt, _cancelInt, _delInt,
     _transferInt, _acceptXfr, _refuseXfr,
     _setFilter, _toggleTech, _toggleSched, _onIntPhoto,
     _calPrev, _calNext, _calToday, _calSetView, _calDayClick,
