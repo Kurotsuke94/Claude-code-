@@ -53,6 +53,14 @@
   let _unsubInts      = null;
   let _unsubPmpInts   = null;
 
+  // Récurrence — tâches "origine" (recurrence:'weekly'|'monthly'), valables
+  // pour TOUTES les semaines, indépendamment de la semaine affichée.
+  let _recurOrigins  = [];
+  let _unsubRecur    = null;
+
+  // Formulaire tâche — sélection techniciens en cours (chips + dropdown)
+  let _orPickerTechs = [];
+
   // ── WEEK HELPERS ──
   function _isoWk(d) {
     const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -191,10 +199,125 @@
   }
 
   function _allPlanItems() {
-    const tasks = _tasks.filter(t => !t.archivedFromActive && t.dayId);
-    const ints  = _interventions.map(_normalizeIntervention).filter(t => t.dayId);
-    const pmps  = _pmpInts.map(_normalizePmpInt).filter(t => t.dayId);
-    return [...tasks, ...ints, ...pmps];
+    // Exceptions ponctuelles (déplacement/édition/suppression d'UNE
+    // occurrence) — y compris celles qui portent sur la date d'ancrage du
+    // document d'origine lui-même, pour que déplacer/terminer/supprimer
+    // cette carte précise ne touche jamais la règle de récurrence globale.
+    const excMap = {};
+    _tasks.filter(t => t.isException === true).forEach(e => { excMap[e.seriesId + '_' + e.occurrenceDate] = e; });
+
+    const tasks = _tasks
+      .filter(t => !t.archivedFromActive && !t.isException && t.dayId)
+      .map(t => {
+        if (!t.recurrence) return t;
+        const anchorDate = _originAnchorDate(t);
+        const exc = anchorDate ? excMap[t.id + '_' + anchorDate] : null;
+        if (exc && exc.deleted) return null;
+        const merged = exc ? Object.assign({}, t, exc, { id: t.id }) : t;
+        return Object.assign({}, merged, { _recurOrigin: true });
+      })
+      .filter(Boolean);
+    const virtual = _weekKey ? _virtualOccurrences(_weekKey) : [];
+    const ints    = _interventions.map(_normalizeIntervention).filter(t => t.dayId);
+    const pmps    = _pmpInts.map(_normalizePmpInt).filter(t => t.dayId);
+    return [...tasks, ...virtual, ...ints, ...pmps];
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  RÉCURRENCE — génération déterministe des occurrences
+  // ═══════════════════════════════════════════════════════
+  // Modèle additif, parallèle à l'ancien report hebdomadaire de _seedWeek()
+  // (laissé intact pour les anciennes tâches "hebdomadaire" déjà
+  // dupliquées semaine après semaine — voir commentaire sur _seedWeek).
+  // Une tâche "origine" porte recurrence:'weekly'|'monthly' + ses règles ;
+  // les occurrences des AUTRES semaines sont calculées à la volée, jamais
+  // écrites en base. Une action utilisateur sur UNE occurrence (déplacer,
+  // modifier, terminer) crée un document d'exception à id déterministe
+  // (`${seriesId}_occ_${date}`), donc jamais de doublon même si l'action
+  // est répétée ou si la semaine est revisitée plusieurs fois.
+  const _DAY_JS_INDEX = { dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6 };
+
+  function _nthWeekdayOfMonth(year, monthIdx, weekdayJs, nth) {
+    if (nth === 'last') {
+      const last = new Date(year, monthIdx + 1, 0);
+      const diff = (last.getDay() - weekdayJs + 7) % 7;
+      last.setDate(last.getDate() - diff);
+      return last;
+    }
+    const first = new Date(year, monthIdx, 1);
+    const diff  = (weekdayJs - first.getDay() + 7) % 7;
+    const date  = 1 + diff + (nth - 1) * 7;
+    const d     = new Date(year, monthIdx, date);
+    return d.getMonth() === monthIdx ? d : null; // ex: un 5ᵉ lundi qui n'existe pas ce mois-ci
+  }
+
+  function _dsOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+
+  // Date (YYYY-MM-DD) du document d'origine lui-même, tel qu'affiché sur sa
+  // propre semaine de création — utilisée pour l'exclure des occurrences
+  // virtuelles (déjà rendue via le vrai document) et pour construire son
+  // propre id d'exception ("${origin.id}__occ_${anchorDate}") quand l'usager
+  // agit (terminer/supprimer) sur CETTE occurrence précise sans toucher au
+  // reste de la série.
+  function _originAnchorDate(origin) {
+    const originWeekDates = origin.weekKey ? _weekKeyToDates(origin.weekKey) : null;
+    const originIdx       = originWeekDates && origin.dayId ? MX.DAYS.findIndex(d => d.id === origin.dayId) : -1;
+    return originIdx >= 0 ? _dsOf(originWeekDates[originIdx]) : null;
+  }
+
+  function _recurrenceOccurrencesForWeek(origin, weekDates) {
+    const anchorDate = _originAnchorDate(origin);
+    const start = origin.recurStart || anchorDate;
+    const end   = origin.recurEnd || null;
+    const out = [];
+    weekDates.forEach((d, idx) => {
+      const dateStr = _dsOf(d);
+      if (dateStr === anchorDate) return; // déjà affichée via le document origine lui-même
+      if (start && dateStr < start) return;
+      if (end && dateStr > end) return;
+      let matches = false;
+      if (origin.recurrence === 'weekly') {
+        const days = Array.isArray(origin.recurDays) && origin.recurDays.length
+          ? origin.recurDays : (origin.dayId ? [origin.dayId] : []);
+        matches = days.includes(MX.DAYS[idx].id);
+      } else if (origin.recurrence === 'monthly') {
+        const rule = origin.recurMonthly;
+        if (rule && rule.weekday != null && rule.nth != null) {
+          const occ = _nthWeekdayOfMonth(d.getFullYear(), d.getMonth(), _DAY_JS_INDEX[rule.weekday], rule.nth);
+          matches = !!occ && _dsOf(occ) === dateStr;
+        }
+      }
+      if (matches) out.push({ dayId: MX.DAYS[idx].id, dateStr });
+    });
+    return out;
+  }
+
+  function _virtualOccurrences(weekKey) {
+    const weekDates  = _weekKeyToDates(weekKey);
+    const exceptions = _tasks.filter(t => t.isException === true);
+    const excMap = {};
+    exceptions.forEach(e => { excMap[e.seriesId + '_' + e.occurrenceDate] = e; });
+
+    const out = [];
+    _recurOrigins.forEach(origin => {
+      if (origin.archivedFromActive) return;
+      _recurrenceOccurrencesForWeek(origin, weekDates).forEach(({ dayId, dateStr }) => {
+        const exc = excMap[origin.id + '_' + dateStr];
+        if (exc && exc.deleted) return; // occurrence explicitement supprimée
+        const base = {
+          id: origin.id + '__occ_' + dateStr,
+          title: origin.title, description: origin.description || '',
+          priority: origin.priority, assignedTo: origin.assignedTo,
+          itemType: origin.itemType || 'tache', category: origin.category,
+          location: origin.location || null, duration: origin.duration || null,
+          done: false, status: 'todo',
+          dayId, weekKey,
+          _recurOccurrence: true, _seriesId: origin.id, _occurrenceDate: dateStr,
+        };
+        out.push(exc ? Object.assign({}, base, exc, { id: base.id, dayId: exc.dayId || dayId }) : base);
+      });
+    });
+    return out;
   }
 
   // ── USER / DISPLAY HELPERS ──
@@ -225,12 +348,90 @@
     };
     return m[cat] || { color: '#6B7280', icon: 'fa-tag' };
   }
-  function _prioConfig(prio) {
-    if (prio === 'critique') return { label: 'Critique', color: '#DC2626', bg: 'rgba(220,38,38,.12)', icon: '🚨' };
-    if (prio === 'urgente')  return { label: 'Urgente',  color: '#EF4444', bg: 'rgba(239,68,68,.10)', icon: '🔴' };
-    if (prio === 'haute')    return { label: 'Haute',    color: '#F59E0B', bg: 'rgba(245,158,11,.10)', icon: '🟠' };
-    return null;
+  // ── PRIORITÉ — 3 niveaux métier (rouge/vert/bleu), jamais déduits de la
+  // couleur affichée. Compatibilité : les anciennes valeurs "urgente" et
+  // "critique" retombent sur "haute" À L'AFFICHAGE SEULEMENT — jamais
+  // réécrites en base (voir _effPriority, seule porte d'entrée à utiliser
+  // pour LIRE une priorité ; les écritures préservent la valeur brute telle
+  // quelle pour ne jamais perdre d'information historique). ──
+  const PRIO_LEVELS = {
+    haute:   { label: 'Haute',   color: '#EF4444', bg: 'rgba(239,68,68,.12)',  icon: '🔴' },
+    normale: { label: 'Normale', color: '#22C55E', bg: 'rgba(34,197,94,.12)',  icon: '🟢' },
+    basse:   { label: 'Basse',   color: '#3B82F6', bg: 'rgba(59,130,246,.12)', icon: '🔵' },
+  };
+  function _effPriority(t) {
+    const p = (t && typeof t === 'object') ? t.priority : t;
+    if (p === 'haute' || p === 'normale' || p === 'basse') return p;
+    if (p === 'urgente' || p === 'critique') return 'haute'; // compat, lecture seule
+    return 'normale';
   }
+  function _prioConfig(prioOrTask) {
+    return PRIO_LEVELS[_effPriority(prioOrTask)];
+  }
+
+  // ── TECHNICIENS AFFECTÉS — compat ancienne chaîne unique / nouveau
+  // tableau. Ne perd jamais une affectation existante. ──
+  function _taskTechs(t) {
+    const a = t && t.assignedTo;
+    if (Array.isArray(a)) return a.filter(Boolean);
+    if (a) return [a];
+    return [];
+  }
+  function _techBubblesHtml(t, max) {
+    const names = _taskTechs(t);
+    if (!names.length) return '';
+    const shown    = max ? names.slice(0, max) : names;
+    const overflow = max && names.length > max ? names.length - max : 0;
+    return shown.map(n =>
+      `<span class="or-av" style="background:${_ucolor(n)}" title="${MX.esc(n)}">${_initials(n)}</span>`
+    ).join('') + (overflow ? `<span class="or-av or-av--more" title="${names.slice(max).map(MX.esc).join(', ')}">+${overflow}</span>` : '');
+  }
+
+  // ── SÉLECTEUR MULTI-TECHNICIENS (dropdown + chips amovibles) ──
+  // Utilise exclusivement MX.state.users (jamais de nom en dur).
+  function _techChipsHtml() {
+    if (!_orPickerTechs.length) return `<span class="or-tech-chips-empty">Aucun technicien sélectionné</span>`;
+    return _orPickerTechs.map(n => {
+      const safe = MX.esc(n).replace(/'/g, "\\'");
+      return `<span class="or-tech-chip" style="border-color:${_ucolor(n)}">
+        <span class="or-av or-av--sm" style="background:${_ucolor(n)}">${_initials(n)}</span>
+        ${MX.esc(n)}
+        <button type="button" class="or-tech-chip-rm" onclick="MX.Pages.OrgResp._removeTechChip('${safe}')" title="Retirer">&times;</button>
+      </span>`;
+    }).join('');
+  }
+  function _techSelectOptionsHtml() {
+    const users = (MX.state.users || []).filter(u => u.name && !_orPickerTechs.includes(u.name));
+    return users.map(u => `<option value="${MX.esc(u.name)}">${MX.esc(u.name)}</option>`).join('');
+  }
+  function _techPickerHtml(selected) {
+    _orPickerTechs = [...(selected || [])];
+    return `<div class="or-tech-picker">
+      <div class="or-tech-chips" id="or-f-tech-chips">${_techChipsHtml()}</div>
+      <select id="or-f-tech-select" class="fi" onchange="MX.Pages.OrgResp._addTechFromSelect(this)">
+        <option value="">+ Ajouter un technicien…</option>
+        ${_techSelectOptionsHtml()}
+      </select>
+    </div>`;
+  }
+  function _addTechFromSelect(sel) {
+    const name = sel.value;
+    if (!name) return;
+    if (!_orPickerTechs.includes(name)) _orPickerTechs.push(name);
+    sel.value = '';
+    _refreshTechPicker();
+  }
+  function _removeTechChip(name) {
+    _orPickerTechs = _orPickerTechs.filter(n => n !== name);
+    _refreshTechPicker();
+  }
+  function _refreshTechPicker() {
+    const chips = document.getElementById('or-f-tech-chips');
+    if (chips) chips.innerHTML = _techChipsHtml();
+    const sel = document.getElementById('or-f-tech-select');
+    if (sel) sel.innerHTML = `<option value="">+ Ajouter un technicien…</option>${_techSelectOptionsHtml()}`;
+  }
+
   function _currentUserName() {
     const cu = MX.state.currentUser;
     const ad = MX.state.adminUser;
@@ -316,6 +517,7 @@
     if (_unsubCfg)     { _unsubCfg();     _unsubCfg     = null; }
     if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
     if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
+    if (_unsubRecur)   { _unsubRecur();   _unsubRecur   = null; }
     _interventions = [];
     _pmpInts       = [];
 
@@ -380,6 +582,24 @@
         );
     } catch(e) { console.warn('[OrgResp] pmp-ints-setup:', e.message); }
 
+    // Listen to recurrence "origin" tasks — valables pour TOUTES les semaines,
+    // indépendamment de weekKey (une tâche créée semaine N doit générer ses
+    // occurrences aux semaines N+1, N+2, ... à la volée, sans jamais écrire
+    // de doublon en base — voir _virtualOccurrences).
+    try {
+      _unsubRecur = db.collection('org_tasks')
+        .where('recurrence', 'in', ['weekly', 'monthly'])
+        .onSnapshot(
+          snap => {
+            _recurOrigins = snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(t => !t.archivedFromActive);
+            if (!_inHistory) _doRender();
+          },
+          err => console.warn('[OrgResp] recur-origins:', err.message)
+        );
+    } catch(e) { console.warn('[OrgResp] recur-origins-setup:', e.message); }
+
     // Load templates once
     db.collection('org_templates').get()
       .then(snap => { _templates = snap.docs.map(d => ({ id: d.id, ...d.data() })); })
@@ -438,8 +658,11 @@
     // ── HEADER ──
     h += `<div class="or-cp-header">
       <div class="or-cp-hdr-left">
-        <div class="or-cp-title">Centre de Pilotage</div>
-        <div class="or-cp-subtitle">Organisation hebdomadaire des équipes techniques</div>
+        <i class="fas fa-users-gear or-cp-title-ico"></i>
+        <div>
+          <div class="or-cp-title">Organisation Responsable</div>
+          <div class="or-cp-subtitle">Organisation hebdomadaire des équipes techniques</div>
+        </div>
       </div>
       <div class="or-cp-hdr-center">
         <button class="or-cp-nav-btn" onclick="MX.Pages.OrgResp._prevWeek()" title="Semaine précédente"><i class="fas fa-chevron-left"></i></button>
@@ -458,7 +681,7 @@
     // ── ACTION BAR 1 ──
     h += `<div class="or-cp-actions-bar">
       <button class="or-cp-ab-btn or-cp-ab-btn--primary" onclick="MX.Pages.OrgResp.openAddFromHeader()">
-        <i class="fas fa-plus"></i> Ajouter dans la feuille de route
+        <i class="fas fa-plus"></i> Nouvelle tâche
       </button>
       <div class="or-cp-ab-sep"></div>
       <button class="or-cp-ab-btn" onclick="MX.Pages.OrgResp.openDuplicateDay('')">
@@ -490,6 +713,9 @@
       <div style="flex:1"></div>
       <span style="font-size:11px;color:var(--text3)">${planDone}/${planTotal} validées cette semaine</span>
     </div>`;
+
+    // ── LÉGENDE PRIORITÉS + COMPTEUR ──
+    h += _cpRenderPrioLegend(planTasks);
 
     // ── KPI ROW ──
     h += _cpRenderKpiRow(planTasks, planDone, planTotal);
@@ -526,6 +752,32 @@
     mc.innerHTML = h;
   }
 
+  // ── LÉGENDE PRIORITÉS (rouge/vert/bleu) + COMPTEUR ── (maquette)
+  function _cpRenderPrioLegend(planTasks) {
+    const counts = { haute: 0, normale: 0, basse: 0 };
+    planTasks.forEach(t => { counts[_effPriority(t)]++; });
+    const items = [
+      { k: 'haute',   lbl: 'Haute priorité'   },
+      { k: 'normale', lbl: 'Priorité normale' },
+      { k: 'basse',   lbl: 'Priorité basse'   },
+    ];
+    return `<div class="or-prio-legend">
+      ${items.map(({ k, lbl }) => {
+        const cfg = PRIO_LEVELS[k];
+        return `<div class="or-prio-legend-card" style="--prio-color:${cfg.color};--prio-bg:${cfg.bg}">
+          <span class="or-prio-legend-dot"></span>
+          <span class="or-prio-legend-lbl">${lbl}</span>
+          <span class="or-prio-legend-cnt">${counts[k]}</span>
+        </div>`;
+      }).join('')}
+      <div class="or-prio-legend-card or-prio-legend-card--total">
+        <i class="fas fa-list-check"></i>
+        <span class="or-prio-legend-lbl">Tâches cette semaine</span>
+        <span class="or-prio-legend-cnt">${planTasks.length}</span>
+      </div>
+    </div>`;
+  }
+
   // ── KPI ROW ──
   function _cpRenderKpiRow(planTasks, planDone, planTotal) {
     const interventions = planTasks.filter(t => t.itemType === 'intervention').length;
@@ -533,7 +785,7 @@
     const reunions      = planTasks.filter(t => t.itemType === 'reunion').length;
     const uniqueTechs   = [...new Set(planTasks.filter(t => t.assignedTo).map(t => t.assignedTo))].length;
     const totalDur      = planTasks.reduce((s, t) => s + (t.duration || 0), 0);
-    const urgents       = planTasks.filter(t => (t.priority === 'critique' || t.priority === 'urgente') && !t.done).length;
+    const urgents       = planTasks.filter(t => _effPriority(t) === 'haute' && !t.done).length;
     const pct           = planTotal ? Math.round(planDone / planTotal * 100) : 0;
     const pctC          = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
     const durStr        = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '—';
@@ -559,177 +811,90 @@
       </div>`).join('')}</div>`;
   }
 
-  // ── DAY COLUMN ──
+  // ── DAY COLUMN ── (refonte : plus de subdivision par créneau horaire —
+  // une tâche s'affiche directement dans la colonne de son jour, empilée.
+  // _getActiveSlots/_getDefaultSlots restent disponibles pour la vue
+  // Timeline et la config avancée optionnelle, mais ne conditionnent plus
+  // l'affichage des tâches ordinaires ici.)
   function _cpRenderDayColumn(day, idx, weekDates, isCurrentWk, todayDayId) {
-    const MAX_VISIBLE  = 4;
-    const dayId        = day.id;
-    const date         = weekDates[idx];
-    const dateStr      = _fmtDate(date);
-    const isToday      = isCurrentWk && dayId === todayDayId;
-    const activeSlots  = _getActiveSlots(dayId);
-    const defaultSlots = _getDefaultSlots(dayId);
-    const dayTasks     = _allPlanItems().filter(t => t.dayId === dayId);
-    const dayDone      = dayTasks.filter(t => t.done).length;
-    const dayTotal     = dayTasks.length;
-    const dayPct       = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
-    const dayPctC      = dayPct >= 75 ? '#10B981' : dayPct >= 40 ? '#F59E0B' : dayTotal > 0 ? '#EF4444' : 'var(--border2)';
-    const totalDur     = dayTasks.reduce((s, t) => s + (t.duration || 0), 0);
-    const dayTechs     = [...new Set(dayTasks.filter(t => t.assignedTo).map(t => t.assignedTo))];
+    const dayId    = day.id;
+    const date     = weekDates[idx];
+    const dateStr  = _fmtDate(date);
+    const isToday  = isCurrentWk && dayId === todayDayId;
+    const dayTasks = _allPlanItems().filter(t => t.dayId === dayId);
 
-    let h = `<div class="or-cp-col${isToday ? ' or-cp-col--today' : ''}">`;
+    let h = `<div class="or-day-col${isToday ? ' or-day-col--today' : ''}">`;
 
-    // ── Column header ──
-    h += `<div class="or-cp-col-hdr">
-      <div class="or-cp-col-hdr-info">
-        <div class="or-cp-col-day">${day.l.toUpperCase()}${isToday ? ' <span class="or-cp-col-today-badge">Auj.</span>' : ''}</div>
-        <div class="or-cp-col-date">${dateStr}</div>
+    h += `<div class="or-day-col-hdr">
+      <div class="or-day-col-hdr-l">
+        <div class="or-day-col-name">${day.l}${isToday ? '<span class="or-day-today-dot" title="Aujourd\'hui"></span>' : ''}</div>
+        <div class="or-day-col-date">${dateStr}</div>
       </div>
-      <button class="or-cp-gear-btn" onclick="MX.Pages.OrgResp.openDayMenu('${dayId}',this)" title="Actions journée">
-        <i class="fas fa-ellipsis-vertical"></i>
-      </button>
+      <div class="or-day-col-hdr-r">
+        ${dayTasks.length ? `<span class="or-day-col-count">${dayTasks.length}</span>` : ''}
+        <button class="or-day-gear-btn" onclick="MX.Pages.OrgResp.openDayMenu('${dayId}',this)" title="Actions journée">
+          <i class="fas fa-ellipsis-vertical"></i>
+        </button>
+      </div>
     </div>`;
 
-    // ── Day charge bar (always visible) ──
-    const durStr  = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '';
-    const techStr = dayTechs.map(u => `<span style="color:${_ucolor(u)};font-weight:700">${_initials(u)}</span>`).join(' · ');
-    h += `<div class="or-cp-col-charge">
-      <div class="or-cp-col-charge-bar">
-        <div class="or-cp-col-charge-fill" style="width:${dayTotal>0?dayPct:0}%;background:${dayPctC}"></div>
-      </div>
-      ${dayTotal > 0 ? `<span class="or-cp-col-charge-pct" style="color:${dayPctC}">${dayPct}%</span>` : ''}
-      <span class="or-cp-col-charge-info">${dayTotal > 0 ? `${dayTotal} mission${dayTotal!==1?'s':''}${durStr?' · '+durStr:''}` : 'Journée vide'}</span>
-      ${techStr ? `<span class="or-cp-col-charge-techs">${techStr}</span>` : ''}
-    </div>`;
-
-    if (activeSlots.length === 0) {
-      h += `<div class="or-cp-col-empty"><i class="fas fa-ban"></i>Créneaux désactivés
-        <button class="or-cp-add-btn" style="margin-top:6px" onclick="MX.Pages.OrgResp.openSlotConfig('${dayId}')">Configurer</button>
-      </div>`;
+    h += `<div class="or-day-col-body" id="or-daycol-${dayId}"
+      ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}')"
+      ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}')"
+      ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
+    if (!dayTasks.length) {
+      h += `<div class="or-day-col-empty">Aucune tâche</div>`;
     } else {
-      ['matin', 'journee', 'soir'].forEach(slot => {
-        if (!defaultSlots.includes(slot) && !activeSlots.includes(slot)) return;
-        const disabled    = !activeSlots.includes(slot);
-        const info        = SLOT_INFO[slot];
-        const slotKey     = `${dayId}_${slot}`;
-        const slotTasks   = dayTasks.filter(t => t.slot === slot);
-        const doneCnt     = slotTasks.filter(t => t.done).length;
-        const total       = slotTasks.length;
-        const slotDur     = slotTasks.reduce((s, t) => s + (t.duration || 0), 0);
-        const slotDurStr  = slotDur > 0 ? `${Math.floor(slotDur/60)}h${slotDur%60>0?String(slotDur%60).padStart(2,'0'):''}` : '';
-        const slotTechs   = [...new Set(slotTasks.filter(t => t.assignedTo).map(t => t.assignedTo))];
-
-        // Slot header meta row (count · duration · assignees)
-        let metaHtml = '';
-        if (!disabled && total > 0) {
-          const parts = [];
-          parts.push(`<span class="or-cp-slot-meta-pill"><i class="fas fa-list-check"></i> ${doneCnt}/${total}</span>`);
-          if (slotDurStr) parts.push(`<span class="or-cp-slot-meta-pill"><i class="fas fa-clock"></i> ${slotDurStr}</span>`);
-          if (slotTechs.length) {
-            parts.push(slotTechs.slice(0,3).map(u =>
-              `<span class="or-cp-slot-tech-av" style="color:${_ucolor(u)}">${_initials(u)}</span>`
-            ).join('<span class="or-cp-slot-meta-sep">·</span>'));
-          }
-          metaHtml = `<div class="or-cp-slot-hdr-row">${parts.join('<span class="or-cp-slot-meta-sep">·</span>')}</div>`;
-        }
-
-        h += `<div class="or-cp-slot or-cp-slot--${slot}${disabled ? ' or-cp-slot--disabled' : ''}">
-          <div class="or-cp-slot-hdr">
-            <i class="fas ${info.icon} or-cp-slot-ico"></i>
-            <div class="or-cp-slot-info" style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:5px">
-                <span class="or-cp-slot-name">${_getSlotName(dayId, slot)}</span>
-                <span class="or-cp-slot-time">${info.time}</span>
-              </div>
-              ${metaHtml}
-            </div>
-            <div class="or-cp-slot-actions">
-              ${!disabled
-                ? `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')" title="Ajouter"><i class="fas fa-plus"></i></button>`
-                : `<button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp._reactivateSlot('${dayId}','${slot}')" title="Réactiver"><i class="fas fa-eye"></i></button>`
-              }
-              <button class="or-cp-slot-btn" onclick="MX.Pages.OrgResp.openSlotMenu('${dayId}','${slot}',this)" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
-            </div>
-          </div>`;
-
-        if (disabled) {
-          h += `<div class="or-cp-slot-disabled"><i class="fas fa-eye-slash"></i> Désactivé</div>`;
-        } else {
-          const visible  = slotTasks.slice(0, MAX_VISIBLE);
-          const hidden   = slotTasks.slice(MAX_VISIBLE);
-          const expandId = `or-exp-${slotKey}`;
-
-          h += `<div class="or-cp-slot-body" id="or-slot-body-${slotKey}"
-            ondragover="event.preventDefault();MX.Pages.OrgResp._onDragOver(event,'${dayId}','${slot}')"
-            ondrop="MX.Pages.OrgResp._onDrop(event,'${dayId}','${slot}')"
-            ondragleave="MX.Pages.OrgResp._onDragLeave(event)">`;
-          visible.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
-          if (hidden.length > 0) {
-            h += `<div id="${expandId}" style="display:none;flex-direction:column;gap:3px">`;
-            hidden.forEach(t => { h += _cpMissionCardV2(t, dayId, slot); });
-            h += `</div>
-            <button class="or-cp-expand-btn" id="${expandId}-btn"
-              onclick="MX.Pages.OrgResp._cpToggleExpand('${expandId}')">
-              <i class="fas fa-chevron-down"></i>&nbsp;${hidden.length} autre${hidden.length!==1?'s':''} mission${hidden.length!==1?'s':''}
-            </button>`;
-          }
-          h += `</div>`;
-          h += `<div class="or-cp-add-row">
-            <button class="or-cp-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}','${slot}')">
-              <i class="fas fa-plus"></i> Ajouter une mission
-            </button>
-          </div>`;
-        }
-        h += `</div>`; // .or-cp-slot
-      });
+      dayTasks.forEach(t => { h += _cpMissionCardV2(t, dayId); });
     }
+    h += `</div>`;
 
-    h += `</div>`; // .or-cp-col
+    h += `<button class="or-day-add-btn" onclick="MX.Pages.OrgResp.openAddDayTask('${dayId}')">
+      <i class="fas fa-plus"></i> Ajouter une tâche
+    </button>`;
+
+    h += `</div>`; // .or-day-col
     return h;
   }
 
-  // ── COMPACT MISSION CARD ──
-  function _cpMissionCardV2(t, dayId, slot) {
-    const prio      = _prioConfig(t.priority);
+  // ── TASK CARD ── (couleur dérivée UNIQUEMENT de la priorité métier,
+  // jamais l'inverse — voir _prioConfig/_effPriority.)
+  function _cpMissionCardV2(t, dayId) {
+    const prio      = _prioConfig(t);
     const itype     = ITEM_TYPES[t.itemType] || ITEM_TYPES.tache;
     const isDone    = t.done;
     const isInProg  = !isDone && t.status === 'inprogress';
-    const statusCls = isDone ? 'or-cp-mc-status--done' : isInProg ? 'or-cp-mc-status--prog' : 'or-cp-mc-status--todo';
-    // Priority urgente/critique overrides border to red; haute → orange; else item type color
-    const borderC   = (t.priority === 'urgente' || t.priority === 'critique') ? '#EF4444'
-                    : t.priority === 'haute' ? '#F59E0B' : itype.color;
-    const durFmt    = t.duration
-      ? (t.duration < 60 ? t.duration + 'min' : Math.floor(t.duration/60) + 'h' + (t.duration%60 ? String(t.duration%60).padStart(2,'0') : ''))
-      : '';
-    const locHtml    = t.location ? `<span class="or-cp-mc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
-    const durHtml    = durFmt ? `<span class="or-cp-mc-dur">${durFmt}</span>` : '';
-    const avColor    = t.assignedTo ? _ucolor(t.assignedTo) : null;
-    const avHtml     = t.assignedTo ? `<span class="or-cp-mc-av" style="background:${avColor}" title="${MX.esc(t.assignedTo)}">${_initials(t.assignedTo)}</span>` : '';
-    const typeIco    = `<i class="fas ${itype.icon} or-cp-mc-icon" style="color:${itype.color}"></i>`;
-    const prioIco    = prio ? `<span style="font-size:10px;flex-shrink:0" title="${prio.label}">${prio.icon}</span>` : '';
-    const planBadge  = t._unscheduled ? `<span class="or-cp-mc-badge or-cp-mc-badge--plan"><i class="fas fa-clock"></i> À planifier</span>` : '';
-
-    return `<div class="or-cp-mc${isDone?' or-cp-mc--done':''}"
-      style="border-left-color:${borderC}"
+    const statusLbl = isDone ? 'Terminée' : (isInProg ? 'En cours' : 'À faire');
+    const statusCls = isDone ? 'or-tc-status--done' : isInProg ? 'or-tc-status--prog' : 'or-tc-status--todo';
+    const techHtml  = _techBubblesHtml(t, 3);
+    const recurIco  = t._recurOrigin ? `<i class="fas fa-rotate or-tc-recur-ico" title="Tâche récurrente"></i>` : '';
+    const locHtml   = t.location ? `<span class="or-tc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
+    const planBadge = t._unscheduled ? `<span class="or-tc-badge"><i class="fas fa-clock"></i> À planifier</span>` : '';
+    return `<div class="or-tc${isDone ? ' or-tc--done' : ''}"
+      style="--prio-color:${prio.color};--prio-bg:${prio.bg}"
       data-id="${t.id}" draggable="true"
-      ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}','${slot}')"
+      ondragstart="MX.Pages.OrgResp._onDragStart(event,'${t.id}','${dayId}')"
       ondragend="MX.Pages.OrgResp._onDragEnd(event)">
-      <span class="or-cp-mc-status ${statusCls}"></span>
-      ${typeIco}
-      <span class="or-cp-mc-title">${MX.esc(t.title)}</span>
-      ${planBadge}
-      ${locHtml}
-      ${durHtml}
-      ${prioIco}
-      ${avHtml}
-      <button class="or-cp-mc-menu" onclick="event.stopPropagation();MX.Pages.OrgResp._cpMissionMenu('${t.id}',this)" title="Actions">
-        <i class="fas fa-ellipsis-vertical"></i>
-      </button>
+      <div class="or-tc-top">
+        <i class="fas ${itype.icon} or-tc-ico" style="color:${itype.color}"></i>
+        <span class="or-tc-title">${MX.esc(t.title)}</span>
+        ${recurIco}
+        <button class="or-tc-menu" onclick="event.stopPropagation();MX.Pages.OrgResp._cpMissionMenu('${t.id}',this)" title="Actions">
+          <i class="fas fa-ellipsis-vertical"></i>
+        </button>
+      </div>
+      ${t.description ? `<div class="or-tc-desc">${MX.esc(t.description)}</div>` : ''}
+      ${locHtml || planBadge ? `<div class="or-tc-meta">${locHtml}${planBadge}</div>` : ''}
+      <div class="or-tc-bottom">
+        <span class="or-tc-status ${statusCls}">${statusLbl}</span>
+        <div class="or-tc-avs">${techHtml}</div>
+      </div>
     </div>`;
   }
 
   // alias for backward compat
-  function _cpMissionCard(t, dayId, slot) { return _cpMissionCardV2(t, dayId, slot); }
-  function _planTaskCard(t, dayId, slot)  { return _cpMissionCardV2(t, dayId, slot); }
+  function _cpMissionCard(t, dayId) { return _cpMissionCardV2(t, dayId); }
+  function _planTaskCard(t, dayId)  { return _cpMissionCardV2(t, dayId); }
 
   // ── ITEM TYPE PICKER ──
   function _itypePicker(selected) {
@@ -798,6 +963,36 @@
       return;
     }
 
+    // Tâche récurrente (document d'origine affiché sur son jour d'ancrage,
+    // OU occurrence virtuelle d'une autre semaine) : Terminer/Rouvrir/
+    // Supprimer ne doivent agir QUE sur cette occurrence précise — jamais sur
+    // le document d'origine, qui piloterait alors toute la série par erreur.
+    const isOccurrence = taskId.includes('__occ_');
+    const origin = isOccurrence ? null : _recurOrigins.find(o => o.id === taskId);
+    if (isOccurrence || origin) {
+      const t = _allPlanItems().find(x => x.id === taskId);
+      if (!t) return;
+      const seriesId = isOccurrence ? taskId.split('__occ_')[0] : taskId;
+      const occId    = isOccurrence ? taskId : (seriesId + '__occ_' + _originAnchorDate(origin));
+      const menu = document.createElement('div');
+      menu.className = 'or-dropdown-menu';
+      menu.innerHTML = `
+        <div class="or-dropdown-label">Cette occurrence</div>
+        ${!t.done
+          ? `<div class="or-dropdown-item" onclick="MX.Pages.OrgResp._occDoneToggle('${occId}',true);MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-check"></i> Terminer</div>`
+          : `<div class="or-dropdown-item" onclick="MX.Pages.OrgResp._occDoneToggle('${occId}',false);MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-rotate-left"></i> Rouvrir</div>`
+        }
+        <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openEditOccurrence('${occId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-pen"></i> Modifier cette occurrence</div>
+        <div class="or-dropdown-item or-dropdown-item--warn" onclick="MX.Pages.OrgResp.openDeleteOccurrence('${occId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-trash"></i> Supprimer cette occurrence</div>
+        <div class="or-dropdown-sep"></div>
+        <div class="or-dropdown-label">Toute la série</div>
+        <div class="or-dropdown-item" onclick="MX.Pages.OrgResp.openEdit('${seriesId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-rotate"></i> Modifier la série</div>
+        <div class="or-dropdown-item or-dropdown-item--warn" onclick="MX.Pages.OrgResp.openDeleteSeries('${seriesId}');MX.Pages.OrgResp._closeDropdowns()"><i class="fas fa-trash-can"></i> Supprimer toute la série</div>
+      `;
+      _attachDropdown(btn, menu);
+      return;
+    }
+
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
     const menu = document.createElement('div');
@@ -819,11 +1014,12 @@
   function _cpRenderSidebar(planTasks, planDone, planTotal) {
     const techMap = {};
     planTasks.forEach(t => {
-      if (!t.assignedTo) return;
-      if (!techMap[t.assignedTo]) techMap[t.assignedTo] = { total:0, done:0, dur:0 };
-      techMap[t.assignedTo].total++;
-      if (t.done) techMap[t.assignedTo].done++;
-      techMap[t.assignedTo].dur += t.duration || 0;
+      _taskTechs(t).forEach(name => {
+        if (!techMap[name]) techMap[name] = { total:0, done:0, dur:0 };
+        techMap[name].total++;
+        if (t.done) techMap[name].done++;
+        techMap[name].dur += t.duration || 0;
+      });
     });
     const techList = Object.entries(techMap).sort((a,b) => b[1].total - a[1].total);
     const maxT     = techList.length ? Math.max(...techList.map(([,v]) => v.total)) : 1;
@@ -844,8 +1040,8 @@
           </div>`;
         }).join('');
 
-    const urgents    = planTasks.filter(t => (t.priority==='critique'||t.priority==='urgente') && !t.done);
-    const unassigned = planTasks.filter(t => !t.assignedTo && !t.done);
+    const urgents    = planTasks.filter(t => _effPriority(t) === 'haute' && !t.done);
+    const unassigned = planTasks.filter(t => !_taskTechs(t).length && !t.done);
     const alerts = [];
     if (urgents.length)    alerts.push({ c:'#EF4444', txt:`${urgents.length} mission${urgents.length>1?'s':''} urgente${urgents.length>1?'s':''}` });
     if (unassigned.length) alerts.push({ c:'#F59E0B', txt:`${unassigned.length} mission${unassigned.length>1?'s':''} sans technicien` });
@@ -1968,64 +2164,95 @@
   // ═══════════════════════════════════════════════════════
   //  DRAG AND DROP
   // ═══════════════════════════════════════════════════════
-  function _onDragStart(event, taskId, srcDayId, srcSlot) {
-    _dragData = { taskId, srcDayId, srcSlot };
+  // ── GLISSER-DÉPOSER — jour à jour uniquement (plus de créneau). Pas de
+  // mise à jour optimiste : la carte ne bouge visuellement qu'une fois
+  // Firestore confirmé, donc rien à restaurer en cas d'échec — elle reste
+  // simplement à sa place, avec un message clair. ──
+  function _onDragStart(event, taskId, srcDayId) {
+    _dragData = { taskId, srcDayId };
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', taskId);
     const el = event.currentTarget;
-    setTimeout(() => el && el.classList.add('or-plan-task--dragging'), 0);
+    setTimeout(() => el && el.classList.add('or-tc--dragging'), 0);
   }
 
   function _onDragEnd(event) {
     const el = event.currentTarget;
-    if (el) el.classList.remove('or-plan-task--dragging');
+    if (el) el.classList.remove('or-tc--dragging');
     _dragData = null;
   }
 
-  function _onDragOver(event, dstDayId, dstSlot) {
+  function _onDragOver(event, dstDayId) {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-    const el = document.getElementById('or-slot-body-' + dstDayId + '_' + dstSlot);
-    if (el) el.classList.add('or-slot-body--drag-over');
+    const el = document.getElementById('or-daycol-' + dstDayId);
+    if (el) el.classList.add('or-day-col-body--drag-over');
   }
 
   function _onDragLeave(event) {
     const el = event.currentTarget;
-    if (el) el.classList.remove('or-slot-body--drag-over');
+    if (el) el.classList.remove('or-day-col-body--drag-over');
   }
 
-  async function _onDrop(event, dstDayId, dstSlot) {
+  async function _onDrop(event, dstDayId) {
     event.preventDefault();
-    const el = document.getElementById('or-slot-body-' + dstDayId + '_' + dstSlot);
-    if (el) el.classList.remove('or-slot-body--drag-over');
+    const el = document.getElementById('or-daycol-' + dstDayId);
+    if (el) el.classList.remove('or-day-col-body--drag-over');
 
     if (!_dragData) return;
-    const { taskId, srcDayId, srcSlot } = _dragData;
+    const { taskId, srcDayId } = _dragData;
     _dragData = null;
 
-    if (srcDayId === dstDayId && srcSlot === dstSlot) return; // same slot
+    if (srcDayId === dstDayId) return; // même jour, rien à faire
 
     MX.syncStart();
     try {
       if (taskId.startsWith('int_')) {
         const srcId   = taskId.slice(4);
         const newDate = _dayIdToDate(dstDayId);
-        const upd     = { cpDayId: dstDayId, cpSlot: dstSlot };
+        const upd     = { cpDayId: dstDayId };
         if (newDate) upd.startDate = newDate;
         await db.collection('interventions').doc(srcId).update(upd);
       } else if (taskId.startsWith('pmp_')) {
         const srcId   = taskId.slice(4);
         const newDate = _dayIdToDate(dstDayId);
-        const upd     = { cpDayId: dstDayId, cpSlot: dstSlot };
+        const upd     = { cpDayId: dstDayId };
         if (newDate) upd.dueDate = newDate;
         await db.collection('pmp_interventions').doc(srcId).update(upd);
+      } else if (taskId.includes('__occ_')) {
+        // Occurrence d'une tâche récurrente : le déplacement ne concerne
+        // QUE cette occurrence (document d'exception à id déterministe,
+        // jamais de duplication) — la règle de récurrence d'origine (et
+        // donc toute la série) n'est jamais modifiée par ce geste.
+        const [seriesId, occurrenceDate] = taskId.split('__occ_');
+        const excId = seriesId + '_occ_' + occurrenceDate;
+        await db.collection('org_tasks').doc(excId).set({
+          seriesId, occurrenceDate, weekKey: _weekKey, dayId: dstDayId,
+          isException: true, deleted: false,
+          updatedBy: _currentUserName(), updatedAt: FV.serverTimestamp(),
+        }, { merge: true });
+      } else if (_recurOrigins.some(o => o.id === taskId)) {
+        // Carte du document d'origine lui-même, sur sa semaine d'ancrage :
+        // on ne déplace QUE cette occurrence (document d'exception), jamais
+        // le document d'origine — un déplacement ne doit pas changer la
+        // règle de récurrence de toute la série par erreur.
+        const origin = _recurOrigins.find(o => o.id === taskId);
+        const anchorDate = _originAnchorDate(origin);
+        const excId = taskId + '_occ_' + anchorDate;
+        await db.collection('org_tasks').doc(excId).set({
+          seriesId: taskId, occurrenceDate: anchorDate, weekKey: _weekKey, dayId: dstDayId,
+          isException: true, deleted: false,
+          updatedBy: _currentUserName(), updatedAt: FV.serverTimestamp(),
+        }, { merge: true });
       } else {
-        await db.collection('org_tasks').doc(taskId).update({
-          dayId: dstDayId, slot: dstSlot,
-        });
+        await db.collection('org_tasks').doc(taskId).update({ dayId: dstDayId });
       }
       MX.syncEnd();
-    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+      MX.toast('Tâche déplacée ✓');
+    } catch(e) {
+      MX.syncFail();
+      MX.toast('Déplacement impossible (' + e.message + ') — la tâche reste à sa place.', true);
+    }
   }
 
   // ── SESSION TEARDOWN ──
@@ -2034,9 +2261,11 @@
     if (_unsubCfg)     { _unsubCfg();     _unsubCfg     = null; }
     if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
     if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
+    if (_unsubRecur)   { _unsubRecur();   _unsubRecur   = null; }
     _tasks         = [];
     _interventions = [];
     _pmpInts       = [];
+    _recurOrigins  = [];
     _weekKey       = null;
     _inHistory     = false;
   }
@@ -2044,125 +2273,212 @@
   // ═══════════════════════════════════════════════════════
   //  TASK FORM (Planning-aware)
   // ═══════════════════════════════════════════════════════
-  function openAddDayTask(dayId, slot) {
-    const day  = MX.DAYS.find(d => d.id === dayId);
-    const info = SLOT_INFO[slot] || {};
+  function openAddDayTask(dayId) {
+    const day = MX.DAYS.find(d => d.id === dayId);
     MX.showModal({
       title:   'Nouvelle tâche',
-      sub:     `${day?.l || dayId} — ${info.l || slot}`,
-      body:    _taskFormBody({ dayId, slot }),
+      sub:     day?.l || dayId,
+      body:    _taskFormBody({ dayId }),
+      noAutoClose: true,
       actions: [
         { label: 'Créer', cls: 'primary-btn', fn: () => _doAdd() },
-        { label: 'Annuler', cls: 'cancel' }
+        { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
       ]
     });
     setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
   }
 
+  // ── FORMULAIRE TÂCHE ── (création ET édition, origine ET occurrence)
+  // Le jour (ou les jours, en récurrence hebdomadaire) est TOUJOURS demandé
+  // — jamais de champ caché/absent — pour qu'une tâche ne puisse plus être
+  // enregistrée sans jour valide et donc ne plus jamais disparaître
+  // silencieusement de la grille (voir _doAdd/_doEdit, qui revalident en
+  // profondeur avant écriture).
   function _taskFormBody(defaults) {
-    const d    = defaults || {};
-    const prio = d.priority || 'normale';
-    const type = d.type || (d.dayId ? 'unique' : 'hebdomadaire');
-    const cats = ['sécurité','réglementaire','stock','administratif','hébergement','autre'];
+    const d     = defaults || {};
+    const prio  = _effPriority(d);
+    const cats  = ['sécurité','réglementaire','stock','administratif','hébergement','autre'];
+    const recur = d.recurrence || '';
 
-    // Day / slot inputs: hidden when pre-assigned, selectors when from header, absent otherwise
-    let daySlotHtml = '';
-    if (d.dayId) {
-      daySlotHtml = `<input type="hidden" id="or-f-dayid" value="${MX.esc(d.dayId)}">
-        <input type="hidden" id="or-f-slot" value="${MX.esc(d.slot || '')}">`;
-    } else if (d.fromHeader) {
-      const dayOpts  = MX.DAYS.map(dy => `<option value="${dy.id}">${dy.l}</option>`).join('');
-      const slotOpts = Object.entries(SLOT_INFO).map(([k,s]) => `<option value="${k}">${s.l} — ${s.time}</option>`).join('');
-      daySlotHtml = `<div class="or-form-2col">
+    const selectedDays = recur === 'weekly' && Array.isArray(d.recurDays) && d.recurDays.length
+      ? d.recurDays : (d.dayId ? [d.dayId] : []);
+    const isMultiDay = recur === 'weekly';
+    const daypickHtml = `<div class="or-daypick" id="or-f-daypick" data-multi="${isMultiDay}">
+      ${MX.DAYS.map(dy => `<button type="button" class="or-daypick-btn${selectedDays.includes(dy.id) ? ' on' : ''}" data-day="${dy.id}" onclick="MX.Pages.OrgResp._toggleDayPick(this)">${dy.s}</button>`).join('')}
+    </div>`;
+
+    const prioHtml = `<div class="or-prio-pills">
+      ${['haute','normale','basse'].map(p => {
+        const cfg  = PRIO_LEVELS[p];
+        const isOn = p === prio;
+        return `<label class="or-prio-pill${isOn ? ' or-prio-pill--on' : ''}" style="--prio-color:${cfg.color};--prio-bg:${cfg.bg}">
+          <input type="radio" name="or-f-prio" value="${p}" ${isOn ? 'checked' : ''} style="display:none" onchange="MX.Pages.OrgResp._onPrioChange(this)">
+          <span class="or-prio-pill-dot"></span>${cfg.label}
+        </label>`;
+      }).join('')}
+    </div>`;
+
+    const monthlyDisplay    = recur === 'monthly' ? '' : 'style="display:none"';
+    const recurRangeDisplay = recur ? '' : 'style="display:none"';
+    const recurHtml = `
+      <div class="or-form-row">
+        <label class="or-form-lbl">Récurrence</label>
+        <div class="or-recur-pills" id="or-f-recur-pills">
+          ${[
+            { v: '',        l: 'Aucune' },
+            { v: 'weekly',  l: 'Toutes les semaines' },
+            { v: 'monthly', l: 'Tous les mois' },
+          ].map(({ v, l }) => `<label class="or-recur-pill${v===recur?' or-recur-pill--on':''}" data-val="${v}">
+            <input type="radio" name="or-f-recur" value="${v}" ${v===recur?'checked':''} style="display:none" onchange="MX.Pages.OrgResp._onRecurChange(this)">
+            ${l}
+          </label>`).join('')}
+        </div>
+      </div>
+      <div class="or-form-row" id="or-f-monthly-rule" ${monthlyDisplay}>
+        <label class="or-form-lbl">Règle mensuelle</label>
+        <select id="or-f-monthly-nth" class="fi">
+          ${[['1','1ère'],['2','2e'],['3','3e'],['4','4e'],['last','Dernière']].map(([v,l]) => `<option value="${v}"${d.recurMonthly && String(d.recurMonthly.nth)===v?' selected':''}>${l}</option>`).join('')}
+        </select>
+        <div class="or-form-hint">semaine du mois, pour le jour sélectionné ci-dessus</div>
+      </div>
+      <div class="or-form-2col" id="or-f-recur-range" ${recurRangeDisplay}>
         <div class="or-form-row">
-          <label class="or-form-lbl">Journée <span style="color:var(--red)">*</span></label>
-          <select id="or-f-dayid" class="fi"><option value="">— Choisir une journée —</option>${dayOpts}</select>
+          <label class="or-form-lbl">Début (optionnel)</label>
+          <input type="date" id="or-f-recur-start" class="fi" value="${MX.esc(d.recurStart || '')}">
         </div>
         <div class="or-form-row">
-          <label class="or-form-lbl">Créneau <span style="color:var(--red)">*</span></label>
-          <select id="or-f-slot" class="fi"><option value="">— Choisir un créneau —</option>${slotOpts}</select>
+          <label class="or-form-lbl">Fin (optionnel)</label>
+          <input type="date" id="or-f-recur-end" class="fi" value="${MX.esc(d.recurEnd || '')}">
         </div>
       </div>`;
-    }
 
-    return `<div class="or-form">${daySlotHtml}
+    return `<div class="or-form">
       <div class="or-form-row">
-        <label class="or-form-lbl">Type d'élément</label>
-        ${_itypePicker(d.itemType)}
-      </div>
-      <div class="or-form-row">
-        <label class="or-form-lbl">Titre <span style="color:var(--red)">*</span></label>
+        <label class="or-form-lbl">Titre <span class="or-req">*</span></label>
         <input id="or-f-title" class="fi" value="${MX.esc(d.title || '')}" placeholder="Nom de la tâche" maxlength="150">
       </div>
       <div class="or-form-row">
         <label class="or-form-lbl">Description</label>
         <input id="or-f-desc" class="fi" value="${MX.esc(d.description || '')}" placeholder="Détails optionnels" maxlength="300">
       </div>
-      <div class="or-form-2col">
-        <div class="or-form-row">
-          <label class="or-form-lbl">Responsable</label>
-          <select id="or-f-assign" class="fi">${_getUserOptions(d.assignedTo || '')}</select>
-        </div>
-        <div class="or-form-row">
-          <label class="or-form-lbl">Catégorie</label>
-          <select id="or-f-cat" class="fi">
-            ${cats.map(c => `<option value="${c}"${c === (d.category || 'autre') ? ' selected' : ''}>${c.charAt(0).toUpperCase()+c.slice(1)}</option>`).join('')}
-          </select>
-        </div>
+      <div class="or-form-row">
+        <label class="or-form-lbl">Priorité</label>
+        ${prioHtml}
       </div>
-      <div class="or-form-2col">
+      <div class="or-form-row">
+        <label class="or-form-lbl">Techniciens affectés</label>
+        ${_techPickerHtml(_taskTechs(d))}
+      </div>
+      <div class="or-form-row">
+        <label class="or-form-lbl">Jour <span class="or-req">*</span></label>
+        ${daypickHtml}
+      </div>
+      ${recurHtml}
+      <details class="or-form-advanced">
+        <summary>Options avancées</summary>
         <div class="or-form-row">
-          <label class="or-form-lbl">Priorité</label>
-          <select id="or-f-prio" class="fi">
-            <option value="normale"${prio==='normale'?' selected':''}>Normale</option>
-            <option value="haute"${prio==='haute'?' selected':''}>🟠 Haute</option>
-            <option value="urgente"${prio==='urgente'?' selected':''}>🔴 Urgente</option>
-            <option value="critique"${prio==='critique'?' selected':''}>🚨 Critique</option>
-          </select>
+          <label class="or-form-lbl">Type d'élément</label>
+          ${_itypePicker(d.itemType)}
         </div>
-        <div class="or-form-row">
-          <label class="or-form-lbl">Type</label>
-          <div class="or-type-pills">
-            ${[
-              { v:'hebdomadaire', l:'♻️ Récurrente' },
-              { v:'mensuelle',    l:'🗓 Mensuelle'  },
-              { v:'unique',       l:'📌 Unique'     },
-            ].map(({ v, l }) => `<label class="or-type-pill${v===type?' or-type-pill--on':''}">
-              <input type="radio" name="or-f-type" value="${v}" ${v===type?'checked':''} style="display:none"
-                onchange="this.closest('.or-type-pills').querySelectorAll('.or-type-pill').forEach(x=>x.classList.remove('or-type-pill--on'));this.closest('.or-type-pill').classList.add('or-type-pill--on')">
-              ${l}
-            </label>`).join('')}
+        <div class="or-form-2col">
+          <div class="or-form-row">
+            <label class="or-form-lbl">Catégorie</label>
+            <select id="or-f-cat" class="fi">
+              ${cats.map(c => `<option value="${c}"${c === (d.category || 'autre') ? ' selected' : ''}>${c.charAt(0).toUpperCase()+c.slice(1)}</option>`).join('')}
+            </select>
           </div>
-        </div>
-      </div>
-      <div class="or-form-2col">
-        <div class="or-form-row">
-          <label class="or-form-lbl">Local / Zone</label>
-          <input id="or-f-location" class="fi" value="${MX.esc(d.location || '')}" placeholder="ex: Hall, Étage 1…" maxlength="100">
+          <div class="or-form-row">
+            <label class="or-form-lbl">Local / Zone</label>
+            <input id="or-f-location" class="fi" value="${MX.esc(d.location || '')}" placeholder="ex: Hall, Étage 1…" maxlength="100">
+          </div>
         </div>
         <div class="or-form-row">
           <label class="or-form-lbl">Durée (min)</label>
           <input id="or-f-duration" type="number" class="fi" value="${d.duration || ''}" placeholder="ex: 30" min="5" max="480">
         </div>
-      </div>
+      </details>
     </div>`;
   }
 
+  // ── Interactions du formulaire (jour / priorité / récurrence) ──
+  function _toggleDayPick(btn) {
+    const container = btn.closest('.or-daypick');
+    if (!container) return;
+    if (container.dataset.multi === 'true') {
+      btn.classList.toggle('on');
+    } else {
+      container.querySelectorAll('.or-daypick-btn').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+    }
+  }
+
+  function _onPrioChange(radio) {
+    const container = radio.closest('.or-prio-pills');
+    if (!container) return;
+    container.querySelectorAll('.or-prio-pill').forEach(p => p.classList.remove('or-prio-pill--on'));
+    radio.closest('.or-prio-pill')?.classList.add('or-prio-pill--on');
+  }
+
+  function _onRecurChange(radio) {
+    const val = radio.value;
+    document.querySelectorAll('#or-f-recur-pills .or-recur-pill').forEach(p => {
+      p.classList.toggle('or-recur-pill--on', p.dataset.val === val);
+    });
+    const daypick = document.getElementById('or-f-daypick');
+    if (daypick) {
+      const wasMulti = daypick.dataset.multi === 'true';
+      daypick.dataset.multi = (val === 'weekly') ? 'true' : 'false';
+      if (val !== 'weekly' && wasMulti) {
+        // on repasse en sélection unique : on garde seulement le premier jour coché
+        const selected = Array.from(daypick.querySelectorAll('.or-daypick-btn.on'));
+        selected.forEach((b, i) => { if (i > 0) b.classList.remove('on'); });
+      }
+    }
+    const monthlyRule = document.getElementById('or-f-monthly-rule');
+    if (monthlyRule) monthlyRule.style.display = (val === 'monthly') ? '' : 'none';
+    const range = document.getElementById('or-f-recur-range');
+    if (range) range.style.display = val ? '' : 'none';
+  }
+
   function _readForm() {
-    const typeEl = document.querySelector('input[name="or-f-type"]:checked');
+    const daypick  = document.getElementById('or-f-daypick');
+    const dayBtns  = daypick ? Array.from(daypick.querySelectorAll('.or-daypick-btn.on')).map(b => b.dataset.day) : [];
+    const recurEl  = document.querySelector('input[name="or-f-recur"]:checked');
+    const recurrence = recurEl ? (recurEl.value || null) : null;
+    const dayId    = dayBtns[0] || null;
+    const recurDays = recurrence === 'weekly' && dayBtns.length ? dayBtns : null;
+    let recurMonthly = null;
+    if (recurrence === 'monthly') {
+      const nthRaw = document.getElementById('or-f-monthly-nth')?.value;
+      recurMonthly = { nth: nthRaw === 'last' ? 'last' : parseInt(nthRaw), weekday: dayId };
+    }
     return {
-      title:       (document.getElementById('or-f-title')?.value  || '').trim(),
-      description: (document.getElementById('or-f-desc')?.value   || '').trim(),
-      assignedTo:  document.getElementById('or-f-assign')?.value  || null,
-      category:    document.getElementById('or-f-cat')?.value     || 'autre',
-      priority:    document.getElementById('or-f-prio')?.value    || 'normale',
-      type:        typeEl ? typeEl.value : 'hebdomadaire',
-      dayId:       document.getElementById('or-f-dayid')?.value   || null,
-      slot:        document.getElementById('or-f-slot')?.value    || null,
-      location:    (document.getElementById('or-f-location')?.value || '').trim() || null,
-      duration:    parseInt(document.getElementById('or-f-duration')?.value) || null,
-      itemType:    document.getElementById('or-f-itype')?.value   || 'tache',
+      title:        (document.getElementById('or-f-title')?.value  || '').trim(),
+      description:  (document.getElementById('or-f-desc')?.value   || '').trim(),
+      assignedTo:   [..._orPickerTechs],
+      category:     document.getElementById('or-f-cat')?.value     || 'autre',
+      priority:     document.querySelector('input[name="or-f-prio"]:checked')?.value || 'normale',
+      type:         'unique',
+      dayId,
+      recurrence:   recurrence || null,
+      recurDays,
+      recurMonthly,
+      recurStart:   document.getElementById('or-f-recur-start')?.value || null,
+      recurEnd:     document.getElementById('or-f-recur-end')?.value   || null,
+      location:     (document.getElementById('or-f-location')?.value || '').trim() || null,
+      duration:     parseInt(document.getElementById('or-f-duration')?.value) || null,
+      itemType:     document.getElementById('or-f-itype')?.value   || 'tache',
     };
+  }
+
+  // Validation commune à la création et à l'édition : jamais d'écriture sans
+  // jour valide, jamais de récurrence incomplète enregistrée silencieusement.
+  function _validateFormData(data) {
+    if (!data.title) return 'Le titre est obligatoire';
+    if (!data.dayId) return 'Choisissez un jour pour cette tâche';
+    if (data.recurrence === 'weekly' && !data.recurDays) return 'Choisissez au moins un jour de récurrence';
+    if (data.recurrence === 'monthly' && (!data.recurMonthly || !data.recurMonthly.nth || !data.recurMonthly.weekday)) return 'Choisissez la règle de récurrence mensuelle';
+    return null;
   }
 
   // ── ADD ──
@@ -2171,29 +2487,25 @@
       title:   'Nouvelle tâche',
       sub:     _weekLabel(_weekKey),
       body:    _taskFormBody(),
+      noAutoClose: true,
       actions: [
         { label: 'Créer', cls: 'primary-btn', fn: () => _doAdd() },
-        { label: 'Annuler', cls: 'cancel' }
+        { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
       ]
     });
     setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
   }
 
-  // ── ADD FROM HEADER (requires day + slot selection) ──
+  // ── "+ Nouvelle tâche" (bouton d'en-tête du planning) ──
   function openAddFromHeader() {
     MX.showModal({
-      title:   'Ajouter dans la feuille de route',
+      title:   'Nouvelle tâche',
       sub:     _weekLabel(_weekKey),
-      body:    _taskFormBody({ fromHeader: true }),
+      body:    _taskFormBody(),
+      noAutoClose: true,
       actions: [
-        { label: 'Ajouter', cls: 'primary-btn', fn: () => {
-          const dayid = document.getElementById('or-f-dayid')?.value;
-          if (!dayid) { MX.toast('Sélectionner une journée', true); return; }
-          const slotid = document.getElementById('or-f-slot')?.value;
-          if (!slotid) { MX.toast('Sélectionner un créneau', true); return; }
-          _doAdd();
-        }},
-        { label: 'Annuler', cls: 'cancel' }
+        { label: 'Créer', cls: 'primary-btn', fn: () => _doAdd() },
+        { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
       ]
     });
     setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
@@ -2201,16 +2513,20 @@
 
   async function _doAdd() {
     const data = _readForm();
-    if (!data.title) { MX.toast('Le titre est obligatoire', true); return; }
+    const err  = _validateFormData(data);
+    if (err) { MX.toast(err, true); return; }
     const name = _currentUserName();
     MX.closeModal();
     MX.syncStart();
     try {
       await db.collection('org_tasks').add({
-        ...data,
-        assignedTo: data.assignedTo || null,
-        dayId: data.dayId || null,
-        slot:  data.slot  || null,
+        title: data.title, description: data.description,
+        assignedTo: data.assignedTo, category: data.category,
+        priority: data.priority, type: data.type,
+        dayId: data.dayId, slot: null,
+        recurrence: data.recurrence, recurDays: data.recurDays,
+        recurMonthly: data.recurMonthly, recurStart: data.recurStart, recurEnd: data.recurEnd,
+        location: data.location, duration: data.duration, itemType: data.itemType,
         weekKey: _weekKey,
         done: false, status: 'todo',
         doneBy: null, doneAt: null, comment: null,
@@ -2223,7 +2539,7 @@
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
-  // ── EDIT ──
+  // ── EDIT (série / tâche unique) ──
   function openEdit(taskId) {
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
@@ -2231,9 +2547,10 @@
       title:   'Modifier la tâche',
       sub:     MX.esc(t.title),
       body:    _taskFormBody(t),
+      noAutoClose: true,
       actions: [
         { label: 'Enregistrer', cls: 'primary-btn', fn: () => _doEdit(taskId) },
-        { label: 'Annuler', cls: 'cancel' }
+        { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
       ]
     });
     setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
@@ -2241,17 +2558,19 @@
 
   async function _doEdit(taskId) {
     const data = _readForm();
-    if (!data.title) { MX.toast('Le titre est obligatoire', true); return; }
+    const err  = _validateFormData(data);
+    if (err) { MX.toast(err, true); return; }
     MX.closeModal();
     MX.syncStart();
     try {
       const upd = {
         title: data.title, description: data.description,
-        assignedTo: data.assignedTo || null, category: data.category,
+        assignedTo: data.assignedTo, category: data.category,
         priority: data.priority, type: data.type,
-        location: data.location || null,
-        duration: data.duration || null,
-        itemType: data.itemType || 'tache',
+        dayId: data.dayId,
+        recurrence: data.recurrence, recurDays: data.recurDays,
+        recurMonthly: data.recurMonthly, recurStart: data.recurStart, recurEnd: data.recurEnd,
+        location: data.location, duration: data.duration, itemType: data.itemType,
       };
       await db.collection('org_tasks').doc(taskId).update(upd);
       MX.syncEnd();
@@ -2259,7 +2578,7 @@
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
-  // ── DELETE ──
+  // ── DELETE (tâche unique, ou série entière) ──
   function openDelete(taskId) {
     const t = _tasks.find(x => x.id === taskId);
     if (!t) return;
@@ -2286,6 +2605,126 @@
       await db.collection('org_tasks').doc(taskId).delete();
       MX.syncEnd();
       MX.toast('Tâche supprimée');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // ── OCCURRENCES D'UNE TÂCHE RÉCURRENTE ──
+  // Terminer / modifier / supprimer UNE occurrence n'écrit JAMAIS dans le
+  // document d'origine (qui pilote toutes les occurrences futures) : ces
+  // actions créent ou mettent à jour un document d'exception à id
+  // déterministe ("${seriesId}_occ_${date}"), via set(...,{merge:true}), donc
+  // jamais de doublon même répété. Seule "Modifier/Supprimer toute la série"
+  // touche le document d'origine, en toute connaissance de cause.
+  function _occIds(taskId) {
+    const [seriesId, occurrenceDate] = taskId.split('__occ_');
+    return { seriesId, occurrenceDate, excId: seriesId + '_occ_' + occurrenceDate };
+  }
+
+  async function _occDoneToggle(taskId, done) {
+    const { seriesId, occurrenceDate, excId } = _occIds(taskId);
+    MX.syncStart();
+    try {
+      await db.collection('org_tasks').doc(excId).set({
+        seriesId, occurrenceDate, weekKey: _weekKey, dayId: _tasks.concat(_recurOrigins).find(x=>x.id===seriesId)?.dayId || null,
+        isException: true, deleted: false,
+        done, status: done ? 'done' : 'todo',
+        doneBy: done ? _currentUserName() : null, doneAt: done ? FV.serverTimestamp() : null,
+        updatedAt: FV.serverTimestamp(),
+      }, { merge: true });
+      MX.syncEnd();
+      MX.toast(done ? 'Occurrence terminée ✓' : 'Occurrence rouverte');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  function openEditOccurrence(taskId) {
+    const t = _allPlanItems().find(x => x.id === taskId);
+    if (!t) return;
+    MX.showModal({
+      title:   'Modifier cette occurrence',
+      sub:     MX.esc(t.title),
+      body:    _taskFormBody(t),
+      noAutoClose: true,
+      actions: [
+        { label: 'Enregistrer', cls: 'primary-btn', fn: () => _doEditOccurrence(taskId) },
+        { label: 'Annuler', cls: 'cancel', fn: () => MX.closeModal() }
+      ]
+    });
+    setTimeout(() => document.getElementById('or-f-title')?.focus(), 50);
+  }
+
+  async function _doEditOccurrence(taskId) {
+    const data = _readForm();
+    if (!data.title) { MX.toast('Le titre est obligatoire', true); return; }
+    if (!data.dayId) { MX.toast('Choisissez un jour pour cette tâche', true); return; }
+    const { seriesId, occurrenceDate, excId } = _occIds(taskId);
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      await db.collection('org_tasks').doc(excId).set({
+        seriesId, occurrenceDate, weekKey: _weekKey, isException: true, deleted: false,
+        title: data.title, description: data.description,
+        assignedTo: data.assignedTo, priority: data.priority,
+        dayId: data.dayId, location: data.location, duration: data.duration, itemType: data.itemType,
+        updatedAt: FV.serverTimestamp(),
+      }, { merge: true });
+      MX.syncEnd();
+      MX.toast('Occurrence modifiée ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  function openDeleteOccurrence(taskId) {
+    MX.showModal({
+      title: 'Supprimer cette occurrence',
+      sub:   'Tâche récurrente',
+      body:  `<div style="font-size:13px;color:var(--text2);line-height:1.6">
+        Seule <strong>cette occurrence</strong> sera supprimée. Les autres dates de la série restent inchangées.
+      </div>`,
+      actions: [
+        { label: 'Supprimer', cls: 'danger-btn', fn: () => _doDeleteOccurrence(taskId) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doDeleteOccurrence(taskId) {
+    const { seriesId, occurrenceDate, excId } = _occIds(taskId);
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      await db.collection('org_tasks').doc(excId).set({
+        seriesId, occurrenceDate, weekKey: _weekKey, isException: true, deleted: true,
+        updatedAt: FV.serverTimestamp(),
+      }, { merge: true });
+      MX.syncEnd();
+      MX.toast('Occurrence supprimée');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  function openDeleteSeries(seriesId) {
+    const t = _recurOrigins.find(o => o.id === seriesId) || _tasks.find(x => x.id === seriesId);
+    MX.showModal({
+      title: 'Supprimer toute la série récurrente',
+      sub:   t ? MX.esc(t.title) : '',
+      body:  `<div style="display:flex;align-items:flex-start;gap:12px;padding:4px 0">
+        <i class="fas fa-triangle-exclamation" style="color:var(--red);font-size:20px;margin-top:2px;flex-shrink:0"></i>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          <strong style="color:var(--red)">Toutes les occurrences</strong> de cette tâche récurrente seront supprimées, pas seulement celle-ci. Cette action est irréversible.
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Supprimer la série', cls: 'danger-btn', fn: () => _doDeleteSeries(seriesId) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doDeleteSeries(seriesId) {
+    MX.closeModal();
+    MX.syncStart();
+    try {
+      await db.collection('org_tasks').doc(seriesId).delete();
+      MX.syncEnd();
+      MX.toast('Série supprimée');
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
   }
 
@@ -2622,6 +3061,13 @@
     _cpToggleExpand, _cpMissionMenu, _cpSelectItype,
     // Header quick-add
     openAddFromHeader,
+    // Formulaire tâche — interactions (jour / priorité / récurrence / techniciens)
+    _toggleDayPick, _onPrioChange, _onRecurChange,
+    _addTechFromSelect, _removeTechChip,
+    // Récurrence — actions par occurrence / par série
+    _occDoneToggle, openEditOccurrence, _doEditOccurrence,
+    openDeleteOccurrence, _doDeleteOccurrence,
+    openDeleteSeries, _doDeleteSeries,
     // Session teardown (called by auth._destroyUI on logout)
     _destroy,
   };

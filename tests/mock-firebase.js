@@ -13,6 +13,9 @@
       case '>':  return a > v;
       case '<':  return a < v;
       case 'array-contains': return Array.isArray(a) && a.indexOf(v) !== -1;
+      case 'in': return Array.isArray(v) && v.indexOf(a) !== -1;
+      case 'not-in': return Array.isArray(v) && v.indexOf(a) === -1;
+      case 'array-contains-any': return Array.isArray(a) && Array.isArray(v) && a.some(function (x) { return v.indexOf(x) !== -1; });
       default: return true;
     }
   }
