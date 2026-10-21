@@ -1,4 +1,16 @@
 importScripts('/version.js');
+// MX_BUILD_STAMP:0 — regénéré automatiquement par scripts/generate-version.sh
+// à chaque déploiement (hook "predeploy" de firebase.json), avec le MÊME
+// numéro de build que version.js (une seule exécution du script, une seule
+// valeur). Sert UNIQUEMENT à faire varier les octets de ce fichier à chaque
+// déploiement : sw.js importe déjà ses constantes de version via
+// importScripts('/version.js') ci-dessus, donc sans cette ligne son propre
+// contenu ne changerait jamais — et l'algorithme natif de mise à jour des
+// Service Workers (qui compare le script enregistré à l'identique octet
+// pour octet) ne détecterait alors jamais de nouvelle version (voir
+// MX.UpdateManager dans assets/js/app.js). NE PAS ÉDITER CETTE LIGNE À LA
+// MAIN — toute modification manuelle sera écrasée sans avertissement au
+// prochain déploiement.
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
@@ -120,7 +132,6 @@ const SHELL = [
   "/assets/js/pages/consommations.js"        + V,
   "/assets/js/pages/interventions.js"        + V,
   "/assets/js/pages/notifications.js"        + V,
-  "/assets/js/pages/equipe.js"               + V,
   "/assets/js/pages/pmp.js"                  + V,
   "/assets/js/pages/ios-diag.js"             + V,
   "/assets/js/alerts-engine.js"              + V,

@@ -20,6 +20,15 @@
 # dépendre de l'historique Git (donc insensible à un rebase/squash futur).
 # MX_VERSION (string) n'est qu'un affichage cosmétique dérivé du même
 # horodatage.
+#
+# Le même TS_BUILD est AUSSI injecté dans sw.js (ligne MX_BUILD_STAMP), en
+# plus de version.js — une seule exécution de ce script, une seule valeur
+# pour les deux fichiers, garantissant qu'ils restent synchronisés. Ça fait
+# varier les octets de sw.js à chaque déploiement : sans ça, sw.js importe
+# ses constantes de version via importScripts('/version.js') et son propre
+# contenu ne changerait jamais, empêchant le navigateur de détecter la
+# moindre mise à jour du Service Worker (comparaison native octet par
+# octet du script enregistré).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -41,3 +50,19 @@ cat > version.js << EOF
 EOF
 
 echo "✓ version.js généré — MX_VERSION=${TS_VERSION}  MX_BUILD=${TS_BUILD}"
+
+# ── Injection du même build dans sw.js (fait varier ses octets) ──
+node -e "
+const fs = require('fs');
+const build = ${TS_BUILD};
+const path = 'sw.js';
+const content = fs.readFileSync(path, 'utf8');
+const marker = /^\/\/ MX_BUILD_STAMP:\d+.*\$/m;
+if (!marker.test(content)) {
+  console.error('✗ ERREUR : marqueur MX_BUILD_STAMP introuvable dans sw.js — build NON injecté, le déploiement est interrompu.');
+  process.exit(1);
+}
+const updated = content.replace(marker, '// MX_BUILD_STAMP:' + build + ' — regénéré automatiquement par scripts/generate-version.sh à chaque déploiement (hook predeploy de firebase.json), même valeur que MX_BUILD dans version.js. NE PAS ÉDITER À LA MAIN.');
+fs.writeFileSync(path, updated);
+console.log('✓ sw.js mis à jour — MX_BUILD_STAMP=' + build);
+"
