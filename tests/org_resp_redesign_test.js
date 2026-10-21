@@ -104,6 +104,9 @@ async function fillForm(page, opts) {
     if (opts.day) await clickSafe(page, `#m-body .or-daypick-btn[data-day="${opts.day}"]`);
     await clickSafe(page, '#m-body .or-recur-pill[data-val="monthly"]');
     if (opts.monthlyNth) await page.selectOption('#or-f-monthly-nth', opts.monthlyNth);
+  } else if (opts.recurrence === 'daily') {
+    if (opts.day) await clickSafe(page, `#m-body .or-daypick-btn[data-day="${opts.day}"]`);
+    await clickSafe(page, '#m-body .or-recur-pill[data-val="daily"]');
   } else {
     if (opts.day) await clickSafe(page, `#m-body .or-daypick-btn[data-day="${opts.day}"]`);
   }
@@ -227,7 +230,7 @@ async function allOrgTasks(page) {
     await openHeaderNewTask(page);
     await fillForm(page, {
       title: 'Carnet sanitaire', priorityLabel: 'Basse', day: 'lundi',
-      techs: ['Kevin', 'Jordan'],
+      techs: ['Sophie', 'Alban'], // grade Responsable — seuls sélectionnables depuis cette refonte
     });
     await submitPrimary(page);
     await page.waitForTimeout(200);
@@ -483,6 +486,207 @@ async function allOrgTasks(page) {
     ok('9.3 La carte legacy est identifiée comme une tâche normale (id Firestore brut, pas une occurrence virtuelle)', legacyId === 'legacyHebdo');
 
     ok('9.4 Aucune erreur JS en affichant des tâches legacy à côté du nouveau moteur', pageErrors.length === 0);
+    await ctx.close();
+  }
+
+  // ── 10. Récurrence QUOTIDIENNE : tous les jours, aucun doublon ──
+  {
+    const { ctx, page, pageErrors } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    await openOrgResp(page);
+    await openHeaderNewTask(page);
+    await fillForm(page, { title: 'Ronde quotidienne', day: 'mardi', recurrence: 'daily' });
+    await submitPrimary(page);
+    await page.waitForTimeout(250);
+
+    // L'ancrage est mardi : aucune occurrence n'est générée AVANT la date de
+    // création (comportement voulu, partagé avec hebdo/mensuel — une tâche
+    // créée un mardi ne doit pas apparaître rétroactivement le lundi
+    // précédent). On vérifie donc un jour APRÈS l'ancrage (jeudi) et la fin
+    // de semaine (dimanche).
+    const jeudiT     = await dayCardTitles(page, 'jeudi');
+    const mardiT     = await dayCardTitles(page, 'mardi');
+    const dimancheT  = await dayCardTitles(page, 'dimanche');
+    ok('10.1 Occurrence quotidienne visible le mardi (ancrage)', mardiT.includes('Ronde quotidienne'));
+    ok('10.2 Occurrence quotidienne visible un autre jour après l\'ancrage (jeudi)', jeudiT.includes('Ronde quotidienne'));
+    ok('10.3 Occurrence quotidienne visible jusqu\'au dimanche de la même semaine', dimancheT.includes('Ronde quotidienne'));
+
+    await clickSafe(page, '.or-cp-nav-btn[title="Semaine suivante"]');
+    await page.waitForTimeout(250);
+    const lundiNext = await dayCardTitles(page, 'lundi');
+    ok('10.4 Occurrence quotidienne régénérée la semaine suivante', lundiNext.includes('Ronde quotidienne'));
+
+    await clickSafe(page, '.or-cp-nav-btn[title="Semaine précédente"]');
+    await page.waitForTimeout(200);
+    await openOrgResp(page);
+    const dailyDocs = (await allOrgTasks(page)).filter(t => t.title === 'Ronde quotidienne');
+    ok('10.5 Un seul document Firestore réel pour la série quotidienne (aucun doublon)', dailyDocs.length === 1 && dailyDocs[0].recurrence === 'daily');
+    ok('10.6 Aucune erreur JS pendant ce scénario', pageErrors.length === 0);
+    await ctx.close();
+  }
+
+  // ── 11. Priorités personnalisables : ajout, édition, suppression ──
+  {
+    const { ctx, page, pageErrors } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    await openOrgResp(page);
+
+    ok('11.1 Config par défaut : 3 niveaux Haute/Normale/Basse présents', (await page.locator('.or-prio-legend-card').count()) === 4); // 3 niveaux + carte "total"
+
+    await clickSafe(page, '.or-prio-legend-cfg');
+    await page.waitForTimeout(200);
+    ok('11.2 Le modal de configuration liste bien 3 niveaux', (await page.locator('.or-prio-cfg-row').count()) === 3);
+
+    // Ajout d'un niveau
+    await clickSafe(page, '.or-prio-cfg-add');
+    await page.waitForTimeout(250);
+    let rows = await page.locator('.or-prio-cfg-row').count();
+    ok('11.3 Un niveau supplémentaire a bien été ajouté', rows === 4);
+
+    // Édition du nom du nouveau niveau (dernière ligne)
+    const nameInputs = page.locator('.or-prio-cfg-name');
+    await nameInputs.last().fill('Critique');
+    await nameInputs.last().dispatchEvent('change');
+    await page.waitForTimeout(250);
+
+    const docAfterAdd = await page.evaluate(async () => {
+      const d = await window.__mockDb.collection('org_config').doc('priorities').get();
+      return d.data();
+    });
+    const added = docAfterAdd.levels.find(l => l.label === 'Critique');
+    ok('11.4 Le nouveau niveau "Critique" est bien persisté en base', !!added);
+
+    // Utiliser ce nouveau niveau sur une tâche
+    await clickSafe(page, '#m-actions .cancel'); // ferme le modal de config
+    await openHeaderNewTask(page);
+    const hasCritiquePill = await page.locator('#m-body .or-prio-pill:has-text("Critique")').count();
+    ok('11.5 Le nouveau niveau apparaît dans le formulaire de création', hasCritiquePill === 1);
+    await clickSafe(page, '#m-body .or-prio-pill:has-text("Critique")');
+    await page.fill('#or-f-title', 'Tâche critique test');
+    await clickSafe(page, '#m-body .or-daypick-btn[data-day="lundi"]');
+    await submitPrimary(page);
+    await page.waitForTimeout(250);
+
+    // Suppression du niveau "Critique" : la tâche doit rester mais devenir "non configurée"
+    await clickSafe(page, '.or-prio-legend-cfg');
+    await page.waitForTimeout(200);
+    // "Critique" est le dernier niveau ajouté (ordre le plus élevé) — le nom
+    // est dans un attribut value="" d'un <input>, donc pas détectable via
+    // hasText (qui ne lit que le texte rendu), d'où le repli sur .last().
+    const delBtn = page.locator('.or-prio-cfg-row').last().locator('.or-prio-cfg-del');
+    await dismissOverlay(page);
+    await delBtn.click({ force: true });
+    await page.waitForTimeout(250);
+    await clickSafe(page, '#m-actions .danger-btn');
+    // _doDeletePrioLevel ré-ouvre le modal de config juste après la
+    // suppression (pour laisser l'admin enchaîner) — on le referme avant de
+    // vérifier la grille, et on attend que le listener Firestore ait eu le
+    // temps de re-render la carte avec le nouveau statut "non configuré".
+    await page.waitForTimeout(300);
+    await clickSafe(page, '#m-actions .cancel');
+    await page.waitForTimeout(300);
+
+    const titlesLundi = await dayCardTitles(page, 'lundi');
+    ok('11.6 La tâche reste visible après suppression de son niveau de priorité', titlesLundi.includes('Tâche critique test'));
+    const cardAfterDel = page.locator('.or-tc', { hasText: 'Tâche critique test' }).first();
+    const styleAfterDel = await cardAfterDel.getAttribute('style');
+    ok('11.7 Couleur "non configurée" (grise), jamais une couleur devinée', !!styleAfterDel && styleAfterDel.includes('#6B7280'));
+
+    const docFinal = await page.evaluate(async () => {
+      const d = await window.__mockDb.collection('org_config').doc('priorities').get();
+      return d.data();
+    });
+    ok('11.8 Le niveau supprimé n\'existe plus dans la config (pas juste masqué)', !docFinal.levels.find(l => l.label === 'Critique'));
+    ok('11.9 Aucune erreur JS pendant ce scénario', pageErrors.length === 0);
+    await ctx.close();
+  }
+
+  // ── 12. Sélecteur de techniciens : grade Responsable uniquement ──
+  {
+    const { ctx, page, pageErrors } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    await openOrgResp(page);
+    await openHeaderNewTask(page);
+    const optionTexts = await page.locator('#or-f-tech-select option').allTextContents();
+    ok('12.1 Kevin (technicien) absent du sélecteur', !optionTexts.includes('Kevin'));
+    ok('12.2 Jordan (technicien) absent du sélecteur', !optionTexts.includes('Jordan'));
+    ok('12.3 Dorian (technicien) absent du sélecteur', !optionTexts.includes('Dorian'));
+    ok('12.4 Sophie (responsable) présente dans le sélecteur', optionTexts.includes('Sophie'));
+    ok('12.5 Alban (responsable) présent dans le sélecteur', optionTexts.includes('Alban'));
+    ok('12.6 Aucune erreur JS pendant ce scénario', pageErrors.length === 0);
+    await ctx.close();
+  }
+
+  // ── 13. Validation rapide en un clic (tâche unique) ──
+  {
+    const { ctx, page, pageErrors } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    await openOrgResp(page);
+    await openHeaderNewTask(page);
+    await fillForm(page, { title: 'Vérifier extincteurs', day: 'mercredi' });
+    await submitPrimary(page);
+    await page.waitForTimeout(250);
+
+    const card = page.locator('#or-daycol-mercredi .or-tc', { hasText: 'Vérifier extincteurs' }).first();
+    const hasValidateBtn = await card.locator('.or-tc-validate-btn').count();
+    ok('13.1 Le bouton "✓ Valider" est visible directement sur la carte', hasValidateBtn === 1);
+
+    await card.locator('.or-tc-validate-btn').click();
+    await page.waitForTimeout(350);
+
+    const cardAfter = page.locator('#or-daycol-mercredi .or-tc', { hasText: 'Vérifier extincteurs' }).first();
+    ok('13.2 Aucun volet ni formulaire ne s\'est ouvert', !(await modalIsOpen(page)));
+    const statusText = await cardAfter.locator('.or-tc-status').textContent();
+    ok('13.3 Le statut visuel devient "Validée" immédiatement', (statusText || '').trim() === 'Validée');
+    ok('13.4 La carte reste affichée sur son jour (pas archivée/disparue)', (await dayCardTitles(page, 'mercredi')).includes('Vérifier extincteurs'));
+    const hasValidateBtnAfter = await cardAfter.locator('.or-tc-validate-btn').count();
+    ok('13.5 Le bouton "Valider" disparaît une fois la tâche validée (pas de double-validation via l\'UI)', hasValidateBtnAfter === 0);
+
+    const doc = (await allOrgTasks(page)).find(t => t.title === 'Vérifier extincteurs');
+    ok('13.6 La validation est bien enregistrée dans Firestore (done:true)', !!doc && doc.done === true && doc.status === 'done');
+
+    // Persistance après re-sélection du module
+    await page.evaluate(() => { MX.showPage('home'); });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => { const o = document.getElementById('ver-modal-overlay'); if (o) o.remove(); });
+    await openOrgResp(page);
+    const statusAfterReload = await page.locator('#or-daycol-mercredi .or-tc', { hasText: 'Vérifier extincteurs' }).first().locator('.or-tc-status').textContent();
+    ok('13.7 Le résultat persiste après relecture Firestore', (statusAfterReload || '').trim() === 'Validée');
+    ok('13.8 Aucune erreur JS pendant ce scénario', pageErrors.length === 0);
+    await ctx.close();
+  }
+
+  // ── 14. Validation rapide sur une occurrence récurrente : série non affectée ──
+  {
+    const { ctx, page, pageErrors } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    await openOrgResp(page);
+    await openHeaderNewTask(page);
+    await fillForm(page, {
+      title: 'Contrôle quotidien sécurité', day: 'lundi',
+      recurrence: 'weekly', recurDays: ['lundi', 'mardi', 'mercredi'],
+    });
+    await submitPrimary(page);
+    await page.waitForTimeout(250);
+
+    // On valide uniquement l'occurrence du mardi
+    const mardiCard = page.locator('#or-daycol-mardi .or-tc', { hasText: 'Contrôle quotidien sécurité' }).first();
+    await mardiCard.locator('.or-tc-validate-btn').click();
+    await page.waitForTimeout(350);
+
+    const mardiStatus  = await page.locator('#or-daycol-mardi .or-tc', { hasText: 'Contrôle quotidien sécurité' }).first().locator('.or-tc-status').textContent();
+    const lundiStatus  = await page.locator('#or-daycol-lundi .or-tc', { hasText: 'Contrôle quotidien sécurité' }).first().locator('.or-tc-status').textContent();
+    const mercrediStatus = await page.locator('#or-daycol-mercredi .or-tc', { hasText: 'Contrôle quotidien sécurité' }).first().locator('.or-tc-status').textContent();
+    ok('14.1 Seule l\'occurrence du mardi est validée', (mardiStatus || '').trim() === 'Validée');
+    ok('14.2 L\'occurrence du lundi reste "À faire"', (lundiStatus || '').trim() === 'À faire');
+    ok('14.3 L\'occurrence du mercredi reste "À faire"', (mercrediStatus || '').trim() === 'À faire');
+
+    const allDocs = (await allOrgTasks(page)).filter(t => t.title === 'Contrôle quotidien sécurité' || t.seriesId);
+    const originDoc = allDocs.find(t => !t.isException);
+    const excDocs    = allDocs.filter(t => t.isException === true);
+    ok('14.4 Le document d\'origine n\'a pas été modifié (toujours non terminé)', !!originDoc && !originDoc.done);
+    ok('14.5 Une seule exception créée pour cette validation (pas de doublon)', excDocs.length === 1 && excDocs[0].done === true);
+    ok('14.6 Aucune erreur JS pendant ce scénario', pageErrors.length === 0);
     await ctx.close();
   }
 

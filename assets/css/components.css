@@ -25634,12 +25634,22 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 
 .or-form-hint { font-size:10px; color:var(--text3); margin-top:3px; grid-column:1 / -1; }
 
-.or-form-advanced { margin-top:4px; border-top:1px solid var(--border1); padding-top:8px; }
-.or-form-advanced summary { font-size:11px; font-weight:700; color:var(--text3); cursor:pointer; list-style:none; display:flex; align-items:center; gap:5px; }
+.or-form-advanced { margin-top:8px; border-top:1px solid var(--border1); padding-top:10px; }
+.or-form-advanced summary { list-style:none; cursor:pointer; }
 .or-form-advanced summary::-webkit-details-marker { display:none; }
-.or-form-advanced summary::before { content:'\f105'; font-family:'Font Awesome 6 Free'; font-weight:900; font-size:9px; transition:transform .15s; }
-.or-form-advanced[open] summary::before { transform:rotate(90deg); }
-.or-form-advanced[open] summary { margin-bottom:8px; }
+.or-form-advanced-toggle {
+  display:flex; align-items:center; gap:9px;
+  padding:11px 14px; border-radius:9px;
+  border:1.5px solid var(--border2); background:var(--bg3);
+  font-size:13px; font-weight:700; color:var(--text1);
+  transition:all .15s; min-height:40px;
+}
+.or-form-advanced-toggle:hover { background:var(--bg4); border-color:var(--border3); }
+.or-form-advanced-toggle i:first-child { color:var(--cyan); font-size:13px; }
+.or-form-advanced-toggle span { flex:1; }
+.or-form-advanced-chevron { font-size:11px; color:var(--text3); transition:transform .15s; }
+.or-form-advanced[open] .or-form-advanced-toggle { border-color:var(--cyan); background:rgba(0,194,209,.06); margin-bottom:10px; }
+.or-form-advanced[open] .or-form-advanced-chevron { transform:rotate(90deg); }
 .or-form-advanced > .or-form-row,
 .or-form-advanced > .or-form-2col { margin-top:8px; }
 
@@ -25671,3 +25681,58 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
   .or-daypick-btn { min-width:28px; padding:6px 0; font-size:10px; }
 }
 @media (min-width: 1100px) { .mtv-banner { margin-left: 8px; margin-right: 8px; } }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ORGANISATION RESPONSABLE — priorités personnalisables, validation rapide
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Bouton "⚙" dans la légende des priorités ── */
+.or-prio-legend-cfg {
+  width:34px; height:34px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  border-radius:9px; border:1px solid var(--border2); background:var(--bg3);
+  color:var(--text3); font-size:13px; cursor:pointer; transition:all .15s;
+}
+.or-prio-legend-cfg:hover { background:var(--bg4); color:var(--cyan); border-color:var(--cyan); }
+
+/* ── Configuration des priorités (modal) ── */
+.or-prio-cfg { display:flex; flex-direction:column; gap:10px; }
+.or-prio-cfg-empty { font-size:12px; color:var(--text3); font-style:italic; padding:8px 0; }
+.or-prio-cfg-list { display:flex; flex-direction:column; gap:8px; }
+.or-prio-cfg-row {
+  display:grid; grid-template-columns:34px 1fr 1fr 34px; gap:8px; align-items:center;
+  padding:8px; border:1px solid var(--border1); border-radius:9px; background:var(--bg3);
+}
+.or-prio-cfg-color { width:34px; height:34px; padding:0; border:1px solid var(--border2); border-radius:7px; cursor:pointer; background:none; }
+.or-prio-cfg-name, .or-prio-cfg-desc { font-size:12px; }
+.or-prio-cfg-del {
+  width:34px; height:34px; display:flex; align-items:center; justify-content:center;
+  border-radius:7px; border:1px solid transparent; background:transparent;
+  color:var(--text3); cursor:pointer; transition:all .15s;
+}
+.or-prio-cfg-del:hover { background:rgba(239,68,68,.1); color:var(--red); border-color:rgba(239,68,68,.25); }
+.or-prio-cfg-add {
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  padding:10px 12px; border:1.5px dashed var(--border2); border-radius:9px;
+  background:transparent; color:var(--text3); font-size:12px; font-weight:700;
+  font-family:var(--ffs); cursor:pointer; transition:all .15s;
+}
+.or-prio-cfg-add:hover { border-color:var(--cyan); color:var(--cyan); background:rgba(0,194,209,.05); }
+@media (max-width:480px) {
+  .or-prio-cfg-row { grid-template-columns:34px 1fr 34px; }
+  .or-prio-cfg-desc { grid-column:1 / -1; }
+}
+
+/* ── Validation rapide en un clic (carte) ── */
+.or-tc-validate-btn {
+  display:flex; align-items:center; justify-content:center; gap:6px;
+  width:100%; margin-top:6px; padding:8px 10px; border-radius:7px;
+  border:1.5px solid rgba(16,185,129,.35); background:rgba(16,185,129,.1);
+  color:#10B981; font-size:11px; font-weight:700; font-family:var(--ffs);
+  cursor:pointer; transition:all .15s; min-height:34px;
+}
+.or-tc-validate-btn:hover { background:rgba(16,185,129,.18); border-color:#10B981; }
+.or-tc-validate-btn:active { transform:scale(.97); }
+.or-tc-validate-btn:disabled { opacity:.5; cursor:wait; }
+@media (hover:none) {
+  .or-tc-validate-btn { min-height:40px; font-size:12px; } /* cible tactile plus confortable */
+}

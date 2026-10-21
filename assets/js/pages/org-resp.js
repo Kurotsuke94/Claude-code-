@@ -53,10 +53,15 @@
   let _unsubInts      = null;
   let _unsubPmpInts   = null;
 
-  // Récurrence — tâches "origine" (recurrence:'weekly'|'monthly'), valables
-  // pour TOUTES les semaines, indépendamment de la semaine affichée.
+  // Récurrence — tâches "origine" (recurrence:'daily'|'weekly'|'monthly'),
+  // valables pour TOUTES les semaines, indépendamment de la semaine affichée.
   let _recurOrigins  = [];
   let _unsubRecur    = null;
+
+  // Priorités personnalisables (org_config/priorities) — config dynamique,
+  // jamais de couleur devinée pour une valeur non configurée.
+  let _prioLevels    = [];
+  let _unsubPrio     = null;
 
   // Formulaire tâche — sélection techniciens en cours (chips + dropdown)
   let _orPickerTechs = [];
@@ -276,7 +281,9 @@
       if (start && dateStr < start) return;
       if (end && dateStr > end) return;
       let matches = false;
-      if (origin.recurrence === 'weekly') {
+      if (origin.recurrence === 'daily') {
+        matches = true; // tous les jours, seules les bornes recurStart/recurEnd limitent
+      } else if (origin.recurrence === 'weekly') {
         const days = Array.isArray(origin.recurDays) && origin.recurDays.length
           ? origin.recurDays : (origin.dayId ? [origin.dayId] : []);
         matches = days.includes(MX.DAYS[idx].id);
@@ -348,25 +355,137 @@
     };
     return m[cat] || { color: '#6B7280', icon: 'fa-tag' };
   }
-  // ── PRIORITÉ — 3 niveaux métier (rouge/vert/bleu), jamais déduits de la
-  // couleur affichée. Compatibilité : les anciennes valeurs "urgente" et
-  // "critique" retombent sur "haute" À L'AFFICHAGE SEULEMENT — jamais
-  // réécrites en base (voir _effPriority, seule porte d'entrée à utiliser
-  // pour LIRE une priorité ; les écritures préservent la valeur brute telle
-  // quelle pour ne jamais perdre d'information historique). ──
-  const PRIO_LEVELS = {
-    haute:   { label: 'Haute',   color: '#EF4444', bg: 'rgba(239,68,68,.12)',  icon: '🔴' },
-    normale: { label: 'Normale', color: '#22C55E', bg: 'rgba(34,197,94,.12)',  icon: '🟢' },
-    basse:   { label: 'Basse',   color: '#3B82F6', bg: 'rgba(59,130,246,.12)', icon: '🔵' },
-  };
+  // ── PRIORITÉ — niveaux personnalisables par les Responsables/Admins
+  // (org_config/priorities), jamais déduits de la couleur affichée.
+  // Compatibilité : les anciennes valeurs "urgente" et "critique" (écrites
+  // avant l'existence de la config dynamique) retombent sur "haute" À
+  // L'AFFICHAGE SEULEMENT — jamais réécrites en base. Une valeur qui ne
+  // correspond à AUCUN niveau configuré (et qui n'est pas l'un de ces deux
+  // alias historiques) n'est JAMAIS interprétée comme une couleur : elle
+  // s'affiche dans un état neutre explicite "Non configuré". Voir
+  // _effPriority, seule porte d'entrée à utiliser pour LIRE une priorité. ──
+  const DEFAULT_PRIO_LEVELS = [
+    { id: 'haute',   label: 'Haute',   color: '#EF4444', description: '', order: 0 },
+    { id: 'normale', label: 'Normale', color: '#22C55E', description: '', order: 1 },
+    { id: 'basse',   label: 'Basse',   color: '#3B82F6', description: '', order: 2 },
+  ];
+  const LEGACY_PRIO_ALIAS = { urgente: 'haute', critique: 'haute' };
+  const UNCONFIGURED_PRIO = { id: null, label: 'Non configuré', color: '#6B7280', bg: 'rgba(107,114,128,.12)', icon: '⚪' };
+
+  function _prioLevelById(id) { return _prioLevels.find(l => l.id === id); }
+  function _sortedPrioLevels() { return [..._prioLevels].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
+  function _defaultPrioId() {
+    if (_prioLevelById('normale')) return 'normale';
+    const sorted = _sortedPrioLevels();
+    return sorted.length ? sorted[0].id : null;
+  }
+  function _prioBg(hex) {
+    const h = (hex || '#6B7280').replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16) || 0, g = parseInt(h.substring(2, 4), 16) || 0, b = parseInt(h.substring(4, 6), 16) || 0;
+    return `rgba(${r},${g},${b},.12)`;
+  }
   function _effPriority(t) {
-    const p = (t && typeof t === 'object') ? t.priority : t;
-    if (p === 'haute' || p === 'normale' || p === 'basse') return p;
-    if (p === 'urgente' || p === 'critique') return 'haute'; // compat, lecture seule
-    return 'normale';
+    const raw = (t && typeof t === 'object') ? t.priority : t;
+    if (raw == null) return _defaultPrioId(); // nouvelle tâche : pas encore de priorité choisie
+    if (_prioLevelById(raw)) return raw;
+    const alias = LEGACY_PRIO_ALIAS[raw];
+    if (alias && _prioLevelById(alias)) return alias;
+    return null; // valeur explicite mais non configurée — jamais interprétée comme une couleur
   }
   function _prioConfig(prioOrTask) {
-    return PRIO_LEVELS[_effPriority(prioOrTask)];
+    const id = _effPriority(prioOrTask);
+    if (!id) return UNCONFIGURED_PRIO;
+    const lvl = _prioLevelById(id);
+    if (!lvl) return UNCONFIGURED_PRIO;
+    return { id: lvl.id, label: lvl.label, color: lvl.color, bg: _prioBg(lvl.color), icon: '●' };
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  CONFIGURATION DES PRIORITÉS (Responsables/Admins — même accès que le
+  //  module) — stockée dans org_config/priorities, jamais écrasée une fois
+  //  créée (voir _subscribe). Supprimer un niveau ne touche aucune tâche
+  //  existante : elle retombera simplement sur l'état "Non configuré".
+  // ═══════════════════════════════════════════════════════
+  function openPriorityConfig() {
+    MX.showModal({
+      title:   'Configurer les priorités',
+      sub:     'Visible par les Responsables et Administrateurs',
+      body:    _priorityConfigBody(),
+      noAutoClose: true,
+      actions: [
+        { label: 'Fermer', cls: 'cancel', fn: () => MX.closeModal() }
+      ]
+    });
+  }
+
+  function _priorityConfigBody() {
+    const sorted = _sortedPrioLevels();
+    return `<div class="or-prio-cfg">
+      ${!sorted.length ? `<div class="or-prio-cfg-empty">Aucun niveau de priorité configuré. Les tâches existantes s'affichent comme "Non configuré".</div>` : ''}
+      <div class="or-prio-cfg-list">
+        ${sorted.map(lvl => `
+          <div class="or-prio-cfg-row">
+            <input type="color" class="or-prio-cfg-color" value="${lvl.color}" onchange="MX.Pages.OrgResp._updatePrioField('${MX.esc(lvl.id)}','color',this.value)" title="Couleur">
+            <input type="text" class="fi or-prio-cfg-name" value="${MX.esc(lvl.label)}" placeholder="Nom (ex: Haute priorité)" onchange="MX.Pages.OrgResp._updatePrioField('${MX.esc(lvl.id)}','label',this.value)">
+            <input type="text" class="fi or-prio-cfg-desc" value="${MX.esc(lvl.description || '')}" placeholder="Description (optionnel)" onchange="MX.Pages.OrgResp._updatePrioField('${MX.esc(lvl.id)}','description',this.value)">
+            <button type="button" class="or-prio-cfg-del" onclick="MX.Pages.OrgResp.openDeletePrioLevel('${MX.esc(lvl.id)}')" title="Supprimer ce niveau">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+      <button type="button" class="or-prio-cfg-add" onclick="MX.Pages.OrgResp._doAddPrioLevel()">
+        <i class="fas fa-plus"></i> Ajouter un niveau de priorité
+      </button>
+    </div>`;
+  }
+
+  async function _savePrioLevels(levels) {
+    MX.syncStart();
+    try {
+      await db.collection('org_config').doc('priorities').set({ levels });
+      MX.syncEnd();
+    } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  function _updatePrioField(id, field, rawValue) {
+    const value = field === 'label' || field === 'description' ? rawValue.trim() : rawValue;
+    const updated = _prioLevels.map(l => l.id === id ? { ...l, [field]: value } : l);
+    _savePrioLevels(updated);
+  }
+
+  function _doAddPrioLevel() {
+    const existingIds = _prioLevels.map(l => l.id);
+    let n = _prioLevels.length + 1, newId = 'niveau' + n;
+    while (existingIds.includes(newId)) { n++; newId = 'niveau' + n; }
+    const maxOrder = _prioLevels.reduce((m, l) => Math.max(m, l.order ?? 0), -1);
+    const updated = [..._prioLevels, { id: newId, label: 'Nouveau niveau', color: '#6B7280', description: '', order: maxOrder + 1 }];
+    _savePrioLevels(updated).then(() => openPriorityConfig());
+  }
+
+  function openDeletePrioLevel(id) {
+    const lvl = _prioLevelById(id);
+    MX.showModal({
+      title: 'Supprimer ce niveau de priorité',
+      sub:   lvl ? MX.esc(lvl.label) : '',
+      body:  `<div style="display:flex;align-items:flex-start;gap:12px;padding:4px 0">
+        <i class="fas fa-triangle-exclamation" style="color:var(--red);font-size:20px;margin-top:2px;flex-shrink:0"></i>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Les tâches utilisant déjà ce niveau resteront enregistrées telles quelles, mais s'afficheront comme <strong>non configurées</strong> (sans couleur) tant qu'aucun niveau portant le même identifiant n'est recréé.
+        </div>
+      </div>`,
+      actions: [
+        { label: 'Supprimer', cls: 'danger-btn', fn: () => _doDeletePrioLevel(id) },
+        { label: 'Annuler', cls: 'cancel' }
+      ]
+    });
+  }
+
+  async function _doDeletePrioLevel(id) {
+    MX.closeModal();
+    const updated = _prioLevels.filter(l => l.id !== id);
+    await _savePrioLevels(updated);
+    openPriorityConfig();
   }
 
   // ── TECHNICIENS AFFECTÉS — compat ancienne chaîne unique / nouveau
@@ -400,8 +519,13 @@
       </span>`;
     }).join('');
   }
+  // Grade "Responsable" — réutilise exactement le champ déjà utilisé par
+  // MX.Auth.isResponsable()/canSeeAll() (jamais une nouvelle notion de rôle).
+  function _isUserResponsable(u) {
+    return !!u && (u.rank === 'responsable' || u.role === 'responsable');
+  }
   function _techSelectOptionsHtml() {
-    const users = (MX.state.users || []).filter(u => u.name && !_orPickerTechs.includes(u.name));
+    const users = (MX.state.users || []).filter(u => u.name && _isUserResponsable(u) && !_orPickerTechs.includes(u.name));
     return users.map(u => `<option value="${MX.esc(u.name)}">${MX.esc(u.name)}</option>`).join('');
   }
   function _techPickerHtml(selected) {
@@ -518,6 +642,7 @@
     if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
     if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
     if (_unsubRecur)   { _unsubRecur();   _unsubRecur   = null; }
+    if (_unsubPrio)    { _unsubPrio();    _unsubPrio    = null; }
     _interventions = [];
     _pmpInts       = [];
 
@@ -588,7 +713,7 @@
     // de doublon en base — voir _virtualOccurrences).
     try {
       _unsubRecur = db.collection('org_tasks')
-        .where('recurrence', 'in', ['weekly', 'monthly'])
+        .where('recurrence', 'in', ['daily', 'weekly', 'monthly'])
         .onSnapshot(
           snap => {
             _recurOrigins = snap.docs
@@ -599,6 +724,30 @@
           err => console.warn('[OrgResp] recur-origins:', err.message)
         );
     } catch(e) { console.warn('[OrgResp] recur-origins-setup:', e.message); }
+
+    // Priorités personnalisables (org_config/priorities) — doc unique,
+    // indépendant de weekKey. Seedé une seule fois avec les valeurs par
+    // défaut (rouge/vert/bleu) si le document n'existe pas encore du tout ;
+    // une config existante, même vidée volontairement par un responsable,
+    // n'est jamais réécrasée.
+    try {
+      _unsubPrio = db.collection('org_config').doc('priorities')
+        .onSnapshot(
+          snap => {
+            if (!snap.exists) {
+              _prioLevels = DEFAULT_PRIO_LEVELS;
+              db.collection('org_config').doc('priorities')
+                .set({ levels: DEFAULT_PRIO_LEVELS }, { merge: true })
+                .catch(() => {});
+            } else {
+              const data = snap.data() || {};
+              _prioLevels = Array.isArray(data.levels) ? data.levels : [];
+            }
+            if (!_inHistory) _doRender();
+          },
+          err => console.warn('[OrgResp] prio-config:', err.message)
+        );
+    } catch(e) { console.warn('[OrgResp] prio-config-setup:', e.message); }
 
     // Load templates once
     db.collection('org_templates').get()
@@ -752,22 +901,18 @@
     mc.innerHTML = h;
   }
 
-  // ── LÉGENDE PRIORITÉS (rouge/vert/bleu) + COMPTEUR ── (maquette)
+  // ── LÉGENDE PRIORITÉS (personnalisable) + COMPTEUR ── (maquette)
   function _cpRenderPrioLegend(planTasks) {
-    const counts = { haute: 0, normale: 0, basse: 0 };
-    planTasks.forEach(t => { counts[_effPriority(t)]++; });
-    const items = [
-      { k: 'haute',   lbl: 'Haute priorité'   },
-      { k: 'normale', lbl: 'Priorité normale' },
-      { k: 'basse',   lbl: 'Priorité basse'   },
-    ];
+    const counts = {};
+    planTasks.forEach(t => { const id = _effPriority(t); if (id) counts[id] = (counts[id] || 0) + 1; });
+    const levels = _sortedPrioLevels();
     return `<div class="or-prio-legend">
-      ${items.map(({ k, lbl }) => {
-        const cfg = PRIO_LEVELS[k];
-        return `<div class="or-prio-legend-card" style="--prio-color:${cfg.color};--prio-bg:${cfg.bg}">
+      ${levels.map(lvl => {
+        const bg = _prioBg(lvl.color);
+        return `<div class="or-prio-legend-card" style="--prio-color:${lvl.color};--prio-bg:${bg}">
           <span class="or-prio-legend-dot"></span>
-          <span class="or-prio-legend-lbl">${lbl}</span>
-          <span class="or-prio-legend-cnt">${counts[k]}</span>
+          <span class="or-prio-legend-lbl">${MX.esc(lvl.label)}</span>
+          <span class="or-prio-legend-cnt">${counts[lvl.id] || 0}</span>
         </div>`;
       }).join('')}
       <div class="or-prio-legend-card or-prio-legend-card--total">
@@ -775,6 +920,9 @@
         <span class="or-prio-legend-lbl">Tâches cette semaine</span>
         <span class="or-prio-legend-cnt">${planTasks.length}</span>
       </div>
+      <button type="button" class="or-prio-legend-cfg" onclick="MX.Pages.OrgResp.openPriorityConfig()" title="Configurer les priorités">
+        <i class="fas fa-gear"></i>
+      </button>
     </div>`;
   }
 
@@ -785,7 +933,10 @@
     const reunions      = planTasks.filter(t => t.itemType === 'reunion').length;
     const uniqueTechs   = [...new Set(planTasks.filter(t => t.assignedTo).map(t => t.assignedTo))].length;
     const totalDur      = planTasks.reduce((s, t) => s + (t.duration || 0), 0);
-    const urgents       = planTasks.filter(t => _effPriority(t) === 'haute' && !t.done).length;
+    // "Urgences" = tâches dont la priorité est le premier niveau configuré
+    // (ordre croissant) — par convention celui de plus haute sévérité.
+    const topPrioId     = _sortedPrioLevels()[0] ? _sortedPrioLevels()[0].id : null;
+    const urgents       = topPrioId ? planTasks.filter(t => _effPriority(t) === topPrioId && !t.done).length : 0;
     const pct           = planTotal ? Math.round(planDone / planTotal * 100) : 0;
     const pctC          = pct >= 80 ? '#10B981' : pct >= 40 ? '#F59E0B' : '#EF4444';
     const durStr        = totalDur > 0 ? `${Math.floor(totalDur/60)}h${totalDur%60>0?String(totalDur%60).padStart(2,'0'):''}` : '—';
@@ -864,12 +1015,20 @@
     const itype     = ITEM_TYPES[t.itemType] || ITEM_TYPES.tache;
     const isDone    = t.done;
     const isInProg  = !isDone && t.status === 'inprogress';
-    const statusLbl = isDone ? 'Terminée' : (isInProg ? 'En cours' : 'À faire');
+    const statusLbl = isDone ? 'Validée' : (isInProg ? 'En cours' : 'À faire');
     const statusCls = isDone ? 'or-tc-status--done' : isInProg ? 'or-tc-status--prog' : 'or-tc-status--todo';
     const techHtml  = _techBubblesHtml(t, 3);
     const recurIco  = t._recurOrigin ? `<i class="fas fa-rotate or-tc-recur-ico" title="Tâche récurrente"></i>` : '';
     const locHtml   = t.location ? `<span class="or-tc-loc" title="${MX.esc(t.location)}"><i class="fas fa-location-dot"></i> ${MX.esc(t.location)}</span>` : '';
     const planBadge = t._unscheduled ? `<span class="or-tc-badge"><i class="fas fa-clock"></i> À planifier</span>` : '';
+    // Validation rapide en un clic : indisponible pour les éléments agrégés
+    // d'un autre module (interventions/PMP), gérés par leur propre module.
+    const canQuickValidate = !isDone && !t._source;
+    const quickValidateBtn = canQuickValidate
+      ? `<button type="button" class="or-tc-validate-btn" onclick="event.stopPropagation();MX.Pages.OrgResp._quickValidate('${t.id}',this)" title="Valider cette tâche">
+          <i class="fas fa-check"></i> Valider
+        </button>`
+      : '';
     return `<div class="or-tc${isDone ? ' or-tc--done' : ''}"
       style="--prio-color:${prio.color};--prio-bg:${prio.bg}"
       data-id="${t.id}" draggable="true"
@@ -889,6 +1048,7 @@
         <span class="or-tc-status ${statusCls}">${statusLbl}</span>
         <div class="or-tc-avs">${techHtml}</div>
       </div>
+      ${quickValidateBtn}
     </div>`;
   }
 
@@ -1040,7 +1200,8 @@
           </div>`;
         }).join('');
 
-    const urgents    = planTasks.filter(t => _effPriority(t) === 'haute' && !t.done);
+    const topPrioId2 = _sortedPrioLevels()[0] ? _sortedPrioLevels()[0].id : null;
+    const urgents    = topPrioId2 ? planTasks.filter(t => _effPriority(t) === topPrioId2 && !t.done) : [];
     const unassigned = planTasks.filter(t => !_taskTechs(t).length && !t.done);
     const alerts = [];
     if (urgents.length)    alerts.push({ c:'#EF4444', txt:`${urgents.length} mission${urgents.length>1?'s':''} urgente${urgents.length>1?'s':''}` });
@@ -2262,10 +2423,12 @@
     if (_unsubInts)    { _unsubInts();    _unsubInts    = null; }
     if (_unsubPmpInts) { _unsubPmpInts(); _unsubPmpInts = null; }
     if (_unsubRecur)   { _unsubRecur();   _unsubRecur   = null; }
+    if (_unsubPrio)    { _unsubPrio();    _unsubPrio    = null; }
     _tasks         = [];
     _interventions = [];
     _pmpInts       = [];
     _recurOrigins  = [];
+    _prioLevels    = [];
     _weekKey       = null;
     _inHistory     = false;
   }
@@ -2308,12 +2471,12 @@
     </div>`;
 
     const prioHtml = `<div class="or-prio-pills">
-      ${['haute','normale','basse'].map(p => {
-        const cfg  = PRIO_LEVELS[p];
-        const isOn = p === prio;
-        return `<label class="or-prio-pill${isOn ? ' or-prio-pill--on' : ''}" style="--prio-color:${cfg.color};--prio-bg:${cfg.bg}">
-          <input type="radio" name="or-f-prio" value="${p}" ${isOn ? 'checked' : ''} style="display:none" onchange="MX.Pages.OrgResp._onPrioChange(this)">
-          <span class="or-prio-pill-dot"></span>${cfg.label}
+      ${_sortedPrioLevels().map(lvl => {
+        const isOn = lvl.id === prio;
+        const bg   = _prioBg(lvl.color);
+        return `<label class="or-prio-pill${isOn ? ' or-prio-pill--on' : ''}" style="--prio-color:${lvl.color};--prio-bg:${bg}">
+          <input type="radio" name="or-f-prio" value="${MX.esc(lvl.id)}" ${isOn ? 'checked' : ''} style="display:none" onchange="MX.Pages.OrgResp._onPrioChange(this)">
+          <span class="or-prio-pill-dot"></span>${MX.esc(lvl.label)}
         </label>`;
       }).join('')}
     </div>`;
@@ -2326,6 +2489,7 @@
         <div class="or-recur-pills" id="or-f-recur-pills">
           ${[
             { v: '',        l: 'Aucune' },
+            { v: 'daily',   l: 'Tous les jours' },
             { v: 'weekly',  l: 'Toutes les semaines' },
             { v: 'monthly', l: 'Tous les mois' },
           ].map(({ v, l }) => `<label class="or-recur-pill${v===recur?' or-recur-pill--on':''}" data-val="${v}">
@@ -2375,7 +2539,11 @@
       </div>
       ${recurHtml}
       <details class="or-form-advanced">
-        <summary>Options avancées</summary>
+        <summary class="or-form-advanced-toggle">
+          <i class="fas fa-sliders"></i>
+          <span>Options avancées</span>
+          <i class="fas fa-chevron-right or-form-advanced-chevron"></i>
+        </summary>
         <div class="or-form-row">
           <label class="or-form-lbl">Type d'élément</label>
           ${_itypePicker(d.itemType)}
@@ -2457,7 +2625,7 @@
       description:  (document.getElementById('or-f-desc')?.value   || '').trim(),
       assignedTo:   [..._orPickerTechs],
       category:     document.getElementById('or-f-cat')?.value     || 'autre',
-      priority:     document.querySelector('input[name="or-f-prio"]:checked')?.value || 'normale',
+      priority:     document.querySelector('input[name="or-f-prio"]:checked')?.value || _defaultPrioId(),
       type:         'unique',
       dayId,
       recurrence:   recurrence || null,
@@ -2624,8 +2792,14 @@
     const { seriesId, occurrenceDate, excId } = _occIds(taskId);
     MX.syncStart();
     try {
+      // Le jour de CETTE occurrence est déterminé par sa propre date dans la
+      // semaine actuellement affichée — jamais par le jour d'ancrage de la
+      // tâche d'origine (sans quoi valider une occurrence la ferait sauter
+      // visuellement sur le jour de l'origine, un bug réel découvert lors de
+      // l'ajout de la validation rapide).
+      const occDayId = _dateToDayId(occurrenceDate) || _tasks.concat(_recurOrigins).find(x => x.id === seriesId)?.dayId || null;
       await db.collection('org_tasks').doc(excId).set({
-        seriesId, occurrenceDate, weekKey: _weekKey, dayId: _tasks.concat(_recurOrigins).find(x=>x.id===seriesId)?.dayId || null,
+        seriesId, occurrenceDate, weekKey: _weekKey, dayId: occDayId,
         isException: true, deleted: false,
         done, status: done ? 'done' : 'todo',
         doneBy: done ? _currentUserName() : null, doneAt: done ? FV.serverTimestamp() : null,
@@ -2634,6 +2808,47 @@
       MX.syncEnd();
       MX.toast(done ? 'Occurrence terminée ✓' : 'Occurrence rouverte');
     } catch(e) { MX.syncFail(); MX.toast('Erreur: ' + e.message, true); }
+  }
+
+  // ── VALIDATION RAPIDE EN UN CLIC (bouton "✓ Valider" sur la carte) ──
+  // Jamais de volet/formulaire supplémentaire. Pour une tâche récurrente,
+  // seule l'occurrence affichée est validée (document d'exception à id
+  // déterministe, comme _occDoneToggle) — jamais toute la série. Idempotent :
+  // une occurrence déjà validée n'est pas réécrite une deuxième fois.
+  // Contrairement à l'ancien "Terminer" (menu ···, avec commentaire), cette
+  // action ne archive JAMAIS la tâche : elle doit rester visible sur son
+  // jour, avec son statut visuel mis à jour — cohérent avec le comportement
+  // déjà existant des occurrences récurrentes.
+  async function _quickValidate(taskId, btn) {
+    if (taskId.startsWith('int_') || taskId.startsWith('pmp_')) return; // géré par leur propre module
+    if (btn) btn.disabled = true;
+    try {
+      if (taskId.includes('__occ_')) {
+        await _occDoneToggle(taskId, true);
+      } else if (_recurOrigins.some(o => o.id === taskId)) {
+        const origin = _recurOrigins.find(o => o.id === taskId);
+        const anchorDate = _originAnchorDate(origin);
+        await _occDoneToggle(taskId + '__occ_' + anchorDate, true);
+      } else {
+        await _doQuickValidatePlain(taskId);
+      }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function _doQuickValidatePlain(taskId) {
+    const task = _tasks.find(x => x.id === taskId);
+    if (task && task.done) return; // déjà validée — idempotent, aucune écriture
+    const name = _currentUserName();
+    MX.syncStart();
+    try {
+      await db.collection('org_tasks').doc(taskId).update({
+        done: true, status: 'done', doneBy: name, doneAt: FV.serverTimestamp(),
+      });
+      MX.syncEnd();
+      MX.toast('Tâche validée ✓');
+    } catch(e) { MX.syncFail(); MX.toast('Erreur : la validation a échoué — réessayez (' + e.message + ')', true); }
   }
 
   function openEditOccurrence(taskId) {
@@ -3068,6 +3283,11 @@
     _occDoneToggle, openEditOccurrence, _doEditOccurrence,
     openDeleteOccurrence, _doDeleteOccurrence,
     openDeleteSeries, _doDeleteSeries,
+    // Validation rapide en un clic
+    _quickValidate,
+    // Priorités personnalisables
+    openPriorityConfig, _updatePrioField, _doAddPrioLevel,
+    openDeletePrioLevel, _doDeletePrioLevel,
     // Session teardown (called by auth._destroyUI on logout)
     _destroy,
   };

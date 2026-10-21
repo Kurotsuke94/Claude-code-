@@ -5,6 +5,7 @@
     await db.collection('users').doc('jordan').set({ name: 'Jordan', role: 'technicien', rank: 'utilisateur',  pin: '2222', color: null });
     await db.collection('users').doc('dorian').set({ name: 'Dorian', role: 'technicien', rank: 'utilisateur',  pin: '3333', color: null });
     await db.collection('users').doc('sophie').set({ name: 'Sophie', role: 'responsable', rank: 'responsable', pin: '9999', color: null });
-    console.log('[seed-gst] Utilisateurs injectés (Kevin, Jordan, Dorian techniciens + Sophie responsable).');
+    await db.collection('users').doc('alban').set({ name: 'Alban', role: 'responsable', rank: 'responsable', pin: '8888', color: null });
+    console.log('[seed-gst] Utilisateurs injectés (Kevin, Jordan, Dorian techniciens + Sophie, Alban responsables).');
   };
 })();
