@@ -17,11 +17,55 @@ const path = require('path');
 const SRC_PATH = path.join(__dirname, '..', 'functions', 'index.js');
 const src = fs.readFileSync(SRC_PATH, 'utf8');
 
+// Extrait le texte source COMPLET d'une fonction nommée, de "function name("
+// jusqu'à SA PROPRE accolade fermante — par comptage de profondeur
+// d'accolades (en ignorant celles à l'intérieur des chaînes/commentaires),
+// jamais par un motif de fin de ligne ("\n}\n"). Portable (Windows/macOS/
+// Linux) : ne dépend d'aucune convention de saut de ligne (LF/CRLF), et
+// fonctionne aussi bien si le corps de la fonction tient sur une seule
+// ligne (ex. _parisDateStr) que sur plusieurs (ex. _yesterdayParisDateStr).
+// Le comptage de profondeur garantit aussi que l'extraction s'arrête
+// exactement à l'accolade fermante DE CETTE fonction et ne déborde jamais
+// sur la fonction suivante, même si celle-ci contient elle-même des
+// accolades imbriquées.
 function extractFn(name) {
-  const re = new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}\\n');
-  const m = src.match(re);
+  const startRe = new RegExp('function\\s+' + name + '\\s*\\([^)]*\\)\\s*\\{');
+  const m = startRe.exec(src);
   if (!m) throw new Error('Fonction ' + name + ' introuvable dans functions/index.js — a-t-elle été renommée/déplacée ? Ce test doit être mis à jour.');
-  return m[0];
+
+  const start = m.index;
+  let i = start + m[0].length; // juste après l'accolade ouvrante de la fonction
+  let depth = 1;
+  let inString = null; // null | '"' | "'" | '`'
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (; i < src.length && depth > 0; i++) {
+    const c = src[i];
+    const next = src[i + 1];
+
+    if (inLineComment) {
+      if (c === '\n') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === '*' && next === '/') { inBlockComment = false; i++; }
+      continue;
+    }
+    if (inString) {
+      if (c === '\\') { i++; continue; } // caractère échappé, ne pas interpréter
+      if (c === inString) inString = null;
+      continue;
+    }
+    if (c === '/' && next === '/') { inLineComment = true; i++; continue; }
+    if (c === '/' && next === '*') { inBlockComment = true; i++; continue; }
+    if (c === '"' || c === "'" || c === '`') { inString = c; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+  }
+  if (depth !== 0) throw new Error('Fonction ' + name + ' : accolades non équilibrées dans functions/index.js — extraction impossible (le fichier a peut-être changé de forme). Ce test doit être mis à jour.');
+
+  return src.slice(start, i);
 }
 
 // Reconstruit les 2 fonctions pures dans ce scope, à partir du texte RÉEL de

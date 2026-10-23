@@ -9,8 +9,39 @@
 // (aucune route cassée, aucune permission existante modifiée), et le
 // responsive de l'écran d'édition lui-même.
 const path = require('path');
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const { chromium } = _resolvePlaywright();
 const BASE  = 'http://127.0.0.1:8811';
+
+// Résolution portable de Playwright (Windows/macOS/Linux) : priorité à une
+// dépendance locale au projet (résolution Node standard — node_modules du
+// projet, puis NODE_PATH/installation globale habituelle), avec un repli
+// configurable par variable d'environnement pour un poste où Playwright
+// est installé ailleurs. Jamais de chemin Linux codé en dur, jamais
+// d'installation automatique — une dépendance absente est signalée
+// clairement plutôt que masquée.
+function _resolvePlaywright() {
+  try {
+    return require('playwright');
+  } catch (e) {
+    if (e.code !== 'MODULE_NOT_FOUND') throw e;
+  }
+  const explicitPath = process.env.PLAYWRIGHT_REQUIRE_PATH;
+  if (explicitPath) {
+    try {
+      return require(explicitPath);
+    } catch (e) {
+      throw new Error(
+        'Playwright introuvable au chemin indiqué par PLAYWRIGHT_REQUIRE_PATH="' + explicitPath + '" (' + (e.message || e) + '). ' +
+        'Vérifiez ce chemin ou installez Playwright localement (npm install -D playwright) dans ce projet.'
+      );
+    }
+  }
+  throw new Error(
+    'Playwright introuvable. Installez-le localement dans ce projet (npm install -D playwright), ' +
+    'ou indiquez son emplacement via la variable d\'environnement PLAYWRIGHT_REQUIRE_PATH ' +
+    '(ex: PLAYWRIGHT_REQUIRE_PATH=/chemin/vers/node_modules/playwright).'
+  );
+}
 const MOCK_FB = path.join(__dirname, 'mock-firebase.js');
 const SEED    = path.join(__dirname, 'gst_seed.js');
 const SUPER_ADMIN_EMAIL = 'keyzeur94460@hotmail.fr';
