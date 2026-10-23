@@ -492,5 +492,40 @@ service cloud.firestore {
       allow read, create, update: if true;
     }
 
+    // ── CTA/VC — CONSEILLER CHAUFFAGE (DJU, circuits, relevés, recommandations) ──
+    // ⚠ RÈGLES TEMPORAIRES — environnement de test fermé, sans données
+    // sensibles (validé explicitement par l'utilisateur pour accélérer les
+    // essais de la V1). À REVOIR avant toute ouverture plus large de
+    // l'application : ces 4 collections sont aussi permissives que
+    // org_tasks/org_config (aucune restriction par rôle côté serveur), ce
+    // qui est cohérent avec elles mais PAS un choix définitif pour de la
+    // donnée de production.
+    //
+    // Permissif à dessein : Techniciens et Responsables s'authentifient par
+    // code PIN (request.auth == null côté Firestore — voir l'en-tête de ce
+    // fichier), donc une règle "Admin Firebase Auth uniquement" (comme
+    // config/hotel_config) leur interdirait toute saisie de circuit ou de
+    // relevé. Protection réelle assurée côté client uniquement
+    // (MX.Auth.canSeeAll, MX.NavVisibility) — même modèle que le bloc
+    // ORGANISATION RESPONSABLE ci-dessus.
+    //
+    // Suppression définitive interdite partout ici : archivage uniquement
+    // pour les circuits (archiveHeatingCircuit), historique append-only
+    // pour les relevés, expiration par changement de statut (jamais de
+    // delete) pour les recommandations — cohérent avec la conservation
+    // d'historique demandée pour ce module.
+    match /heating_circuits/{docId} {
+      allow read, create, update: if true;
+    }
+    match /heating_readings/{docId} {
+      allow read, create: if true;
+    }
+    match /heating_recommendations/{docId} {
+      allow read, create, update: if true;
+    }
+    match /weather_daily/{docId} {
+      allow read, create, update: if true;
+    }
+
   }
 }

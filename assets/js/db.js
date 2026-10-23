@@ -1606,6 +1606,117 @@
     await batch.commit();
   }
 
+  // ── CHAUFFAGE CTA/VC — DJU, circuits, relevés manuels, recommandations ──
+  // 4 collections NOUVELLES, introduites avec le module CTA/VC. Aucune
+  // d'elles n'a encore de règle dans firestore.rules : tant que ces règles
+  // ne sont pas ajoutées (proposition séparée, à valider), toute lecture ou
+  // écriture échoue avec permission-denied sur un Firestore réel (refus par
+  // défaut) — ces fonctions sont fonctionnelles et testées via le mock de
+  // tests/mock-firebase.js, mais pas opérationnelles en production tant que
+  // les règles ne sont pas déployées.
+  //
+  // Permissives à dessein ("if true", écriture incluse, jamais de
+  // suppression dure) : les Techniciens/Responsables s'authentifient par
+  // code PIN (request.auth == null côté Firestore, voir firestore.rules),
+  // donc une règle "Admin Firebase Auth uniquement" comme celle de
+  // config/hotel_config leur interdirait toute saisie — même pattern que
+  // org_tasks/org_config (refonte Organisation Responsable), pas un nouveau
+  // choix d'architecture.
+  const R_HEATING_CIRCUITS = () => db.collection('heating_circuits');
+  const R_HEATING_READINGS = () => db.collection('heating_readings');
+  const R_HEATING_RECOS    = () => db.collection('heating_recommendations');
+  const R_WEATHER_DAILY    = () => db.collection('weather_daily');
+
+  function listenHeatingCircuits(cb) {
+    return R_HEATING_CIRCUITS().onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('heating_circuits'));
+  }
+  async function addHeatingCircuit(data) {
+    const ref = R_HEATING_CIRCUITS().doc(uuid());
+    await ref.set({ ...data, archived: false, createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+  async function updateHeatingCircuit(id, data) {
+    await R_HEATING_CIRCUITS().doc(id).update({ ...data, updatedAt: FV.serverTimestamp() });
+  }
+  async function archiveHeatingCircuit(id, archived) {
+    await R_HEATING_CIRCUITS().doc(id).update({ archived: !!archived, updatedAt: FV.serverTimestamp() });
+  }
+
+  function listenHeatingReadings(cb) {
+    return R_HEATING_READINGS().orderBy('recordedAt', 'desc').limit(500).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('heating_readings'));
+  }
+  // Append-only : une "correction" crée un NOUVEAU relevé référençant
+  // l'ancien (correctsId) plutôt que d'écraser l'historique (consigne
+  // explicite : "une correction ne doit pas détruire silencieusement
+  // l'historique").
+  async function addHeatingReading(data) {
+    const ref = R_HEATING_READINGS().doc(uuid());
+    await ref.set({ ...data, createdAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+
+  function listenHeatingRecommendations(cb) {
+    return R_HEATING_RECOS().orderBy('createdAt', 'desc').limit(300).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('heating_recommendations'));
+  }
+  async function addHeatingRecommendation(data) {
+    const ref = R_HEATING_RECOS().doc(uuid());
+    await ref.set({ status: 'a_examiner', ...data, createdAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+  // Statut uniquement : "acceptée" (décision) reste distinct d'"appliquée"
+  // (confirmation technicien que le réglage a réellement été changé sur
+  // l'installation) — jamais fusionnés dans la même écriture implicite.
+  async function setHeatingRecommendationStatus(id, status, actor, extra) {
+    await R_HEATING_RECOS().doc(id).update({
+      status, decidedAt: FV.serverTimestamp(), decidedBy: actor || '',
+      ...(extra || {}),
+    });
+  }
+  // Expiration automatique (temps écoulé, pas une décision humaine) —
+  // volontairement SÉPARÉE de setHeatingRecommendationStatus : n'écrit
+  // jamais decidedAt/decidedBy (réservés à une vraie décision acceptée/
+  // refusée), pour que "expirée" reste visiblement distincte d'"appliquée"
+  // ou de toute décision humaine dans l'historique. Durée centralisée dans
+  // MX.HeatingEngine.RECO_EXPIRY_DAYS (assets/js/utils/heating-engine.js).
+  async function expireHeatingRecommendation(id) {
+    await R_HEATING_RECOS().doc(id).update({ status: 'expiree', expiredAt: FV.serverTimestamp() });
+  }
+
+  // weather_daily/{YYYY-MM-DD} — un document par jour, écrit en merge
+  // (idempotent) à chaque chargement de météo multi-jours réussi (voir
+  // assets/js/app.js:_ensureDailyDjuPersisted). Jamais de recalcul
+  // destructif : un jour déjà écrit avec kind:'observed' n'est jamais repris
+  // en 'forecast'. Chaque jour (`d`) inclut `lat`/`lon` — les coordonnées
+  // réellement utilisées pour le produire — afin qu'un changement de
+  // localisation en cours de vie de l'app ne se retrouve jamais mélangé
+  // silencieusement sous les mêmes dates sans indication de provenance.
+  async function saveWeatherDailyBatch(days) {
+    if (!days || !days.length) return;
+    const batch = db.batch();
+    days.forEach(d => {
+      batch.set(R_WEATHER_DAILY().doc(d.date), { ...d, updatedAt: FV.serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  }
+  // Interroge sur le champ `date` (toujours présent, identique à l'id du
+  // document) plutôt que FieldPath.documentId() — reste simple à simuler
+  // dans tests/mock-firebase.js et évite une dépendance à une fonctionnalité
+  // Firestore plus avancée pour un gain marginal.
+  function listenWeatherDailyRange(fromDateStr, toDateStr, cb) {
+    return R_WEATHER_DAILY()
+      .where('date', '>=', fromDateStr)
+      .where('date', '<=', toDateStr)
+      .onSnapshot(snap => {
+        cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }, _fsError('weather_daily'));
+  }
+
   // ── EXPORT ──
   window.MX = window.MX || {};
   window.MX.DB = {
@@ -1666,5 +1777,9 @@
     listenTriggeredAlerts, createTriggeredAlert, resolveTriggeredAlert, acknowledgeAlert, clearTodayAlerts,
     listenCsoAlerts,
     getWeeklyChecks, saveWeeklyChecks, deleteWeeklyChecks, updateWeeklyTasks, promoteWeeklyToActive,
+    listenHeatingCircuits, addHeatingCircuit, updateHeatingCircuit, archiveHeatingCircuit,
+    listenHeatingReadings, addHeatingReading,
+    listenHeatingRecommendations, addHeatingRecommendation, setHeatingRecommendationStatus, expireHeatingRecommendation,
+    saveWeatherDailyBatch, listenWeatherDailyRange,
   };
 })();

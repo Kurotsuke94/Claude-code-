@@ -488,3 +488,145 @@ exports.onReadingWrittenRatioClient = onDocumentWritten(
     return alertRef.set(payload, { merge: true });
   }
 );
+
+// ── CTA/VC — PERSISTANCE QUOTIDIENNE DES DJU OBSERVÉS ──
+// PRÉPARÉE MAIS NON DÉPLOYÉE : cette fonction n'existe que dans ce fichier
+// source tant que `firebase deploy --only functions` n'a pas été exécuté
+// explicitement avec l'accord de l'utilisateur — aucune ressource Firebase
+// n'est créée par la seule présence de ce code.
+//
+// Comble le point faible du mécanisme client (assets/js/app.js :
+// _ensureDailyDjuPersisted) : celui-ci n'écrit weather_daily que lorsqu'une
+// session ouvre l'application et que la météo se charge avec succès — si
+// personne ne se connecte un jour donné, ce jour reste vide. Cette tâche
+// planifiée garantit la continuité indépendamment de toute ouverture de
+// l'app.
+//
+// Idempotence : avant tout appel réseau, vérifie si le document du jour
+// cible existe déjà avec kind:"observed" POUR LA MÊME LOCALISATION (lat/lon
+// identiques à la config actuelle) — si oui, ne refait rien. Ne retraite
+// donc jamais un jour déjà finalisé, y compris en cas de ré-exécution
+// manuelle ou de double déclenchement. Si la localisation a changé depuis
+// cette écriture, le jour est reconstruit avec les nouvelles coordonnées
+// (jamais de donnée d'une ancienne localisation conservée silencieusement
+// sous la même date) — voir _yesterdayParisDateStr ci-dessous.
+//
+// Toujours la veille (hier, Europe/Paris) : jamais "aujourd'hui", dont la
+// journée n'est pas terminée — mêmes règles observé/prévisionnel que
+// assets/js/utils/dju.js (buildDailySeries), dupliquées ici en pur Node
+// (pas d'accès à window.MX côté Cloud Function) ; à maintenir manuellement
+// synchronisées si la méthode de calcul évolue côté client. Le calcul de
+// "hier" est purement calendaire (voir _yesterdayParisDateStr), pas une
+// soustraction de 24h en millisecondes, pour rester fiable lors des
+// changements d'heure Europe/Paris.
+const DJU_BASE_TEMP = 19;
+function _parisDateStr(d) {
+  // en-CA produit directement AAAA-MM-JJ, sans ambiguïté de format.
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
+}
+// Date calendaire de la veille, en Europe/Paris — calcul PUREMENT calendaire
+// (jamais une simple soustraction de 24h en millisecondes, qui peut dériver
+// d'environ 1h lors des deux changements d'heure annuels et produire la
+// mauvaise date calendaire pour un déclenchement proche de minuit). On part
+// de la date du jour (déjà en Europe/Paris), on la décompose en Y/M/D, on
+// reconstruit un instant UTC à midi ce même jour calendaire (toujours dans
+// la bonne date quel que soit le décalage UTC+1/UTC+2 de Paris) puis on
+// retire exactement UN jour calendaire via setUTCDate — jamais une durée en
+// millisecondes.
+function _yesterdayParisDateStr(now) {
+  const todayStr = _parisDateStr(now);
+  const parts = todayStr.split("-").map(Number);
+  const noonUtc = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+  noonUtc.setUTCDate(noonUtc.getUTCDate() - 1);
+  return _parisDateStr(noonUtc);
+}
+function _estimateDailyMean(tMin, tMax, tMeanApi) {
+  if (typeof tMeanApi === "number" && !isNaN(tMeanApi)) return { value: tMeanApi, method: "api_mean" };
+  if (typeof tMin === "number" && typeof tMax === "number") return { value: (tMin + tMax) / 2, method: "minmax_avg" };
+  return { value: null, method: null };
+}
+
+exports.computeDailyWeatherDju = onSchedule(
+  { schedule: "30 1 * * *", timeZone: "Europe/Paris", region: REGION },
+  async () => {
+    const db = admin.firestore();
+
+    const cfgSnap = await db.collection("config").doc("hotel_config").get();
+    const cfg = cfgSnap.exists ? cfgSnap.data() : {};
+    if (typeof cfg.lat !== "number" || typeof cfg.lon !== "number") {
+      console.warn("[computeDailyWeatherDju] config/hotel_config.lat/lon non renseignés — rien à faire.");
+      return null;
+    }
+
+    const dateStr = _yesterdayParisDateStr(new Date());
+
+    const docRef = db.collection("weather_daily").doc(dateStr);
+    const existing = await docRef.get();
+    const existingData = existing.exists ? existing.data() : null;
+    // Idempotence par CONTENU, pas seulement par présence : un jour déjà
+    // "observed" pour la MÊME localisation n'est jamais retraité (rejouer la
+    // fonction plusieurs fois ne produit aucun doublon ni écriture inutile).
+    // En revanche, si la localisation configurée a changé depuis cette
+    // écriture (lat/lon différents), l'ancienne valeur ne représente plus
+    // l'établissement réel : on la remplace plutôt que de la laisser
+    // silencieusement sous la même date — voir aussi assets/js/app.js pour
+    // la même règle côté client.
+    const sameLocation = !!existingData
+      && typeof existingData.lat === "number" && typeof existingData.lon === "number"
+      && Math.abs(existingData.lat - cfg.lat) < 1e-6 && Math.abs(existingData.lon - cfg.lon) < 1e-6;
+    if (existingData && existingData.kind === "observed" && sameLocation) {
+      console.log(`[computeDailyWeatherDju] ${dateStr} déjà enregistré (observed, même localisation) — idempotence, rien à refaire.`);
+      return null;
+    }
+
+    const url = "https://api.open-meteo.com/v1/forecast"
+      + `?latitude=${encodeURIComponent(cfg.lat)}&longitude=${encodeURIComponent(cfg.lon)}`
+      + "&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,weather_code"
+      + "&timezone=Europe%2FParis&past_days=3&forecast_days=1";
+
+    let json;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) { console.error(`[computeDailyWeatherDju] Open-Meteo HTTP ${res.status}`); return null; }
+      json = await res.json();
+    } catch (e) {
+      console.error("[computeDailyWeatherDju] Échec réseau Open-Meteo :", e.message || e);
+      return null;
+    }
+    if (!json || !json.daily || !Array.isArray(json.daily.time)) {
+      console.error("[computeDailyWeatherDju] Réponse Open-Meteo invalide.");
+      return null;
+    }
+
+    const idx = json.daily.time.indexOf(dateStr);
+    if (idx === -1) {
+      console.warn(`[computeDailyWeatherDju] Date cible ${dateStr} absente de la réponse — rien enregistré (jamais de donnée inventée).`);
+      return null;
+    }
+    const tMin = typeof json.daily.temperature_2m_min[idx] === "number" ? json.daily.temperature_2m_min[idx] : null;
+    const tMax = typeof json.daily.temperature_2m_max[idx] === "number" ? json.daily.temperature_2m_max[idx] : null;
+    const tMeanApi = json.daily.temperature_2m_mean ? json.daily.temperature_2m_mean[idx] : undefined;
+    const mean = _estimateDailyMean(tMin, tMax, tMeanApi);
+    if (mean.value === null) {
+      console.warn(`[computeDailyWeatherDju] Aucune température exploitable pour ${dateStr} — rien enregistré.`);
+      return null;
+    }
+    const dju19 = Math.max(0, DJU_BASE_TEMP - mean.value);
+
+    await docRef.set({
+      date: dateStr,
+      tMin, tMax,
+      tMean: Math.round(mean.value * 10) / 10,
+      meanMethod: mean.method,
+      dju19: Math.round(dju19 * 10) / 10,
+      djuMethod: mean.method,
+      kind: "observed",
+      source: "cloud-function-scheduled",
+      lat: cfg.lat, lon: cfg.lon,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    console.log(`[computeDailyWeatherDju] ${dateStr} enregistré — DJU19=${Math.round(dju19 * 10) / 10}`);
+    return null;
+  }
+);

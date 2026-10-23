@@ -199,6 +199,7 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     await saveVisibility(page, {
       'org-resp':             { tech: true, responsable: false },
       'gestion-semaine-tech': { tech: true, responsable: false },
+      'cta-vc':               { tech: true, responsable: false },
     });
     await page.waitForTimeout(200);
     await page.evaluate(() => window.__mockAuth.signOut());
@@ -207,6 +208,7 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     const html = await sidebarHtml(page);
     ok('8.1 Organisation Responsable absente', !/Organisation Responsable/.test(html));
     ok('8.2 Gestion semaine tech absente', !/Gestion semaine tech/.test(html));
+    ok('8.2b CTA / VC absente (3e membre de la famille PILOTAGE, ajouté avec le module chauffage)', !/CTA \/ VC/.test(html));
     ok('8.3 Le titre de section "PILOTAGE" est masqué (famille vide)', !/>PILOTAGE</.test(html));
     ok('8.4 "ÉQUIPE" reste affiché (jamais configurable, non vide)', />ÉQUIPE</.test(html));
     await ctx.close();

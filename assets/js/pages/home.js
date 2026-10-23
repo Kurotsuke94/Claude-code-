@@ -126,25 +126,78 @@
   // rendu de l'Accueil : on affiche l'état courant puis on redemande un
   // rendu quand la promesse se résout (si toujours sur l'Accueil).
   var _weather = { status: 'unconfigured', data: null, forKey: null };
+  // Série 7 jours (passé observé + prévisions) + DJU — voir assets/js/utils/
+  // dju.js. Affichage uniquement ici (la persistance Firestore est gérée
+  // par app.js, voir plus bas).
+  var _weatherDaily = { status: 'unconfigured', series: null, forKey: null };
+
+  function _localDateStr(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
   function _ensureWeatherLoaded(cfg) {
     var lat = cfg && typeof cfg.lat === 'number' ? cfg.lat : null;
     var lon = cfg && typeof cfg.lon === 'number' ? cfg.lon : null;
-    if (lat === null || lon === null) { _weather = { status: 'unconfigured', data: null, forKey: null }; return; }
+    if (lat === null || lon === null) {
+      _weather = { status: 'unconfigured', data: null, forKey: null };
+      _weatherDaily = { status: 'unconfigured', series: null, forKey: null };
+      return;
+    }
     var key = lat + ',' + lon;
-    if (_weather.forKey === key && _weather.status !== 'unconfigured') return; // déjà chargé/en cours pour ces coordonnées
-    _weather = { status: 'loading', data: null, forKey: key };
-    if (!MX.Weather || !MX.Weather.getCurrent) { _weather = { status: 'error', data: null, forKey: key }; return; }
-    MX.Weather.getCurrent(lat, lon).then(function (data) {
-      if (_weather.forKey !== key) return; // config changée entre-temps
-      _weather = { status: data ? 'ok' : 'error', data: data, forKey: key };
-      if (MX.state.currentPage === 'home') render();
-    });
+    if (_weather.forKey !== key || _weather.status === 'unconfigured') {
+      _weather = { status: 'loading', data: null, forKey: key };
+      if (!MX.Weather || !MX.Weather.getCurrent) {
+        _weather = { status: 'error', data: null, forKey: key };
+      } else {
+        MX.Weather.getCurrent(lat, lon).then(function (data) {
+          if (_weather.forKey !== key) return; // config changée entre-temps
+          _weather = { status: data ? 'ok' : 'error', data: data, forKey: key };
+          if (MX.state.currentPage === 'home') render();
+        });
+      }
+    }
+    if (_weatherDaily.forKey !== key || _weatherDaily.status === 'unconfigured') {
+      _weatherDaily = { status: 'loading', series: null, forKey: key };
+      if (!MX.Weather || !MX.Weather.getDaily || !MX.Dju) {
+        _weatherDaily = { status: 'error', series: null, forKey: key };
+      } else {
+        MX.Weather.getDaily(lat, lon).then(function (raw) {
+          if (_weatherDaily.forKey !== key) return;
+          if (!raw) { _weatherDaily = { status: 'error', series: null, forKey: key }; if (MX.state.currentPage === 'home') render(); return; }
+          var series = MX.Dju.buildDailySeries(raw.daily, _localDateStr());
+          _weatherDaily = { status: 'ok', series: series, forKey: key };
+          if (MX.state.currentPage === 'home') render();
+        });
+      }
+    }
   }
+  // La persistance Firestore des DJU observés (weather_daily) ne vit plus
+  // ici : elle est centralisée dans assets/js/app.js (_ensureDailyDjuPersisted,
+  // appelée une fois par session dès que la localisation est connue), pour
+  // ne plus dépendre de l'ouverture de l'Accueil. Cette fonction ne fait
+  // plus qu'afficher — voir app.js pour l'écriture en base.
 
   // isAdmin (strict, PAS canSeeAll) : la configuration météo (config/hotel_config)
   // est réservée Admin côté Firestore — le bouton et le message détaillé ne
   // doivent apparaître qu'à un Admin, pour rester cohérents avec ce qui est
   // réellement modifiable (voir _renderEtablissement dans settings.js).
+  function _weatherDayCard(d, isToday) {
+    var info = (MX.Weather && MX.Weather.codeInfo) ? MX.Weather.codeInfo(d.weatherCode) : { icon: 'fa-cloud', label: '' };
+    var wd = new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short' });
+    wd = wd.charAt(0).toUpperCase() + wd.slice(1).replace('.', '');
+    var dd = new Date(d.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    return '<div class="acc-wd-card' + (isToday ? ' acc-wd-card--today' : '') + '">' +
+      '<div class="acc-wd-head">' + MX.esc(wd) + '<span class="acc-wd-date">' + dd + '</span></div>' +
+      '<i class="fas ' + info.icon + ' acc-wd-ico"></i>' +
+      '<div class="acc-wd-minmax">' + (d.tMin !== null ? Math.round(d.tMin) + '°' : '—') + ' / ' + (d.tMax !== null ? Math.round(d.tMax) + '°' : '—') + '</div>' +
+      '<div class="acc-wd-dju' + (d.kind === 'forecast' ? ' acc-wd-dju--forecast' : '') + '">' +
+        (d.dju19 !== null ? 'DJU ' + d.dju19.toFixed(1) : 'DJU —') +
+      '</div>' +
+      '<div class="acc-wd-kind">' + (d.kind === 'observed' ? 'Observé' : d.kind === 'forecast' ? 'Prévision' : 'N/D') + '</div>' +
+    '</div>';
+  }
+
   function _weatherWidgetHtml(cfg, isAdmin) {
     var cityLabel = (cfg && cfg.cityLabel) ? cfg.cityLabel : '';
     if (_weather.status === 'unconfigured') {
@@ -178,15 +231,39 @@
       '</div>';
     }
     var d = _weather.data;
-    return '<div class="acc-weather acc-weather--ok">' +
-      '<i class="fas ' + d.icon + '"></i>' +
-      '<div class="acc-weather-txt">' +
-        '<div class="acc-weather-line"><span class="acc-weather-temp">' + d.temp + '°</span> ' + MX.esc(d.label) + '</div>' +
-        '<div class="acc-weather-sub">' + (cityLabel ? MX.esc(cityLabel) + ' · ' : '') +
-          (d.tempMin !== null && d.tempMax !== null ? d.tempMin + '° / ' + d.tempMax + '°' : '') +
+    var h = '<div class="acc-weather acc-weather--ok">' +
+      '<div class="acc-weather-top">' +
+        '<i class="fas ' + d.icon + '"></i>' +
+        '<div class="acc-weather-txt">' +
+          '<div class="acc-weather-line"><span class="acc-weather-temp">' + d.temp + '°</span> ' + MX.esc(d.label) + '</div>' +
+          '<div class="acc-weather-sub">' + (cityLabel ? MX.esc(cityLabel) + ' · ' : '') +
+            (d.tempMin !== null && d.tempMax !== null ? d.tempMin + '° / ' + d.tempMax + '°' : '') +
+          '</div>' +
         '</div>' +
-      '</div>' +
-    '</div>';
+      '</div>';
+
+    // Tableau 7 jours — distinct de l'instantané ci-dessus (source : getDaily)
+    if (_weatherDaily.status === 'loading') {
+      h += '<div class="acc-wd-row acc-wd-row--loading"><i class="fas fa-spinner fa-spin"></i> Chargement des prévisions 7 jours…</div>';
+    } else if (_weatherDaily.status === 'error') {
+      h += '<div class="acc-wd-row acc-wd-row--error">Prévisions 7 jours temporairement indisponibles.</div>';
+    } else if (_weatherDaily.status === 'ok' && _weatherDaily.series && _weatherDaily.series.length) {
+      var today = _localDateStr();
+      // Les 7 prochains jours (aujourd'hui inclus) — le passé observé sert
+      // uniquement à la tendance et à l'historique, pas à cette rangée.
+      var upcoming = _weatherDaily.series.filter(function (x) { return x.date >= today; }).slice(0, 7);
+      var trend = MX.Dju.trend(_weatherDaily.series);
+      h += '<div class="acc-wd-wrap">';
+      h += '<div class="acc-wd-head-row"><span>DJU base 19°C — 7 prochains jours</span>' +
+        (trend ? '<span class="acc-wd-trend acc-wd-trend--' + trend + '"><i class="fas fa-arrow-' + (trend === 'hausse' ? 'up' : trend === 'baisse' ? 'down' : 'right') + '"></i> ' +
+          (trend === 'hausse' ? 'Besoin de chauffe en hausse' : trend === 'baisse' ? 'Besoin de chauffe en baisse' : 'Stable') + '</span>' : '') +
+      '</div>';
+      h += '<div class="acc-wd-row">';
+      upcoming.forEach(function (day) { h += _weatherDayCard(day, day.date === today); });
+      h += '</div></div>';
+    }
+    h += '</div>';
+    return h;
   }
 
   function _priorityRow(level, icon, title, subtitle, badge, onclick) {

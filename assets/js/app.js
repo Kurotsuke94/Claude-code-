@@ -22,6 +22,7 @@
     { id: "notifs",        icon: "fa-bell",            l: "Notifications", noBot: true },
     { id: "planning",      icon: "fa-calendar-days",  l: "Planning" },
     { id: "org-resp",      icon: "fa-users",          l: "Organisation Responsable", respOnly: true },
+    { id: "cta-vc",        icon: "fa-fire-flame-curved", l: "CTA / VC",          respOnly: true },
   ];
 
   const BIBLE_CATS = [
@@ -61,6 +62,9 @@
     if (_prevPage === 'planning' && id !== 'planning') {
       MX.Pages.Planning && MX.Pages.Planning._destroy && MX.Pages.Planning._destroy();
     }
+    if (_prevPage === 'cta-vc' && id !== 'cta-vc') {
+      MX.Pages.CtaVc && MX.Pages.CtaVc._destroy && MX.Pages.CtaVc._destroy();
+    }
     if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
     const navItem = NAV.find(n => n && n.id === id);
     const navInfo = NAV_INFO[id] || {};
@@ -90,6 +94,7 @@
     if (id === "interventions") return Pages.Int  ? Pages.Int.render()  : _renderStub("Interventions", "fa-wrench", "Chargement…");
     if (id === "pmp")          return Pages.PMP  ? Pages.PMP.render()  : _renderStub("Maintenance PMP", "fa-screwdriver-wrench", "Chargement…");
     if (id === "org-resp")      return Pages.OrgResp ? Pages.OrgResp.render() : null;
+    if (id === "cta-vc")        return Pages.CtaVc ? Pages.CtaVc.render() : null;
     if (id === "mes-missions")  return Pages.MesMissions ? Pages.MesMissions.render() : (Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : null);
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
@@ -228,6 +233,7 @@
     'today-cl':      { icon: 'fa-list-check',      l: 'Checklists' },
     'mes-missions':  { icon: 'fa-list-check',      l: 'Mes missions' },
     'org-resp':      { icon: 'fa-users-gear',      l: 'Organisation' },
+    'cta-vc':        { icon: 'fa-fire-flame-curved', l: 'CTA / VC' },
     'orders':        { icon: 'fa-box',             l: 'Stock' },
     'documents':     { icon: 'fa-book',            l: 'Bibliothèque' },
     'consommations': { icon: 'fa-gauge-high',       l: 'Compteurs' },
@@ -547,6 +553,7 @@
       let secPilotage = "";
       if (_nv('org-resp'))             secPilotage += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
       if (_nv('gestion-semaine-tech')) secPilotage += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
+      if (_nv('cta-vc'))               secPilotage += _pageBtn("cta-vc",        "fa-fire-flame-curved", "CTA / VC");
       if (secPilotage) aItems += _sec("PILOTAGE") + secPilotage;
 
       // ÉQUIPE : jamais configurable (menus purement administratifs, restent
@@ -1553,6 +1560,10 @@
   }
 
   // ── FIRESTORE LISTENERS ──
+  // Suivi par COORDONNÉES (pas un simple booléen) : voir _ensureDailyDjuPersisted
+  // ci-dessous — permet de relancer la persistance quand la localisation est
+  // modifiée en cours de session, pas seulement lors de la 1ère config.
+  let _djuPersistState = { coordsKey: null, inFlight: false };
   function setupListeners() {
     const { DB, state, Pages } = MX;
 
@@ -1819,7 +1830,70 @@
     DB.getHotelConfig().then(cfg => {
       if (cfg) state.hotelConfig = cfg;
       if (state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+      _ensureDailyDjuPersisted(); // indépendant de la page affichée — voir plus bas
     }).catch(() => {});
+
+    // ── CTA/VC — persistance quotidienne des DJU observés (weather_daily) ──
+    // Appelée au démarrage puis à chaque fois que la localisation change en
+    // cours de session (voir settings.js:_sttSaveEtablissement) — PAS depuis
+    // assets/js/pages/home.js, pour ne plus dépendre de l'ouverture de
+    // l'Accueil. Reste un palliatif client : si personne ne se connecte un
+    // jour donné, ce jour reste vide — voir functions/index.js:
+    // computeDailyWeatherDju (préparée, non déployée) pour la solution
+    // serveur qui ne dépend d'aucune session utilisateur.
+    // Idempotent (merge Firestore) — peut donc être appelée à chaque boot ou
+    // changement de localisation sans risque de doublon. Le suivi se fait par
+    // COUPLE DE COORDONNÉES (_djuPersistState.coordsKey), pas un simple
+    // booléen "déjà tenté" : reconfigurer la MÊME localisation ne refait rien
+    // (évite un fetch/write inutile), mais changer de localisation relance
+    // bien un fetch + une écriture avec les NOUVELLES coordonnées — chaque
+    // jour persisté est tagué `lat`/`lon` (coordonnées effectives au moment
+    // de l'écriture) pour que l'historique weather_daily ne mélange jamais
+    // silencieusement, sous une même date, les DJU observés d'une ancienne
+    // localisation avec ceux d'une nouvelle (voir aussi functions/index.js,
+    // même logique de tag côté fonction planifiée).
+    // _inFlight protège uniquement contre un double appel concurrent pour LA
+    // MÊME localisation pendant que la requête réseau est en cours — en cas
+    // d'échec réseau, coordsKey n'est PAS mis à jour, donc le prochain appel
+    // (reconfiguration, ou prochain boot) retente normalement.
+    // Définie ICI (à l'intérieur de setupListeners, pas en sibling) pour
+    // capturer `state` par fermeture — une version précédente définie à
+    // l'extérieur levait "state is not defined" à chaque appel, erreur
+    // silencieusement avalée par le .catch() ci-dessus (promesse rejetée,
+    // jamais une exception non interceptée) : aucune donnée n'était alors
+    // jamais écrite, sans aucune erreur visible en console.
+    function _ensureDailyDjuPersisted() {
+      if (!MX.Weather || !MX.Weather.getDaily || !MX.Dju || !MX.DB || !MX.DB.saveWeatherDailyBatch) return;
+      const cfg = state.hotelConfig;
+      const lat = cfg && typeof cfg.lat === 'number' ? cfg.lat : null;
+      const lon = cfg && typeof cfg.lon === 'number' ? cfg.lon : null;
+      if (lat === null || lon === null) return;
+      const coordsKey = lat + ',' + lon;
+      if (_djuPersistState.inFlight) return;
+      if (_djuPersistState.coordsKey === coordsKey) return; // déjà persisté pour cette localisation
+      _djuPersistState.inFlight = true;
+      const todayStr = (function () {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      })();
+      MX.Weather.getDaily(lat, lon).then(raw => {
+        _djuPersistState.inFlight = false;
+        if (!raw) return; // échec réseau : coordsKey pas mis à jour, on retentera au prochain appel
+        _djuPersistState.coordsKey = coordsKey;
+        const series = MX.Dju.buildDailySeries(raw.daily, todayStr);
+        const observed = series.filter(d => d.kind === 'observed' && d.dju19 !== null);
+        if (!observed.length) return;
+        const days = observed.map(d => ({ date: d.date, tMin: d.tMin, tMax: d.tMax, tMean: d.tMean, meanMethod: d.meanMethod, dju19: d.dju19, kind: 'observed', source: 'client-session-boot', lat: lat, lon: lon }));
+        return MX.DB.saveWeatherDailyBatch(days);
+      }).catch(err => {
+        _djuPersistState.inFlight = false;
+        console.warn('[CTA/VC] Échec enregistrement weather_daily (permission-denied attendu tant que les règles ne sont pas déployées) :', err);
+      });
+    }
+    // Exposée pour settings.js : appelée à chaque sauvegarde de la
+    // localisation (1ère config OU modification) — voir _sttSaveEtablissement
+    // dans settings.js.
+    window.MX.ensureDailyDjuPersisted = _ensureDailyDjuPersisted;
   }
 
   // ── INIT ──
@@ -1899,7 +1973,7 @@
     renderStatusBar();
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
-    const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp"]);
+    const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp","cta-vc"]);
     MX.showPage(_urlPage && (NAV.some(n => n && n.id === _urlPage) || _extraPages.has(_urlPage)) ? _urlPage : "home");
 
     // Favoris — hors du chemin critique du premier rendu (V1 perf) : la nav
@@ -3204,6 +3278,7 @@
     if (canAll) {
       navItems.splice(2, 0,
         { id: 'org-resp',     icon: 'fa-users-gear',    label: 'Organisation',   fn: "MX.closeMobileDrawer();MX.showPage('org-resp')" },
+        { id: 'cta-vc',       icon: 'fa-fire-flame-curved', label: 'CTA / VC',   fn: "MX.closeMobileDrawer();MX.showPage('cta-vc')" },
         { id: 'utilisateurs', icon: 'fa-crosshairs', label: 'Centre de Pilotage', fn: "MX.closeMobileDrawer();MX.showPage('utilisateurs')" }
       );
     }
@@ -3282,6 +3357,7 @@
     let items = '';
     items += '<div class="mbn-pmenu-sec">PILOTAGE</div>';
     items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'org-resp\')"><i class="fas fa-clipboard-list"></i><span>Organisation Responsable</span></button>';
+    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'cta-vc\')"><i class="fas fa-fire-flame-curved"></i><span>CTA / VC</span></button>';
     if (canAll) {
       items += '<div class="mbn-pmenu-sec">ÉQUIPE</div>';
       items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'users\')"><i class="fas fa-users"></i><span>Utilisateurs</span></button>';

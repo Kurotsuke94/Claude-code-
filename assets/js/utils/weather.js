@@ -7,9 +7,16 @@
   // null en cas d'échec/timeout — jamais de valeur inventée. Mise en cache
   // localStorage (45 min) pour éviter un appel réseau à chaque ouverture de
   // l'Accueil ; ne bloque jamais le rendu (à appeler en fire-and-forget).
+  //
+  // getCurrent() : instantané + min/max du jour (usage historique, Accueil).
+  // getDaily()   : série multi-jours (passé réellement mesuré + prévisions),
+  //                utilisée par le tableau météo 7 jours de l'Accueil et par
+  //                le module CTA/VC pour les DJU — voir assets/js/utils/
+  //                dju.js pour le calcul, qui reste séparé de ce module.
   // ══════════════════════════════════════════════════════════════════════
 
   var CACHE_KEY     = 'mx_weather_cache_v1';
+  var DAILY_CACHE_KEY = 'mx_weather_daily_cache_v1';
   var CACHE_TTL_MS  = 45 * 60 * 1000; // 45 min (dans la fourchette 30-60 demandée)
   var FETCH_TIMEOUT_MS = 6000;
 
@@ -48,9 +55,9 @@
     return WMO[code] || { icon: 'fa-cloud', label: 'Conditions inconnues' };
   }
 
-  function _readCache(lat, lon) {
+  function _readCache(key, lat, lon) {
     try {
-      var raw = localStorage.getItem(CACHE_KEY);
+      var raw = localStorage.getItem(key);
       if (!raw) return null;
       var c = JSON.parse(raw);
       if (!c || c.lat !== lat || c.lon !== lon) return null;
@@ -58,9 +65,9 @@
       return c.data || null;
     } catch (e) { return null; }
   }
-  function _writeCache(lat, lon, data) {
+  function _writeCache(key, lat, lon, data) {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ lat: lat, lon: lon, ts: Date.now(), data: data }));
+      localStorage.setItem(key, JSON.stringify({ lat: lat, lon: lon, ts: Date.now(), data: data }));
     } catch (e) { /* stockage indisponible (quota/navigation privée) — pas bloquant */ }
   }
 
@@ -71,7 +78,7 @@
   async function getCurrent(lat, lon) {
     if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) return null;
 
-    var cached = _readCache(lat, lon);
+    var cached = _readCache(CACHE_KEY, lat, lon);
     if (cached) return cached;
 
     var url = 'https://api.open-meteo.com/v1/forecast'
@@ -101,7 +108,50 @@
         icon:    info.icon,
         label:   info.label,
       };
-      _writeCache(lat, lon, data);
+      _writeCache(CACHE_KEY, lat, lon, data);
+      return data;
+    } catch (e) {
+      if (timer) clearTimeout(timer);
+      return null;
+    }
+  }
+
+  // getDaily(lat, lon, opts) → Promise<{ timezone, daily: <bloc brut Open-Meteo> } | null>
+  // Fournit jusqu'à 7 jours passés (past_days, données réellement mesurées)
+  // et jusqu'à 7 jours à venir (forecast_days, prévisions) — mêmes règles
+  // que getCurrent : jamais de donnée inventée, null si indisponible, cache
+  // localStorage dédié (même TTL 45 min), timeout 6 s. Le bloc `daily` brut
+  // est retourné tel quel (pas de DJU calculé ici — voir assets/js/utils/
+  // dju.js:buildDailySeries, qui reste indépendant de la couche réseau).
+  var DEFAULT_PAST_DAYS     = 7;
+  var DEFAULT_FORECAST_DAYS = 7;
+  async function getDaily(lat, lon, opts) {
+    if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) return null;
+    var pastDays     = (opts && typeof opts.pastDays === 'number')     ? opts.pastDays     : DEFAULT_PAST_DAYS;
+    var forecastDays = (opts && typeof opts.forecastDays === 'number') ? opts.forecastDays : DEFAULT_FORECAST_DAYS;
+
+    var cached = _readCache(DAILY_CACHE_KEY, lat, lon);
+    if (cached) return cached;
+
+    var url = 'https://api.open-meteo.com/v1/forecast'
+      + '?latitude=' + encodeURIComponent(lat)
+      + '&longitude=' + encodeURIComponent(lon)
+      + '&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,weather_code'
+      + '&timezone=auto'
+      + '&past_days=' + encodeURIComponent(pastDays)
+      + '&forecast_days=' + encodeURIComponent(forecastDays);
+
+    var ctrl  = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS) : null;
+    try {
+      var res = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
+      if (timer) clearTimeout(timer);
+      if (!res || !res.ok) return null;
+      var json = await res.json();
+      if (!json || !json.daily || !Array.isArray(json.daily.time)) return null;
+
+      var data = { timezone: json.timezone || null, daily: json.daily };
+      _writeCache(DAILY_CACHE_KEY, lat, lon, data);
       return data;
     } catch (e) {
       if (timer) clearTimeout(timer);
@@ -110,5 +160,5 @@
   }
 
   window.MX = window.MX || {};
-  window.MX.Weather = { getCurrent: getCurrent };
+  window.MX.Weather = { getCurrent: getCurrent, getDaily: getDaily, codeInfo: _codeInfo };
 })();

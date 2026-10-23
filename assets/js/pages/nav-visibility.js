@@ -27,6 +27,7 @@
     { id: 'mxdoc',                label: 'MX Doc',                   desc: 'Documentation technique',           family: 'GESTION' },
     { id: 'org-resp',             label: 'Organisation Responsable', desc: "Organisation de l'équipe",          family: 'PILOTAGE' },
     { id: 'gestion-semaine-tech', label: 'Gestion semaine tech',     desc: 'Gestion des semaines techniciens',  family: 'PILOTAGE' },
+    { id: 'cta-vc',               label: 'CTA / VC',                 desc: 'Conseiller chauffage',              family: 'PILOTAGE' },
     { id: 'alerts',               label: 'Alertes',                  desc: 'Alertes et notifications',          family: 'SUPERVISION' },
     { id: 'alertes-config',       label: 'Config Alertes',           desc: 'Configuration des alertes',         family: 'SUPERVISION' },
     { id: 'logs',                 label: 'Activité',                 desc: "Suivi d'activité",                  family: 'SUPERVISION' },

@@ -1749,6 +1749,7 @@
         MX.state.hotelConfig = Object.assign({}, MX.state.hotelConfig, { lat: latVal, lon: lonVal, cityLabel: cityVal });
         MX.toast('Localisation enregistrée');
         if (MX.state.currentPage === 'home' && MX.Pages.Home) MX.Pages.Home.render();
+        if (MX.ensureDailyDjuPersisted) MX.ensureDailyDjuPersisted(); // 1ère config OU changement de localisation pendant la session (CTA/VC)
       } catch (err) { MX.toast('Erreur sauvegarde', true); console.error(err); }
     };
 
