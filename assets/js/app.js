@@ -489,6 +489,16 @@
       _dbgAdd("[Groupe] Stock");
     }
 
+    // ── 🔥 CTA / VC (déplacé hors de Centre de Pilotage > PILOTAGE) ──
+    // Entrée de navigation principale, juste au-dessus d'Analyses. Mêmes
+    // contrôles d'accès qu'avant le déplacement : canAll (responsables +
+    // administrateurs) ET MX.NavVisibility (_nv) — aucun changement de
+    // permission, uniquement un changement d'emplacement dans le menu.
+    if (canAll && _nv('cta-vc')) {
+      h += _item("cta-vc", "fa-fire-flame-curved", "CTA / VC");
+      _dbgAdd("CTA / VC");
+    }
+
     // ── 📊 Analyses ──
     if ((_see('counters') || _see('consumption')) && _nv('anly')) {
       let anlyItems = "";
@@ -553,7 +563,10 @@
       let secPilotage = "";
       if (_nv('org-resp'))             secPilotage += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
       if (_nv('gestion-semaine-tech')) secPilotage += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
-      if (_nv('cta-vc'))               secPilotage += _pageBtn("cta-vc",        "fa-fire-flame-curved", "CTA / VC");
+      // CTA / VC déplacé hors de PILOTAGE vers la navigation principale,
+      // juste au-dessus du groupe "Analyses" — voir plus bas. Entrée de
+      // menu uniquement : mêmes contrôles d'accès (canAll + _nv('cta-vc')),
+      // aucun changement au module ni à ses règles Firestore.
       if (secPilotage) aItems += _sec("PILOTAGE") + secPilotage;
 
       // ÉQUIPE : jamais configurable (menus purement administratifs, restent
@@ -3357,7 +3370,9 @@
     let items = '';
     items += '<div class="mbn-pmenu-sec">PILOTAGE</div>';
     items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'org-resp\')"><i class="fas fa-clipboard-list"></i><span>Organisation Responsable</span></button>';
-    items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showPage(\'cta-vc\')"><i class="fas fa-fire-flame-curved"></i><span>CTA / VC</span></button>';
+    // CTA / VC retiré d'ici : déplacé vers la navigation principale (voir le
+    // tiroir mobile "Navigation", où il reste accessible — même entrée,
+    // nouvel emplacement, mêmes droits d'accès canAll).
     if (canAll) {
       items += '<div class="mbn-pmenu-sec">ÉQUIPE</div>';
       items += '<button class="mbn-pitem" onclick="MX.closePilotageMenu();MX.showAdminTab(\'users\')"><i class="fas fa-users"></i><span>Utilisateurs</span></button>';

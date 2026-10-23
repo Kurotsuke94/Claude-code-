@@ -239,9 +239,83 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     const html = await sidebarHtml(page);
     ok('8.1 Organisation Responsable absente', !/Organisation Responsable/.test(html));
     ok('8.2 Gestion semaine tech absente', !/Gestion semaine tech/.test(html));
-    ok('8.2b CTA / VC absente (3e membre de la famille PILOTAGE, ajouté avec le module chauffage)', !/CTA \/ VC/.test(html));
-    ok('8.3 Le titre de section "PILOTAGE" est masqué (famille vide)', !/>PILOTAGE</.test(html));
+    // CTA / VC n'appartient plus à la famille PILOTAGE (déplacé vers la
+    // navigation principale, voir bloc 8b ci-dessous) — ce test confirme
+    // seulement que sa propre config de visibilité continue de le masquer
+    // depuis son NOUVEL emplacement, sans incidence sur le masquage de la
+    // famille PILOTAGE (devenue 2 membres : org-resp, gestion-semaine-tech).
+    ok('8.2b CTA / VC absente (masquée à son nouvel emplacement, hors PILOTAGE)', !/CTA \/ VC/.test(html));
+    ok('8.3 Le titre de section "PILOTAGE" est masqué (famille vide — 2 membres, tous masqués)', !/>PILOTAGE</.test(html));
     ok('8.4 "ÉQUIPE" reste affiché (jamais configurable, non vide)', />ÉQUIPE</.test(html));
+    await ctx.close();
+  }
+
+  // ═══ 8b. CTA / VC — nouvel emplacement : navigation principale, hors Pilotage ═══
+  // Déplacement de l'entrée de menu uniquement (voir assets/js/app.js:
+  // buildNav) — le module CTA/VC lui-même et ses contrôles d'accès
+  // (canAll + MX.NavVisibility) restent inchangés. Ce bloc vérifie que :
+  //  - l'entrée est désormais un item de niveau racine (classe "sx-sub"
+  //    absente), et non plus nichée dans le groupe "Centre de Pilotage" ;
+  //  - elle apparaît bien AU-DESSUS du groupe "Analyses" dans le DOM ;
+  //  - elle reste réservée aux responsables/admins (jamais aux techniciens,
+  //    quelle que soit la config de visibilité) ;
+  //  - sa propre config de visibilité continue de fonctionner à ce nouvel
+  //    emplacement (déjà réinitialisée par défaut ici, aucune config
+  //    résiduelle du bloc 8 — chaque bloc utilise un nouveau contexte).
+  {
+    console.log('\n--- 8b. CTA / VC déplacée hors de PILOTAGE, au-dessus d\'Analyses ---');
+    const { ctx, page } = await newCtx();
+    await pinLogin(page, 'sophie', '9999'); // responsable -> canAll === true
+    const html = await sidebarHtml(page);
+    const ctaBtn = html.match(/<button class="([^"]*)" data-page="cta-vc"[^>]*>/);
+    ok('8b.1 CTA / VC présente par défaut (aucune config de visibilité)', !!ctaBtn);
+    ok('8b.2 CTA / VC est un item de NIVEAU RACINE (plus niché dans un groupe, classe "sx-sub" absente)', !!ctaBtn && !/\bsx-sub\b/.test(ctaBtn[1]));
+    const idxCta  = html.indexOf('CTA / VC');
+    const idxAnly = html.indexOf('data-group="anly"');
+    ok('8b.3 CTA / VC apparaît bien AVANT (au-dessus de) le groupe "Analyses" dans le DOM', idxCta !== -1 && idxAnly !== -1 && idxCta < idxAnly);
+    ok('8b.4 CTA / VC n\'est plus listée sous "PILOTAGE" (Centre de Pilotage)', !/>PILOTAGE<[\s\S]*CTA \/ VC/.test(html));
+    await ctx.close();
+
+    // Technicien : jamais d'accès, quelle que soit la config de visibilité
+    // (restriction canAll, inchangée par le déplacement — voir point 2 de
+    // la consigne : "CTA/VC reste réservé aux responsables et admins").
+    const { ctx: ctxTech, page: pageTech } = await newCtx();
+    await adminLogin(pageTech, SUPER_ADMIN_EMAIL);
+    await saveVisibility(pageTech, { 'cta-vc': { tech: true, responsable: true } }); // visible="true" pour tech : ne doit RIEN changer
+    await pageTech.waitForTimeout(200);
+    await pageTech.evaluate(() => window.__mockAuth.signOut());
+    await pageTech.waitForTimeout(200);
+    await pinLogin(pageTech, 'kevin', '1111'); // technicien -> canAll === false
+    const htmlTech = await sidebarHtml(pageTech);
+    ok('8b.5 CTA / VC reste invisible pour un technicien même si sa visibilité est explicitement activée (restriction de rôle prioritaire, inchangée)', !/CTA \/ VC/.test(htmlTech));
+    await ctxTech.close();
+  }
+
+  // ═══ 8c. Écran "Visibilité des modules" (Super Admin) — regroupement cohérent ═══
+  // assets/js/pages/nav-visibility.js tient son PROPRE registre ITEMS, avec
+  // un champ "family" qui ne sert qu'au regroupement visuel de CET écran —
+  // totalement indépendant de assets/js/app.js:buildNav(). Après le
+  // déplacement de l'entrée de menu CTA/VC, ce registre pointait encore
+  // family:'PILOTAGE' pour cta-vc : l'écran de configuration continuait donc
+  // à l'afficher sous "PILOTAGE", même si la navigation réelle ne le faisait
+  // plus — exactement le symptôme signalé. Ce bloc verrouille la cohérence
+  // des DEUX registres pour éviter une régression silencieuse à l'avenir.
+  {
+    console.log('\n--- 8c. CTA / VC régénéré sous GESTION dans l\'écran Visibilité des modules ---');
+    const { ctx, page } = await newCtx();
+    await adminLogin(page, SUPER_ADMIN_EMAIL);
+    const famInfo = await evalPage(page, () => {
+      const it = MX.NavVisibility.ITEMS.find(x => x.id === 'cta-vc');
+      return it ? it.family : null;
+    });
+    ok('8c.1 Le registre ITEMS de l\'écran admin classe désormais CTA / VC dans "GESTION" (plus "PILOTAGE")', famInfo === 'GESTION');
+    await evalPage(page, () => { MX.showPage('nav-visibility'); });
+    await page.waitForTimeout(300);
+    const screenHtml = await page.evaluate(() => document.getElementById('main-content').innerHTML);
+    const idxCtaScreen  = screenHtml.indexOf('CTA / VC');
+    const idxGestion    = screenHtml.lastIndexOf('GESTION', idxCtaScreen);
+    const idxPilotage   = screenHtml.lastIndexOf('PILOTAGE', idxCtaScreen);
+    ok('8c.2 Sur l\'écran rendu, CTA / VC apparaît bien sous l\'en-tête "GESTION" le plus proche (pas "PILOTAGE")', idxCtaScreen !== -1 && idxGestion !== -1 && idxGestion > idxPilotage);
     await ctx.close();
   }
 

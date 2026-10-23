@@ -22,12 +22,17 @@
     { id: 'documents',            label: 'Ressources',               desc: 'Gestion des ressources',            family: 'GESTION' },
     { id: 'msgs',                 label: 'Journal',                  desc: "Journal d'activité",                family: 'GESTION' },
     { id: 'stock',                label: 'Stock',                    desc: 'Gestion du stock',                  family: 'GESTION' },
+    // CTA / VC : déplacé de PILOTAGE vers GESTION (juste avant 'anly'), pour
+    // refléter son nouvel emplacement réel dans la navigation principale,
+    // juste au-dessus du groupe Analyses — voir assets/js/app.js:buildNav().
+    // Ce "family" ne sert qu'au regroupement visuel de CET écran Super
+    // Admin ; il n'a aucun effet sur shouldShow()/la navigation réelle.
+    { id: 'cta-vc',               label: 'CTA / VC',                 desc: 'Conseiller chauffage',              family: 'GESTION' },
     { id: 'anly',                 label: 'Analyses',                 desc: 'Analyses et statistiques',          family: 'GESTION' },
     { id: 'maint',                label: 'Maintenance PMP',          desc: 'Maintenance préventive',            family: 'GESTION' },
     { id: 'mxdoc',                label: 'MX Doc',                   desc: 'Documentation technique',           family: 'GESTION' },
     { id: 'org-resp',             label: 'Organisation Responsable', desc: "Organisation de l'équipe",          family: 'PILOTAGE' },
     { id: 'gestion-semaine-tech', label: 'Gestion semaine tech',     desc: 'Gestion des semaines techniciens',  family: 'PILOTAGE' },
-    { id: 'cta-vc',               label: 'CTA / VC',                 desc: 'Conseiller chauffage',              family: 'PILOTAGE' },
     { id: 'alerts',               label: 'Alertes',                  desc: 'Alertes et notifications',          family: 'SUPERVISION' },
     { id: 'alertes-config',       label: 'Config Alertes',           desc: 'Configuration des alertes',         family: 'SUPERVISION' },
     { id: 'logs',                 label: 'Activité',                 desc: "Suivi d'activité",                  family: 'SUPERVISION' },
