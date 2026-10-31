@@ -879,6 +879,14 @@ async function _recordPinAttempt(db, userId, callerUid, matched, now) {
   const targetRef = db.collection("pin_attempts").doc(userId);
   const callerRef = callerUid ? db.collection("pin_attempts_by_caller").doc(callerUid) : null;
 
+  // maxAttempts relevé (défaut SDK : 5) — sous attaque distribuée réelle,
+  // de nombreux appels concurrents du MÊME appelant se disputent l'écriture
+  // du même document pin_attempts_by_caller/{callerUid}, ce qui épuisait le
+  // budget de retry par défaut et faisait remonter une erreur de contention
+  // Firestore brute (perdant ainsi le comptage de ces tentatives au lieu de
+  // les classer "denied"). 30 couvre confortablement PIN_CALLER_MAX_FAILURES
+  // (20) + marge, sans jamais affecter l'usage normal (un seul utilisateur
+  // ne génère jamais ce niveau de concurrence sur son propre callerUid).
   return db.runTransaction(async (tx) => {
     const targetSnap = await tx.get(targetRef);
     const callerSnap = callerRef ? await tx.get(callerRef) : null;
@@ -947,7 +955,7 @@ async function _recordPinAttempt(db, userId, callerUid, matched, now) {
     }
 
     return { outcome: "denied" };
-  });
+  }, { maxAttempts: 30 });
 }
 
 exports.verifyPin = onCall({ region: REGION }, async (request) => {
@@ -999,7 +1007,21 @@ exports.verifyPin = onCall({ region: REGION }, async (request) => {
   // deux compteurs ensemble, éliminant la fenêtre de course prouvée dans
   // l'ancienne version (lecture puis écriture séparées, voir audit et
   // tests/pin_security_test.js).
-  const result = await _recordPinAttempt(db, userId, callerUid, match, now);
+  //
+  // Garde-fou défensif (audit C.2 — contention sous rafale distribuée) : si
+  // la transaction elle-même échoue malgré le maxAttempts relevé ci-dessus
+  // (ex. rafale encore plus large que prévu), on échoue FERMÉ — jamais de
+  // token émis, jamais de PIN considéré comme valide, aucun contournement du
+  // comptage (on ne peut pas compter une tentative dont l'écriture n'a
+  // jamais pu committer, mais on ne la transforme jamais en succès non
+  // plus). L'appelant doit simplement réessayer.
+  let result;
+  try {
+    result = await _recordPinAttempt(db, userId, callerUid, match, now);
+  } catch (e) {
+    console.error("[verifyPin] Échec de la transaction de comptage (contention Firestore) :", e);
+    throw new HttpsError("unavailable", "Service temporairement surchargé — réessayez dans quelques secondes.");
+  }
 
   if (result.outcome === "locked" || result.outcome === "caller_cooldown") {
     // Même code, même forme de message dans les deux cas : le client ne
