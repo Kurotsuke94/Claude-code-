@@ -37,6 +37,13 @@
 // locale (voir le rapport : "n'exécute pas ce script contre la
 // production").
 //
+// GARDE-FOU PROJET : hors émulateur, ce script REFUSE toute opération (même
+// un dry-run) si le project id réellement résolu par le SDK Admin
+// (db.projectId, pas seulement --project/GCLOUD_PROJECT) n'est pas EXACTEMENT
+// "maintix-c9dbd" — voir EXPECTED_PRODUCTION_PROJECT_ID et
+// _checkPreconditions. Le projet ciblé est systématiquement affiché avant
+// toute opération, dans tous les modes.
+//
 // USAGE :
 //   node scripts/migrate-pins-to-private.js                  (dry-run, par défaut)
 //   node scripts/migrate-pins-to-private.js --dry-run
@@ -48,6 +55,15 @@ const path = require('path');
 
 const FUNCTIONS_DIR = path.join(__dirname, '..', 'functions');
 const PAGE_SIZE_DEFAULT = 300;
+// Seul projet Firebase de production autorisé pour ce script. Vérifié
+// contre le project id RÉELLEMENT résolu par le SDK Admin (db.projectId,
+// jamais seulement --project/GCLOUD_PROJECT, qui ne sont que des intentions
+// — db.projectId reflète ce que le SDK utilisera effectivement pour ses
+// requêtes, y compris quand il est déduit de credentials par défaut).
+// Jamais appliqué sous l'émulateur (voir _checkPreconditions) : les tests
+// (tests/migrate_pins_test.js) utilisent délibérément un autre project id
+// ('maintix-rules-test') contre l'émulateur local, ce qui doit rester permis.
+const EXPECTED_PRODUCTION_PROJECT_ID = 'maintix-c9dbd';
 
 function _loadFirebaseAdmin() {
   // firebase-admin vit dans functions/node_modules (installé pour les
@@ -113,13 +129,41 @@ async function _checkPreconditions(args, db) {
       'arrêt pour éviter de cibler un projet par défaut non voulu.';
   }
   // Connectivité minimale : une lecture bon marché doit réussir avant de
-  // se lancer dans une migration potentiellement longue.
+  // se lancer dans une migration potentiellement longue. Elle a aussi pour
+  // effet de garantir que le client Firestore est prêt (db.projectId lève
+  // une erreur interne s'il est lu avant la première requête), ce qui
+  // permet la vérification du project id juste après, en toute sécurité.
   try {
     await db.collection('users').limit(1).get();
   } catch (e) {
     return 'Lecture de test sur la collection "users" impossible (' + (e.message || e) + ') — ' +
       'arrêt avant toute migration (accès/réseau/projet incorrect ?).';
   }
+
+  // Project id RÉELLEMENT utilisé par le SDK Admin pour cette session —
+  // affiché systématiquement (dry-run ou exécution réelle), avant toute
+  // opération de migration proprement dite, pour qu'il soit impossible de
+  // cibler le mauvais projet sans s'en apercevoir.
+  let resolvedProjectId;
+  try {
+    resolvedProjectId = db.projectId;
+  } catch (e) {
+    resolvedProjectId = args.project || process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || null;
+  }
+  _log('Projet Firebase ciblé : ' + (resolvedProjectId || '(indéterminé)') + (isEmulator ? '  [ÉMULATEUR]' : '  [PRODUCTION]'));
+
+  // Hors émulateur, seul le projet de production Maintix attendu est
+  // autorisé — refus avant toute opération si un autre projet est ciblé
+  // (ex. mauvaise variable d'environnement, mauvais --project), qu'il
+  // s'agisse d'un dry-run ou d'une exécution réelle : un dry-run contre le
+  // mauvais projet produirait de toute façon un bilan trompeur, pas
+  // seulement un risque d'écriture.
+  if (!isEmulator && resolvedProjectId !== EXPECTED_PRODUCTION_PROJECT_ID) {
+    return 'Projet Firebase ciblé ("' + (resolvedProjectId || '(indéterminé)') + '") différent du seul ' +
+      'projet de production autorisé pour ce script ("' + EXPECTED_PRODUCTION_PROJECT_ID + '") — arrêt ' +
+      'avant toute opération, pour éviter de migrer (même en dry-run) le mauvais projet Firebase.';
+  }
+
   return null;
 }
 
