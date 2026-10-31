@@ -2,3 +2,5 @@ functions/node_modules
 node_modules
 .firebase/
 .claude/
+*-debug.log
+firestore-export/

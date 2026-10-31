@@ -319,6 +319,23 @@
     }, 60);
   }
 
+  // Vérifie le PIN ACTUEL via le callable serveur verifyPin — plus jamais
+  // une comparaison de hash locale (cu.pin n'existe plus : le hash vit dans
+  // users_private/{id}, non lisible par le client, voir
+  // firestore.rules.draft-claims-migration et le rapport d'audit). Le
+  // jeton renvoyé en cas de succès n'est volontairement pas utilisé ici
+  // (pas de signInWithCustomToken) : on réutilise verifyPin uniquement
+  // comme "cette personne connaît bien le PIN actuel", la session active
+  // de l'utilisateur n'a pas besoin d'être renouvelée pour changer son
+  // propre PIN.
+  async function _verifyCurrentPin(userId, pin) {
+    if (!(window.MX.Functions && window.MX.Functions.httpsCallable)) {
+      throw Object.assign(new Error("Service d'authentification indisponible."), { code: 'unavailable' });
+    }
+    const verifyPin = window.MX.Functions.httpsCallable('verifyPin');
+    await verifyPin({ userId, pin });
+  }
+
   async function _confirmChangePin() {
     const cu = MX.state.currentUser;
     if (!cu) return;
@@ -328,22 +345,27 @@
     const errEl   = document.getElementById('stt-pin-err');
     const showErr = msg => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
 
-    const stored = cu.pin || '';
-    const isHashed = stored.length === 64;
-    const curHash = await MX.hashPin(curVal);
-    const valid   = isHashed ? (curHash === stored) : (curVal === stored);
-    if (!valid) { showErr('PIN actuel incorrect'); return; }
+    try {
+      await _verifyCurrentPin(cu.id, curVal);
+    } catch (ex) {
+      const code = (ex && ex.code) || '';
+      if (code === 'functions/resource-exhausted' || code === 'resource-exhausted') {
+        showErr((ex && ex.message) || 'Trop de tentatives — réessayez plus tard.');
+      } else if (code === 'functions/unavailable' || code === 'unavailable'
+              || code === 'functions/deadline-exceeded' || code === 'functions/internal') {
+        showErr('Connexion impossible. Vérifiez votre réseau et réessayez.');
+      } else {
+        showErr('PIN actuel incorrect');
+      }
+      return;
+    }
     if (newVal.length < 4) { showErr('Le nouveau PIN doit avoir au moins 4 chiffres'); return; }
     if (newVal !== confVal) { showErr('Les deux nouveaux PIN ne correspondent pas'); return; }
 
     const newHash = await MX.hashPin(newVal);
     try {
       MX.syncStart && MX.syncStart();
-      await MX.DB.updateUser(cu.id, { pin: newHash });
-      const u = (MX.state.users || []).find(u => u.id === cu.id);
-      if (u) u.pin = newHash;
-      cu.pin = newHash;
-      localStorage.setItem('mx_user', JSON.stringify(cu));
+      await MX.DB.updateUserPin(cu.id, newHash);
       MX.syncEnd && MX.syncEnd();
       MX.closeModal();
       MX.toast('PIN modifié avec succès');
@@ -388,9 +410,7 @@
     const newHash = await MX.hashPin(newVal);
     try {
       MX.syncStart && MX.syncStart();
-      await MX.DB.updateUser(uid, { pin: newHash });
-      const u = (MX.state.users || []).find(u => u.id === uid);
-      if (u) u.pin = newHash;
+      await MX.DB.updateUserPin(uid, newHash);
       MX.syncEnd && MX.syncEnd();
       MX.closeModal();
       MX.toast('PIN réinitialisé');

@@ -76,10 +76,15 @@
         orderBy: function (f, dir)   { return makeQuery(path, Object.assign({}, q, { orderField: f, orderDir: dir || 'asc' })); },
         limit:   function (n)        { return makeQuery(path, Object.assign({}, q, { limitN: n })); },
         get:     function ()         { return _deniedColl(path) ? Promise.reject(_denyErr()) : Promise.resolve(makeSnapshot(path, q)); },
-        onSnapshot: function (cb) {
+        // onError (2e paramètre, optionnel) : enregistré avec le listener pour
+        // pouvoir être déclenché depuis un test via
+        // firebase.firestore().triggerSnapshotError(collName) — simule une
+        // VRAIE erreur de snapshot (ex. permission-denied), jamais une simple
+        // réponse météo/donnée invalide, voir tests/cta_vc_test.js.
+        onSnapshot: function (cb, onError) {
           var k = path.join('/');
           listeners[k] = listeners[k] || [];
-          var entry = { cb: cb, q: q };
+          var entry = { cb: cb, q: q, onError: onError };
           listeners[k].push(entry);
           setTimeout(function () { cb(makeSnapshot(path, q)); }, 0);
           return function () { var i = listeners[k].indexOf(entry); if (i >= 0) listeners[k].splice(i, 1); };
@@ -196,7 +201,21 @@
         };
       },
       _debugStore: store,
-      _debugListeners: listeners
+      _debugListeners: listeners,
+      // triggerSnapshotError(collName, err) — simule une VRAIE erreur de
+      // snapshot Firestore (ex. permission-denied) sur une collection de
+      // premier niveau, pour les listeners actuellement actifs. Fidèle au
+      // comportement réel du SDK Firestore : un onSnapshot qui reçoit une
+      // erreur est détaché définitivement (jamais de redémarrage automatique
+      // tout seul) — les entrées sont donc retirées de `listeners[k]` ici
+      // aussi, pas seulement notifiées.
+      triggerSnapshotError: function (collName, err) {
+        var k = collName;
+        var entries = (listeners[k] || []).slice();
+        listeners[k] = [];
+        var e = err || (function () { var x = new Error('Missing or insufficient permissions.'); x.code = 'permission-denied'; return x; })();
+        entries.forEach(function (entry) { if (entry.onError) entry.onError(e); });
+      },
     };
   }
 
@@ -231,7 +250,85 @@
     } catch (e) {}
     return null;
   }
-  var _authUser = _loadAuthUser();
+  // getIdTokenResult(), lu par auth.js (onAuthStateChanged) pour distinguer
+  // Admin ('password')/anonyme ('anonymous')/PIN custom token ('custom') —
+  // voir la migration custom claims. Les données JSON (provider/claims) sont
+  // sérialisables (survivent à _saveAuthUser/_loadAuthUser via
+  // localStorage/sessionStorage) ; la méthode elle-même est ré-attachée
+  // après chaque restauration, puisque les fonctions ne survivent pas à
+  // JSON.stringify/parse.
+  function _attachTokenResult(u) {
+    if (!u) return u;
+    var provider = u.__provider || (u.isAnonymous ? 'anonymous' : 'password');
+    var claims   = u.__claims || {};
+    u.getIdTokenResult = function () {
+      return Promise.resolve({ claims: Object.assign({ firebase: { sign_in_provider: provider } }, claims) });
+    };
+    return u;
+  }
+
+  // ── Cloud Functions mock (verifyPin) ──
+  // Reproduit la logique SERVEUR réelle de functions/index.js:verifyPin
+  // (lecture du hash stocké dans le mock Firestore users/{id}, comparaison
+  // SHA-256 via crypto.subtle — disponible nativement dans le vrai
+  // navigateur piloté par Playwright) pour que confirmPin() (assets/js/
+  // auth.js) puisse être exercé de bout en bout par les tests existants
+  // SANS jamais toucher un vrai projet Firebase. Le "token" renvoyé n'est
+  // jamais un vrai JWT : juste un sachet JSON que signInWithCustomToken()
+  // ci-dessous sait décoder, suffisant pour vérifier le FLUX client (appel
+  // verifyPin -> signInWithCustomToken -> rôle reflété dans le jeton) — pas
+  // pour valider la sécurité serveur elle-même (voir
+  // tests/firestore_rules_cta_vc_claims_test.js, seul test faisant foi pour
+  // cela, contre un véritable émulateur de règles).
+  function _sha256HexMock(str) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(str))).then(function (buf) {
+      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    });
+  }
+  function _normalizeRoleMock(userDoc) {
+    return (userDoc.rank === 'responsable' || userDoc.role === 'responsable') ? 'responsable' : 'technicien';
+  }
+  function _mockVerifyPin(data) {
+    var userId = data && data.userId, pin = data && data.pin;
+    // Même séparation que la vraie Cloud Function (functions/index.js:
+    // verifyPin) : le rôle vient de users/{id}, le hash de
+    // users_private/{id} (non lisible par le client en réalité — voir
+    // firestore.rules.draft-claims-migration — mais le mock n'a pas besoin
+    // de simuler ce blocage de lecture : il reproduit seulement la SOURCE
+    // de données réelle, pas les règles elles-mêmes, voir
+    // tests/firestore_rules_cta_vc_claims_test.js pour la preuve contre un
+    // véritable moteur de règles).
+    var store = (window.__mockDb && window.__mockDb._debugStore) || {};
+    var userDoc = (store['users'] || {})[userId] || null;
+    var privateDoc = (store['users_private'] || {})[userId] || null;
+    return _sha256HexMock(pin).then(function (enteredHash) {
+      var storedPin = privateDoc ? String(privateDoc.pin || '') : '';
+      var match;
+      if (/^[0-9a-f]{64}$/.test(storedPin)) match = !!userDoc && enteredHash === storedPin;
+      else match = !!userDoc && pin === storedPin;
+      if (!match) {
+        var err = new Error('PIN incorrect.');
+        err.code = 'functions/permission-denied';
+        throw err;
+      }
+      var role = _normalizeRoleMock(userDoc);
+      var claims = { role: role, userId: userId };
+      if (userDoc.roleId) claims.roleId = userDoc.roleId;
+      return { data: { token: 'mock-custom-token:' + JSON.stringify(claims) } };
+    });
+  }
+  function functionsFn() {
+    return {
+      httpsCallable: function (name) {
+        return function (data) {
+          if (name !== 'verifyPin') return Promise.reject(new Error('mock: fonction callable inconnue ' + name));
+          return _mockVerifyPin(data);
+        };
+      },
+    };
+  }
+
+  var _authUser = _attachTokenResult(_loadAuthUser());
   var _authCbs = [];
   function fireAuth() { _authCbs.forEach(function (cb) { cb(_authUser); }); }
   var authMock = {
@@ -242,13 +339,32 @@
     },
     onAuthStateChanged: function (cb) { _authCbs.push(cb); setTimeout(function () { cb(_authUser); }, 0); return function () {}; },
     signInAnonymously: function () {
-      _authUser = { uid: 'anon-' + Math.random().toString(36).slice(2), isAnonymous: true, email: null };
+      _authUser = _attachTokenResult({ uid: 'anon-' + Math.random().toString(36).slice(2), isAnonymous: true, email: null, __provider: 'anonymous' });
       _saveAuthUser();
       setTimeout(fireAuth, 0);
       return Promise.resolve({ user: _authUser });
     },
     signInWithEmailAndPassword: function (email) {
-      _authUser = { uid: 'admin-uid', isAnonymous: false, email: email };
+      _authUser = _attachTokenResult({ uid: 'admin-uid', isAnonymous: false, email: email, __provider: 'password' });
+      _saveAuthUser();
+      setTimeout(fireAuth, 0);
+      return Promise.resolve({ user: _authUser });
+    },
+    // Simule auth.signInWithCustomToken(token) (compat SDK) : décode le
+    // sachet JSON renvoyé par le mock verifyPin ci-dessus et établit une
+    // session dont getIdTokenResult() reflète fidèlement
+    // sign_in_provider:'custom' + les claims role/userId/roleId — exactement
+    // ce que lit onAuthStateChanged (assets/js/auth.js) pour distinguer une
+    // session PIN d'une vraie session Admin.
+    signInWithCustomToken: function (token) {
+      var claims = {};
+      if (typeof token === 'string' && token.indexOf('mock-custom-token:') === 0) {
+        try { claims = JSON.parse(token.slice('mock-custom-token:'.length)); } catch (e) {}
+      }
+      _authUser = _attachTokenResult({
+        uid: 'pinuser_' + (claims.userId || 'unknown'), isAnonymous: false, email: null,
+        __provider: 'custom', __claims: claims,
+      });
       _saveAuthUser();
       setTimeout(fireAuth, 0);
       return Promise.resolve({ user: _authUser });
@@ -258,7 +374,7 @@
     // sans déclencher onAuthStateChanged sur CETTE page — un vrai autre
     // navigateur ne notifierait jamais cette page directement. Ne pas
     // utiliser pour simuler la propre identité de la page testée.
-    __setCurrentUserForTest: function (u) { _authUser = u; },
+    __setCurrentUserForTest: function (u) { _authUser = _attachTokenResult(u); },
   };
 
   var mockDb = makeFirestoreMock();
@@ -317,11 +433,14 @@
     };
   }
 
+  var _appMock = { functions: function () { return functionsFn(); } };
   window.firebase = {
     initializeApp: function () { window.firebase.apps.push({}); },
     apps: [],
+    app: function () { return _appMock; },
     firestore: firestoreFn,
     auth: authFn,
+    functions: functionsFn,
     storage: storageFn,
   };
 })();

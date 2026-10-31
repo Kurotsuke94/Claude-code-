@@ -1,6 +1,18 @@
 (function () {
   var _clWsSelKey = null;
 
+  // ── Correction bug "boucle infinie de rendu" (Responsable/Admin) ──────────
+  // render() relance _ensurePlanningForWeek(...).then(() => render(dayId))
+  // tant que MX.state.planningEntries est vide. Si l'établissement n'a
+  // simplement aucune donnée de planning pour le mois en cours,
+  // planningEntries reste vide indéfiniment : chaque render() reprogrammait
+  // alors un nouveau cycle, en boucle infinie (le callback matche toujours
+  // sur mc.dataset.dayId, affecté sans condition à la fin de render()).
+  // On ne tente le pré-chargement qu'une seule fois par semaine (weekKey),
+  // que les données arrivent ou non — render() se relance alors une seule
+  // fois si de nouvelles suggestions sont arrivées, jamais en boucle.
+  var _planningLoadAttemptedForWeek = {};
+
   // ── REFONTE MISSIONS (Admin/Responsable) : horaires des créneaux ──────────
   // Source UNIQUE pour les 3 écrans du flux admin/responsable (Vue d'ensemble/
   // Semaine/Journée), utilisée par render()/_renderHistDay()/_showFutureDay().
@@ -100,9 +112,13 @@
     const canAll = MX.Auth.canSeeAll();
     const worker = (!canAll && cu) ? cu.name : null;
 
-    // Pre-load planning data for suggestion pre-fill (non-blocking; re-renders once loaded)
-    if (canAll && !Object.keys(MX.state.planningEntries || {}).length) {
-      _ensurePlanningForWeek(_weekKey(new Date())).then(() => {
+    // Pre-load planning data for suggestion pre-fill (non-blocking; re-renders
+    // once loaded). Tenté une seule fois par semaine — voir
+    // _planningLoadAttemptedForWeek ci-dessus (correction boucle infinie).
+    const _plWeekKey = _weekKey(new Date());
+    if (canAll && !Object.keys(MX.state.planningEntries || {}).length && !_planningLoadAttemptedForWeek[_plWeekKey]) {
+      _planningLoadAttemptedForWeek[_plWeekKey] = true;
+      _ensurePlanningForWeek(_plWeekKey).then(() => {
         const mc = document.getElementById('main-content');
         if (mc && mc.dataset.dayId === dayId) render(dayId);
       }).catch(() => {});
@@ -232,9 +248,24 @@
       const slDailyClaim  = (!isWeekSlots && isToday) ? (dailyClaims[sl] || null) : null;
       const slPlanSugg    = (!isWeekSlots && canAll) ? _getPlanSuggestions(_currK, dayId, sl) : [];
 
-      // Visibility filter (mirrors slotCard logic)
+      // Visibility filter (mirrors slotCard logic) — un technicien ne voit
+      // QUE son propre créneau (slAsn === worker) ou une tâche qui lui est
+      // individuellement assignée dans un autre créneau (hasPerTask).
+      //
+      // Correction (diagnostic "Jordan voit des check-lists d'une autre
+      // tranche horaire") : l'ancienne condition ajoutait une exception
+      // "&& !(isToday && !slAsn)" qui réaffichait TOUT créneau NON ASSIGNÉ
+      // du jour même, à TOUT technicien, quelle que soit sa propre
+      // affectation — un résidu de l'ancien mécanisme où un technicien
+      // pouvait "réclamer" un créneau libre directement depuis cette page
+      // (claimSlot/unclaimSlot/assignToday, retirés — voir mes-missions.js
+      // :_getTodayAssignment). Cette action n'existe plus ici : rien ne
+      // justifie plus de montrer un créneau non assigné à un technicien qui
+      // n'en est pas responsable. Un responsable/admin (canSeeAll) continue
+      // de tout voir dans tous les cas (worker est déjà null pour lui,
+      // cette condition ne s'applique jamais à lui).
       const hasPerTask = worker && slotTasks.some(function(t) { return t.assignedTo === worker; });
-      if (worker && !MX.Auth.canSeeAll() && slAsn !== worker && !hasPerTask && !(isToday && !slAsn)) return;
+      if (worker && !MX.Auth.canSeeAll() && slAsn !== worker && !hasPerTask) return;
 
       const visTasks = (worker && !MX.Auth.canSeeAll() && slAsn !== worker)
         ? slotTasks.filter(function(t) { return t.assignedTo === worker; })
@@ -281,10 +312,17 @@
         }
       } else if (canAll) {
         if (isToday) {
-          const claimName = (slDailyClaim && slDailyClaim.name) || '';
-          const lockIcon  = (slDailyClaim && slDailyClaim.lockedBy) ? '<i class="fas fa-lock" style="color:var(--orange);font-size:10px"></i> ' : '';
-          if (claimName) {
-            h += '<div class="cl-ws-asgn-row">' + lockIcon + '<span class="cl-ws-asgn-chip">' + esc(claimName) + '</span></div>';
+          // Libellé = slAsn (déjà résolu par getEffectiveDaySchedule : revendication
+          // du jour puis repli sur l'affectation formelle state.assignments, voir
+          // helpers.js:getEffectiveDaySchedule), EXACTEMENT la même source que le
+          // panneau "Planning" (app.js:buildDxPanel, inst.userName). Avant cette
+          // correction, ce libellé relisait dailyClaims seul, sans jamais retomber
+          // sur l'affectation formelle quand personne n'avait "réclamé" le créneau
+          // aujourd'hui — d'où un "Non assigné" ici alors que le panneau Planning,
+          // lui, affichait correctement le technicien affecté.
+          const lockIcon = (slDailyClaim && slDailyClaim.lockedBy) ? '<i class="fas fa-lock" style="color:var(--orange);font-size:10px"></i> ' : '';
+          if (slAsn) {
+            h += '<div class="cl-ws-asgn-row">' + lockIcon + '<span class="cl-ws-asgn-chip">' + esc(slAsn) + '</span></div>';
           } else if (slPlanSugg.length) {
             h += '<div class="cl-ws-asgn-row"><i class="fas fa-calendar-check" style="color:var(--cyan);font-size:10px"></i>&nbsp;<span class="cl-ws-asgn-chip" style="border-color:rgba(0,245,212,.3)">' + esc(slPlanSugg[0]) + '</span></div>';
           } else {

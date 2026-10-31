@@ -143,19 +143,31 @@ ok('5.2 Changement de mois (28 -> 1er mars, 2026 n\'est pas bissextile)',
 // de sa logique. Module._load est restauré immédiatement après le require.
 const Module = require('module');
 
-function makeFakeDb(seed) {
+// failPaths (Étape 3, section 7) : ensemble optionnel de clés pour lesquelles
+// get()/set() doivent lever une exception — simule une panne Firestore
+// réelle (permission, indisponibilité...) sans émulateur. Une entrée bare
+// "collection/id" fait échouer get() ET set() pour ce document (usage
+// historique, inchangé) ; une entrée préfixée "get:collection/id" ou
+// "set:collection/id" (Étape 4.1) cible UNIQUEMENT la lecture ou UNIQUEMENT
+// l'écriture de ce document, pour isoler précisément lequel des deux chemins
+// d'erreur de _persistOneObservedDay est exercé.
+function makeFakeDb(seed, failPaths) {
   const store = JSON.parse(JSON.stringify(seed || {}));
+  const fail = failPaths || new Set();
   return {
     collection(name) {
       store[name] = store[name] || {};
       return {
         doc(id) {
+          const path = name + '/' + id;
           return {
             async get() {
+              if (fail.has(path) || fail.has('get:' + path)) throw new Error('FAKE_FIRESTORE_ERROR(get:' + path + ')');
               const exists = Object.prototype.hasOwnProperty.call(store[name], id);
               return { exists, data: () => store[name][id] };
             },
             async set(data, opts) {
+              if (fail.has(path) || fail.has('set:' + path)) throw new Error('FAKE_FIRESTORE_ERROR(set:' + path + ')');
               if (opts && opts.merge && store[name][id]) store[name][id] = Object.assign({}, store[name][id], data);
               else store[name][id] = Object.assign({}, data);
             },
@@ -307,6 +319,215 @@ function _openMeteoOkResponse(dateStr, tMin, tMax, tMean) {
     await _runHandler();
     ok('6.9 Rejouée deux fois pour la même nuit -> un seul appel réseau, un seul document, aucun doublon',
       fetchCount === 1 && Object.keys(_fakeDb._store.weather_daily || {}).length === 1);
+    _restoreFetch();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── 7. ÉTAPE 3 — scénarios critiques ajoutés : lat/lon invalides, erreurs
+  // Firestore, délai dépassé réseau, et rattrapage de jours antérieurs
+  // (fenêtre déjà reçue dans la même réponse Open-Meteo). ──
+  // Petit utilitaire LOCAL AU TEST (construction de dates de fixtures
+  // uniquement, ne teste rien par lui-même) — même méthode calendaire que
+  // _yesterdayParisDateStr, généralisée à N jours, pour fabriquer des
+  // entrées de test réalistes sans dépendre d'une date figée.
+  function _testDaysAgoStr(n) {
+    const base = _parisDateStr(new Date());
+    const parts = base.split('-').map(Number);
+    const noonUtc = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+    noonUtc.setUTCDate(noonUtc.getUTCDate() - n);
+    return _parisDateStr(noonUtc);
+  }
+
+  // 7.1 — Lecture Firestore de config/hotel_config en échec (ex. panne,
+  // permission) -> pas d'exception non interceptée, aucun appel réseau, rien écrit.
+  {
+    let fetchCalled = false;
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 48.75, lon: 2.36 } } }, new Set(['config/hotel_config']));
+    _mockFetch(async () => { fetchCalled = true; return _openMeteoOkResponse(_yesterdayParisDateStr(new Date()), 1, 2, 1.5); });
+    let threw = false;
+    try { await _runHandler(); } catch (e) { threw = true; }
+    ok('7.1 Erreur Firestore (lecture config/hotel_config) : gérée proprement, aucune exception, aucun appel réseau',
+      !threw && !fetchCalled);
+    _restoreFetch();
+  }
+
+  // 7.2 — Lecture Firestore de weather_daily/{hier} (vérif. d'idempotence
+  // PRÉALABLE au fetch) en échec -> pas d'exception, aucun appel réseau.
+  {
+    const yesterdayStr = _yesterdayParisDateStr(new Date());
+    let fetchCalled = false;
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 48.75, lon: 2.36 } } }, new Set(['weather_daily/' + yesterdayStr]));
+    _mockFetch(async () => { fetchCalled = true; return _openMeteoOkResponse(yesterdayStr, 1, 2, 1.5); });
+    let threw = false;
+    try { await _runHandler(); } catch (e) { threw = true; }
+    ok('7.2 Erreur Firestore (lecture weather_daily de la veille) : gérée proprement, aucune exception, aucun appel réseau',
+      !threw && !fetchCalled);
+    _restoreFetch();
+  }
+
+  // 7.3 — Latitude hors bornes valides (> 90) -> aucun appel réseau, rien écrit.
+  {
+    let fetchCalled = false;
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 200, lon: 2.36 } } });
+    _mockFetch(async () => { fetchCalled = true; return _openMeteoOkResponse(_yesterdayParisDateStr(new Date()), 1, 2, 1.5); });
+    await _runHandler();
+    ok('7.3a Latitude hors bornes (200) -> aucun appel réseau, rien n\'est écrit', !fetchCalled && Object.keys(_fakeDb._store.weather_daily || {}).length === 0);
+    _restoreFetch();
+  }
+  // 7.3b — Longitude hors bornes valides (< -180) -> même traitement.
+  {
+    let fetchCalled = false;
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 48.75, lon: -500 } } });
+    _mockFetch(async () => { fetchCalled = true; return _openMeteoOkResponse(_yesterdayParisDateStr(new Date()), 1, 2, 1.5); });
+    await _runHandler();
+    ok('7.3b Longitude hors bornes (-500) -> aucun appel réseau, rien n\'est écrit', !fetchCalled && Object.keys(_fakeDb._store.weather_daily || {}).length === 0);
+    _restoreFetch();
+  }
+
+  // 7.4 — Délai Open-Meteo dépassé (fetch rejeté par AbortController) ->
+  // pas d'exception non interceptée, rien écrit ; le signal d'abandon est
+  // bien transmis à fetch (préalable réel à tout délai dépassé).
+  {
+    let sawSignal = false;
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 48.75, lon: 2.36 } } });
+    _mockFetch(async (url, opts) => {
+      sawSignal = !!(opts && opts.signal && typeof opts.signal.aborted === 'boolean');
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+    let threw = false;
+    try { await _runHandler(); } catch (e) { threw = true; }
+    ok('7.4a Un AbortSignal est bien transmis à fetch (préalable à tout délai dépassé réel)', sawSignal);
+    ok('7.4b Délai dépassé simulé (AbortError) : géré proprement, aucune exception, rien n\'est écrit',
+      !threw && Object.keys(_fakeDb._store.weather_daily || {}).length === 0);
+    _restoreFetch();
+  }
+
+  // 7.5 — Rattrapage : jour-3 déjà "observed" (ne doit pas être réécrit),
+  // jour-2 pas encore observé (doit être écrit), hier pas encore observé
+  // (doit être écrit) — TOUT dans la MÊME réponse Open-Meteo, sans second
+  // appel réseau.
+  {
+    const d1 = _yesterdayParisDateStr(new Date()); // hier
+    const d2 = _testDaysAgoStr(2);
+    const d3 = _testDaysAgoStr(3);
+    let fetchCount = 0;
+    _fakeDb = makeFakeDb({
+      config: { hotel_config: { lat: 48.75, lon: 2.36 } },
+      weather_daily: { [d3]: { date: d3, kind: 'observed', lat: 48.75, lon: 2.36, tMean: 99 } }, // déjà finalisé, ne doit pas changer
+    });
+    _mockFetch(async () => {
+      fetchCount++;
+      return {
+        ok: true,
+        json: async () => ({ daily: {
+          time: [d3, d2, d1],
+          temperature_2m_min:  [1, 2, 3],
+          temperature_2m_max:  [5, 6, 7],
+          temperature_2m_mean: [3, 4, 5],
+        } }),
+      };
+    });
+    await _runHandler();
+    const store = _fakeDb._store.weather_daily;
+    ok('7.5a Un seul appel réseau pour toute la fenêtre de rattrapage', fetchCount === 1);
+    ok('7.5b Jour-3 déjà "observed" : INCHANGÉ (pas réécrasé)', store[d3].tMean === 99);
+    ok('7.5c Jour-2 (pas encore observé) : rattrapé dans la même exécution', !!store[d2] && store[d2].tMean === 4 && store[d2].kind === 'observed');
+    ok('7.5d Hier (pas encore observé) : toujours écrit normalement', !!store[d1] && store[d1].tMean === 5 && store[d1].kind === 'observed');
+    _restoreFetch();
+  }
+
+  // 7.6 — Jour présent dans la réponse mais HORS de la fenêtre de rattrapage
+  // réellement demandée (> BACKFILL_WINDOW_DAYS avant aujourd'hui) -> jamais
+  // traité, même si la donnée serait par ailleurs exploitable (défense en
+  // profondeur contre une réponse inattendue).
+  {
+    const d1 = _yesterdayParisDateStr(new Date());
+    const dOld = _testDaysAgoStr(10); // bien au-delà de BACKFILL_WINDOW_DAYS (3) et de past_days (3)
+    _fakeDb = makeFakeDb({ config: { hotel_config: { lat: 48.75, lon: 2.36 } } });
+    _mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ daily: {
+        time: [dOld, d1],
+        temperature_2m_min:  [1, 3],
+        temperature_2m_max:  [5, 7],
+        temperature_2m_mean: [3, 5],
+      } }),
+    }));
+    await _runHandler();
+    const store = _fakeDb._store.weather_daily;
+    ok('7.6a Hier bien écrit normalement', !!store[d1]);
+    ok('7.6b Jour hors fenêtre (10 jours avant) jamais écrit, malgré une donnée exploitable présente', !store[dOld]);
+    _restoreFetch();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── 8. ÉTAPE 4.1 — erreur Firestore sur UN SEUL jour précis EN PLEIN
+  // rattrapage, pendant que d'autres jours de la MÊME exécution réussissent.
+  // Reproduit une VRAIE erreur Firestore dans la fausse base (pas une
+  // réponse météo invalide) : fail = 'set:weather_daily/{d2}' -> get()
+  // réussit normalement pour d2 (non encore observé), puis set() lève une
+  // exception réelle, interceptée par _persistOneObservedDay. ──
+  {
+    const d1 = _yesterdayParisDateStr(new Date());
+    const d2 = _testDaysAgoStr(2);
+    const d3 = _testDaysAgoStr(3);
+    _fakeDb = makeFakeDb(
+      {
+        config: { hotel_config: { lat: 48.75, lon: 2.36 } },
+        weather_daily: { [d3]: { date: d3, kind: 'observed', lat: 48.75, lon: 2.36, tMean: 99 } }, // historique existant, ne doit pas être écrasé
+      },
+      new Set(['set:weather_daily/' + d2]) // échec RÉEL ciblé sur l'écriture de d2 uniquement
+    );
+    _mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ daily: {
+        time: [d3, d2, d1],
+        temperature_2m_min:  [1, 2, 3],
+        temperature_2m_max:  [5, 6, 7],
+        temperature_2m_mean: [3, 4, 5],
+      } }),
+    }));
+    let threw = false;
+    try { await _runHandler(); } catch (e) { threw = true; }
+    const store = _fakeDb._store.weather_daily;
+    ok('8.1 Aucune exception non interceptée ne fait échouer toute la fonction', !threw);
+    ok('8.2 Jour-3 (historique déjà observé) : jamais écrasé par l\'erreur sur un autre jour', store[d3].tMean === 99);
+    ok('8.3 Jour-2 (set() en échec) : jamais déclaré enregistré (document absent, pas de donnée partielle/fausse)', !store[d2]);
+    ok('8.4 Hier (jour valide suivant dans la même boucle) : quand même traité et enregistré normalement', !!store[d1] && store[d1].tMean === 5 && store[d1].kind === 'observed');
+    _restoreFetch();
+  }
+
+  // 8.5 — Variante : échec sur la LECTURE (get) d'un jour précis du
+  // rattrapage, pas seulement l'écriture — même garanties.
+  {
+    const d1 = _yesterdayParisDateStr(new Date());
+    const d2 = _testDaysAgoStr(2);
+    const d3 = _testDaysAgoStr(3);
+    _fakeDb = makeFakeDb(
+      {
+        config: { hotel_config: { lat: 48.75, lon: 2.36 } },
+        weather_daily: { [d3]: { date: d3, kind: 'observed', lat: 48.75, lon: 2.36, tMean: 99 } },
+      },
+      new Set(['get:weather_daily/' + d2])
+    );
+    _mockFetch(async () => ({
+      ok: true,
+      json: async () => ({ daily: {
+        time: [d3, d2, d1],
+        temperature_2m_min:  [1, 2, 3],
+        temperature_2m_max:  [5, 6, 7],
+        temperature_2m_mean: [3, 4, 5],
+      } }),
+    }));
+    let threw = false;
+    try { await _runHandler(); } catch (e) { threw = true; }
+    const store = _fakeDb._store.weather_daily;
+    ok('8.5a Échec de LECTURE sur un jour précis : aucune exception non interceptée', !threw);
+    ok('8.5b Jour-3 (historique) toujours inchangé', store[d3].tMean === 99);
+    ok('8.5c Jour-2 (get() en échec) jamais déclaré enregistré', !store[d2]);
+    ok('8.5d Hier toujours traité et enregistré normalement malgré l\'échec d\'un autre jour', !!store[d1] && store[d1].tMean === 5);
     _restoreFetch();
   }
 

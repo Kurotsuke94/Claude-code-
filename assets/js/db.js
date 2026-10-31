@@ -34,6 +34,7 @@
     products:    () => db.collection("products"),
     messages:    () => db.collection("messages"),
     users:       () => db.collection("users"),
+    usersPrivate: () => db.collection("users_private"),
     logs:        () => db.collection("logs"),
     transfers:   () => db.collection("transfers"),
     missions:    () => db.collection("missions"),
@@ -211,10 +212,37 @@
     await R.messages().doc(id).delete();
   }
 
-  async function addUser(data)                      { await R.users().add(data); }
+  // addUser crée le profil ET son document users_private (pin vide tant
+  // qu'aucun PIN n'a été saisi) en une seule fois — un compte PIN vérifié
+  // n'a jamais besoin de CRÉER users_private/{id} lui-même (voir règles),
+  // il doit toujours déjà exister avant sa première connexion.
+  async function addUser(data) {
+    const ref = await R.users().add(data);
+    await R.usersPrivate().doc(ref.id).set({ pin: "" });
+    return ref;
+  }
   async function updateUser(id, data)               { await R.users().doc(id).update(data); }
+  // Hash du PIN — collection séparée, non lisible par le client (voir
+  // firestore.rules.draft-claims-migration : audit précédent, le hash
+  // vivait auparavant dans users/{id}.pin, document lisible par quiconque).
+  // set({merge:true}) plutôt que update() : couvre le cas (rare en usage
+  // normal, mais possible pour un compte créé avant cette migration) où le
+  // document users_private/{id} n'existe pas encore.
+  async function updateUserPin(id, pinHash)         { await R.usersPrivate().doc(id).set({ pin: pinHash }, { merge: true }); }
   async function updateUserPlanningOrder(id, order) { await R.users().doc(id).update({ planningOrder: order }); }
-  async function deleteUser(id)                     { await R.users().doc(id).delete(); }
+  async function deleteUser(id) {
+    await R.users().doc(id).delete();
+    await R.usersPrivate().doc(id).delete().catch(() => {}); // best-effort, ne bloque jamais la suppression du profil
+  }
+  // Lecture ponctuelle d'un seul utilisateur (pas un listener) — utilisée
+  // par auth.js pour revérifier périodiquement qu'une session PIN (custom
+  // token) correspond toujours au rôle réellement enregistré côté Firestore
+  // (détection d'une révocation/changement de rôle décidé par un
+  // admin/responsable pendant que la session est ouverte ailleurs).
+  async function getUserSnapshot(id) {
+    const snap = await R.users().doc(id).get();
+    return snap.exists ? Object.assign({ id: snap.id }, snap.data()) : null;
+  }
 
   async function addLog(data) {
     await R.logs().add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
@@ -1626,28 +1654,54 @@
   const R_HEATING_READINGS = () => db.collection('heating_readings');
   const R_HEATING_RECOS    = () => db.collection('heating_recommendations');
   const R_WEATHER_DAILY    = () => db.collection('weather_daily');
+  // ── CONFIGURATION THERMIQUE (bâtiments/pièces/courbes) ──
+  // heating_circuits reste la SEULE collection "installation" (CTA/VC/
+  // réseau/autre) — pas de nouvelle collection redondante : ce chantier
+  // transforme son champ buildingId d'un énumérable codé en dur
+  // ('batiment_1'/'batiment_2') en une VRAIE référence vers
+  // heating_buildings/{id}, créé et configuré depuis l'interface.
+  const R_HEATING_BUILDINGS = () => db.collection('heating_buildings');
+  const R_HEATING_ROOMS = () => db.collection('heating_rooms');
+  const R_HEATING_CURVE_POINTS = () => db.collection('heating_curve_points');
+  const R_HEATING_AUDIT = () => db.collection('heating_config_audit');
 
-  function listenHeatingCircuits(cb) {
+  // onError (2e paramètre, optionnel) : en PLUS du log console existant
+  // (_fsError), prévient l'appelant qu'une erreur a coupé l'écoute — un
+  // onSnapshot Firestore qui échoue (ex. permission-denied) NE REDÉMARRE
+  // JAMAIS seul, même après correction des règles côté serveur, tant que le
+  // code n'en relance pas un nouveau explicitement. Voir assets/js/pages/
+  // cta-vc.js:_subscribe(), qui utilise ce paramètre pour se reconnecter
+  // automatiquement (une fois) plutôt que de rester silencieusement figé.
+  function listenHeatingCircuits(cb, onError) {
     return R_HEATING_CIRCUITS().onSnapshot(snap => {
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, _fsError('heating_circuits'));
+    }, err => { _fsError('heating_circuits')(err); if (onError) onError(err); });
   }
-  async function addHeatingCircuit(data) {
+  // actor (2e paramètre, optionnel, rétrocompatible) : trace l'installation
+  // dans le journal d'audit (CONFIGURATION THERMIQUE) au même titre que les
+  // bâtiments/pièces/courbes — une installation EST de la configuration
+  // structurelle. Omis, le circuit est créé/modifié sans entrée d'audit
+  // (appelants existants non mis à jour), jamais une erreur.
+  async function addHeatingCircuit(data, actor) {
     const ref = R_HEATING_CIRCUITS().doc(uuid());
     await ref.set({ ...data, archived: false, createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+    if (actor) await _logConfigChange('installation', ref.id, _diffForAudit({}, data), actor);
     return ref.id;
   }
-  async function updateHeatingCircuit(id, data) {
-    await R_HEATING_CIRCUITS().doc(id).update({ ...data, updatedAt: FV.serverTimestamp() });
+  async function updateHeatingCircuit(id, data, actor) {
+    const ref = R_HEATING_CIRCUITS().doc(id);
+    const existing = actor ? (await ref.get()).data() : null;
+    await ref.update({ ...data, updatedAt: FV.serverTimestamp() });
+    if (actor) await _logConfigChange('installation', id, _diffForAudit(existing, data), actor);
   }
-  async function archiveHeatingCircuit(id, archived) {
-    await R_HEATING_CIRCUITS().doc(id).update({ archived: !!archived, updatedAt: FV.serverTimestamp() });
+  async function archiveHeatingCircuit(id, archived, actor) {
+    await updateHeatingCircuit(id, { archived: !!archived }, actor);
   }
 
-  function listenHeatingReadings(cb) {
+  function listenHeatingReadings(cb, onError) {
     return R_HEATING_READINGS().orderBy('recordedAt', 'desc').limit(500).onSnapshot(snap => {
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, _fsError('heating_readings'));
+    }, err => { _fsError('heating_readings')(err); if (onError) onError(err); });
   }
   // Append-only : une "correction" crée un NOUVEAU relevé référençant
   // l'ancien (correctsId) plutôt que d'écraser l'historique (consigne
@@ -1659,10 +1713,10 @@
     return ref.id;
   }
 
-  function listenHeatingRecommendations(cb) {
+  function listenHeatingRecommendations(cb, onError) {
     return R_HEATING_RECOS().orderBy('createdAt', 'desc').limit(300).onSnapshot(snap => {
       cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, _fsError('heating_recommendations'));
+    }, err => { _fsError('heating_recommendations')(err); if (onError) onError(err); });
   }
   async function addHeatingRecommendation(data) {
     const ref = R_HEATING_RECOS().doc(uuid());
@@ -1686,6 +1740,209 @@
   // MX.HeatingEngine.RECO_EXPIRY_DAYS (assets/js/utils/heating-engine.js).
   async function expireHeatingRecommendation(id) {
     await R_HEATING_RECOS().doc(id).update({ status: 'expiree', expiredAt: FV.serverTimestamp() });
+  }
+
+  // ── REFONTE CTA/VC — cycle de validation complet à 5 états ──
+  // Ajoute un cycle QUANTITATIF, en PLUS du cycle qualitatif v1 ci-dessus
+  // (a_examiner/acceptee/refusee/appliquee/expiree, jamais retiré — les
+  // enregistrements existants restent valides et affichables tels quels).
+  // Une proposition v2 (moteur quantitatif, voir heating-engine.js) suit :
+  //   proposition_generee → validee → reglage_effectue → consigne_confirmee
+  //                                                      → controle_effectue
+  // avec deux branches possibles à tout moment avant 'reglage_effectue' :
+  //   refusee (terminal) | reportee (différée, redevient visible comme une
+  //   proposition active — jamais un statut terminal).
+  // engineVersion:'v2' marque une proposition de ce cycle, pour que l'UI et
+  // les filtres d'historique distinguent sans ambiguïté les deux familles de
+  // statuts qui partagent la même collection heating_recommendations.
+  async function addHeatingProposal(data) {
+    const ref = R_HEATING_RECOS().doc(uuid());
+    await ref.set({ engineVersion: 'v2', status: 'proposition_generee', ...data, createdAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+  async function validateHeatingProposal(id, actor) {
+    await R_HEATING_RECOS().doc(id).update({ status: 'validee', validatedAt: FV.serverTimestamp(), validatedBy: actor || '' });
+  }
+  async function refuseHeatingProposal(id, actor, reason) {
+    await R_HEATING_RECOS().doc(id).update({ status: 'refusee', decidedAt: FV.serverTimestamp(), decidedBy: actor || '', refusalReason: reason || '' });
+  }
+  // reportedUntil (optionnel) : date AAAA-MM-JJ à partir de laquelle la
+  // proposition redevient prioritaire — purement indicatif côté UI, aucune
+  // tâche planifiée serveur ne la fait réapparaître automatiquement.
+  async function reportHeatingProposal(id, actor, reportedUntil) {
+    await R_HEATING_RECOS().doc(id).update({
+      status: 'reportee', reportedAt: FV.serverTimestamp(), reportedBy: actor || '',
+      reportedUntil: reportedUntil || null,
+    });
+  }
+  // appliedValue : la valeur RÉELLEMENT réglée sur l'installation (saisie
+  // technicien) — distincte de la valeur proposée par le moteur
+  // (proposal.waterTemp/blowTemp), car un technicien peut légitimement
+  // régler une valeur différente (contrainte matérielle, arrondi de
+  // l'équipement, etc.) ; les deux restent visibles séparément dans
+  // l'historique, jamais l'une écrasée par l'autre.
+  async function markHeatingSettingApplied(id, actor, appliedValue) {
+    await R_HEATING_RECOS().doc(id).update({
+      status: 'reglage_effectue', appliedAt: FV.serverTimestamp(), appliedBy: actor || '',
+      appliedValue: appliedValue || null,
+    });
+  }
+  async function confirmHeatingSetpoint(id, actor, confirmedValue) {
+    await R_HEATING_RECOS().doc(id).update({
+      status: 'consigne_confirmee', confirmedAt: FV.serverTimestamp(), confirmedBy: actor || '',
+      confirmedValue: confirmedValue || null,
+    });
+  }
+  // controlReadingId : référence vers le relevé (heating_readings) pris
+  // APRÈS le réglage, preuve du contrôle — jamais un nouveau champ de
+  // température recopié ici (source unique de vérité = heating_readings).
+  async function linkHeatingControlReading(id, actor, controlReadingId) {
+    await R_HEATING_RECOS().doc(id).update({
+      status: 'controle_effectue', controlledAt: FV.serverTimestamp(), controlledBy: actor || '',
+      controlReadingId: controlReadingId || null,
+    });
+  }
+
+  // ── CONFIGURATION THERMIQUE — journal d'audit ──
+  // Une entrée PAR APPEL de modification (pas par champ) : {entityType,
+  // entityId, changes:{champ:{old,new}}, actor, at}. Jamais de suppression
+  // ni de modification de ce journal (append-only, comme heating_readings)
+  // — voir firestore.rules.draft-claims-migration.
+  async function _logConfigChange(entityType, entityId, changes, actor) {
+    if (!changes || !Object.keys(changes).length) return;
+    await R_HEATING_AUDIT().doc(uuid()).set({
+      entityType, entityId, changes, actor: actor || '', at: FV.serverTimestamp(),
+    });
+  }
+  // Calcule le diff {champ:{old,new}} entre le document existant et les
+  // données soumises — seulement les champs RÉELLEMENT présents dans data
+  // (une mise à jour partielle ne doit jamais faire croire que les autres
+  // champs ont été remis à une valeur "old -> undefined").
+  function _diffForAudit(existing, data) {
+    var changes = {};
+    Object.keys(data || {}).forEach(function (k) {
+      var oldV = existing ? existing[k] : undefined;
+      var newV = data[k];
+      if (JSON.stringify(oldV) !== JSON.stringify(newV)) changes[k] = { old: (oldV === undefined ? null : oldV), new: (newV === undefined ? null : newV) };
+    });
+    return changes;
+  }
+
+  // ── BÂTIMENTS ── mode: 'automatique' (loi d'eau/régulation auto — MX ne
+  // propose JAMAIS de réglage) | 'manuel_assiste' (techniciens réglent,
+  // MX propose). Jamais codé en dur ailleurs : toute la logique moteur
+  // (heating-engine.js) et les écrans lisent ce champ via l'id réel du
+  // bâtiment — voir aussi heating_circuits.buildingId, désormais une
+  // référence vers heating_buildings/{id}, plus un énumérable fixe.
+  function listenHeatingBuildings(cb, onError) {
+    return R_HEATING_BUILDINGS().onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => { _fsError('heating_buildings')(err); if (onError) onError(err); });
+  }
+  async function addHeatingBuilding(data, actor) {
+    const ref = R_HEATING_BUILDINGS().doc(uuid());
+    await ref.set({ ...data, archived: false, createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(), createdBy: actor || '' });
+    await _logConfigChange('building', ref.id, _diffForAudit({}, data), actor);
+    return ref.id;
+  }
+  async function updateHeatingBuilding(id, data, actor) {
+    const ref = R_HEATING_BUILDINGS().doc(id);
+    const existing = (await ref.get()).data();
+    await ref.update({ ...data, updatedAt: FV.serverTimestamp(), updatedBy: actor || '' });
+    await _logConfigChange('building', id, _diffForAudit(existing, data), actor);
+  }
+  async function archiveHeatingBuilding(id, archived, actor) {
+    await updateHeatingBuilding(id, { archived: !!archived }, actor);
+  }
+
+  // ── PIÈCES ── alimentent la courbe thermique moyenne du bâtiment (voir
+  // MX.HeatingEngine.computeBuildingAverageTemp) — seules les pièces avec
+  // trackedActive:true et sélectionnées par le Responsable y participent.
+  // L'archivage ne supprime JAMAIS les relevés déjà liés (roomId sur
+  // heating_readings, append-only comme le reste).
+  function listenHeatingRooms(cb, onError) {
+    return R_HEATING_ROOMS().onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => { _fsError('heating_rooms')(err); if (onError) onError(err); });
+  }
+  async function addHeatingRoom(data, actor) {
+    const ref = R_HEATING_ROOMS().doc(uuid());
+    await ref.set({ ...data, archived: false, createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(), createdBy: actor || '' });
+    await _logConfigChange('room', ref.id, _diffForAudit({}, data), actor);
+    return ref.id;
+  }
+  async function updateHeatingRoom(id, data, actor) {
+    const ref = R_HEATING_ROOMS().doc(id);
+    const existing = (await ref.get()).data();
+    await ref.update({ ...data, updatedAt: FV.serverTimestamp(), updatedBy: actor || '' });
+    await _logConfigChange('room', id, _diffForAudit(existing, data), actor);
+  }
+  async function archiveHeatingRoom(id, archived, actor) {
+    await updateHeatingRoom(id, { archived: !!archived }, actor);
+  }
+  // Relevé de température AMBIANTE d'une pièce (jamais un relevé
+  // d'installation — roomId XOR circuitId sur heating_readings, jamais les
+  // deux ni aucun des deux, voir firestore.rules.draft-claims-migration).
+  // recordedAt (5e paramètre, optionnel) : Date ou chaîne ISO saisie par le
+  // technicien dans le vrai formulaire de relevé de pièce (voir
+  // assets/js/pages/heating-config.js:_openRoomReadingForm) — permet de
+  // saisir un relevé a posteriori (ex. tournée du matin notée plus tard).
+  // Omis, retombe sur l'instant présent (rétrocompatible avec les appels
+  // existants). Plusieurs relevés le même jour pour la même pièce sont
+  // TOUJOURS acceptés — append-only, aucune limite, aucune fusion.
+  async function addRoomReading(roomId, temp, author, comment, recordedAt) {
+    const ref = R_HEATING_READINGS().doc(uuid());
+    const recordedAtIso = recordedAt ? (recordedAt instanceof Date ? recordedAt.toISOString() : recordedAt) : new Date().toISOString();
+    await ref.set({ roomId, temp, author: author || '', comment: comment || '', recordedAt: recordedAtIso, createdAt: FV.serverTimestamp() });
+    return ref.id;
+  }
+
+  // ── COURBES DJU / TEMPÉRATURE INTÉRIEURE (points programmés) ──
+  // Seule collection heating_* où la suppression est autorisée : ce sont
+  // des points de RÉFÉRENCE configurés par un humain (jamais une mesure
+  // historique), corriger une erreur de saisie ne doit pas laisser un
+  // point fantôme indéfiniment. Ne contient JAMAIS de valeur inventée par
+  // MX — uniquement ce que le Responsable saisit explicitement.
+  function listenHeatingCurvePoints(cb, onError) {
+    return R_HEATING_CURVE_POINTS().onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => { _fsError('heating_curve_points')(err); if (onError) onError(err); });
+  }
+  async function addHeatingCurvePoint(data, actor) {
+    const ref = R_HEATING_CURVE_POINTS().doc(uuid());
+    await ref.set({ ...data, createdAt: FV.serverTimestamp(), createdBy: actor || '' });
+    await _logConfigChange('curve_point', ref.id, _diffForAudit({}, data), actor);
+    return ref.id;
+  }
+  async function updateHeatingCurvePoint(id, data, actor) {
+    const ref = R_HEATING_CURVE_POINTS().doc(id);
+    const existing = (await ref.get()).data();
+    await ref.update({ ...data, updatedAt: FV.serverTimestamp(), updatedBy: actor || '' });
+    await _logConfigChange('curve_point', id, _diffForAudit(existing, data), actor);
+  }
+  async function deleteHeatingCurvePoint(id, actor) {
+    await _logConfigChange('curve_point', id, { deleted: { old: false, new: true } }, actor);
+    await R_HEATING_CURVE_POINTS().doc(id).delete();
+  }
+  function listenHeatingAudit(cb, onError) {
+    return R_HEATING_AUDIT().orderBy('at', 'desc').limit(200).onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => { _fsError('heating_config_audit')(err); if (onError) onError(err); });
+  }
+
+  // ── REFONTE CTA/VC — configuration (référence DJU, bornes CTA/VC, seuils) ──
+  // Document SÉPARÉ de config/hotel_config (coordonnées météo) : évite de
+  // mélanger deux responsabilités dans un même document et un même risque de
+  // conflit d'écriture. djuBaseTemp absent → l'appelant retombe sur
+  // MX.Dju.BASE_TEMP (19), jamais une valeur inventée ici.
+  const R_HEATING_CONFIG = () => db.collection('config').doc('heating_config');
+  function listenHeatingConfig(cb, onError) {
+    return R_HEATING_CONFIG().onSnapshot(snap => {
+      cb(snap.exists ? snap.data() : {});
+    }, err => { _fsError('heating_config')(err); if (onError) onError(err); });
+  }
+  async function saveHeatingConfig(data) {
+    await R_HEATING_CONFIG().set({ ...data, updatedAt: FV.serverTimestamp() }, { merge: true });
   }
 
   // weather_daily/{YYYY-MM-DD} — un document par jour, écrit en merge
@@ -1730,7 +1987,7 @@
     addProduct, updateProduct, deleteProduct,
     uploadMessageImage, sendMessage, deleteMessage,
     listenPlanning, uploadPlanningImage, savePlanning, clearPlanning,
-    addUser, updateUser, updateUserPlanningOrder, deleteUser,
+    addUser, updateUser, updateUserPin, updateUserPlanningOrder, deleteUser, getUserSnapshot,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,
@@ -1780,6 +2037,14 @@
     listenHeatingCircuits, addHeatingCircuit, updateHeatingCircuit, archiveHeatingCircuit,
     listenHeatingReadings, addHeatingReading,
     listenHeatingRecommendations, addHeatingRecommendation, setHeatingRecommendationStatus, expireHeatingRecommendation,
+    addHeatingProposal, validateHeatingProposal, refuseHeatingProposal, reportHeatingProposal,
+    markHeatingSettingApplied, confirmHeatingSetpoint, linkHeatingControlReading,
+    listenHeatingConfig, saveHeatingConfig,
     saveWeatherDailyBatch, listenWeatherDailyRange,
+    // CONFIGURATION THERMIQUE (bâtiments/pièces/courbes/audit)
+    listenHeatingBuildings, addHeatingBuilding, updateHeatingBuilding, archiveHeatingBuilding,
+    listenHeatingRooms, addHeatingRoom, updateHeatingRoom, archiveHeatingRoom, addRoomReading,
+    listenHeatingCurvePoints, addHeatingCurvePoint, updateHeatingCurvePoint, deleteHeatingCurvePoint,
+    listenHeatingAudit,
   };
 })();

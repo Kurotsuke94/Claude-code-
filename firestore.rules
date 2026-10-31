@@ -514,6 +514,33 @@ service cloud.firestore {
     // pour les relevés, expiration par changement de statut (jamais de
     // delete) pour les recommandations — cohérent avec la conservation
     // d'historique demandée pour ce module.
+    //
+    // ── Accès technicien aux relevés (revue sécurité) ──
+    // Le technicien doit pouvoir créer des relevés de température
+    // (heating_readings) — déjà permis ci-dessous, aucun changement requis.
+    //
+    // En revanche, restreindre heating_circuits/heating_recommendations au
+    // "Responsable + Admin" (en excluant le Technicien) N'EST PAS
+    // applicable au niveau des règles Firestore aujourd'hui : Responsable
+    // et Technicien utilisent la MÊME session Firebase (connexion anonyme,
+    // voir firebase-config.js) — l'identité PIN et le rôle ne sont jamais
+    // transmis ni vérifiés côté serveur, uniquement lus côté client
+    // (MX.state.currentUser.role, fourni par le client lui-même). Une règle
+    // qui ferait confiance à une donnée de rôle fournie par le client (ex.
+    // request.resource.data.role) ne serait PAS une vraie protection — un
+    // technicien pourrait simplement se déclarer "responsable" dans sa
+    // requête Firestore. isAdmin() seul ne convient pas non plus : il
+    // exclurait aussi le Responsable PIN, qui doit garder la main sur les
+    // circuits et les recommandations.
+    // Migration nécessaire avant d'écrire une règle réellement sécurisée :
+    // une Cloud Function callable qui vérifie le PIN côté serveur (Admin
+    // SDK) et assigne un custom claim Firebase Auth (ex. role:'responsable'
+    // /'technicien') sur le token anonyme, que les règles pourraient alors
+    // lire via request.auth.token.role. Sans cette migration, la séparation
+    // Responsable/Technicien reste — comme pour ORGANISATION RESPONSABLE —
+    // une protection côté client uniquement (MX.Auth.canSeeAll dans
+    // cta-vc.js), pas une garantie serveur. Rules inchangées dans
+    // l'attente de cette migration.
     match /heating_circuits/{docId} {
       allow read, create, update: if true;
     }

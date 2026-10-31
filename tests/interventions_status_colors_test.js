@@ -630,8 +630,17 @@ async function clickCardAction(page, title, labelSubstr) {
     ok('22.7 Tri "Plus anciennes" inverse l\'ordre (la première créée apparaît en premier)', titles[0] === 'Fuite évier cuisine');
     await evalPage(page, () => MX.Pages.Int._setFilter('sort', 'recent'));
 
-    // 22.8 — Bouton flottant "+" ouvre bien le formulaire (clic réel sur l'élément)
-    await page.click('#int-fab');
+    // 22.8 — Bouton flottant "+" ouvre bien le formulaire
+    // Le modal "Bienvenue"/nouveautés (#ver-modal-overlay, voir app.js:
+    // MX.Updates.init) se déclenche 2.5s après le chargement de la page —
+    // délai déjà écoulé à ce point de la section — et peut apparaître à
+    // tout moment entre ce retrait et le clic (course résiduelle avec le
+    // setTimeout(2500) de l'app, pas éliminable de façon déterministe
+    // depuis le test). { force: true } contourne la vérification
+    // "non obscurci" de Playwright — même technique que clickSafe() dans
+    // tests/cta_vc_test.js pour la même classe de flake.
+    await page.evaluate(() => { const o = document.getElementById('ver-modal-overlay'); if (o) o.remove(); });
+    await page.click('#int-fab', { force: true });
     await page.waitForTimeout(200);
     const formOpen = await evalPage(page, () => !!document.getElementById('int-f-title'));
     ok('22.8 Le bouton flottant "+" ouvre le formulaire de création', formOpen);

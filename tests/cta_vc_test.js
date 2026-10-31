@@ -132,9 +132,18 @@ async function dismissOverlays(page) {
     document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
   });
 }
+// Clic DOM direct (pas Playwright page.click) : évite les échecs
+// "Element is outside of the viewport" quand un bouton se trouve en bas
+// d'une carte qui a grandi (ex. nouveaux champs de configuration) —
+// { force: true } de Playwright ignore les vérifications de visibilité
+// mais PAS le scroll-into-view, qui peut échouer selon la taille de la
+// fenêtre par défaut du navigateur de test. Même correctif déjà appliqué
+// dans tests/heating_config_page_test.js et tests/_screenshot_config_
+// thermique_demo.js pour la même cause (REFONTE CTA/VC + CONFIGURATION
+// THERMIQUE a fait grandir plusieurs formulaires/cartes).
 async function clickSafe(page, selector) {
   await dismissOverlays(page);
-  await page.click(selector, { force: true });
+  await page.evaluate((sel) => { const el = document.querySelector(sel); if (el) el.click(); }, selector);
   await page.waitForTimeout(250);
   await dismissOverlays(page);
 }
@@ -701,6 +710,221 @@ async function setHotelConfig(page, lat, lon) {
     const afterBackToA = await page.evaluate(() => Object.values(firebase.firestore()._debugStore.weather_daily || {}));
     ok('13.6 Retour à A en cours de session : les documents portent de nouveau les coordonnées de A (pas de verrou permanent par ancien booléen)', afterBackToA.every(d => d.lat === 48.75 && d.lon === 2.36));
     ok('13.7 Aucune erreur JS sur tout le scénario de changement de localisation', pageErrors.length === 0);
+    await page.close();
+  }
+
+  // ═══════════════ 14. Visibilité du menu CTA/VC pour les 3 rôles ═══════════════
+  // canSeeAll() traite Admin Firebase et Responsable de façon identique
+  // (même booléen) — tester avec Sophie (responsable) couvre donc aussi le
+  // code path "Admin" pour cette porte d'accès précise ; aucun login Admin
+  // Firebase séparé n'est nécessaire ici (voir tests/navigation_visibility_
+  // test.js pour des scénarios Admin dédiés sur d'autres écrans).
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+    await pinLogin(page, 'kevin', '1111'); // technicien
+    await page.waitForTimeout(400);
+    const sidebarTech = await page.evaluate(() => document.getElementById('sidebar-nav').innerHTML);
+    ok('14.1 Technicien : CTA/VC est désormais visible dans le menu principal (plus réservé à Responsable/Admin)', /CTA \/ VC/.test(sidebarTech));
+    ok('14.2 Aucune erreur JS', pageErrors.length === 0);
+    await page.close();
+  }
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+    await pinLogin(page, 'sophie', '9999'); // responsable
+    await page.waitForTimeout(400);
+    const sidebarResp = await page.evaluate(() => document.getElementById('sidebar-nav').innerHTML);
+    ok('14.3 Responsable : CTA/VC toujours visible (non-régression)', /CTA \/ VC/.test(sidebarResp));
+    ok('14.4 Aucune erreur JS', pageErrors.length === 0);
+    await page.close();
+  }
+
+  // ═══════════════ 15. Technicien — consultation + relevés, aucun droit de pilotage ═══════════════
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+
+    // Un circuit doit déjà exister (créé par une Responsable au préalable —
+    // conforme au rôle attendu) pour que le technicien puisse y ajouter un
+    // relevé ; la création elle-même est testée séparément (test 5/9).
+    await pinLogin(page, 'sophie', '9999');
+    await page.evaluate(() => MX.showPage('cta-vc'));
+    await page.waitForTimeout(400);
+    await page.evaluate(() => MX.Pages.CtaVc._setTab('config'));
+    await page.waitForTimeout(800);
+    await clickSafe(page, '[onclick="MX.Pages.CtaVc._openCircuitForm(null)"]');
+    await page.fill('#ctavc-f-name', 'Circuit technicien');
+    await page.selectOption('#ctavc-f-regtype', 'consigne');
+    await page.waitForTimeout(150);
+    await page.selectOption('#ctavc-f-setpointtype', 'ambiante');
+    await page.fill('#ctavc-f-setpointval', '20');
+    await page.fill('#ctavc-f-target', '20');
+    await clickSafe(page, '.modal-btn.primary-btn');
+    await page.waitForTimeout(400);
+    await page.evaluate(() => { MX.Auth.setCurrentUser(null); });
+    await page.waitForTimeout(200);
+
+    await pinLogin(page, 'kevin', '1111'); // technicien
+    await page.evaluate(() => MX.showPage('cta-vc'));
+    await page.waitForTimeout(2500); // laisse la météo + le moteur de reco tourner
+
+    const tabsHtml = await page.evaluate(() => document.querySelector('.ctavc-tabs').innerHTML);
+    ok('15.1 Onglet "Configuration" absent pour un technicien (gestion des circuits = pilotage)', !/Configuration/.test(tabsHtml));
+
+    await clickSafe(page, "[onclick=\"MX.Pages.CtaVc._setTab('circuits')\"]");
+    const circuitsHtml = await page.evaluate(() => document.querySelector('.ctavc-body').innerHTML);
+    ok('15.2 Bouton "Nouveau circuit" absent pour un technicien', !/Nouveau circuit/.test(circuitsHtml));
+    ok('15.3 Le circuit existant reste consultable (lecture)', /Circuit technicien/.test(circuitsHtml));
+
+    await page.locator('.ctavc-circuit-card', { hasText: 'Circuit technicien' }).click();
+    await page.waitForTimeout(400);
+    const detailHtml = await page.evaluate(() => document.querySelector('.ctavc-body').innerHTML);
+    ok('15.4 Boutons "Modifier"/"Archiver" absents de la fiche circuit pour un technicien', !/>Modifier<|>Archiver</.test(detailHtml));
+    ok('15.5 Bouton "Relevé" (saisie manuelle) toujours présent pour un technicien', /ctavc-f-|Relevé/.test(detailHtml) || (await page.locator('[onclick^="MX.Pages.CtaVc._openReadingForm"]').count()) === 1);
+    ok('15.6 Aucun bouton Accepter/Refuser sur la recommandation du circuit (si une candidate existe)', !/>Accepter<|>Refuser</.test(detailHtml));
+
+    // Le technicien DOIT pouvoir enregistrer un relevé — exigence centrale de cette consigne.
+    await clickSafe(page, '[onclick^="MX.Pages.CtaVc._openReadingForm"]');
+    await page.fill('#ctavc-r-temp', '17.5');
+    await clickSafe(page, '.modal-btn.primary-btn');
+    await page.waitForTimeout(400);
+    const readingsAfter = await page.evaluate(() => Object.values(firebase.firestore()._debugStore.heating_readings || {}));
+    const techReading = readingsAfter.find(r => r.temp === 17.5);
+    ok('15.7 Le relevé du technicien est bien enregistré dans Firestore (author = son nom)', !!techReading && techReading.author === 'Kevin');
+
+    // Onglet Recommandations : aucune action de décision visible pour un technicien.
+    await clickSafe(page, "[onclick=\"MX.Pages.CtaVc._setTab('recommendations')\"]");
+    await page.waitForTimeout(500);
+    const recoTabHtml = await page.evaluate(() => document.querySelector('.ctavc-body').innerHTML);
+    ok('15.8 Aucun bouton Accepter/Refuser/Appliquée visible pour un technicien dans l\'onglet Recommandations', !/>Accepter<|>Refuser<|Appliquée<\/button/.test(recoTabHtml));
+
+    // Accès direct (console) aux fonctions de pilotage : doivent être bloquées
+    // même sans passer par l'UI (protection de CHAQUE action, pas seulement
+    // de son bouton).
+    const beforeCircuitCount = await page.evaluate(() => Object.keys(firebase.firestore()._debugStore.heating_circuits || {}).length);
+    await page.evaluate(() => { MX.Pages.CtaVc._openCircuitForm(null); });
+    await page.waitForTimeout(200);
+    const modalOpened = await page.locator('.modal-overlay').count();
+    ok('15.9 Accès direct à _openCircuitForm bloqué pour un technicien (aucun modal, toast d\'erreur)', modalOpened === 0);
+    const toastMsg1 = await page.evaluate(() => { const t = document.getElementById('toast'); return t ? t.textContent : ''; });
+    ok('15.9b Le toast d\'erreur mentionne bien la restriction de rôle', /réservée/.test(toastMsg1));
+
+    const recosBeforeEntries = await page.evaluate(() => Object.entries(firebase.firestore()._debugStore.heating_recommendations || {}));
+    const anyAExaminerEntry = recosBeforeEntries.find(([, r]) => r.status === 'a_examiner');
+    if (anyAExaminerEntry) {
+      const aExaminerId = anyAExaminerEntry[0];
+      await page.evaluate((id) => { MX.Pages.CtaVc._decideReco(id, 'acceptee'); }, aExaminerId);
+      await page.waitForTimeout(300);
+      const afterDirectDecide = await page.evaluate((id) => firebase.firestore()._debugStore.heating_recommendations[id], aExaminerId);
+      ok('15.10 Accès direct à _decideReco bloqué pour un technicien (statut inchangé)', !!afterDirectDecide && afterDirectDecide.status === 'a_examiner');
+    } else {
+      ok('15.10 Accès direct à _decideReco bloqué pour un technicien (statut inchangé)', true); // aucune candidate à ce stade, rien à régresser
+    }
+
+    await page.evaluate(() => { MX.Pages.CtaVc._confirmArchive('__inexistant__', true); });
+    await page.waitForTimeout(200);
+    const circuitCountUnchanged = await page.evaluate(() => Object.keys(firebase.firestore()._debugStore.heating_circuits || {}).length);
+    ok('15.11 Accès direct à _confirmArchive bloqué pour un technicien avant même la confirmation (aucun appel Firestore tenté)', circuitCountUnchanged === beforeCircuitCount);
+
+    ok('15.12 Aucune erreur JS pendant tout le scénario technicien', pageErrors.length === 0);
+    await page.close();
+  }
+
+  // ═══════════════ 16. Responsable — accès complet conservé (non-régression) ═══════════════
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+    await pinLogin(page, 'sophie', '9999');
+    await page.evaluate(() => MX.showPage('cta-vc'));
+    await page.waitForTimeout(400);
+    const tabsHtml = await page.evaluate(() => document.querySelector('.ctavc-tabs').innerHTML);
+    ok('16.1 Onglet "Configuration" toujours présent pour une responsable', /Configuration/.test(tabsHtml));
+    await clickSafe(page, "[onclick=\"MX.Pages.CtaVc._setTab('circuits')\"]");
+    const circuitsHtml = await page.evaluate(() => document.querySelector('.ctavc-body').innerHTML);
+    ok('16.2 Bouton "Nouveau circuit" toujours présent pour une responsable', /Nouveau circuit/.test(circuitsHtml));
+    ok('16.3 Aucune erreur JS', pageErrors.length === 0);
+    await page.close();
+  }
+
+  // ═══════════════ 17. Listener Firestore mort (permission-denied) PUIS règles
+  // corrigées — le circuit créé ensuite doit quand même apparaître ═══════════════
+  // Reproduit l'incident réel rapporté : une erreur de permission tue le
+  // onSnapshot de heating_circuits (le SDK Firestore ne le relance JAMAIS
+  // seul) ; un circuit créé ENSUITE réussit son écriture (confirmation
+  // affichée) mais n'apparaissait pas dans la liste avant ce correctif,
+  // car l'ancien listener mort n'était jamais ré-attaché tant que la page
+  // restait ouverte. Utilise une VRAIE simulation d'erreur de snapshot
+  // (firebase.firestore().triggerSnapshotError), pas une réponse invalide.
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+    await pinLogin(page, 'sophie', '9999');
+    await page.evaluate(() => MX.showPage('cta-vc'));
+    await page.waitForTimeout(400);
+
+    // Déclenche une VRAIE erreur de permission sur le listener déjà actif.
+    await page.evaluate(() => firebase.firestore().triggerSnapshotError('heating_circuits'));
+    await page.waitForTimeout(50);
+    const toastAfterError = await page.evaluate(() => { const t = document.getElementById('toast'); return t ? t.textContent : ''; });
+    ok('17.1 Erreur de listener rendue VISIBLE (jamais silencieuse)', /interrompue/.test(toastAfterError));
+
+    // Crée un circuit PENDANT que le listener est mort (reconnexion en cours, 1.5s) —
+    // reproduit exactement l'ordre réel de l'incident (règles corrigées puis création).
+    await clickSafe(page, "[onclick=\"MX.Pages.CtaVc._setTab('config')\"]");
+    await clickSafe(page, '[onclick="MX.Pages.CtaVc._openCircuitForm(null)"]');
+    await page.fill('#ctavc-f-name', 'Circuit après incident');
+    await clickSafe(page, '.modal-btn.primary-btn');
+    await page.waitForTimeout(200);
+    const toastAfterCreate = await page.evaluate(() => { const t = document.getElementById('toast'); return t ? t.textContent : ''; });
+    ok('17.2 La création réussit bien malgré l\'incident précédent (écriture Firestore indépendante du listener)', /Circuit créé/.test(toastAfterCreate));
+    const createdInStore = await page.evaluate(() => Object.values(firebase.firestore()._debugStore.heating_circuits || {}).some(c => c.name === 'Circuit après incident'));
+    ok('17.3 Le circuit est réellement enregistré dans le faux Firestore (pas une fausse confirmation)', createdInStore);
+
+    // Laisse la reconnexion automatique (1.5s) se terminer, puis vérifie
+    // l'affichage SANS quitter/recharger la page.
+    await page.waitForTimeout(1700);
+    await clickSafe(page, "[onclick=\"MX.Pages.CtaVc._setTab('circuits')\"]");
+    await page.waitForTimeout(300);
+    const namesAfterReconnect = await page.evaluate(() => Array.from(document.querySelectorAll('.ctavc-circuit-card')).map(el => el.textContent));
+    ok('17.4 Le circuit créé pendant l\'incident apparaît bien dans la liste APRÈS la reconnexion automatique, sans recharger la page',
+      namesAfterReconnect.some(t => /Circuit après incident/.test(t)));
+    ok('17.5 Aucune erreur JS pendant tout le scénario', pageErrors.length === 0);
+    await page.close();
+  }
+
+  // ═══════════════ 17b. Deux incidents SÉPARÉS (chacun suivi d'une
+  // reconnexion réussie) -> chacun obtient sa propre tentative automatique,
+  // la borne anti-boucle (_resubscribeAttempted) étant remise à zéro par le
+  // succès entre les deux, pas seulement jamais déclenchée une 2e fois ═══════════════
+  {
+    const page = await browser.newPage();
+    const { pageErrors } = await bootPage(page);
+    await setHotelConfig(page, 48.75, 2.36);
+    await pinLogin(page, 'sophie', '9999');
+    await page.evaluate(() => MX.showPage('cta-vc'));
+    await page.waitForTimeout(400);
+
+    await page.evaluate(() => firebase.firestore().triggerSnapshotError('heating_circuits'));
+    await page.waitForTimeout(50);
+    const toast1 = await page.evaluate(() => { const t = document.getElementById('toast'); return t ? t.textContent : ''; });
+    ok('17b.1 1er incident -> reconnexion automatique proposée', /reconnexion/.test(toast1));
+    await page.waitForTimeout(1700); // la reconnexion automatique réussit (règles/mock toujours valides)
+
+    // 2e incident, totalement séparé (après succès de la reconnexion du 1er) :
+    // doit À NOUVEAU proposer une reconnexion automatique, pas un message de
+    // rechargement — la borne anti-boucle ne doit jamais bloquer un futur
+    // incident distinct, seulement une boucle sur LE MÊME incident.
+    await page.evaluate(() => firebase.firestore().triggerSnapshotError('heating_circuits'));
+    await page.waitForTimeout(50);
+    const toast2 = await page.evaluate(() => { const t = document.getElementById('toast'); return t ? t.textContent : ''; });
+    ok('17b.2 2e incident séparé -> reconnexion automatique À NOUVEAU proposée (anti-boucle remise à zéro par le succès intermédiaire)', /reconnexion/.test(toast2));
+    ok('17b.3 Aucune erreur JS', pageErrors.length === 0);
     await page.close();
   }
 

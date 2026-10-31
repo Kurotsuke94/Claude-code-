@@ -131,7 +131,12 @@
   // par app.js, voir plus bas).
   var _weatherDaily = { status: 'unconfigured', series: null, forKey: null };
 
+  // Délègue à MX.Dju.parisDateStr (Europe/Paris explicite, pas le fuseau
+  // local de l'appareil) — voir assets/js/utils/dju.js pour le détail du
+  // bug corrigé (trou d'historique / donnée figée prématurément sur un
+  // appareil dont le fuseau diffère de celui de l'établissement).
   function _localDateStr(d) {
+    if (MX.Dju && MX.Dju.parisDateStr) return MX.Dju.parisDateStr(d);
     d = d || new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
@@ -559,7 +564,7 @@
     h += '<div class="acc-header' + (heroImg ? ' acc-header--photo' : '') + '"' + heroStyle + '>' +
       '<div class="acc-header-top">' +
         '<div class="acc-header-greet">' +
-          MX.userAvatarHtml(displayName, { size: 46, radius: 14 }) +
+          MX.userAvatarHtml(displayName, { size: 54, radius: 16 }) +
           '<div class="acc-header-id">' +
             '<div class="acc-greeting">' + greeting + ', ' + esc(firstName) + ' 👋</div>' +
             '<div class="acc-header-date">' + dayFr + ' ' + dateFr + (weekLabel ? ' · ' + esc(weekLabel) : '') + ' · ' + momentJour + '</div>' +

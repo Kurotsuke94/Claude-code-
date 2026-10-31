@@ -1,0 +1,59 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "firebase.local.json",
+      ".firebaserc",
+      ".git/**",
+      "*.md",
+      "node_modules/**",
+      "functions/**",
+      "tests/**",
+      "scripts/**",
+      "**/*.log",
+      "firestore.rules*",
+      "firestore.indexes.json",
+      "storage.rules"
+    ],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000" }]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "/version.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules.draft-claims-migration",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "nodejs22"
+    }
+  ],
+  "emulators": {
+    "firestore": { "port": 8090 },
+    "auth": { "port": 9099 },
+    "functions": { "port": 5002 },
+    "storage": { "port": 9199 },
+    "hosting": { "port": 5000 },
+    "ui": { "enabled": true, "port": 4000 }
+  }
+}

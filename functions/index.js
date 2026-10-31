@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule }        = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin                 = require("firebase-admin");
 admin.initializeApp();
 
@@ -519,7 +520,34 @@ exports.onReadingWrittenRatioClient = onDocumentWritten(
 // "hier" est purement calendaire (voir _yesterdayParisDateStr), pas une
 // soustraction de 24h en millisecondes, pour rester fiable lors des
 // changements d'heure Europe/Paris.
+// REFONTE CTA/VC : cette constante reste volontairement figée à 19 et n'est
+// PAS rendue configurable ici. weather_daily.dju19 est la valeur HISTORIQUE
+// de référence, écrite une seule fois par jour observé — la rendre
+// dépendante d'une configuration changeante romprait l'idempotence par
+// contenu ci-dessous (_persistOneObservedDay) et réinterpréterait
+// silencieusement l'historique à chaque changement de réglage.
+// La référence DJU CONFIGURABLE (config/heating_config.djuBaseTemp, voir
+// firestore.rules.draft-claims-migration et assets/js/utils/dju.js) est
+// calculée UNIQUEMENT côté client, à la volée, à partir de `tMean` (donnée
+// brute, toujours préservée ci-dessous, jamais recalculée ici) — voir
+// MX.Dju.computeAt()/recomputeStoredDay(). Aucun recalcul destructif n'a
+// jamais lieu côté serveur : si cette fonction était un jour étendue pour
+// écrire aussi une valeur à référence configurable, elle devrait ajouter un
+// NOUVEAU champ distinct (jamais réécrire dju19) et lire elle-même
+// config/heating_config — non fait ici tant qu'aucun besoin serveur réel
+// (ex. alerte automatisée) ne le justifie.
 const DJU_BASE_TEMP = 19;
+// Open-Meteo n'a pas de délai explicite côté serveur (contrairement au
+// client, voir assets/js/utils/weather.js:FETCH_TIMEOUT_MS=6000) : sans
+// AbortController, une réponse qui ne vient jamais ferait attendre la
+// fonction jusqu'à la limite de la plateforme, avec un journal peu clair.
+// Valeur plus généreuse que côté client (personne n'attend cet appel).
+const OPEN_METEO_TIMEOUT_MS = 10000;
+// Fenêtre de rattrapage des jours passés déjà présents dans la réponse
+// Open-Meteo (voir plus bas) — DOIT rester <= past_days de l'URL ci-dessous :
+// on ne traite jamais un jour hors de ce qui a été explicitement demandé,
+// même si l'API renvoyait un jour inattendu.
+const BACKFILL_WINDOW_DAYS = 3;
 function _parisDateStr(d) {
   // en-CA produit directement AAAA-MM-JJ, sans ambiguïté de format.
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
@@ -540,79 +568,67 @@ function _yesterdayParisDateStr(now) {
   noonUtc.setUTCDate(noonUtc.getUTCDate() - 1);
   return _parisDateStr(noonUtc);
 }
+// Même méthode calendaire que _yesterdayParisDateStr, généralisée à un
+// nombre de jours arbitraire — fonction INDÉPENDANTE (ne modifie pas
+// _yesterdayParisDateStr, dont le texte exact est extrait tel quel par
+// tests/dju_scheduled_function_test.js) utilisée uniquement pour borner la
+// fenêtre de rattrapage ci-dessous.
+function _minBackfillDateStr(now, windowDays) {
+  const todayStr = _parisDateStr(now);
+  const parts = todayStr.split("-").map(Number);
+  const noonUtc = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+  noonUtc.setUTCDate(noonUtc.getUTCDate() - windowDays);
+  return _parisDateStr(noonUtc);
+}
 function _estimateDailyMean(tMin, tMax, tMeanApi) {
   if (typeof tMeanApi === "number" && !isNaN(tMeanApi)) return { value: tMeanApi, method: "api_mean" };
   if (typeof tMin === "number" && typeof tMax === "number") return { value: (tMin + tMax) / 2, method: "minmax_avg" };
   return { value: null, method: null };
 }
 
-exports.computeDailyWeatherDju = onSchedule(
-  { schedule: "30 1 * * *", timeZone: "Europe/Paris", region: REGION },
-  async () => {
-    const db = admin.firestore();
+// Traite UN jour (déjà présent dans la réponse Open-Meteo reçue par
+// l'appelant, aucun appel réseau ici) : idempotence par contenu (identique à
+// l'ancien comportement), calcul mean/DJU19, écriture. Factorisé pour être
+// appliqué à "hier" ET aux jours de rattrapage ci-dessous SANS dupliquer la
+// logique. Retourne un statut (jamais d'exception) pour le résumé journalisé
+// par l'appelant.
+async function _persistOneObservedDay(db, dateStr, idx, daily, cfg) {
+  const docRef = db.collection("weather_daily").doc(dateStr);
+  let existing;
+  try {
+    existing = await docRef.get();
+  } catch (e) {
+    console.error(`[computeDailyWeatherDju] Lecture Firestore impossible pour ${dateStr} :`, e.message || e);
+    return "firestore_read_error";
+  }
+  const existingData = existing.exists ? existing.data() : null;
+  // Idempotence par CONTENU, pas seulement par présence : un jour déjà
+  // "observed" pour la MÊME localisation n'est jamais retraité (rejouer la
+  // fonction plusieurs fois ne produit aucun doublon ni écriture inutile).
+  // En revanche, si la localisation configurée a changé depuis cette
+  // écriture (lat/lon différents), l'ancienne valeur ne représente plus
+  // l'établissement réel : on la remplace plutôt que de la laisser
+  // silencieusement sous la même date — voir aussi assets/js/app.js pour
+  // la même règle côté client.
+  const sameLocation = !!existingData
+    && typeof existingData.lat === "number" && typeof existingData.lon === "number"
+    && Math.abs(existingData.lat - cfg.lat) < 1e-6 && Math.abs(existingData.lon - cfg.lon) < 1e-6;
+  if (existingData && existingData.kind === "observed" && sameLocation) {
+    console.log(`[computeDailyWeatherDju] ${dateStr} déjà enregistré (observed, même localisation) — idempotence, rien à refaire.`);
+    return "already_observed";
+  }
 
-    const cfgSnap = await db.collection("config").doc("hotel_config").get();
-    const cfg = cfgSnap.exists ? cfgSnap.data() : {};
-    if (typeof cfg.lat !== "number" || typeof cfg.lon !== "number") {
-      console.warn("[computeDailyWeatherDju] config/hotel_config.lat/lon non renseignés — rien à faire.");
-      return null;
-    }
+  const tMin = typeof daily.temperature_2m_min[idx] === "number" ? daily.temperature_2m_min[idx] : null;
+  const tMax = typeof daily.temperature_2m_max[idx] === "number" ? daily.temperature_2m_max[idx] : null;
+  const tMeanApi = daily.temperature_2m_mean ? daily.temperature_2m_mean[idx] : undefined;
+  const mean = _estimateDailyMean(tMin, tMax, tMeanApi);
+  if (mean.value === null) {
+    console.warn(`[computeDailyWeatherDju] Aucune température exploitable pour ${dateStr} — rien enregistré.`);
+    return "no_usable_temperature";
+  }
+  const dju19 = Math.max(0, DJU_BASE_TEMP - mean.value);
 
-    const dateStr = _yesterdayParisDateStr(new Date());
-
-    const docRef = db.collection("weather_daily").doc(dateStr);
-    const existing = await docRef.get();
-    const existingData = existing.exists ? existing.data() : null;
-    // Idempotence par CONTENU, pas seulement par présence : un jour déjà
-    // "observed" pour la MÊME localisation n'est jamais retraité (rejouer la
-    // fonction plusieurs fois ne produit aucun doublon ni écriture inutile).
-    // En revanche, si la localisation configurée a changé depuis cette
-    // écriture (lat/lon différents), l'ancienne valeur ne représente plus
-    // l'établissement réel : on la remplace plutôt que de la laisser
-    // silencieusement sous la même date — voir aussi assets/js/app.js pour
-    // la même règle côté client.
-    const sameLocation = !!existingData
-      && typeof existingData.lat === "number" && typeof existingData.lon === "number"
-      && Math.abs(existingData.lat - cfg.lat) < 1e-6 && Math.abs(existingData.lon - cfg.lon) < 1e-6;
-    if (existingData && existingData.kind === "observed" && sameLocation) {
-      console.log(`[computeDailyWeatherDju] ${dateStr} déjà enregistré (observed, même localisation) — idempotence, rien à refaire.`);
-      return null;
-    }
-
-    const url = "https://api.open-meteo.com/v1/forecast"
-      + `?latitude=${encodeURIComponent(cfg.lat)}&longitude=${encodeURIComponent(cfg.lon)}`
-      + "&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,weather_code"
-      + "&timezone=Europe%2FParis&past_days=3&forecast_days=1";
-
-    let json;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) { console.error(`[computeDailyWeatherDju] Open-Meteo HTTP ${res.status}`); return null; }
-      json = await res.json();
-    } catch (e) {
-      console.error("[computeDailyWeatherDju] Échec réseau Open-Meteo :", e.message || e);
-      return null;
-    }
-    if (!json || !json.daily || !Array.isArray(json.daily.time)) {
-      console.error("[computeDailyWeatherDju] Réponse Open-Meteo invalide.");
-      return null;
-    }
-
-    const idx = json.daily.time.indexOf(dateStr);
-    if (idx === -1) {
-      console.warn(`[computeDailyWeatherDju] Date cible ${dateStr} absente de la réponse — rien enregistré (jamais de donnée inventée).`);
-      return null;
-    }
-    const tMin = typeof json.daily.temperature_2m_min[idx] === "number" ? json.daily.temperature_2m_min[idx] : null;
-    const tMax = typeof json.daily.temperature_2m_max[idx] === "number" ? json.daily.temperature_2m_max[idx] : null;
-    const tMeanApi = json.daily.temperature_2m_mean ? json.daily.temperature_2m_mean[idx] : undefined;
-    const mean = _estimateDailyMean(tMin, tMax, tMeanApi);
-    if (mean.value === null) {
-      console.warn(`[computeDailyWeatherDju] Aucune température exploitable pour ${dateStr} — rien enregistré.`);
-      return null;
-    }
-    const dju19 = Math.max(0, DJU_BASE_TEMP - mean.value);
-
+  try {
     await docRef.set({
       date: dateStr,
       tMin, tMax,
@@ -625,8 +641,393 @@ exports.computeDailyWeatherDju = onSchedule(
       lat: cfg.lat, lon: cfg.lon,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+  } catch (e) {
+    console.error(`[computeDailyWeatherDju] Écriture Firestore impossible pour ${dateStr} :`, e.message || e);
+    return "firestore_write_error";
+  }
 
-    console.log(`[computeDailyWeatherDju] ${dateStr} enregistré — DJU19=${Math.round(dju19 * 10) / 10}`);
+  console.log(`[computeDailyWeatherDju] ${dateStr} enregistré — DJU19=${Math.round(dju19 * 10) / 10}`);
+  return "written";
+}
+
+exports.computeDailyWeatherDju = onSchedule(
+  { schedule: "30 1 * * *", timeZone: "Europe/Paris", region: REGION },
+  async () => {
+    const db = admin.firestore();
+
+    let cfgSnap;
+    try {
+      cfgSnap = await db.collection("config").doc("hotel_config").get();
+    } catch (e) {
+      console.error("[computeDailyWeatherDju] Lecture Firestore de config/hotel_config impossible :", e.message || e);
+      return null;
+    }
+    const cfg = cfgSnap.exists ? cfgSnap.data() : {};
+    if (typeof cfg.lat !== "number" || typeof cfg.lon !== "number") {
+      console.warn("[computeDailyWeatherDju] config/hotel_config.lat/lon non renseignés — rien à faire.");
+      return null;
+    }
+    // Bornes géographiques valides — défense en profondeur : rien ici ne
+    // doit faire confiance à la validation déjà faite côté client
+    // (assets/js/pages/settings.js) comme seule garantie.
+    if (cfg.lat < -90 || cfg.lat > 90 || cfg.lon < -180 || cfg.lon > 180) {
+      console.error(`[computeDailyWeatherDju] config/hotel_config.lat/lon hors bornes valides (lat=${cfg.lat}, lon=${cfg.lon}) — rien à faire.`);
+      return null;
+    }
+
+    const now      = new Date();
+    const todayStr = _parisDateStr(now);
+    const dateStr  = _yesterdayParisDateStr(now);
+
+    // Court-circuit SANS appel réseau si "hier" est déjà définitivement
+    // enregistré pour la même localisation — comportement INCHANGÉ (voir
+    // tests/dju_scheduled_function_test.js, section 6.2 : aucun fetch tant
+    // que ce cas s'applique). Le rattrapage des jours antérieurs (ci-dessous)
+    // n'a lieu QUE lorsqu'un appel réseau est de toute façon nécessaire pour
+    // "hier" — jamais d'appel réseau supplémentaire juste pour vérifier
+    // d'anciens jours déjà potentiellement à jour.
+    let yesterdaySnap;
+    try {
+      yesterdaySnap = await db.collection("weather_daily").doc(dateStr).get();
+    } catch (e) {
+      console.error(`[computeDailyWeatherDju] Lecture Firestore impossible pour ${dateStr} :`, e.message || e);
+      return null;
+    }
+    const yesterdayData = yesterdaySnap.exists ? yesterdaySnap.data() : null;
+    const yesterdaySameLocation = !!yesterdayData
+      && typeof yesterdayData.lat === "number" && typeof yesterdayData.lon === "number"
+      && Math.abs(yesterdayData.lat - cfg.lat) < 1e-6 && Math.abs(yesterdayData.lon - cfg.lon) < 1e-6;
+    if (yesterdayData && yesterdayData.kind === "observed" && yesterdaySameLocation) {
+      console.log(`[computeDailyWeatherDju] ${dateStr} déjà enregistré (observed, même localisation) — idempotence, rien à refaire.`);
+      return null;
+    }
+
+    const url = "https://api.open-meteo.com/v1/forecast"
+      + `?latitude=${encodeURIComponent(cfg.lat)}&longitude=${encodeURIComponent(cfg.lon)}`
+      + "&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,weather_code"
+      + "&timezone=Europe%2FParis&past_days=3&forecast_days=1";
+
+    let json;
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), OPEN_METEO_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) { console.error(`[computeDailyWeatherDju] Open-Meteo HTTP ${res.status}`); return null; }
+      json = await res.json();
+    } catch (e) {
+      clearTimeout(timer);
+      const isTimeout = !!e && e.name === "AbortError";
+      console.error(`[computeDailyWeatherDju] ${isTimeout ? `Délai dépassé (${OPEN_METEO_TIMEOUT_MS}ms)` : "Échec réseau"} Open-Meteo :`, e.message || e);
+      return null;
+    }
+    if (!json || !json.daily || !Array.isArray(json.daily.time)) {
+      console.error("[computeDailyWeatherDju] Réponse Open-Meteo invalide.");
+      return null;
+    }
+
+    if (json.daily.time.indexOf(dateStr) === -1) {
+      console.warn(`[computeDailyWeatherDju] Date cible ${dateStr} absente de la réponse — rien enregistré pour ce jour (jamais de donnée inventée).`);
+      // Pas de retour anticipé : d'autres jours de la fenêtre de rattrapage
+      // ci-dessous peuvent être présents et exploitables même si "hier"
+      // spécifiquement ne l'est pas.
+    }
+
+    // Rattrapage : traite TOUS les jours strictement passés (< aujourd'hui,
+    // Europe/Paris) déjà présents dans CETTE MÊME réponse Open-Meteo, dans
+    // la fenêtre réellement demandée (BACKFILL_WINDOW_DAYS <= past_days de
+    // l'URL ci-dessus) — AUCUN appel réseau supplémentaire. Comble une
+    // lacune réelle : si une exécution précédente avait échoué (panne
+    // Open-Meteo, Firestore...), le lendemain ne retraitait auparavant QUE
+    // sa propre veille — les jours d'avant restaient alors définitivement
+    // vides. Ne touche jamais aujourd'hui ni un jour futur (jamais une
+    // prévision transformée en observation) ; l'idempotence par jour
+    // (_persistOneObservedDay) garantit qu'aucun jour déjà "observed" pour
+    // la même localisation n'est jamais retraité.
+    const minBackfillStr = _minBackfillDateStr(now, BACKFILL_WINDOW_DAYS);
+    let written = 0, skippedIdempotent = 0, skippedNoData = 0, errors = 0, outOfWindow = 0;
+    for (let i = 0; i < json.daily.time.length; i++) {
+      const d = json.daily.time[i];
+      if (!(d < todayStr)) continue; // jamais aujourd'hui ni un jour futur
+      if (d < minBackfillStr) { outOfWindow++; continue; } // jamais hors de la fenêtre réellement demandée
+      const outcome = await _persistOneObservedDay(db, d, i, json.daily, cfg);
+      if (outcome === "written") written++;
+      else if (outcome === "already_observed") skippedIdempotent++;
+      else if (outcome === "no_usable_temperature") skippedNoData++;
+      else errors++;
+    }
+    console.log(`[computeDailyWeatherDju] Fenêtre traitée autour de ${dateStr} : ${written} jour(s) écrit(s), ${skippedIdempotent} déjà à jour, ${skippedNoData} sans donnée exploitable, ${errors} erreur(s) Firestore, ${outOfWindow} hors fenêtre.`);
     return null;
   }
 );
+
+// ── AUTHENTIFICATION PIN — VÉRIFICATION SERVEUR + ÉMISSION D'IDENTITÉ FIABLE ──
+// PRÉPARÉE MAIS NON DÉPLOYÉE (comme computeDailyWeatherDju ci-dessus) : tant
+// que `firebase deploy --only functions:verifyPin` n'a pas été exécuté avec
+// l'accord explicite de l'utilisateur, aucune ressource Firebase n'est créée.
+//
+// Comble la faille de confiance du flux PIN actuel (assets/js/auth.js
+// confirmPin()) : le hash du PIN est aujourd'hui comparé entièrement côté
+// client, à partir d'une donnée (users/{id}.pin) elle-même lisible par
+// n'importe qui (firestore.rules: users -> allow read: if true). Rien ne
+// prouve au serveur quelle est l'identité ou le rôle réel de l'appelant —
+// MX.state.currentUser.role n'est qu'une variable JS locale, jamais
+// vérifiée. Cette fonction callable déplace la vérification du PIN et la
+// détermination du rôle côté serveur (Admin SDK, jamais contournable par le
+// client), puis émet un VRAI jeton d'identité Firebase (custom token) que
+// le client échange ensuite via signInWithCustomToken() — remplaçant la
+// session anonyme par une identité stable et vérifiée, portant les rôles en
+// custom claims que les règles Firestore peuvent lire via
+// request.auth.token.role (voir firestore.rules.draft-claims-migration).
+//
+// UID STABLE : dérivé déterministement de l'id du document users/{userId}
+// (préfixe "pinuser_" pour ne jamais collisionner avec un futur UID Admin
+// Firebase Auth réel). Le MÊME utilisateur PIN obtient donc TOUJOURS le
+// même UID Firebase d'une connexion à l'autre — nécessaire pour que les
+// claims/permissions restent cohérents et traçables.
+//
+// ANTI-ENNUMÉRATION / ANTI-BRUTE-FORCE :
+//  - userId inconnu ou PIN faux renvoient EXACTEMENT la même erreur
+//    générique ("PIN incorrect") — jamais de distinction qui révélerait si
+//    un identifiant existe.
+//  - Un hash factice est TOUJOURS calculé même si userId est introuvable,
+//    pour que le temps de réponse ne révèle pas non plus cette différence.
+//  - Compteur d'échecs persistant (pin_attempts/{userId}), DÉSORMAIS
+//    ATOMIQUE (voir _recordPinAttempt, db.runTransaction ci-dessous) : au
+//    5e échec consécutif, verrouillage 60s, qui DOUBLE à chaque nouveau
+//    verrouillage tant que les échecs continuent (60s, 120s, 240s, …) —
+//    remis à zéro uniquement par une vérification réussie.
+//    ⚠ AUDIT (session précédente) : l'ancienne version (lecture puis
+//    écriture séparées, sans transaction) a été prouvée NON ATOMIQUE par un
+//    test de concurrence réel contre l'émulateur (12 appels parallèles ->
+//    compteur final resté à 1 au lieu de 12, verrou jamais déclenché). Voir
+//    tests/pin_security_test.js, bloc 1, pour la preuve de la correction.
+//  - Limitation COMPLÉMENTAIRE par appelant (pin_attempts_by_caller/
+//    {callerUid}, voir _recordPinAttempt) : ralentit une attaque distribuée
+//    sur de nombreux comptes depuis la MÊME session Firebase (anonyme ou
+//    non) — fenêtre glissante, pause COURTE et toujours temporaire (jamais
+//    de verrou permanent), sans jamais affecter un autre appelant (chaque
+//    callerUid a son propre compteur, aucun risque de bloquer un
+//    utilisateur légitime à cause de l'activité d'un autre). LIMITE
+//    CONNUE, à ne jamais sur-vendre : un script qui régénère une session
+//    anonyme fraîche (signInAnonymously) entre chaque lot contourne
+//    entièrement ce compteur — ce n'est PAS une protection suffisante à
+//    elle seule contre un attaquant déterminé. Une protection réellement
+//    robuste nécessiterait Firebase App Check (ou équivalent), non mis en
+//    place ici : cela suppose d'enregistrer un nouveau fournisseur
+//    d'attestation dans la console Firebase, une décision/action de
+//    configuration externe qui n'a pas été demandée et n'est pas prise ici.
+//  - Le PIN et son hash ne sont JAMAIS renvoyés au client, dans aucune
+//    réponse, succès ou erreur.
+//
+// COMPATIBILITÉ : réplique exactement la même comparaison que le client
+// actuel (SHA-256 hex, avec repli PIN en clair pour les comptes legacy non
+// encore migrés — voir assets/js/pages/admin.js:saveUsers) : aucune donnée
+// existante n'a besoin d'être réinitialisée pour cette migration. Le niveau
+// de robustesse du hash lui-même (SHA-256 non salé) reste une limite
+// connue, documentée séparément, pas corrigée ici (hors périmètre : cela
+// nécessiterait de re-saisir tous les PIN existants).
+//
+// STOCKAGE DU HASH : désormais lu depuis users_private/{userId}.pin (Admin
+// SDK, contourne de toute façon les règles) et non plus depuis
+// users/{userId}.pin — ce dernier champ n'est plus exposé en lecture
+// publique (voir firestore.rules.draft-claims-migration et le rapport
+// d'audit : un hash SHA-256 non salé, lisible par quiconque, se brute-force
+// hors-ligne en quelques millisecondes pour un PIN à 4-8 chiffres).
+const PIN_MAX_ATTEMPTS         = 5;
+const PIN_LOCKOUT_BASE_MS      = 60 * 1000;      // 60s, double à chaque nouveau verrouillage (par COMPTE CIBLE)
+const PIN_CALLER_WINDOW_MS     = 10 * 60 * 1000; // fenêtre glissante de 10 min (par APPELANT)
+const PIN_CALLER_MAX_FAILURES  = 20;             // tolérant (usage normal : quelques PIN oubliés, jamais 20 comptes différents en 10 min)
+const PIN_CALLER_COOLDOWN_MS   = 5 * 60 * 1000;  // pause COURTE, jamais permanente — expire seule
+const PIN_GENERIC_ERROR        = "PIN incorrect.";
+
+function _isPlausibleUserId(v) {
+  return typeof v === "string" && v.length > 0 && v.length <= 128 && /^[A-Za-z0-9_-]+$/.test(v);
+}
+function _isPlausiblePin(v) {
+  return typeof v === "string" && /^[0-9]{4,8}$/.test(v);
+}
+async function _sha256Hex(str) {
+  const buf = await require("crypto").subtle.digest("SHA-256", new TextEncoder().encode(String(str)));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Même règle que _roleFamily()/isResponsable() côté client (assets/js/auth.js,
+// assets/js/pages/nav-visibility.js) — dupliquée ici volontairement (pas
+// d'accès à window.MX côté Cloud Function), à resynchroniser manuellement
+// si cette règle évolue côté client.
+function _normalizeRole(userDoc) {
+  return (userDoc.rank === "responsable" || userDoc.role === "responsable") ? "responsable" : "technicien";
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// _recordPinAttempt — UNE SEULE transaction Firestore qui lit ET écrit à la
+// fois le verrou par compte cible (pin_attempts/{userId}) et la fenêtre par
+// appelant (pin_attempts_by_caller/{callerUid}), pour garantir l'atomicité
+// sous concurrence (plusieurs appels verifyPin() simultanés pour le même
+// compte, ou depuis le même appelant). db.runTransaction() sérialise
+// automatiquement les transactions en conflit (relecture + nouvel essai
+// côté SDK) : deux appels concurrents ne peuvent plus jamais lire le même
+// état "avant" et écraser le résultat de l'autre.
+// Retourne un objet {outcome} parmi :
+//   - "locked"          : compte cible verrouillé (retryAfterSeconds fourni)
+//   - "caller_cooldown" : appelant en pause (retryAfterSeconds fourni)
+//   - "ok"              : PIN correct, aucun verrou actif — le compteur du
+//                          compte cible est remis à zéro
+//   - "denied"          : PIN incorrect, tentative comptée
+// ────────────────────────────────────────────────────────────────────────
+async function _recordPinAttempt(db, userId, callerUid, matched, now) {
+  const targetRef = db.collection("pin_attempts").doc(userId);
+  const callerRef = callerUid ? db.collection("pin_attempts_by_caller").doc(callerUid) : null;
+
+  return db.runTransaction(async (tx) => {
+    const targetSnap = await tx.get(targetRef);
+    const callerSnap = callerRef ? await tx.get(callerRef) : null;
+    const targetAttempts = targetSnap.exists ? targetSnap.data() : null;
+    const callerAttempts = callerSnap && callerSnap.exists ? callerSnap.data() : null;
+
+    // 1. Verrou par COMPTE CIBLE — vérifié AVANT toute autre logique, pour
+    // qu'un compte verrouillé le reste même si, par ailleurs, l'appelant
+    // n'est pas encore en pause.
+    if (targetAttempts && typeof targetAttempts.lockedUntilMs === "number" && targetAttempts.lockedUntilMs > now) {
+      return { outcome: "locked", retryAfterSeconds: Math.ceil((targetAttempts.lockedUntilMs - now) / 1000) };
+    }
+
+    // 2. Pause COURTE par APPELANT (protection complémentaire contre une
+    // attaque distribuée sur plusieurs comptes CIBLES depuis la même
+    // session) — bloque la tentative même si le PIN soumis est correct,
+    // pour qu'un script ne puisse pas "deviner juste" sur un compte pour
+    // continuer d'en tenter d'autres pendant sa propre pause.
+    if (callerRef && callerAttempts && typeof callerAttempts.cooldownUntilMs === "number" && callerAttempts.cooldownUntilMs > now) {
+      return { outcome: "caller_cooldown", retryAfterSeconds: Math.ceil((callerAttempts.cooldownUntilMs - now) / 1000) };
+    }
+
+    if (matched) {
+      // Succès : le compte cible repart à zéro. Le compteur par APPELANT
+      // n'est volontairement PAS remis à zéro ici — un attaquant qui finit
+      // par deviner un PIN après avoir essayé de nombreux comptes ne doit
+      // pas repartir d'une ardoise vierge pour continuer d'en essayer
+      // d'autres ; seule l'expiration naturelle de la fenêtre le réduit.
+      tx.delete(targetRef);
+      return { outcome: "ok" };
+    }
+
+    // Échec : compteur du compte CIBLE (logique de verrouillage inchangée,
+    // désormais protégée par la transaction).
+    const prevCount = targetAttempts ? (targetAttempts.count || 0) : 0;
+    const prevLockoutLevel = targetAttempts ? (targetAttempts.lockoutLevel || 0) : 0;
+    const newCount = prevCount + 1;
+    const targetUpdate = { count: newCount, lastAttemptAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (newCount >= PIN_MAX_ATTEMPTS) {
+      const lockoutLevel = prevLockoutLevel + 1;
+      const lockoutMs = PIN_LOCKOUT_BASE_MS * Math.pow(2, lockoutLevel - 1);
+      targetUpdate.count = 0;
+      targetUpdate.lockoutLevel = lockoutLevel;
+      targetUpdate.lockedUntilMs = now + lockoutMs;
+    }
+    tx.set(targetRef, targetUpdate, { merge: true });
+
+    // Échec : fenêtre glissante par APPELANT (nouveau — protection contre
+    // la distribution sur plusieurs comptes). Jamais de verrou permanent :
+    // la fenêtre se réinitialise seule après PIN_CALLER_WINDOW_MS, et la
+    // pause elle-même expire après PIN_CALLER_COOLDOWN_MS sans aucune
+    // action manuelle requise.
+    if (callerRef) {
+      let windowStartMs = (callerAttempts && typeof callerAttempts.windowStartMs === "number") ? callerAttempts.windowStartMs : now;
+      let failCountInWindow = callerAttempts ? (callerAttempts.failCountInWindow || 0) : 0;
+      if (now - windowStartMs > PIN_CALLER_WINDOW_MS) {
+        windowStartMs = now;
+        failCountInWindow = 0;
+      }
+      failCountInWindow += 1;
+      const callerUpdate = { windowStartMs, failCountInWindow, lastAttemptAt: admin.firestore.FieldValue.serverTimestamp() };
+      if (failCountInWindow >= PIN_CALLER_MAX_FAILURES) {
+        callerUpdate.cooldownUntilMs = now + PIN_CALLER_COOLDOWN_MS;
+      }
+      tx.set(callerRef, callerUpdate, { merge: true });
+    }
+
+    return { outcome: "denied" };
+  });
+}
+
+exports.verifyPin = onCall({ region: REGION }, async (request) => {
+  const data = request.data || {};
+  const userId = data.userId;
+  const pin = data.pin;
+
+  if (!_isPlausibleUserId(userId) || !_isPlausiblePin(pin)) {
+    throw new HttpsError("invalid-argument", PIN_GENERIC_ERROR);
+  }
+
+  const db = admin.firestore();
+  const now = Date.now();
+  // Identité de l'appelant pour la limitation complémentaire par appelant
+  // (voir _recordPinAttempt) — un client PIN est TOUJOURS authentifié au
+  // moins anonymement (voir firebase-config.js:signInAnonymously), donc
+  // request.auth est normalement toujours défini ici ; en son absence (cas
+  // défensif, ne devrait jamais se produire en usage normal de l'app), on
+  // se contente de la protection par compte cible, déjà suffisante seule.
+  const callerUid = (request.auth && request.auth.uid) ? request.auth.uid : null;
+
+  // users/{userId}      : role/rank/roleId (inchangé)
+  // users_private/{userId} : pin (hash) — plus jamais lisible par un client,
+  // voir firestore.rules.draft-claims-migration. Les deux lectures passent
+  // par l'Admin SDK, qui contourne de toute façon les règles — ce
+  // changement de collection n'affecte que ce qui est exposé AUX CLIENTS.
+  const [userSnap, privateSnap] = await Promise.all([
+    db.collection("users").doc(userId).get(),
+    db.collection("users_private").doc(userId).get(),
+  ]);
+  const userDoc = userSnap.exists ? userSnap.data() : null;
+  const privateDoc = privateSnap.exists ? privateSnap.data() : null;
+  const storedPin = privateDoc ? String(privateDoc.pin || "") : "";
+
+  // Toujours calculer un hash, même si l'utilisateur n'existe pas, pour ne
+  // pas laisser le temps de réponse révéler l'absence du compte.
+  const enteredHash = await _sha256Hex(pin);
+  let match;
+  if (/^[0-9a-f]{64}$/.test(storedPin)) {
+    match = userDoc !== null && enteredHash === storedPin;
+  } else {
+    // Legacy PIN en clair (voir assets/js/pages/admin.js:saveUsers) —
+    // comparaison directe, comme le client le fait aujourd'hui.
+    match = userDoc !== null && pin === storedPin;
+  }
+
+  // Toute la logique de verrouillage (compte cible + appelant) est
+  // désormais ATOMIQUE — une seule transaction Firestore lit et écrit les
+  // deux compteurs ensemble, éliminant la fenêtre de course prouvée dans
+  // l'ancienne version (lecture puis écriture séparées, voir audit et
+  // tests/pin_security_test.js).
+  const result = await _recordPinAttempt(db, userId, callerUid, match, now);
+
+  if (result.outcome === "locked" || result.outcome === "caller_cooldown") {
+    // Même code, même forme de message dans les deux cas : le client ne
+    // peut pas distinguer "ce compte précis est verrouillé" de "c'est VOUS
+    // qui êtes temporairement ralenti" — aucune des deux formulations ne
+    // révèle quoi que ce soit sur l'existence ou l'état d'un compte tiers.
+    throw new HttpsError("resource-exhausted", "Trop de tentatives — réessayez dans " + result.retryAfterSeconds + "s.");
+  }
+  if (result.outcome === "denied") {
+    throw new HttpsError("permission-denied", PIN_GENERIC_ERROR);
+  }
+
+  // result.outcome === "ok" : PIN correct, aucun verrou actif — émission de
+  // l'identité fiable. (userDoc ne peut pas être null ici : match est
+  // "true" uniquement quand userDoc !== null, voir ci-dessus.)
+  const role = _normalizeRole(userDoc);
+  const uid = "pinuser_" + userId;
+  const claims = { role, userId };
+  if (userDoc.roleId) claims.roleId = userDoc.roleId;
+
+  let token;
+  try {
+    token = await admin.auth().createCustomToken(uid, claims);
+  } catch (e) {
+    console.error("[verifyPin] Échec de création du custom token :", e);
+    throw new HttpsError("internal", "Erreur serveur — réessayez.");
+  }
+
+  console.log(`[verifyPin] Authentification réussie pour userId=${userId} (role=${role}).`);
+  return { token };
+});

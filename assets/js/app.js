@@ -65,6 +65,9 @@
     if (_prevPage === 'cta-vc' && id !== 'cta-vc') {
       MX.Pages.CtaVc && MX.Pages.CtaVc._destroy && MX.Pages.CtaVc._destroy();
     }
+    if (_prevPage === 'heating-config' && id !== 'heating-config') {
+      MX.Pages.HeatingConfig && MX.Pages.HeatingConfig._destroy && MX.Pages.HeatingConfig._destroy();
+    }
     if (id === "msgs") { _markMsgsSeen(); updateNavProgress(); }
     const navItem = NAV.find(n => n && n.id === id);
     const navInfo = NAV_INFO[id] || {};
@@ -95,6 +98,14 @@
     if (id === "pmp")          return Pages.PMP  ? Pages.PMP.render()  : _renderStub("Maintenance PMP", "fa-screwdriver-wrench", "Chargement…");
     if (id === "org-resp")      return Pages.OrgResp ? Pages.OrgResp.render() : null;
     if (id === "cta-vc")        return Pages.CtaVc ? Pages.CtaVc.render() : null;
+    // SÉCURISATION (passe de finalisation) : plus de redirection ici — la
+    // page elle-même est désormais ouverte à tout rôle authentifié en
+    // consultation + relevés de pièce (voir heating-config.js:render()),
+    // même principe que "cta-vc" juste au-dessus. La configuration
+    // structurelle (bâtiments/installations/pièces/courbes) reste réservée
+    // Responsable/Admin, protégée individuellement dans heating-config.js
+    // ET côté serveur (firestore.rules.draft-claims-migration).
+    if (id === "heating-config") return Pages.HeatingConfig ? Pages.HeatingConfig.render() : null;
     if (id === "mes-missions")  return Pages.MesMissions ? Pages.MesMissions.render() : (Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : null);
     if (id === "today-cl")     return Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : Pages.Checklist.render(MX.todayId());
     if (id === "notifs")       return Pages.Notifications ? Pages.Notifications.render() : _renderStub("Notifications", "fa-bell", "Chargement…");
@@ -490,13 +501,32 @@
     }
 
     // ── 🔥 CTA / VC (déplacé hors de Centre de Pilotage > PILOTAGE) ──
-    // Entrée de navigation principale, juste au-dessus d'Analyses. Mêmes
-    // contrôles d'accès qu'avant le déplacement : canAll (responsables +
-    // administrateurs) ET MX.NavVisibility (_nv) — aucun changement de
-    // permission, uniquement un changement d'emplacement dans le menu.
-    if (canAll && _nv('cta-vc')) {
+    // Entrée de navigation principale, juste au-dessus d'Analyses. Visible
+    // par TOUS les rôles désormais (technicien inclus, pour les relevés de
+    // température nécessaires au calcul des DJU) — _see('cta-vc') suit le
+    // même mécanisme que les autres modules ouverts aux techniciens
+    // (ex. 'planning', 'counters'), y compris le système de rôles
+    // personnalisés (voir assets/js/pages/admin.js:PERM_MODULES et
+    // assets/js/auth.js:can()). MX.NavVisibility (_nv) reste le réglage
+    // Super Admin par profil (tech/responsable), inchangé. La gestion des
+    // circuits/configuration et les décisions sur les recommandations
+    // restent réservées à canSeeAll() — voir MX.Pages.CtaVc._canManage()
+    // dans cta-vc.js, qui protège chaque action, pas seulement l'affichage
+    // du menu.
+    if (_see('cta-vc') && _nv('cta-vc')) {
       h += _item("cta-vc", "fa-fire-flame-curved", "CTA / VC");
       _dbgAdd("CTA / VC");
+    }
+
+    // ── 🌡️ Configuration thermique (déplacée hors de Centre de Pilotage) ──
+    // Même principe que CTA / VC juste au-dessus : visible à tout rôle en
+    // consultation + relevés de pièce (_see suit la matrice de permissions
+    // des rôles personnalisés comme ailleurs) ; la configuration
+    // structurelle reste réservée Responsable/Admin, protégée dans
+    // heating-config.js (_canManage()) et côté serveur.
+    if (_see('heating-config') && _nv('heating-config')) {
+      h += _item("heating-config", "fa-temperature-three-quarters", "Configuration thermique");
+      _dbgAdd("Configuration thermique");
     }
 
     // ── 📊 Analyses ──
@@ -563,10 +593,16 @@
       let secPilotage = "";
       if (_nv('org-resp'))             secPilotage += _pageBtn("org-resp",      "fa-clipboard-list",   "Organisation Responsable");
       if (_nv('gestion-semaine-tech')) secPilotage += _pageBtn("gestion-semaine-tech", "fa-user-clock", "Gestion semaine tech");
+      // CONFIGURATION THERMIQUE déplacée hors de PILOTAGE (passe de
+      // finalisation) — voir plus bas, désormais visible aux techniciens
+      // aussi (_see('heating-config') au lieu de canAll), même principe que
+      // CTA / VC ci-dessous : consultation + relevés de pièce ouverts à
+      // tous, la configuration structurelle (bâtiments/installations/
+      // pièces/courbes) reste protégée dans heating-config.js lui-même.
       // CTA / VC déplacé hors de PILOTAGE vers la navigation principale,
-      // juste au-dessus du groupe "Analyses" — voir plus bas. Entrée de
-      // menu uniquement : mêmes contrôles d'accès (canAll + _nv('cta-vc')),
-      // aucun changement au module ni à ses règles Firestore.
+      // juste au-dessus du groupe "Analyses" — voir plus bas, désormais
+      // visible aux techniciens aussi (_see('cta-vc') au lieu de canAll) :
+      // les actions de pilotage restent protégées dans cta-vc.js lui-même.
       if (secPilotage) aItems += _sec("PILOTAGE") + secPilotage;
 
       // ÉQUIPE : jamais configurable (menus purement administratifs, restent
@@ -1885,10 +1921,13 @@
       if (_djuPersistState.inFlight) return;
       if (_djuPersistState.coordsKey === coordsKey) return; // déjà persisté pour cette localisation
       _djuPersistState.inFlight = true;
-      const todayStr = (function () {
-        const d = new Date();
-        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-      })();
+      // Europe/Paris explicite (MX.Dju.parisDateStr), PAS le fuseau local de
+      // l'appareil — voir assets/js/utils/dju.js pour le détail du bug
+      // corrigé : un appareil réglé sur un autre fuseau pouvait soit ne
+      // jamais persister un jour pourtant déjà observé à Paris (trou
+      // d'historique), soit persister un jour pas encore terminé comme
+      // "observed" définitif (donnée figée, plus jamais recalculée).
+      const todayStr = MX.Dju.parisDateStr();
       MX.Weather.getDaily(lat, lon).then(raw => {
         _djuPersistState.inFlight = false;
         if (!raw) return; // échec réseau : coordsKey pas mis à jour, on retentera au prochain appel
@@ -3288,10 +3327,25 @@
       { id: 'documents',    icon: 'fa-book',           label: 'Ressources',    fn: "MX.closeMobileDrawer();MX.showPage('documents')" },
       { id: 'parametres',   icon: 'fa-gear',           label: 'Paramètres',    fn: "MX.closeMobileDrawer();MX.showPage('parametres')" },
     ];
+    // CTA / VC : même gate que buildNav() (_see('cta-vc') && _nv('cta-vc')),
+    // recalculée ici car openMobileDrawer() ne partage pas les closures de
+    // buildNav(). Visible aux techniciens désormais — la gestion des
+    // circuits et les décisions restent protégées dans cta-vc.js lui-même.
+    const _ctaVcVisible = (canAll || !cu || !cu.roleId || MX.Auth.can('cta-vc', 'view'))
+      && (!MX.NavVisibility || MX.NavVisibility.shouldShow('cta-vc'));
+    if (_ctaVcVisible) {
+      navItems.splice(2, 0, { id: 'cta-vc', icon: 'fa-fire-flame-curved', label: 'CTA / VC', fn: "MX.closeMobileDrawer();MX.showPage('cta-vc')" });
+    }
+    // Configuration thermique : même gate que CTA / VC ci-dessus (passe de
+    // finalisation — consultation + relevés de pièce ouverts à tous).
+    const _heatingConfigVisible = (canAll || !cu || !cu.roleId || MX.Auth.can('heating-config', 'view'))
+      && (!MX.NavVisibility || MX.NavVisibility.shouldShow('heating-config'));
+    if (_heatingConfigVisible) {
+      navItems.splice(_ctaVcVisible ? 3 : 2, 0, { id: 'heating-config', icon: 'fa-temperature-three-quarters', label: 'Config. thermique', fn: "MX.closeMobileDrawer();MX.showPage('heating-config')" });
+    }
     if (canAll) {
-      navItems.splice(2, 0,
+      navItems.splice((_ctaVcVisible ? 1 : 0) + (_heatingConfigVisible ? 1 : 0) + 2, 0,
         { id: 'org-resp',     icon: 'fa-users-gear',    label: 'Organisation',   fn: "MX.closeMobileDrawer();MX.showPage('org-resp')" },
-        { id: 'cta-vc',       icon: 'fa-fire-flame-curved', label: 'CTA / VC',   fn: "MX.closeMobileDrawer();MX.showPage('cta-vc')" },
         { id: 'utilisateurs', icon: 'fa-crosshairs', label: 'Centre de Pilotage', fn: "MX.closeMobileDrawer();MX.showPage('utilisateurs')" }
       );
     }

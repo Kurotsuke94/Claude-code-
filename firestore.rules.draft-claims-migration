@@ -1,0 +1,1040 @@
+rules_version = '2';
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MAINTIX — RÈGLES FIRESTORE PRODUCTION
+//  Réseau interne fermé · Sécurité intermédiaire
+//  Généré le : 2026-07-13
+//
+//  PHILOSOPHIE :
+//  • Lectures   : libres pour toutes les collections (listeners temps réel)
+//  • Écritures  : libres sur les collections opérationnelles
+//  • Config     : écriture réservée à l'Administrateur (Firebase Auth)
+//  • Suppressions critiques : bloquées au niveau serveur
+//  • Philosophie GMAO : missions jamais supprimées (archivage archived:true)
+//
+//  AUTHENTIFICATION :
+//  • Administrateur  → Firebase Auth (request.auth != null)
+//  • Responsable     → PIN Firestore (pas de Firebase Auth → request.auth null)
+//  • Technicien      → PIN Firestore (pas de Firebase Auth → request.auth null)
+//
+//  NE PAS DÉPLOYER SANS AVOIR RELU CE FICHIER.
+//  Commande de déploiement : firebase deploy --only firestore:rules
+// ════════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : Administrateur Firebase Auth
+    // Exclut explicitement le provider "anonymous" : depuis l'ajout de la
+    // connexion anonyme (bootstrap client pour les techniciens/responsables
+    // PIN, voir firebase-config.js), request.auth != null seul ne suffit
+    // plus à identifier un Administrateur — il faut vérifier qu'il s'agit
+    // d'une vraie session e-mail/mot de passe.
+    //
+    // ⚠ MIGRATION CUSTOM CLAIMS (functions/index.js:verifyPin) : exclut
+    // DÉSORMAIS AUSSI le provider "custom" — les comptes PIN authentifiés
+    // par verifyPin()/signInWithCustomToken() ont request.auth != null ET
+    // sign_in_provider == 'custom' (jamais 'anonymous'). Sans cette
+    // exclusion supplémentaire, TOUT technicien ou responsable passerait
+    // isAdmin() == true partout dans l'application dès le déploiement de
+    // cette migration — régression de sécurité majeure et silencieuse,
+    // repérée uniquement parce que ce fichier a été relu intégralement
+    // avant toute modification (voir consigne : "examiner les effets de
+    // bord sur les fonctionnalités existantes avant toute modification des
+    // règles"). Isoler cette vérification ici garantit que CHAQUE usage
+    // existant de isAdmin() dans ce fichier reste correct sans modification
+    // supplémentaire.
+    // ────────────────────────────────────────────────────────────────────────
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider != 'anonymous'
+          && request.auth.token.firebase.sign_in_provider != 'custom';
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPERS : rôles PIN vérifiés côté serveur (migration custom claims)
+    // Un compte PIN authentifié via verifyPin() porte un jeton avec
+    // sign_in_provider == 'custom' et un claim `role` ('responsable' ou
+    // 'technicien'), posé UNIQUEMENT par la Cloud Function (Admin SDK,
+    // jamais modifiable par le client — voir functions/index.js:verifyPin).
+    // Ne jamais lire un rôle depuis request.resource.data (donnée du
+    // document écrit par le client) : seul request.auth.token est fiable.
+    // ────────────────────────────────────────────────────────────────────────
+    function isPinRole(r) {
+      return request.auth != null
+          && request.auth.token.firebase.sign_in_provider == 'custom'
+          && ('role' in request.auth.token)
+          && request.auth.token.role == r;
+    }
+    function isResponsableOrAdmin() {
+      return isAdmin() || isPinRole('responsable');
+    }
+    function isAnyVerifiedRole() {
+      return isAdmin() || isPinRole('responsable') || isPinRole('technicien');
+    }
+
+    // HELPER (REFONTE CTA/VC) : un point de mesure à 2 points
+    // (heating_readings.points.point1/point2) est-il structurellement
+    // valide ? Mêmes bornes physiques que l'ancien champ plat `temp`
+    // (-50/100°C) pour les 3 sous-mesures — volontairement permissif sur
+    // les BORNES (le plafond métier réel, ex. 50°C VC, est appliqué par
+    // MX.HeatingEngine côté client ET revalidé lors de la décision
+    // Responsable/Admin, pas ici : cette règle ne garantit que la forme des
+    // données, jamais la pertinence métier d'une valeur).
+    function _validHeatingPoint(p) {
+      return p is map
+        && p.waterTemp is number && p.waterTemp > -50 && p.waterTemp < 100
+        && p.blowTemp is number && p.blowTemp > -50 && p.blowTemp < 100
+        && p.ambientTemp is number && p.ambientTemp > -50 && p.ambientTemp < 100;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : le document users/{userId} CIBLÉ appartient-il à un
+    // Responsable ? Règle métier explicite (section A.2 du rapport) : un
+    // Responsable peut réinitialiser le PIN de n'importe quel TECHNICIEN,
+    // mais JAMAIS celui d'un AUTRE Responsable (Kevin ne peut pas changer le
+    // PIN d'Alban, ni l'inverse) — seul l'Admin le peut. Nécessite une
+    // lecture Firestore du document CIBLE (get()), pas du jeton de
+    // l'appelant : le rôle de la CIBLE n'est jamais un claim du jeton de
+    // celui qui écrit. Même logique à deux champs que _normalizeRole() côté
+    // serveur (functions/index.js) et isResponsable()/_roleFamily() côté
+    // client (auth.js) — rank='responsable' OU role='responsable' comptent
+    // tous les deux, à resynchroniser manuellement si cette règle évolue.
+    // exists() d'abord : un users/{userId} absent (ne devrait jamais
+    // arriver en usage normal — users_private n'est créé qu'après un
+    // users/{id} existant, voir db.js:addUser) est traité comme "pas un
+    // Responsable" par défaut FAUX-FERMÉ ici (l'absence du doc renvoie
+    // false à exists(), donc _isResponsable() renvoie false, donc le
+    // Responsable appelant serait AUTORISÉ) — acceptable uniquement parce
+    // que ce cas ne peut concerner qu'un compte déjà inexistant pour
+    // l'app ; aucune tentative légitime ne cible un tel id.
+    // Map.get(clé, défaut) plutôt que la notation pointée .rank/.role :
+    // un champ ABSENT en notation pointée lève une erreur d'évaluation
+    // (pas une simple valeur "null") — avec seulement deux champs
+    // optionnels liés par ||, cela pouvait, pour un technicien sans champ
+    // `rank` (le cas courant), faire échouer toute l'expression au lieu de
+    // renvoyer proprement `false`, refusant à tort une écriture légitime
+    // (faux négatif fonctionnel, pas une faille de sécurité, mais à éviter).
+    function _isResponsable(userId) {
+      let p = /databases/$(database)/documents/users/$(userId);
+      return exists(p)
+          && (get(p).data.get('rank', '') == 'responsable' || get(p).data.get('role', '') == 'responsable');
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : Super-admin — UN seul compte Firebase Auth, en dur ici (pas de
+    // custom claims/Cloud Functions dans ce projet). Restreint l'écriture des
+    // documents explicitement réservés au Super Admin : config/adminSession
+    // (révocation forcée des sessions admin) et config/navigation_visibility
+    // (visibilité des menus par profil). N'utiliser ce helper QUE pour ces
+    // fonctionnalités explicitement Super-Admin-only ; ne PAS l'utiliser
+    // comme substitut/alias de isAdmin() pour des fonctionnalités ouvertes à
+    // tout admin/responsable ailleurs dans ce fichier.
+    // ────────────────────────────────────────────────────────────────────────
+    function isSuperAdmin() {
+      return isAdmin() && request.auth.token.email == 'keyzeur94460@hotmail.fr';
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // HELPER : session applicative authentifiée (Admin OU PIN via bootstrap
+    // anonyme). Ne prouve PAS l'identité du technicien/responsable (le PIN
+    // lui-même n'est vérifié que côté client), mais exige un vrai jeton
+    // Firebase Auth — ce qui exclut toute requête faite sans jamais passer
+    // par le SDK/l'app (ex. appel REST direct sans authentification).
+    // ────────────────────────────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+
+    // ════════════════════════════════════════════════════════════════════════
+    // GROUPE A — COLLECTIONS PROTÉGÉES
+    // Écriture restreinte · Suppression interdite ou admin uniquement
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── CONFIG ──────────────────────────────────────────────────────────────
+    // Documents : week, teams, alerts, assignments, checks, notes, planning,
+    //             bible_permissions, games_config, hotel_config, versions,
+    //             maintenance.
+    // Lecture   : libre (listeners db.js, Cloud Functions)
+    // Écriture  : Admin uniquement (Firebase Auth)
+    // Suppression : JAMAIS — configuration structurelle de l'application
+    //
+    // IMPORTANT — sémantique réelle des règles Firestore : quand plusieurs
+    // blocs "match" correspondent au même chemin (ex. ce bloc générique ET
+    // le bloc précis config/navigation_visibility plus bas), Firestore
+    // AUTORISE la requête si N'IMPORTE LEQUEL des blocs correspondants
+    // l'autorise (union/OR — PAS "le plus précis l'emporte"). Un bloc précis
+    // plus restrictif ne fait donc RIEN tant que ce bloc générique reste
+    // permissif pour ce même docId : il faut l'exclure explicitement ici.
+    // docId != 'navigation_visibility' : cette configuration (Visibilité des
+    // modules) a sa propre règle Super-Admin-only plus bas — sans cette
+    // exclusion, N'IMPORTE QUEL admin Firebase pourrait la modifier via ce
+    // bloc générique, contournant silencieusement la restriction.
+    match /config/{docId} {
+      allow read: if true;
+      // 'heating_config' exclu (PASSE DE FIABILISATION) : sans cette
+      // exclusion, le isAdmin() large de CETTE règle générique s'OR-ait
+      // avec la règle spécifique match /config/heating_config ci-dessous
+      // (les blocs match qui correspondent au même chemin se cumulent en
+      // OR dans Firestore) et permettrait à tout Admin Firebase d'écrire
+      // n'importe quel champ, y compris hors bornes, en contournant
+      // entièrement la validation de heating_config — exactement le
+      // défaut qui excluait déjà 'navigation_visibility' pour la même
+      // raison structurelle.
+      allow create, update: if isAdmin() && docId != 'navigation_visibility' && docId != 'heating_config';
+      // delete : interdit — aucune suppression de config
+
+      // Sous-collection : config/maintenance/deploy_log
+      // Journal de déploiement en append-only
+      match /deploy_log/{logId} {
+        allow read: if true;
+        allow create: if isAdmin();
+        // update, delete : interdit
+      }
+    }
+
+    // config/checks & config/notes : exceptions à la règle "config = Admin
+    // Firebase Auth uniquement" ci-dessus. Ce sont des documents OPÉRATIONNELS
+    // (état des cases cochées / notes de tâche des check-lists), écrits en
+    // continu par les techniciens ET les responsables — qui s'authentifient
+    // par PIN Firestore, jamais par un compte e-mail/mot de passe. Le
+    // isAdmin() ci-dessus bloquait donc TOUTE validation de tâche pour ces
+    // deux rôles ("Erreur de connexion" au clic sur Valider).
+    // Écriture réservée à isAuthenticated() (PAS "if true") : le client
+    // (firebase-config.js) ouvre désormais une session Firebase Auth anonyme
+    // au chargement pour TOUTE l'app, y compris les utilisateurs PIN. Un
+    // appel direct à l'API Firestore sans jamais passer par le SDK Firebase
+    // Auth (donc sans jeton) reste refusé ; ceci ne remplace pas une vraie
+    // vérification d'identité par technicien (le PIN n'est validé que côté
+    // client), qui nécessiterait une Cloud Function + jetons personnalisés.
+    // Ce chemin plus précis prend le pas sur /config/{docId} pour ces deux
+    // documents uniquement — le reste de /config/* reste Admin-only.
+    match /config/checks {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+    }
+    match /config/notes {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+    }
+
+    // config/adminSession : version de session admin (mécanisme de
+    // révocation forcée des sessions Firebase Admin résiduelles sur un
+    // poste partagé — voir auth.js). Lecture libre (tout admin doit pouvoir
+    // vérifier sa propre version périodiquement) ; écriture réservée au
+    // SEUL super-admin — plus restrictif que /config/{docId} (isAdmin()),
+    // donc prend le pas dessus pour ce document précis.
+    match /config/adminSession {
+      allow read: if true;
+      allow create, update: if isSuperAdmin();
+    }
+
+    // config/navigation_visibility : configuration de visibilité des menus
+    // par profil (technicien/responsable), gérée depuis l'écran Super Admin
+    // "Visibilité des modules" (voir assets/js/pages/nav-visibility.js).
+    // Lecture libre (tout client doit pouvoir filtrer sa propre navigation) ;
+    // écriture réservée au SEUL super-admin. Le bloc /config/{docId}
+    // ci-dessus exclut explicitement ce docId de son propre "allow write" —
+    // sans cette exclusion, sa condition isAdmin() (union/OR avec ce bloc-
+    // ci, voir commentaire plus haut) permettrait à N'IMPORTE QUEL admin
+    // Firebase d'écrire ce document malgré cette règle. Un admin Firebase
+    // non-super-admin ne doit jamais pouvoir modifier cette configuration,
+    // y compris par appel direct à l'API — vérifié par
+    // tests/firestore_rules_navigation_visibility_test.js (émulateur réel).
+    match /config/navigation_visibility {
+      allow read: if true;
+      allow create, update: if isSuperAdmin();
+    }
+
+    // config/heating_config : référence DJU configurable + bornes CTA/VC +
+    // seuils d'alerte (REFONTE CTA/VC). Document de PILOTAGE (comme la
+    // gestion des circuits ci-dessous) : écriture Responsable/Admin, PAS
+    // seulement Admin Firebase comme le bloc générique /config/{docId}
+    // ci-dessus — sans cette exception, un Responsable (session PIN) ne
+    // pourrait jamais régler la référence DJU, alors que
+    // assets/js/pages/cta-vc.js le lui permet déjà pour la gestion des
+    // circuits (_canManage()). Lecture ouverte à tout rôle vérifié (le
+    // moteur quantitatif en a besoin côté technicien pour afficher les
+    // mêmes propositions que Responsable/Admin).
+    // PASSE DE FIABILISATION (demande utilisateur) : validation serveur
+    // complète des 6 champs de configuration générale, pas seulement le
+    // rôle de l'auteur. Même principe déjà appliqué à heating_circuits
+    // (chaque champ est OPTIONNEL — un réglage non encore défini reste
+    // absent/null, jamais une valeur inventée — mais VALIDÉ quand
+    // présent). hasOnly() interdit tout champ en dehors de cette liste
+    // précise : un client ne peut pas glisser un champ arbitraire dans ce
+    // document partagé par tous les rôles vérifiés en lecture.
+    // Bornes cohérentes (min < max) revalidées ici pour ctaRangeMin/Max et
+    // ctaWaterTempMin/Max — déjà revalidées côté client
+    // (_saveHeatingConfigForm dans cta-vc.js) mais jamais QUE côté client :
+    // un acteur contournant l'UI ne doit pas pouvoir écrire min >= max.
+    match /config/heating_config {
+      allow read: if isAnyVerifiedRole();
+      allow create, update: if isResponsableOrAdmin()
+        && request.resource.data.keys().hasOnly(['djuBaseTemp', 'ctaRangeMin', 'ctaRangeMax', 'vcMaxTemp', 'ctaWaterTempMin', 'ctaWaterTempMax', 'updatedAt'])
+        && (!('djuBaseTemp' in request.resource.data) || request.resource.data.djuBaseTemp == null || (request.resource.data.djuBaseTemp is number && request.resource.data.djuBaseTemp > 0 && request.resource.data.djuBaseTemp <= 30))
+        && (!('ctaRangeMin' in request.resource.data) || request.resource.data.ctaRangeMin == null || (request.resource.data.ctaRangeMin is number && request.resource.data.ctaRangeMin >= 0 && request.resource.data.ctaRangeMin <= 30))
+        && (!('ctaRangeMax' in request.resource.data) || request.resource.data.ctaRangeMax == null || (request.resource.data.ctaRangeMax is number && request.resource.data.ctaRangeMax >= 0 && request.resource.data.ctaRangeMax <= 30))
+        && (!('ctaRangeMin' in request.resource.data && 'ctaRangeMax' in request.resource.data) || request.resource.data.ctaRangeMin == null || request.resource.data.ctaRangeMax == null || request.resource.data.ctaRangeMin < request.resource.data.ctaRangeMax)
+        && (!('vcMaxTemp' in request.resource.data) || request.resource.data.vcMaxTemp == null || (request.resource.data.vcMaxTemp is number && request.resource.data.vcMaxTemp > 0 && request.resource.data.vcMaxTemp <= 50))
+        && (!('ctaWaterTempMin' in request.resource.data) || request.resource.data.ctaWaterTempMin == null || (request.resource.data.ctaWaterTempMin is number && request.resource.data.ctaWaterTempMin >= 0 && request.resource.data.ctaWaterTempMin <= 100))
+        && (!('ctaWaterTempMax' in request.resource.data) || request.resource.data.ctaWaterTempMax == null || (request.resource.data.ctaWaterTempMax is number && request.resource.data.ctaWaterTempMax >= 0 && request.resource.data.ctaWaterTempMax <= 100))
+        && (!('ctaWaterTempMin' in request.resource.data && 'ctaWaterTempMax' in request.resource.data) || request.resource.data.ctaWaterTempMin == null || request.resource.data.ctaWaterTempMax == null || request.resource.data.ctaWaterTempMin < request.resource.data.ctaWaterTempMax);
+    }
+
+    // ── USERS ────────────────────────────────────────────────────────────────
+    // Lecture   : libre (profil : nom, rôle, couleur, avatar… JAMAIS le PIN,
+    //             voir users_private/{userId} ci-dessous)
+    // Création  : Admin uniquement
+    // Mise à jour : libre pour son propre profil (hors role/rank/roleId/pin),
+    //             large pour Responsable/Admin (gestion d'équipe)
+    // Suppression : Admin uniquement (panneau admin)
+    match /users/{userId} {
+      // CORRECTION AUDIT (session précédente) : le hash du PIN ne vit plus
+      // dans ce document — déplacé vers users_private/{userId}, dont la
+      // lecture est bloquée pour TOUT client (voir plus bas). Avant cette
+      // correction, "allow read: if true" ici exposait le hash SHA-256 non
+      // salé du PIN à quiconque, permettant un brute-force hors-ligne en
+      // quelques millisecondes pour un PIN à 4-8 chiffres — verifyPin()
+      // aurait alors accepté ce PIN deviné comme légitime, rendant la
+      // vérification serveur inefficace contre cette voie de contournement.
+      allow read: if true;
+      allow create: if isAdmin();
+      // AVANT : allow update: if true — n'importe qui (y compris une
+      // session anonyme) pouvait réécrire le rôle/roleId/pin de N'IMPORTE
+      // QUEL utilisateur, y compris le sien : élévation de privilège
+      // triviale (ex. se déclarer "responsable" par un simple appel
+      // Firestore direct, en contournant entièrement l'application).
+      // APRÈS : un compte PIN vérifié (role/userId posés par verifyPin(),
+      // jamais par le client) peut mettre à jour UNIQUEMENT SON PROPRE
+      // document, et JAMAIS les champs role/rank/roleId (empêche toute
+      // auto-élévation) — couvre les usages existants légitimes
+      // (settings.js : changer son propre nom, avatar). Un Responsable
+      // garde un accès complet à la gestion d'équipe (assignation de
+      // roleId, etc.), exactement comme aujourd'hui via l'écran
+      // Utilisateurs déjà accessible à canSeeAll() — aucune régression sur
+      // cette fonctionnalité existante. Un Admin garde un accès total, y
+      // compris pour changer le rôle d'un utilisateur.
+      // 'pin' est EXCLU ICI POUR TOUT LE MONDE, y compris Responsable/Admin
+      // : ce champ ne doit plus jamais réapparaître dans un document
+      // publiquement lisible — seul users_private/{userId} (non lisible)
+      // peut le contenir désormais. Sans cette exclusion, n'importe quelle
+      // écriture autorisée par ailleurs (gestion d'équipe, self-service)
+      // pourrait réintroduire par erreur le hash dans un endroit lisible de
+      // tous, annulant la correction ci-dessous.
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pin'])
+        && (
+          isResponsableOrAdmin()
+          || (
+            request.auth != null
+            && request.auth.token.firebase.sign_in_provider == 'custom'
+            && ('userId' in request.auth.token)
+            && request.auth.token.userId == userId
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'rank', 'roleId'])
+          )
+        );
+      allow delete: if isAdmin();
+    }
+
+    // ── USERS_PRIVATE (correction audit : hash PIN, jamais lisible) ───────────
+    // Contient UNIQUEMENT le champ `pin` (hash SHA-256, ou PIN en clair pour
+    // un compte legacy pas encore migré) — jamais aucun autre champ. Lecture
+    // bloquée pour TOUT client, y compris Admin : verifyPin()
+    // (functions/index.js) le lit via l'Admin SDK, qui contourne de toute
+    // façon les règles de sécurité — aucun client légitime n'a jamais besoin
+    // de lire ce hash (la vérification de l'ancien PIN lors d'un changement
+    // self-service passe elle aussi par verifyPin(), voir
+    // assets/js/pages/settings.js:_confirmChangePin — plus par une
+    // comparaison locale de hash).
+    match /users_private/{userId} {
+      allow read: if false;
+      // CORRECTION AUDIT (session suivante) : un compte existant AVANT la
+      // migration des données (voir scripts/migrate-pins-to-private.js),
+      // ou dont la migration aurait échoué pour une raison quelconque, n'a
+      // PAS encore de document users_private — sans cette branche, son
+      // propre changement de PIN self-service (settings.js:
+      // _confirmChangePin) serait traité comme un "create" (le document
+      // n'existe pas) et rejeté par l'ancienne règle (allow create: if
+      // isAdmin() uniquement), empêché PERMANENT jusqu'à une intervention
+      // Admin manuelle. Prouvé par un test contre l'émulateur réel avant
+      // cette correction (voir le rapport d'audit, et
+      // tests/pin_security_test.js, section D).
+      //
+      // Un utilisateur peut donc désormais CRÉER son propre document
+      // users_private — mais seulement sous TOUTES ces conditions à la
+      // fois (chacune vérifiée indépendamment, aucune ne peut être
+      // falsifiée côté client) :
+      //   1. request.auth.token.firebase.sign_in_provider == 'custom'
+      //      Ce claim n'est JAMAIS fourni par le client — il est dérivé
+      //      par Firebase Auth lui-même de LA FAÇON dont le jeton a été
+      //      obtenu (ici : admin.auth().createCustomToken(), appelé
+      //      UNIQUEMENT par verifyPin(), côté serveur, avec la clé de
+      //      service — jamais accessible au client). Un attaquant ne peut
+      //      pas "se déclarer" sign_in_provider:'custom' depuis le client :
+      //      soit son jeton a réellement été émis par verifyPin() (donc le
+      //      PIN a été vérifié), soit ce claim ne vaudra jamais 'custom'.
+      //   2. ('userId' in request.auth.token) && request.auth.token.userId
+      //      == userId — le claim `userId` est posé par verifyPin()
+      //      (functions/index.js:881, Admin SDK) à partir du compte dont
+      //      LE PIN A RÉELLEMENT ÉTÉ VALIDÉ — jamais depuis une valeur
+      //      fournie par le client dans la requête Firestore elle-même
+      //      (qui ne pourrait de toute façon QUE lire request.auth.token,
+      //      jamais le modifier après coup : un jeton Firebase est signé
+      //      par le serveur et non falsifiable une fois émis). Comparé au
+      //      paramètre de chemin {userId} du document ciblé : ne peut donc
+      //      JAMAIS créer/modifier le document d'un AUTRE utilisateur.
+      //   3. request.resource.data.keys().hasOnly(['pin']) &&
+      //      request.resource.data.pin is string — la création ne peut
+      //      JAMAIS introduire un autre champ que `pin` (empêche de
+      //      glisser role/roleId ou tout autre champ dès la création).
+      // Ensemble, ces 3 conditions garantissent qu'une création self-
+      // service ne peut avoir lieu qu'APRÈS une authentification PIN
+      // fiable (verifyPin, côté serveur) et UNIQUEMENT pour son propre
+      // document, avec UNIQUEMENT le champ attendu.
+      //
+      // ── RÈGLE MÉTIER RESPONSABLE (section A.2 du rapport) ──
+      // Un Responsable peut créer/réinitialiser le PIN de N'IMPORTE QUEL
+      // TECHNICIEN (gestion d'équipe, déjà exposée aujourd'hui via
+      // admin.js:renderUsers()/saveUsers(), accessible à canSeeAll() — pas
+      // seulement à isAdmin()), mais JAMAIS celui d'un AUTRE Responsable ni
+      // de l'Admin — _isResponsable(userId) lit le RÔLE RÉEL de la CIBLE
+      // (Firestore, pas le jeton de l'appelant) pour trancher. Un
+      // Responsable gérant son propre PIN passe par la branche self-
+      // service ci-dessous (userId == soi-même), jamais par celle-ci.
+      // Mêmes garanties de champ que le self-service : uniquement `pin`,
+      // jamais un autre champ glissé dans la même écriture.
+      allow create: if isAdmin()
+        || (
+          isPinRole('responsable')
+          && !_isResponsable(userId)
+          && request.resource.data.keys().hasOnly(['pin'])
+          && request.resource.data.pin is string
+        )
+        || (
+          request.auth != null
+          && request.auth.token.firebase.sign_in_provider == 'custom'
+          && ('userId' in request.auth.token)
+          && request.auth.token.userId == userId
+          && request.resource.data.keys().hasOnly(['pin'])
+          && request.resource.data.pin is string
+        );
+      // Mise à jour : Admin (réinitialisation de n'importe quel PIN, y
+      // compris celui d'un Responsable) OU Responsable réinitialisant le
+      // PIN d'un TECHNICIEN uniquement (voir règle métier ci-dessus) OU
+      // l'utilisateur lui-même via une session PIN vérifiée (self-service,
+      // settings.js:_confirmChangePin — couvre aussi bien un Technicien
+      // qu'un Responsable changeant SON PROPRE PIN) — dans ces deux
+      // derniers cas, UNIQUEMENT le champ `pin`, jamais rien d'autre.
+      // Mêmes garanties de claims qu'à la création ci-dessus (sign_in_
+      // provider + userId jamais falsifiables côté client).
+      allow update: if isAdmin()
+        || (
+          isPinRole('responsable')
+          && !_isResponsable(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pin'])
+          && request.resource.data.pin is string
+        )
+        || (
+          request.auth != null
+          && request.auth.token.firebase.sign_in_provider == 'custom'
+          && ('userId' in request.auth.token)
+          && request.auth.token.userId == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pin'])
+          && request.resource.data.pin is string
+        );
+      allow delete: if isAdmin();
+    }
+
+    // ── ROLES ────────────────────────────────────────────────────────────────
+    // Lecture   : libre (auth.js charge les permissions par roleId)
+    // Écriture  : Admin uniquement
+    // Suppression : Admin uniquement (panneau admin)
+    match /roles/{roleId} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── CSO_PERF_CONFIG ──────────────────────────────────────────────────────
+    // Configuration performance énergétique (seuils, classes, objectifs)
+    // Écriture  : libre (consommations.js → settings)
+    // Suppression : JAMAIS — configuration structurelle
+    match /cso_perf_config/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      // delete : interdit
+    }
+
+    // ── ALERT_RULES ──────────────────────────────────────────────────────────
+    // Règles d'alertes configurées (admin.js, app.js)
+    // Écriture  : libre (responsable peut configurer les alertes)
+    // Suppression : JAMAIS — protection contre suppression accidentelle
+    match /alert_rules/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      // delete : interdit
+    }
+
+    // ── FCMTOKENS ────────────────────────────────────────────────────────────
+    // Tokens push notification (client : set/delete sur login/logout)
+    // Cloud Functions gèrent les tokens expirés via Admin SDK (hors règles)
+    match /fcmTokens/{tokenId} {
+      allow read, create, update, delete: if true;
+    }
+
+
+    // ════════════════════════════════════════════════════════════════════════
+    // GROUPE B — COLLECTIONS OPÉRATIONNELLES
+    // Lecture + écriture libres · Suppression selon usage réel audité
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── PRÉSENCE & PRÉFÉRENCES ───────────────────────────────────────────────
+    // Heartbeat toutes les 2 min (presence). Favoris de navigation (user_prefs).
+    // Pas de suppression utilisée dans le code actuel.
+    match /presence/{docId} {
+      allow read, create, update: if true;
+    }
+    match /user_prefs/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── CHECKLISTS ───────────────────────────────────────────────────────────
+    // tasks : batch.set uniquement, jamais supprimé → pas de delete
+    match /tasks/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // weekly_checks : delete utilisé (suppression de templates)
+    match /weekly_checks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // weekHistory : batch.delete pour purge 30 jours
+    match /weekHistory/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── MISSIONS ─────────────────────────────────────────────────────────────
+    // PHILOSOPHIE GMAO : suppression physique réservée à l'Admin via Corbeille.
+    // Cycle normal : opérationnel → inTrash:true → archived:true → delete (Admin).
+    match /missions/{docId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // ── INTERVENTIONS ────────────────────────────────────────────────────────
+    // PHILOSOPHIE GMAO : suppression physique réservée à l'Admin via Corbeille.
+    // Le JS remplace les .delete() par MX.Trash.sendToTrash().
+    match /interventions/{docId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+    }
+
+    // Transferts liés aux interventions — pas de delete dans le code
+    match /int_transfers/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── RESP_TASKS ───────────────────────────────────────────────────────────
+    match /resp_tasks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── TASK_PHOTOS ──────────────────────────────────────────────────────────
+    // arrayUnion uniquement (ajout de photos) — jamais supprimé
+    match /task_photos/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── LOGS TECHNIQUES ──────────────────────────────────────────────────────
+    // clearLogs supprime les anciennes entrées — delete autorisé
+    match /logs/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── PLANNING ─────────────────────────────────────────────────────────────
+    match /planning_entries/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /planning_shifts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /absences/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // daily_claims : set merge uniquement, pas de delete
+    match /daily_claims/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── PMP — MAINTENANCE PRÉVENTIVE ─────────────────────────────────────────
+    // pmp_equipments : batch.delete sur suppression équipement — autorisé
+    // (les équipements sont des entrées de configuration, pas des historiques)
+    match /pmp_equipments/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // pmp_interventions : PHILOSOPHIE GMAO — historique d'interventions
+    // Le JS utilise MX.Trash.sendToTrash() au lieu de .delete().
+    // Suppression physique uniquement depuis Corbeille (Admin).
+    match /pmp_interventions/{docId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+    }
+    // pmp_plans : PHILOSOPHIE GMAO — plans de maintenance = données critiques
+    // Suppression physique uniquement depuis Corbeille (Admin).
+    match /pmp_plans/{docId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+    }
+    match /pmp_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── STOCK ────────────────────────────────────────────────────────────────
+    match /products/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /orders/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /transfers/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // stock_checks : états des lieux hebdomadaires (inventaire).
+    // Même contrôle que cso_charts : isAuthenticated() exige un vrai jeton
+    // Firebase Auth (Admin OU session anonyme bootstrap PIN, voir
+    // firebase-config.js) — bloque un appel REST direct non authentifié, mais
+    // ne distingue pas encore les rôles côté serveur (limite identique aux
+    // autres collections utilisant isAuthenticated()).
+    match /stock_checks/{checkId} {
+      allow read:                   if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+
+      match /items/{itemId} {
+        allow read:                   if isAuthenticated();
+        allow create, update, delete: if isAuthenticated();
+      }
+    }
+
+    // ── MESSAGES & JOURNAL ───────────────────────────────────────────────────
+    // messages : delete autorisé (suppression de messages)
+    match /messages/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // announcements + sous-collection replies
+    match /announcements/{annId} {
+      allow read, create, update, delete: if true;
+
+      match /replies/{replyId} {
+        allow read, create, delete: if true;
+      }
+    }
+
+    // admin_journal : delete autorisé (purge manuelle)
+    match /admin_journal/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── NOTIFICATIONS ────────────────────────────────────────────────────────
+    match /notifications/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── BADGES ───────────────────────────────────────────────────────────────
+    // delete utilisé (admin supprime un badge + cascade user_badges)
+    match /badges/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /user_badges/{docId} {
+      allow read, create, delete: if true;
+    }
+
+    // ── GAMIFICATION — REWARDS ───────────────────────────────────────────────
+    match /rewards_rules/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /rewards_grades/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /rewards_items/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // rewards_history : delete lors du resetProfile
+    match /rewards_history/{docId} {
+      allow read, create, delete: if true;
+    }
+    // rewards_users : set merge (increment points/xp) — pas de delete
+    match /rewards_users/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── GAMIFICATION — MINI-JEUX ─────────────────────────────────────────────
+    // games_scores : delete pour reset du classement
+    match /games_scores/{docId} {
+      allow read, create, delete: if true;
+    }
+    // games_achievements : delete lors du resetProfile
+    match /games_achievements/{docId} {
+      allow read, create, delete: if true;
+    }
+    match /games_questions/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── BIBLE MAINTIX ────────────────────────────────────────────────────────
+    // delete utilisé (suppression article + cascade comments)
+    match /bible_articles/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /bible_comments/{docId} {
+      allow read, create, delete: if true;
+    }
+    match /bibleCategories/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── CONSOMMATIONS ÉNERGÉTIQUES ───────────────────────────────────────────
+    match /cso_meters/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // cso_readings : batch.update pour recalcul des consommations
+    match /cso_readings/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /cso_clients/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    match /cso_energy_alerts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+    // cso_activity_log : append-only — pas de update ni delete
+    match /cso_activity_log/{docId} {
+      allow read, create: if true;
+    }
+    // cso_charts : graphiques personnalisés PARTAGÉS (onglet Analyses).
+    // RÈGLE PROVISOIRE : l'authentification actuelle par PIN ne permet pas
+    // de distinguer Responsable/Technicien côté serveur (session Firebase
+    // Auth anonyme commune, voir firebase-config.js) — isAuthenticated()
+    // autorise donc tout utilisateur ayant chargé l'application (Admin ou
+    // PIN) à lire/créer/modifier/supprimer, SANS distinction de rôle. Ce
+    // n'est PAS une sécurité complète : elle bloque uniquement un accès
+    // direct à l'API sans jamais être passé par l'app (contrairement à
+    // `allow read, write: if true`, qui ne bloquerait même pas cela). La
+    // distinction fine par rôle nécessitera des Custom Claims, prévue avec
+    // la future architecture utilisateurs/multi-sites — pas traitée ici.
+    match /cso_charts/{docId} {
+      allow read:                   if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // ── ALERTES DÉCLENCHÉES ──────────────────────────────────────────────────
+    // batch.delete pour purger les anciennes alertes
+    match /triggered_alerts/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── ORGANISATION RESPONSABLE ──────────────────────────────────────────────
+    // delete utilisé (suppression tâche hebdomadaire)
+    match /org_tasks/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── ORG CONFIG (slot configuration par semaine) ───────────────────────────
+    // Pas de suppression — configuration préservée même pour les semaines passées
+    match /org_config/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── ORG TEMPLATES (modèles de journée) ───────────────────────────────────
+    // delete autorisé (suppression d'un modèle par le responsable)
+    match /org_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── GESTION SEMAINE TECH — SHIFT_TEMPLATES (catalogue de créneaux) ───────
+    // Créée en Phase 2 (ea0c29e) sans règle associée — collection restée
+    // inaccessible en production jusqu'à ce correctif (voir diagnostic
+    // Phase 3-bis). delete utilisé (suppression d'un modèle par le
+    // responsable/admin, db.js deleteShiftTemplate).
+    match /shift_templates/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // ── GESTION SEMAINE TECH — WEEK_SLOTS (affectations datées) ──────────────
+    // Même oubli que shift_templates ci-dessus. Toutes les écritures sont des
+    // set()/set(merge:true) sur le document de la semaine (db.js) — jamais de
+    // delete de document (le retrait d'un créneau est un update du tableau
+    // days.{dayId}) — pas de suppression autorisée ici.
+    match /week_slots/{docId} {
+      allow read, create, update: if true;
+    }
+
+    // ── CTA/VC — CONSEILLER CHAUFFAGE (DJU, circuits, relevés, recommandations) ──
+    // ⚠ RÈGLES TEMPORAIRES — environnement de test fermé, sans données
+    // sensibles (validé explicitement par l'utilisateur pour accélérer les
+    // essais de la V1). À REVOIR avant toute ouverture plus large de
+    // l'application : ces 4 collections sont aussi permissives que
+    // org_tasks/org_config (aucune restriction par rôle côté serveur), ce
+    // qui est cohérent avec elles mais PAS un choix définitif pour de la
+    // donnée de production.
+    //
+    // Suppression définitive interdite partout ici : archivage uniquement
+    // pour les circuits (archiveHeatingCircuit), historique append-only
+    // pour les relevés, expiration par changement de statut (jamais de
+    // delete) pour les recommandations — cohérent avec la conservation
+    // d'historique demandée pour ce module. Inchangé par cette migration.
+    //
+    // ── MIGRATION CUSTOM CLAIMS — Responsable/Technicien désormais
+    // réellement distingués côté serveur via isPinRole()/isAnyVerifiedRole()
+    // (voir les HELPERS en haut de ce fichier et functions/index.js:
+    // verifyPin). CECI EST UN BROUILLON — NE PAS DÉPLOYER avant que :
+    //  1. verifyPin soit déployée et validée en conditions réelles ;
+    //  2. assets/js/auth.js utilise bien signInWithCustomToken() (plus la
+    //     comparaison de hash côté client) pour CHAQUE connexion PIN ;
+    //  3. computeDailyWeatherDju soit déployée (sans quoi weather_daily ne
+    //     serait plus jamais alimenté une fois l'écriture client bloquée
+    //     ci-dessous — voir le rapport de migration, section séquencement).
+    // Tant que ces 3 conditions ne sont pas réunies, garder les règles
+    // actuelles (permissives) déployées, pas celles-ci.
+    match /heating_circuits/{docId} {
+      allow read: if isAnyVerifiedRole();
+      // Gestion des circuits ("installations", CONFIGURATION THERMIQUE) =
+      // pilotage, réservé Responsable + Admin.
+      // buildingId/vcMaxTemp/ctaRangeMin/ctaRangeMax/waterTempMin/
+      // waterTempMax sont tous OPTIONNELS (circuits créés avant cette
+      // refonte n'en ont aucun — jamais invalidés rétroactivement), mais
+      // VALIDÉS quand présents. vcMaxTemp <= 50 est revérifié ICI (pas
+      // seulement par MX.HeatingEngine côté client) : plafond de sécurité,
+      // défense en profondeur.
+      // CORRECTION — buildingId est désormais une VRAIE référence vers
+      // heating_buildings/{id} (créé depuis Configuration thermique),
+      // jamais un énumérable codé en dur ('batiment_1'/'batiment_2') :
+      // seule la FORME (chaîne non vide ou null) est validée ici — une
+      // vérification d'EXISTENCE coûterait une lecture supplémentaire par
+      // écriture pour un gain de sécurité marginal (un buildingId orphelin
+      // est déjà neutralisé côté moteur, voir
+      // MX.HeatingEngine.proposeQuantitative : mode 'observation' par
+      // prudence tant que le bâtiment n'est pas résolu).
+      // CORRECTION 2 : ctaRangeMin/Max restent la plage de SOUFFLAGE
+      // (air) ; waterTempMin/Max sont les limites, INDÉPENDANTES, de l'eau
+      // de batterie — jamais fusionnées ni l'une validée à la place de
+      // l'autre.
+      allow create, update: if isResponsableOrAdmin()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && (!('buildingId' in request.resource.data) || request.resource.data.buildingId == null || (request.resource.data.buildingId is string && request.resource.data.buildingId.size() > 0))
+        && (!('vcMaxTemp' in request.resource.data) || request.resource.data.vcMaxTemp == null || (request.resource.data.vcMaxTemp is number && request.resource.data.vcMaxTemp > 0 && request.resource.data.vcMaxTemp <= 50))
+        && (!('ctaRangeMin' in request.resource.data) || request.resource.data.ctaRangeMin == null || (request.resource.data.ctaRangeMin is number && request.resource.data.ctaRangeMin >= 0 && request.resource.data.ctaRangeMin <= 30))
+        && (!('ctaRangeMax' in request.resource.data) || request.resource.data.ctaRangeMax == null || (request.resource.data.ctaRangeMax is number && request.resource.data.ctaRangeMax >= 0 && request.resource.data.ctaRangeMax <= 30))
+        && (!('waterTempMin' in request.resource.data) || request.resource.data.waterTempMin == null || (request.resource.data.waterTempMin is number && request.resource.data.waterTempMin >= 0 && request.resource.data.waterTempMin <= 100))
+        && (!('waterTempMax' in request.resource.data) || request.resource.data.waterTempMax == null || (request.resource.data.waterTempMax is number && request.resource.data.waterTempMax >= 0 && request.resource.data.waterTempMax <= 100))
+        // CORRECTION PRIORITAIRE (passe de finalisation) : tempMin/tempMax
+        // = "température minimale/maximale autorisée" du formulaire
+        // installation (Configuration thermique) — bornes GÉNÉRALES,
+        // resserrant TOUTE grandeur chiffrée de l'installation (soufflage,
+        // eau de batterie, eau VC), voir MX.HeatingEngine.
+        // _intersectGeneralLimits(). Revalidées ici pour la même raison que
+        // vcMaxTemp ci-dessus : défense en profondeur, pas seulement côté
+        // client.
+        && (!('tempMin' in request.resource.data) || request.resource.data.tempMin == null || (request.resource.data.tempMin is number && request.resource.data.tempMin >= 0 && request.resource.data.tempMin <= 100))
+        && (!('tempMax' in request.resource.data) || request.resource.data.tempMax == null || (request.resource.data.tempMax is number && request.resource.data.tempMax >= 0 && request.resource.data.tempMax <= 100));
+    }
+    // ── CONFIGURATION THERMIQUE — bâtiments ──
+    // mode:'automatique'|'manuel_assiste' uniquement — c'est CE champ que
+    // le moteur (MX.HeatingEngine.proposeQuantitative/evaluateCircuit) lit
+    // pour exclure toute proposition/action de réglage manuel sur un
+    // bâtiment automatique ; une valeur hors de cette liste serait un état
+    // ambigu dangereux (ni surveillance ni pilotage clairement établis),
+    // donc rejetée ici.
+    match /heating_buildings/{docId} {
+      allow read: if isAnyVerifiedRole();
+      allow create, update: if isResponsableOrAdmin()
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.mode in ['automatique', 'manuel_assiste'];
+    }
+    // ── CONFIGURATION THERMIQUE — pièces ──
+    // Gestion structurelle réservée Responsable/Admin (section 8 du
+    // cahier des charges) ; le technicien ne peut que LIRE (choisir la
+    // bonne pièce pour un relevé, voir heating_readings.roomId ci-dessous)
+    // et SAISIR un relevé — jamais créer/modifier/archiver une pièce.
+    match /heating_rooms/{docId} {
+      allow read: if isAnyVerifiedRole();
+      allow create, update: if isResponsableOrAdmin()
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.buildingId is string && request.resource.data.buildingId.size() > 0;
+    }
+    // ── CONFIGURATION THERMIQUE — courbes DJU / température intérieure ──
+    // SEULE collection heating_* où la suppression est autorisée (points de
+    // référence saisis par un humain, jamais une mesure historique — voir
+    // assets/js/db.js:deleteHeatingCurvePoint). Toujours Responsable/Admin.
+    match /heating_curve_points/{docId} {
+      allow read: if isAnyVerifiedRole();
+      allow create, update: if isResponsableOrAdmin()
+        && request.resource.data.buildingId is string && request.resource.data.buildingId.size() > 0
+        && request.resource.data.dju is number
+        && request.resource.data.expectedIndoorTemp is number;
+      allow delete: if isResponsableOrAdmin();
+    }
+    // ── CONFIGURATION THERMIQUE — journal d'audit ──
+    // Append-only (jamais de update/delete) : trace ancienne/nouvelle
+    // valeur, utilisateur, date pour chaque modification de configuration
+    // structurelle (section 7 du cahier des charges). Écrit uniquement par
+    // Responsable/Admin, cohérent avec le fait que seules ces actions sont
+    // elles-mêmes réservées à ces rôles.
+    match /heating_config_audit/{docId} {
+      allow read: if isResponsableOrAdmin();
+      allow create: if isResponsableOrAdmin()
+        && request.resource.data.entityType in ['building', 'installation', 'room', 'curve_point']
+        && request.resource.data.entityId is string
+        && request.resource.data.at == request.time;
+      // allow update, delete : interdit (append-only)
+    }
+    match /heating_readings/{docId} {
+      // Lecture nécessaire au technicien pour choisir le bon circuit et
+      // consulter l'historique (calcul des DJU) — jamais restreinte à
+      // Responsable/Admin, contrairement aux 3 autres collections.
+      allow read: if isAnyVerifiedRole();
+      // Création ouverte à TOUT rôle vérifié (c'est l'action centrale
+      // demandée pour le technicien) — mais jamais en blanc : validation
+      // minimale des champs pour écarter une écriture arbitraire/abusive.
+      // createdAt DOIT être un vrai horodatage serveur (FieldValue.
+      // serverTimestamp()) : request.resource.data.createdAt == request.time
+      // n'est vrai que pour ce sentinel, jamais pour une date fournie par
+      // le client.
+      //
+      // REFONTE CTA/VC : un relevé D'INSTALLATION (circuitId) est désormais
+      // soit l'ANCIENNE forme à un seul point (`temp`, inchangée — jamais
+      // retirée, l'historique déjà écrit reste lisible et de nouveaux
+      // relevés "simples" restent possibles pour les circuits hors CTA/VC),
+      // soit la NOUVELLE forme à 2 points (`points.point1`/`points.point2`,
+      // voir _validHeatingPoint ci-dessus) — jamais les deux absentes à la
+      // fois, jamais un mélange invalide.
+      //
+      // CONFIGURATION THERMIQUE : un relevé peut ALTERNATIVEMENT porter sur
+      // une PIÈCE (roomId) — température ambiante simple uniquement,
+      // jamais `points` (une pièce n'a pas de "2 points de réseau") —
+      // alimente MX.HeatingEngine.computeBuildingAverageTemp. circuitId et
+      // roomId sont mutuellement exclusifs : un relevé ne peut jamais
+      // porter sur les deux à la fois (empêcherait de savoir sans ambiguïté
+      // s'il s'agit d'un relevé d'installation ou de pièce).
+      // Chaque branche est gardée par un test 'in' AVANT tout accès par
+      // notation pointée (request.resource.data.circuitId / .roomId /
+      // .points) : un champ ABSENT accédé en notation pointée lève une
+      // erreur d'évaluation CEL (jamais une simple valeur "absente"), ce
+      // qui aurait fait échouer TOUTE l'expression — y compris la branche
+      // circuitId pourtant valide — dès qu'une seule des deux branches
+      // référence un champ non présent sur ce document précis. Même
+      // précaution déjà appliquée ailleurs dans ce fichier (voir
+      // _isResponsable ci-dessus).
+      allow create: if isAnyVerifiedRole()
+        && !(('circuitId' in request.resource.data) && ('roomId' in request.resource.data))
+        && (
+          (
+            ('circuitId' in request.resource.data)
+            && request.resource.data.circuitId is string && request.resource.data.circuitId.size() > 0
+            && (
+              (('temp' in request.resource.data) && request.resource.data.temp is number && request.resource.data.temp > -50 && request.resource.data.temp < 100)
+              || (
+                ('points' in request.resource.data) && request.resource.data.points is map
+                && _validHeatingPoint(request.resource.data.points.point1)
+                && _validHeatingPoint(request.resource.data.points.point2)
+              )
+            )
+          )
+          || (
+            ('roomId' in request.resource.data)
+            && request.resource.data.roomId is string && request.resource.data.roomId.size() > 0
+            && ('temp' in request.resource.data) && request.resource.data.temp is number && request.resource.data.temp > -50 && request.resource.data.temp < 100
+            && !('points' in request.resource.data)
+          )
+        )
+        && request.resource.data.createdAt == request.time
+        && (!('comment' in request.resource.data) || (request.resource.data.comment is string && request.resource.data.comment.size() <= 500))
+        // PASSE DE FIABILISATION (demande utilisateur) — "l'auteur [d'un
+        // relevé] ne peut pas être falsifié depuis le client" : pour un
+        // compte PIN (Technicien ou Responsable, sign_in_provider=='custom'),
+        // `author` doit correspondre EXACTEMENT au vrai nom enregistré du
+        // titulaire du jeton (users/{userId}.name, lu via le claim userId —
+        // posé UNIQUEMENT par la Cloud Function verifyPin, jamais
+        // modifiable par le client, voir functions/index.js). Un technicien
+        // ne peut donc jamais écrire un relevé au nom d'un collègue ou d'un
+        // nom inventé — seul SON PROPRE nom, tel qu'enregistré côté serveur,
+        // est accepté. Un Admin Firebase (sign_in_provider != 'custom') n'a
+        // pas de claim userId correspondant à users/{id} de la même façon
+        // (compte email/mot de passe) : non concerné par cette vérification
+        // supplémentaire, déjà pleinement privilégié ailleurs dans ce
+        // fichier.
+        && (!('author' in request.resource.data) || (
+          request.resource.data.author is string && request.resource.data.author.size() <= 120
+          && (
+            request.auth.token.firebase.sign_in_provider != 'custom'
+            || request.resource.data.author == get(/databases/$(database)/documents/users/$(request.auth.token.userId)).data.name
+          )
+        ));
+      // Toujours append-only : aucun allow update ici (inchangé).
+    }
+    match /heating_recommendations/{docId} {
+      allow read: if isAnyVerifiedRole();
+      // Création : UNIQUEMENT un statut INITIAL — 'a_examiner' (moteur v1
+      // qualitatif, inchangé) ou 'proposition_generee' (moteur v2
+      // quantitatif, REFONTE CTA/VC — voir cta-vc.js). N'importe quel rôle
+      // vérifié peut déclencher ces écritures (ce sont des CANDIDATS
+      // calculés, pas des décisions), mais ne peut JAMAIS créer directement
+      // un document déjà dans un statut de décision/avancement — empêche de
+      // contourner le cycle de validation en créant un nouveau document
+      // plutôt qu'en modifiant.
+      allow create: if isAnyVerifiedRole()
+        && request.resource.data.circuitId is string
+        && request.resource.data.createdAt == request.time
+        && (
+          request.resource.data.status == 'a_examiner'
+          || (request.resource.data.status == 'proposition_generee' && request.resource.data.engineVersion == 'v2')
+        );
+      // Modification :
+      //  - Responsable/Admin : toute transition (décision pilotage — accepter/
+      //    refuser/reporter/valider/appliquer/confirmer/contrôler).
+      //  - Technicien (et tout rôle vérifié) : UNIQUEMENT les transitions du
+      //    cycle v2 qui correspondent à une action PHYSIQUE qu'il doit pouvoir
+      //    réaliser seul (réglage effectué, consigne confirmée, contrôle
+      //    effectué) — jamais la décision de valider/refuser/reporter une
+      //    proposition, réservée au pilotage — ET jamais depuis un statut qui
+      //    ne précède pas normalement celui demandé (machine à états stricte,
+      //    pas un simple changement de champ libre).
+      //  - EN PLUS, tout rôle vérifié peut déclencher la seule transition
+      //    automatique "a_examiner -> expiree" (moteur v1, inchangée — voir
+      //    cta-vc.js:_expireStaleRecommendations).
+      allow update: if isResponsableOrAdmin()
+        || (
+          isAnyVerifiedRole()
+          && resource.data.status == 'a_examiner'
+          && request.resource.data.status == 'expiree'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'expiredAt'])
+        )
+        || (
+          isAnyVerifiedRole() && resource.data.engineVersion == 'v2'
+          && (
+            (resource.data.status == 'validee' && request.resource.data.status == 'reglage_effectue'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'appliedAt', 'appliedBy', 'appliedValue']))
+            || (resource.data.status == 'reglage_effectue' && request.resource.data.status == 'consigne_confirmee'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'confirmedAt', 'confirmedBy', 'confirmedValue']))
+            || (resource.data.status == 'consigne_confirmee' && request.resource.data.status == 'controle_effectue'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'controlledAt', 'controlledBy', 'controlReadingId']))
+          )
+        );
+    }
+    match /weather_daily/{docId} {
+      allow read: if isAnyVerifiedRole();
+      // Écriture SERVEUR UNIQUEMENT (computeDailyWeatherDju, Admin SDK —
+      // qui contourne de toute façon ces règles) : plus aucune écriture
+      // client, y compris depuis assets/js/app.js:_ensureDailyDjuPersisted,
+      // qui devra être retirée/désactivée côté client avant déploiement de
+      // cette règle (voir dépendance de séquencement ci-dessus, condition 3).
+      allow create, update: if false;
+    }
+
+  }
+}

@@ -28,6 +28,11 @@
     // Ce "family" ne sert qu'au regroupement visuel de CET écran Super
     // Admin ; il n'a aucun effet sur shouldShow()/la navigation réelle.
     { id: 'cta-vc',               label: 'CTA / VC',                 desc: 'Conseiller chauffage',              family: 'GESTION' },
+    // Configuration thermique : déplacée de PILOTAGE vers GESTION, même
+    // raison que CTA/VC ci-dessus (passe de finalisation — voir
+    // assets/js/app.js:buildNav(), désormais un item de navigation
+    // principal, plus un sous-item PILOTAGE réservé Responsable/Admin).
+    { id: 'heating-config',       label: 'Configuration thermique',  desc: 'Bâtiments, installations, pièces, courbes DJU', family: 'GESTION' },
     { id: 'anly',                 label: 'Analyses',                 desc: 'Analyses et statistiques',          family: 'GESTION' },
     { id: 'maint',                label: 'Maintenance PMP',          desc: 'Maintenance préventive',            family: 'GESTION' },
     { id: 'mxdoc',                label: 'MX Doc',                   desc: 'Documentation technique',           family: 'GESTION' },

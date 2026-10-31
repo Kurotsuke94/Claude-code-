@@ -231,6 +231,7 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
       'org-resp':             { tech: true, responsable: false },
       'gestion-semaine-tech': { tech: true, responsable: false },
       'cta-vc':               { tech: true, responsable: false },
+      'heating-config':       { tech: true, responsable: false },
     });
     await page.waitForTimeout(200);
     await page.evaluate(() => window.__mockAuth.signOut());
@@ -239,29 +240,40 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     const html = await sidebarHtml(page);
     ok('8.1 Organisation Responsable absente', !/Organisation Responsable/.test(html));
     ok('8.2 Gestion semaine tech absente', !/Gestion semaine tech/.test(html));
-    // CTA / VC n'appartient plus à la famille PILOTAGE (déplacé vers la
-    // navigation principale, voir bloc 8b ci-dessous) — ce test confirme
-    // seulement que sa propre config de visibilité continue de le masquer
-    // depuis son NOUVEL emplacement, sans incidence sur le masquage de la
-    // famille PILOTAGE (devenue 2 membres : org-resp, gestion-semaine-tech).
+    // Ni CTA / VC ni Configuration thermique n'appartiennent plus à la
+    // famille PILOTAGE (tous deux déplacés vers la navigation principale,
+    // voir bloc 8b ci-dessous) — ce test confirme seulement que leur propre
+    // config de visibilité continue de les masquer depuis leur NOUVEL
+    // emplacement, sans incidence sur le masquage de la famille PILOTAGE
+    // (revenue à 2 membres : org-resp, gestion-semaine-tech — passe de
+    // finalisation, voir assets/js/app.js:buildNav).
     ok('8.2b CTA / VC absente (masquée à son nouvel emplacement, hors PILOTAGE)', !/CTA \/ VC/.test(html));
+    ok('8.2c Configuration thermique absente', !/Configuration thermique/.test(html));
     ok('8.3 Le titre de section "PILOTAGE" est masqué (famille vide — 2 membres, tous masqués)', !/>PILOTAGE</.test(html));
     ok('8.4 "ÉQUIPE" reste affiché (jamais configurable, non vide)', />ÉQUIPE</.test(html));
     await ctx.close();
   }
 
   // ═══ 8b. CTA / VC — nouvel emplacement : navigation principale, hors Pilotage ═══
-  // Déplacement de l'entrée de menu uniquement (voir assets/js/app.js:
-  // buildNav) — le module CTA/VC lui-même et ses contrôles d'accès
-  // (canAll + MX.NavVisibility) restent inchangés. Ce bloc vérifie que :
+  // Déplacement de l'entrée de menu (voir assets/js/app.js:buildNav). Ce
+  // bloc vérifie que :
   //  - l'entrée est désormais un item de niveau racine (classe "sx-sub"
   //    absente), et non plus nichée dans le groupe "Centre de Pilotage" ;
   //  - elle apparaît bien AU-DESSUS du groupe "Analyses" dans le DOM ;
-  //  - elle reste réservée aux responsables/admins (jamais aux techniciens,
-  //    quelle que soit la config de visibilité) ;
-  //  - sa propre config de visibilité continue de fonctionner à ce nouvel
-  //    emplacement (déjà réinitialisée par défaut ici, aucune config
-  //    résiduelle du bloc 8 — chaque bloc utilise un nouveau contexte).
+  //  - sa propre config de visibilité (MX.NavVisibility) continue de
+  //    fonctionner à ce nouvel emplacement.
+  //
+  // MISE À JOUR SÉCURISATION : le technicien doit désormais pouvoir
+  // accéder au module (consultation + relevés de température pour le
+  // calcul des DJU) — la porte d'accès au MENU est donc passée de canAll
+  // (qui l'excluait totalement) à _see('cta-vc') && _nv('cta-vc'), exactement
+  // comme les autres modules ouverts aux techniciens (ex. 'planning').
+  // Ce n'est plus "jamais, quel que soit le réglage" : la visibilité suit
+  // maintenant fidèlement MX.NavVisibility pour les 3 rôles. La vraie
+  // restriction (gestion des circuits/configuration, décisions sur les
+  // recommandations) est protégée DANS cta-vc.js (MX.Pages.CtaVc._canManage(),
+  // basé sur MX.Auth.canSeeAll()) — voir tests/cta_vc_test.js blocs 14-16
+  // pour cette partie, hors du périmètre de ce fichier (menu uniquement).
   {
     console.log('\n--- 8b. CTA / VC déplacée hors de PILOTAGE, au-dessus d\'Analyses ---');
     const { ctx, page } = await newCtx();
@@ -276,19 +288,27 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     ok('8b.4 CTA / VC n\'est plus listée sous "PILOTAGE" (Centre de Pilotage)', !/>PILOTAGE<[\s\S]*CTA \/ VC/.test(html));
     await ctx.close();
 
-    // Technicien : jamais d'accès, quelle que soit la config de visibilité
-    // (restriction canAll, inchangée par le déplacement — voir point 2 de
-    // la consigne : "CTA/VC reste réservé aux responsables et admins").
-    const { ctx: ctxTech, page: pageTech } = await newCtx();
-    await adminLogin(pageTech, SUPER_ADMIN_EMAIL);
-    await saveVisibility(pageTech, { 'cta-vc': { tech: true, responsable: true } }); // visible="true" pour tech : ne doit RIEN changer
-    await pageTech.waitForTimeout(200);
-    await pageTech.evaluate(() => window.__mockAuth.signOut());
-    await pageTech.waitForTimeout(200);
-    await pinLogin(pageTech, 'kevin', '1111'); // technicien -> canAll === false
-    const htmlTech = await sidebarHtml(pageTech);
-    ok('8b.5 CTA / VC reste invisible pour un technicien même si sa visibilité est explicitement activée (restriction de rôle prioritaire, inchangée)', !/CTA \/ VC/.test(htmlTech));
-    await ctxTech.close();
+    // Technicien, SANS configuration de visibilité particulière : visible
+    // PAR DÉFAUT désormais (nouveau comportement voulu — consultation +
+    // relevés). C'était l'inverse avant cette consigne (toujours masqué).
+    const { ctx: ctxTechDefault, page: pageTechDefault } = await newCtx();
+    await pinLogin(pageTechDefault, 'kevin', '1111');
+    const htmlTechDefault = await sidebarHtml(pageTechDefault);
+    ok('8b.5 CTA / VC VISIBLE par défaut pour un technicien (nouveau comportement : consultation + relevés autorisés)', /CTA \/ VC/.test(htmlTechDefault));
+    await ctxTechDefault.close();
+
+    // Technicien, visibilité EXPLICITEMENT désactivée par le Super Admin :
+    // MX.NavVisibility reste respecté comme pour tout autre module.
+    const { ctx: ctxTechHidden, page: pageTechHidden } = await newCtx();
+    await adminLogin(pageTechHidden, SUPER_ADMIN_EMAIL);
+    await saveVisibility(pageTechHidden, { 'cta-vc': { tech: false, responsable: true } });
+    await pageTechHidden.waitForTimeout(200);
+    await pageTechHidden.evaluate(() => window.__mockAuth.signOut());
+    await pageTechHidden.waitForTimeout(200);
+    await pinLogin(pageTechHidden, 'kevin', '1111');
+    const htmlTechHidden = await sidebarHtml(pageTechHidden);
+    ok('8b.6 CTA / VC masquée pour un technicien quand "tech" est explicitement désactivé (MX.NavVisibility toujours respecté)', !/CTA \/ VC/.test(htmlTechHidden));
+    await ctxTechHidden.close();
   }
 
   // ═══ 8c. Écran "Visibilité des modules" (Super Admin) — regroupement cohérent ═══
@@ -317,6 +337,41 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     const idxPilotage   = screenHtml.lastIndexOf('PILOTAGE', idxCtaScreen);
     ok('8c.2 Sur l\'écran rendu, CTA / VC apparaît bien sous l\'en-tête "GESTION" le plus proche (pas "PILOTAGE")', idxCtaScreen !== -1 && idxGestion !== -1 && idxGestion > idxPilotage);
     await ctx.close();
+  }
+
+  // ═══ 8d. Configuration thermique — même déplacement que CTA/VC (passe de finalisation) ═══
+  // Demande utilisateur : le Technicien doit pouvoir saisir un relevé de
+  // température de pièce, ce qui suppose d'abord qu'il puisse ATTEINDRE la
+  // page. Avant cette passe, "Configuration thermique" était nichée sous
+  // PILOTAGE (canAll uniquement) — désormais un item de niveau racine,
+  // même mécanisme que CTA/VC (_see('heating-config') && _nv('heating-config')).
+  {
+    console.log('\n--- 8d. Configuration thermique déplacée hors de PILOTAGE, visible au technicien ---');
+    const { ctx, page } = await newCtx();
+    await pinLogin(page, 'sophie', '9999');
+    const html = await sidebarHtml(page);
+    const hcBtn = html.match(/<button class="([^"]*)" data-page="heating-config"[^>]*>/);
+    ok('8d.1 Configuration thermique présente par défaut (aucune config de visibilité)', !!hcBtn);
+    ok('8d.2 Configuration thermique est un item de NIVEAU RACINE (classe "sx-sub" absente)', !!hcBtn && !/\bsx-sub\b/.test(hcBtn[1]));
+    ok('8d.3 Configuration thermique n\'est plus listée sous "PILOTAGE"', !/>PILOTAGE<[\s\S]*Configuration thermique/.test(html));
+    await ctx.close();
+
+    const { ctx: ctxTech, page: pageTech } = await newCtx();
+    await pinLogin(pageTech, 'kevin', '1111'); // technicien, sans roleId personnalisé
+    const htmlTech = await sidebarHtml(pageTech);
+    ok('8d.4 Configuration thermique VISIBLE par défaut pour un technicien (consultation + relevés de pièce)', /Configuration thermique/.test(htmlTech));
+    await ctxTech.close();
+
+    const { ctx: ctxTechHidden, page: pageTechHidden } = await newCtx();
+    await adminLogin(pageTechHidden, SUPER_ADMIN_EMAIL);
+    await saveVisibility(pageTechHidden, { 'heating-config': { tech: false, responsable: true } });
+    await pageTechHidden.waitForTimeout(200);
+    await pageTechHidden.evaluate(() => window.__mockAuth.signOut());
+    await pageTechHidden.waitForTimeout(200);
+    await pinLogin(pageTechHidden, 'kevin', '1111');
+    const htmlTechHidden = await sidebarHtml(pageTechHidden);
+    ok('8d.5 Configuration thermique masquée pour un technicien quand "tech" est explicitement désactivé', !/Configuration thermique/.test(htmlTechHidden));
+    await ctxTechHidden.close();
   }
 
   // ═══ 9. Menu Super Admin visible uniquement au vrai Super Admin ═══
