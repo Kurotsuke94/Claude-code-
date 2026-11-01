@@ -403,7 +403,11 @@ async function setHotelConfig(page, lat, lon) {
     ok('7.2 recordedAt est bien une date exploitable (pas un placeholder)', !!firstReading && !isNaN(new Date(firstReading.recordedAt).getTime()));
 
     // Un second relevé LE MÊME JOUR pour la même pièce doit être accepté
-    // (append-only, jamais fusionné avec le précédent).
+    // (append-only, jamais fusionné avec le précédent). La modale
+    // "nouveautés" (programmée 2.5s après le chargement, voir
+    // MX.Updates.showWelcome dans app.js) peut apparaître pile à ce point
+    // du scénario et intercepter le clic suivant — nettoyage défensif,
+    // comme ailleurs dans ce fichier et dans les autres suites Playwright.
     await pageTech.evaluate(() => { const o = document.getElementById('ver-modal-overlay'); if (o) o.remove(); });
     await pageTech.click('text=Nouveau relevé de température', { force: true });
     await pageTech.waitForSelector('#hc-rr-temp', { state: 'visible' });

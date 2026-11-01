@@ -305,6 +305,10 @@
 
   // ── ENTRY POINT ──
   function render() {
+    // Onglet de départ demandé depuis la sidebar (groupe accordéon "CTA /
+    // VC", voir app.js:showCtaVcTab) — même mécanisme que showCsoTab pour
+    // Analyses. Consommé une seule fois, jamais relu après.
+    if (window._ctavcStartTab) { _tab = window._ctavcStartTab; window._ctavcStartTab = null; }
     _subscribe();
     _ensureWeather();
     var mc = document.getElementById('main-content');
