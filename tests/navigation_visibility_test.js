@@ -274,17 +274,32 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
   // recommandations) est protégée DANS cta-vc.js (MX.Pages.CtaVc._canManage(),
   // basé sur MX.Auth.canSeeAll()) — voir tests/cta_vc_test.js blocs 14-16
   // pour cette partie, hors du périmètre de ce fichier (menu uniquement).
+  //
+  // MISE À JOUR RÉORGANISATION NAV : CTA / VC et Configuration thermique
+  // sont désormais un SEUL groupe accordéon (data-group="ctavc", voir
+  // assets/js/app.js:buildNav) — CTA/VC n'est donc plus un item de niveau
+  // racine avec data-page="cta-vc" (ça n'existe plus du tout), ses 5
+  // onglets (Vue d'ensemble/Circuits/Recommandations/Historique &
+  // analyse/Configuration CTA/VC) sont désormais des sous-entrées
+  // (classe "sx-sub", attendue PRÉSENTE — inverse de l'ancienne assertion)
+  // à l'intérieur du groupe. On vérifie la présence/absence d'un onglet
+  // représentatif ("Circuits") plutôt que du libellé "CTA / VC" du groupe
+  // lui-même, car ce libellé reste affiché dès que Configuration thermique
+  // (l'autre moitié du même groupe) est visible, même si CTA/VC seul est
+  // masqué — voir tests/navigation_visibility_test.js bloc 8d pour le cas
+  // symétrique.
   {
-    console.log('\n--- 8b. CTA / VC déplacée hors de PILOTAGE, au-dessus d\'Analyses ---');
+    console.log('\n--- 8b. CTA / VC déplacée hors de PILOTAGE, regroupée en accordéon au-dessus d\'Analyses ---');
     const { ctx, page } = await newCtx();
     await pinLogin(page, 'sophie', '9999'); // responsable -> canAll === true
     const html = await sidebarHtml(page);
-    const ctaBtn = html.match(/<button class="([^"]*)" data-page="cta-vc"[^>]*>/);
-    ok('8b.1 CTA / VC présente par défaut (aucune config de visibilité)', !!ctaBtn);
-    ok('8b.2 CTA / VC est un item de NIVEAU RACINE (plus niché dans un groupe, classe "sx-sub" absente)', !!ctaBtn && !/\bsx-sub\b/.test(ctaBtn[1]));
-    const idxCta  = html.indexOf('CTA / VC');
+    const ctaGroup = html.match(/<div class="sx-group" data-group="ctavc">/);
+    ok('8b.1 Le groupe accordéon CTA / VC est présent par défaut (aucune config de visibilité)', !!ctaGroup);
+    const circuitsBtn = html.match(/<button class="([^"]*)"[^>]*onclick="MX\.showCtaVcTab\('circuits'\)"[^>]*>/);
+    ok('8b.2 L\'onglet "Circuits" est bien une sous-entrée imbriquée dans le groupe (classe "sx-sub" présente — regroupement voulu)', !!circuitsBtn && /\bsx-sub\b/.test(circuitsBtn[1]));
+    const idxCta  = html.indexOf('data-group="ctavc"');
     const idxAnly = html.indexOf('data-group="anly"');
-    ok('8b.3 CTA / VC apparaît bien AVANT (au-dessus de) le groupe "Analyses" dans le DOM', idxCta !== -1 && idxAnly !== -1 && idxCta < idxAnly);
+    ok('8b.3 Le groupe CTA / VC apparaît bien AVANT (au-dessus de) le groupe "Analyses" dans le DOM', idxCta !== -1 && idxAnly !== -1 && idxCta < idxAnly);
     ok('8b.4 CTA / VC n\'est plus listée sous "PILOTAGE" (Centre de Pilotage)', !/>PILOTAGE<[\s\S]*CTA \/ VC/.test(html));
     await ctx.close();
 
@@ -294,11 +309,15 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     const { ctx: ctxTechDefault, page: pageTechDefault } = await newCtx();
     await pinLogin(pageTechDefault, 'kevin', '1111');
     const htmlTechDefault = await sidebarHtml(pageTechDefault);
-    ok('8b.5 CTA / VC VISIBLE par défaut pour un technicien (nouveau comportement : consultation + relevés autorisés)', /CTA \/ VC/.test(htmlTechDefault));
+    ok('8b.5 Onglet "Circuits" (CTA/VC) VISIBLE par défaut pour un technicien (nouveau comportement : consultation + relevés autorisés)', /MX\.showCtaVcTab\('circuits'\)/.test(htmlTechDefault));
     await ctxTechDefault.close();
 
     // Technicien, visibilité EXPLICITEMENT désactivée par le Super Admin :
-    // MX.NavVisibility reste respecté comme pour tout autre module.
+    // MX.NavVisibility reste respecté comme pour tout autre module. Seuls
+    // les onglets CTA/VC doivent disparaître — Configuration thermique
+    // (non touchée par cette config) reste visible, donc le libellé de
+    // groupe "CTA / VC" lui-même reste affiché : on vérifie l'absence du
+    // sous-onglet spécifique, pas du libellé.
     const { ctx: ctxTechHidden, page: pageTechHidden } = await newCtx();
     await adminLogin(pageTechHidden, SUPER_ADMIN_EMAIL);
     await saveVisibility(pageTechHidden, { 'cta-vc': { tech: false, responsable: true } });
@@ -307,7 +326,7 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     await pageTechHidden.waitForTimeout(200);
     await pinLogin(pageTechHidden, 'kevin', '1111');
     const htmlTechHidden = await sidebarHtml(pageTechHidden);
-    ok('8b.6 CTA / VC masquée pour un technicien quand "tech" est explicitement désactivé (MX.NavVisibility toujours respecté)', !/CTA \/ VC/.test(htmlTechHidden));
+    ok('8b.6 Onglet "Circuits" (CTA/VC) masqué pour un technicien quand "tech" est explicitement désactivé (MX.NavVisibility toujours respecté)', !/MX\.showCtaVcTab\('circuits'\)/.test(htmlTechHidden));
     await ctxTechHidden.close();
   }
 
@@ -345,21 +364,31 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
   // page. Avant cette passe, "Configuration thermique" était nichée sous
   // PILOTAGE (canAll uniquement) — désormais un item de niveau racine,
   // même mécanisme que CTA/VC (_see('heating-config') && _nv('heating-config')).
+  //
+  // MISE À JOUR RÉORGANISATION NAV : Configuration thermique n'a plus
+  // d'item propre du tout (data-page="heating-config" n'existe plus) — ses
+  // 4 onglets (Bâtiments/Installations/Pièces/Courbes) sont désormais des
+  // sous-entrées du même groupe accordéon que CTA/VC (data-group="ctavc",
+  // voir bloc 8b ci-dessus), sous un séparateur "CONFIGURATION THERMIQUE".
+  // On vérifie un onglet représentatif ("Bâtiments") plutôt que le libellé
+  // de groupe "CTA / VC" lui-même, qui reste affiché dès que CTA/VC (l'autre
+  // moitié du même groupe) est visible, même si Configuration thermique
+  // seule est masquée.
   {
-    console.log('\n--- 8d. Configuration thermique déplacée hors de PILOTAGE, visible au technicien ---');
+    console.log('\n--- 8d. Configuration thermique déplacée hors de PILOTAGE, regroupée en accordéon, visible au technicien ---');
     const { ctx, page } = await newCtx();
     await pinLogin(page, 'sophie', '9999');
     const html = await sidebarHtml(page);
-    const hcBtn = html.match(/<button class="([^"]*)" data-page="heating-config"[^>]*>/);
-    ok('8d.1 Configuration thermique présente par défaut (aucune config de visibilité)', !!hcBtn);
-    ok('8d.2 Configuration thermique est un item de NIVEAU RACINE (classe "sx-sub" absente)', !!hcBtn && !/\bsx-sub\b/.test(hcBtn[1]));
-    ok('8d.3 Configuration thermique n\'est plus listée sous "PILOTAGE"', !/>PILOTAGE<[\s\S]*Configuration thermique/.test(html));
+    const batimentsBtn = html.match(/<button class="([^"]*)"[^>]*onclick="MX\.showHeatingConfigTab\('batiments'\)"[^>]*>/);
+    ok('8d.1 L\'onglet "Bâtiments" (Configuration thermique) présent par défaut (aucune config de visibilité)', !!batimentsBtn);
+    ok('8d.2 L\'onglet "Bâtiments" est bien une sous-entrée imbriquée dans le groupe (classe "sx-sub" présente — regroupement voulu)', !!batimentsBtn && /\bsx-sub\b/.test(batimentsBtn[1]));
+    ok('8d.3 Configuration thermique n\'est plus listée sous "PILOTAGE"', !/>PILOTAGE<[\s\S]*CONFIGURATION THERMIQUE/.test(html));
     await ctx.close();
 
     const { ctx: ctxTech, page: pageTech } = await newCtx();
     await pinLogin(pageTech, 'kevin', '1111'); // technicien, sans roleId personnalisé
     const htmlTech = await sidebarHtml(pageTech);
-    ok('8d.4 Configuration thermique VISIBLE par défaut pour un technicien (consultation + relevés de pièce)', /Configuration thermique/.test(htmlTech));
+    ok('8d.4 Onglet "Bâtiments" VISIBLE par défaut pour un technicien (consultation + relevés de pièce)', /MX\.showHeatingConfigTab\('batiments'\)/.test(htmlTech));
     await ctxTech.close();
 
     const { ctx: ctxTechHidden, page: pageTechHidden } = await newCtx();
@@ -370,7 +399,7 @@ async function clickSafe(page, selector) { await dismissOverlay(page); await pag
     await pageTechHidden.waitForTimeout(200);
     await pinLogin(pageTechHidden, 'kevin', '1111');
     const htmlTechHidden = await sidebarHtml(pageTechHidden);
-    ok('8d.5 Configuration thermique masquée pour un technicien quand "tech" est explicitement désactivé', !/Configuration thermique/.test(htmlTechHidden));
+    ok('8d.5 Onglet "Bâtiments" masqué pour un technicien quand "tech" est explicitement désactivé', !/MX\.showHeatingConfigTab\('batiments'\)/.test(htmlTechHidden));
     await ctxTechHidden.close();
   }
 

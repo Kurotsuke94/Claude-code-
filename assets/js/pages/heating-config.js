@@ -116,6 +116,11 @@
   // firestore.rules.draft-claims-migration pour la protection serveur,
   // seule qui compte réellement).
   function render() {
+    // Onglet de départ demandé depuis la sidebar (groupe accordéon "CTA /
+    // VC" > section "Configuration thermique", voir
+    // app.js:showHeatingConfigTab) — même mécanisme que showCsoTab pour
+    // Analyses. Consommé une seule fois, jamais relu après.
+    if (window._heatingConfigStartTab) { _tab = window._heatingConfigStartTab; window._heatingConfigStartTab = null; }
     _subscribe();
     _ensureWeather();
     var mc = document.getElementById('main-content');

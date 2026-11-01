@@ -9613,6 +9613,28 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .mob-drw-item:active { background: var(--bg4); color: var(--text); }
 .mob-drw-item i { font-size: 20px; color: var(--cyan); margin-bottom: 1px; }
 
+/* Tuile repliable "CTA / VC" (regroupe aussi Configuration thermique) —
+   ne navigue jamais, bascule uniquement son volet .mob-drw-ctavc-body,
+   rendu comme élément frère (voir openMobileDrawer()), pas imbriqué. */
+.mob-drw-item--ctavc { position: relative; }
+.mob-drw-chev {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 10px !important; color: var(--text3) !important; margin: 0 !important;
+  transition: transform 0.2s;
+}
+.mob-drw-item--ctavc-open .mob-drw-chev { transform: rotate(90deg); }
+.mob-drw-ctavc-body {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 2px 0 0;
+}
+.mob-drw-ctavc-body.collapsed { display: none; }
+.mob-drw-ctavc-sep {
+  padding: 8px 4px 2px;
+  font-size: 10px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+
 /* ── V6 SIDEBAR REDESIGN ── */
 .sx-modules {
   padding: 4px 0 8px;

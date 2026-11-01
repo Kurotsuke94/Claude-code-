@@ -77,6 +77,7 @@
       : (navItem?.l || navInfo.l || "Maintix");
     document.getElementById("topbar-title").textContent = title;
     document.querySelectorAll(".sx-item[data-page],.bn[data-page]").forEach(el => el.classList.toggle("active", el.dataset.page === id));
+    _applyCtavcAutoOpen(id);
     MX.closeSidebar();
     renderPage(id);
     buildDxPanel();
@@ -150,6 +151,7 @@
   let _anlyOpen   = localStorage.getItem("mx_sx_anly")   === "1";
   let _adminOpen  = localStorage.getItem("mx_sx_adm")    === "1";
   let _mxdocOpen  = localStorage.getItem("mx_sx_mxdoc")  === "1";
+  let _ctavcOpen  = localStorage.getItem("mx_sx_ctavc")  === "1";
   let _compact    = localStorage.getItem("mx_sx_compact") === "1";
 
   function _sx(k, v) { localStorage.setItem(k, v ? "1" : "0"); }
@@ -165,6 +167,7 @@
       anly:  _anlyOpen,
       adm:   _adminOpen,
       mxdoc: _mxdocOpen,
+      ctavc: _ctavcOpen,
     };
     Object.keys(_map).forEach(function(key) {
       var grp  = nav.querySelector('[data-group="' + key + '"]');
@@ -177,13 +180,35 @@
     });
   }
 
+  // Dépliage automatique du groupe "CTA / VC" sur la sidebar DESKTOP quand
+  // la page active lui appartient — appelé depuis showPage() ci-dessous,
+  // car showPage() ne reconstruit PAS toute la nav à chaque navigation
+  // (seules les classes "active" des items existants sont patchées) :
+  // sans cet appel dédié, le dépliage automatique calculé dans buildNav()
+  // ne s'appliquerait qu'au tout premier rendu de la sidebar, jamais aux
+  // navigations suivantes. Patch en place (comme _applyGroupStates() ci-
+  // dessus), jamais de reconstruction complète, et jamais d'écriture dans
+  // localStorage : la préférence mémorisée (_ctavcOpen) n'est jamais
+  // modifiée par ce forçage, seul l'affichage l'est.
+  function _applyCtavcAutoOpen(cur) {
+    var nav = document.getElementById('sidebar-nav');
+    if (!nav) return;
+    var grp = nav.querySelector('[data-group="ctavc"]');
+    if (!grp) return;
+    var hdr  = grp.querySelector('.sx-group-hdr');
+    var body = grp.querySelector('.sx-group-body');
+    var open = _ctavcOpen || (cur === 'cta-vc' || cur === 'heating-config');
+    if (hdr)  hdr.classList.toggle('sx-group-hdr--open', open);
+    if (body) body.classList.toggle('collapsed', !open);
+  }
+
   function _toggleSec(which) {
     const mob = window.innerWidth <= 900;
     if (mob) {
       const wasPlng = _plngOpen, wasMaint = _maintOpen, wasGest = _gestOpen, wasStock = _stockOpen,
-            wasAnly = _anlyOpen, wasAdm = _adminOpen, wasMxdoc = _mxdocOpen;
+            wasAnly = _anlyOpen, wasAdm = _adminOpen, wasMxdoc = _mxdocOpen, wasCtavc = _ctavcOpen;
       _plngOpen = false; _maintOpen = false; _gestOpen = false; _stockOpen = false;
-      _anlyOpen = false; _adminOpen = false; _mxdocOpen = false;
+      _anlyOpen = false; _adminOpen = false; _mxdocOpen = false; _ctavcOpen = false;
       if (which === "plng")  _plngOpen  = !wasPlng;
       if (which === "maint") _maintOpen = !wasMaint;
       if (which === "gest")  _gestOpen  = !wasGest;
@@ -191,6 +216,7 @@
       if (which === "anly")  _anlyOpen  = !wasAnly;
       if (which === "adm")   _adminOpen = !wasAdm;
       if (which === "mxdoc") _mxdocOpen = !wasMxdoc;
+      if (which === "ctavc") _ctavcOpen = !wasCtavc;
     } else {
       if (which === "plng")  _plngOpen  = !_plngOpen;
       if (which === "maint") _maintOpen = !_maintOpen;
@@ -199,6 +225,7 @@
       if (which === "anly")  _anlyOpen  = !_anlyOpen;
       if (which === "adm")   _adminOpen = !_adminOpen;
       if (which === "mxdoc") _mxdocOpen = !_mxdocOpen;
+      if (which === "ctavc") _ctavcOpen = !_ctavcOpen;
     }
     _sx("mx_sx_plng",  _plngOpen);
     _sx("mx_sx_maint", _maintOpen);
@@ -207,6 +234,7 @@
     _sx("mx_sx_anly",  _anlyOpen);
     _sx("mx_sx_adm",   _adminOpen);
     _sx("mx_sx_mxdoc", _mxdocOpen);
+    _sx("mx_sx_ctavc", _ctavcOpen);
     _applyGroupStates();
   }
 
@@ -217,7 +245,10 @@
   window.MX.toggleNavAnly   = function() { _toggleSec("anly"); };
   window.MX.toggleNavAdmin  = function() { _toggleSec("adm"); };
   window.MX.toggleNavMxDoc  = function() { _toggleSec("mxdoc"); };
+  window.MX.toggleNavCtavc  = function() { _toggleSec("ctavc"); };
   window.MX.showCsoTab      = function(tab) { window._csoStartTab  = tab; MX.showPage('consommations'); };
+  window.MX.showCtaVcTab    = function(tab) { window._ctavcStartTab = tab; MX.showPage('cta-vc'); };
+  window.MX.showHeatingConfigTab = function(tab) { window._heatingConfigStartTab = tab; MX.showPage('heating-config'); };
   window.MX.showOrdersTab   = function(tab) { window._ordStartTab  = tab; MX.showPage('orders'); };
   window.MX.showIntTab      = function(tab) { window._intStartTab  = tab; MX.showPage('interventions'); };
   window.MX.showPmpTab      = function(tab) { window._pmpStartTab  = tab; MX.showPage('pmp'); };
@@ -500,33 +531,65 @@
       _dbgAdd("[Groupe] Stock");
     }
 
-    // ── 🔥 CTA / VC (déplacé hors de Centre de Pilotage > PILOTAGE) ──
-    // Entrée de navigation principale, juste au-dessus d'Analyses. Visible
+    // ── 🔥 CTA / VC (groupe accordéon, regroupe aussi Configuration
+    // thermique) ── Remplace les deux entrées plates précédentes. Visible
     // par TOUS les rôles désormais (technicien inclus, pour les relevés de
-    // température nécessaires au calcul des DJU) — _see('cta-vc') suit le
-    // même mécanisme que les autres modules ouverts aux techniciens
-    // (ex. 'planning', 'counters'), y compris le système de rôles
-    // personnalisés (voir assets/js/pages/admin.js:PERM_MODULES et
-    // assets/js/auth.js:can()). MX.NavVisibility (_nv) reste le réglage
-    // Super Admin par profil (tech/responsable), inchangé. La gestion des
-    // circuits/configuration et les décisions sur les recommandations
-    // restent réservées à canSeeAll() — voir MX.Pages.CtaVc._canManage()
-    // dans cta-vc.js, qui protège chaque action, pas seulement l'affichage
-    // du menu.
-    if (_see('cta-vc') && _nv('cta-vc')) {
-      h += _item("cta-vc", "fa-fire-flame-curved", "CTA / VC");
-      _dbgAdd("CTA / VC");
-    }
-
-    // ── 🌡️ Configuration thermique (déplacée hors de Centre de Pilotage) ──
-    // Même principe que CTA / VC juste au-dessus : visible à tout rôle en
-    // consultation + relevés de pièce (_see suit la matrice de permissions
-    // des rôles personnalisés comme ailleurs) ; la configuration
-    // structurelle reste réservée Responsable/Admin, protégée dans
-    // heating-config.js (_canManage()) et côté serveur.
-    if (_see('heating-config') && _nv('heating-config')) {
-      h += _item("heating-config", "fa-temperature-three-quarters", "Configuration thermique");
-      _dbgAdd("Configuration thermique");
+    // température nécessaires au calcul des DJU) — _see('cta-vc')/
+    // _see('heating-config') suivent le même mécanisme que les autres
+    // modules ouverts aux techniciens (ex. 'planning', 'counters'), y
+    // compris le système de rôles personnalisés (voir
+    // assets/js/pages/admin.js:PERM_MODULES et assets/js/auth.js:can()).
+    // MX.NavVisibility (_nv) reste le réglage Super Admin par profil
+    // (tech/responsable), inchangé, et les deux modules restent deux
+    // familles indépendantes dans nav-visibility.js : chaque section (les 5
+    // onglets CTA/VC, puis les 4 onglets Configuration thermique) n'est
+    // affichée que si SON module précis est visible, le groupe parent
+    // s'affichant dès que l'un des deux l'est. La gestion des circuits/
+    // configuration et les décisions sur les recommandations restent
+    // réservées à canSeeAll() — voir MX.Pages.CtaVc._canManage() dans
+    // cta-vc.js, qui protège chaque action, pas seulement l'affichage du
+    // menu ; même principe pour la configuration structurelle des
+    // bâtiments/installations/pièces/courbes, protégée dans
+    // heating-config.js lui-même et côté serveur.
+    const _ctaVcSee  = _see('cta-vc')          && _nv('cta-vc');
+    const _heatSee   = _see('heating-config')  && _nv('heating-config');
+    if (_ctaVcSee || _heatSee) {
+      let ctavcItems = "";
+      if (_ctaVcSee) {
+        [
+          { tab: 'overview',        icon: 'fa-gauge-high',      l: "Vue d'ensemble" },
+          { tab: 'circuits',        icon: 'fa-diagram-project', l: 'Circuits' },
+          { tab: 'recommendations', icon: 'fa-lightbulb',       l: 'Recommandations' },
+          { tab: 'history',         icon: 'fa-chart-line',      l: 'Historique & analyse' },
+        ].forEach(t => {
+          ctavcItems += `<button class="sx-item sx-sub" onclick="MX.showCtaVcTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+        });
+        // Onglet "Configuration CTA / VC" = gestion des circuits + réglages,
+        // réservé au pilotage — même condition que cta-vc.js:_tabsHtml()
+        // (_canManage() === MX.Auth.canSeeAll()), pour ne jamais proposer
+        // dans la sidebar un onglet qui se replierait de toute façon sur
+        // "Vue d'ensemble" une fois ouvert.
+        if (canAll) {
+          ctavcItems += `<button class="sx-item sx-sub" onclick="MX.showCtaVcTab('config')" title="Configuration CTA / VC"><i class="fas fa-sliders sx-ico"></i><span class="sx-lbl">Configuration CTA / VC</span></button>`;
+        }
+      }
+      if (_heatSee) {
+        ctavcItems += `<div class="sx-sec-sep"><span>CONFIGURATION THERMIQUE</span></div>`;
+        [
+          { tab: 'batiments',     icon: 'fa-building',                l: 'Bâtiments' },
+          { tab: 'installations', icon: 'fa-temperature-three-quarters', l: 'Installations' },
+          { tab: 'pieces',        icon: 'fa-door-open',               l: 'Pièces' },
+          { tab: 'courbes',       icon: 'fa-chart-line',              l: 'Courbes DJU / température' },
+        ].forEach(t => {
+          ctavcItems += `<button class="sx-item sx-sub" onclick="MX.showHeatingConfigTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
+        });
+      }
+      // Dépliage automatique quand une page du groupe est active, sans
+      // jamais modifier la préférence mémorisée (localStorage) — l'état
+      // manuel de l'utilisateur est restauré dès qu'il quitte ces pages.
+      const _ctavcForceOpen = (cur === 'cta-vc' || cur === 'heating-config');
+      h += _group("fa-fire-flame-curved", "sx-group-ico--violet", "CTA / VC", "ctavc", "toggleNavCtavc", _ctavcOpen || _ctavcForceOpen, ctavcItems);
+      _dbgAdd("[Groupe] CTA / VC");
     }
 
     // ── 📊 Analyses ──
@@ -664,6 +727,7 @@
     console.log('Maintenance PMP  (_maintOpen) :', _maintOpen, '| localStorage "mx_sx_maint" :', localStorage.getItem("mx_sx_maint"));
     console.log('MX Doc           (_mxdocOpen) :', _mxdocOpen, '| localStorage "mx_sx_mxdoc" :', localStorage.getItem("mx_sx_mxdoc"));
     console.log('Centre Pilotage  (_adminOpen) :', _adminOpen, '| localStorage "mx_sx_adm"   :', localStorage.getItem("mx_sx_adm"));
+    console.log('CTA / VC         (_ctavcOpen) :', _ctavcOpen, '| localStorage "mx_sx_ctavc" :', localStorage.getItem("mx_sx_ctavc"));
     console.warn('⚠️ _group() n\'injecte les enfants QUE si open === true. Groupes fermés = 0 enfants dans le DOM.');
     console.groupEnd();
 
@@ -2025,7 +2089,7 @@
     renderStatusBar();
     buildNav();
     const _urlPage = new URLSearchParams(window.location.search).get("page");
-    const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp","cta-vc"]);
+    const _extraPages = new Set(["mes-missions","consommations","interventions","org-resp","cta-vc","heating-config"]);
     MX.showPage(_urlPage && (NAV.some(n => n && n.id === _urlPage) || _extraPages.has(_urlPage)) ? _urlPage : "home");
 
     // Favoris — hors du chemin critique du premier rendu (V1 perf) : la nav
@@ -3297,12 +3361,33 @@
   };
 
   // ── MOBILE DRAWER ──
+  // Groupe "CTA / VC" repliable (partage l'état avec le groupe accordéon
+  // desktop équivalent — même variable _ctavcOpen, même clé localStorage
+  // mx_sx_ctavc, voir buildNav() plus haut) : patché en place dans le DOM
+  // (comme _applyGroupStates() pour le desktop), JAMAIS en reconstruisant
+  // tout le tiroir — un rebuild complet rejouerait l'animation d'ouverture
+  // du tiroir à chaque tap, ce qui serait désagréable.
+  function _applyMobileCtavcState() {
+    const drw = document.getElementById('mob-drw');
+    if (!drw) return;
+    const body = drw.querySelector('.mob-drw-ctavc-body');
+    const tile = drw.querySelector('.mob-drw-item--ctavc');
+    if (body) body.classList.toggle('collapsed', !_ctavcOpen);
+    if (tile) tile.classList.toggle('mob-drw-item--ctavc-open', _ctavcOpen);
+  }
+  window.MX.toggleMobileCtavc = function() {
+    _ctavcOpen = !_ctavcOpen;
+    _sx('mx_sx_ctavc', _ctavcOpen);
+    _applyMobileCtavcState();
+  };
+
   function openMobileDrawer() {
     closeMobileDrawer();
     const { state } = MX;
     const cu    = state.currentUser;
     const admin = state.adminUser;
     const canAll = MX.Auth.canSeeAll();
+    const cur   = state.currentPage || "";
     const name  = cu ? (cu.name || cu.id || '') : (admin ? (admin.email || 'Admin') : '');
     const role  = cu ? (cu.role || '') : (admin ? 'Admin' : '');
     const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
@@ -3327,29 +3412,76 @@
       { id: 'documents',    icon: 'fa-book',           label: 'Ressources',    fn: "MX.closeMobileDrawer();MX.showPage('documents')" },
       { id: 'parametres',   icon: 'fa-gear',           label: 'Paramètres',    fn: "MX.closeMobileDrawer();MX.showPage('parametres')" },
     ];
-    // CTA / VC : même gate que buildNav() (_see('cta-vc') && _nv('cta-vc')),
-    // recalculée ici car openMobileDrawer() ne partage pas les closures de
-    // buildNav(). Visible aux techniciens désormais — la gestion des
-    // circuits et les décisions restent protégées dans cta-vc.js lui-même.
+    // CTA / VC + Configuration thermique : même gate que buildNav()
+    // (_see('cta-vc')/_see('heating-config') && _nv(...)), recalculée ici
+    // car openMobileDrawer() ne partage pas les closures de buildNav().
+    // Visibles aux techniciens désormais — la gestion des circuits/
+    // installations et les décisions de pilotage restent protégées dans
+    // cta-vc.js/heating-config.js eux-mêmes. Regroupées en UN seul groupe
+    // repliable (même principe que le groupe accordéon "CTA / VC" du
+    // desktop) : la tuile ne navigue plus nulle part, elle ne fait que
+    // déplier/replier la liste de ses 9 sous-entrées (voir
+    // _applyMobileCtavcState ci-dessus et toggleMobileCtavc).
     const _ctaVcVisible = (canAll || !cu || !cu.roleId || MX.Auth.can('cta-vc', 'view'))
       && (!MX.NavVisibility || MX.NavVisibility.shouldShow('cta-vc'));
-    if (_ctaVcVisible) {
-      navItems.splice(2, 0, { id: 'cta-vc', icon: 'fa-fire-flame-curved', label: 'CTA / VC', fn: "MX.closeMobileDrawer();MX.showPage('cta-vc')" });
-    }
-    // Configuration thermique : même gate que CTA / VC ci-dessus (passe de
-    // finalisation — consultation + relevés de pièce ouverts à tous).
     const _heatingConfigVisible = (canAll || !cu || !cu.roleId || MX.Auth.can('heating-config', 'view'))
       && (!MX.NavVisibility || MX.NavVisibility.shouldShow('heating-config'));
-    if (_heatingConfigVisible) {
-      navItems.splice(_ctaVcVisible ? 3 : 2, 0, { id: 'heating-config', icon: 'fa-temperature-three-quarters', label: 'Config. thermique', fn: "MX.closeMobileDrawer();MX.showPage('heating-config')" });
+    const _ctavcGroupVisible = _ctaVcVisible || _heatingConfigVisible;
+    if (_ctavcGroupVisible) {
+      // Dépliage automatique si une page du groupe est active — sans
+      // jamais écraser la préférence mémorisée (identique au principe du
+      // groupe desktop, voir buildNav()).
+      const _ctavcForceOpen = (cur === 'cta-vc' || cur === 'heating-config');
+      const _mobCtavcOpen = _ctavcOpen || _ctavcForceOpen;
+
+      let ctavcSubHtml = '';
+      if (_ctaVcVisible) {
+        [
+          { tab: 'overview',        icon: 'fa-gauge-high',      l: "Vue d'ensemble" },
+          { tab: 'circuits',        icon: 'fa-diagram-project', l: 'Circuits' },
+          { tab: 'recommendations', icon: 'fa-lightbulb',       l: 'Recommandations' },
+          { tab: 'history',         icon: 'fa-chart-line',      l: 'Historique & analyse' },
+        ].forEach(t => {
+          ctavcSubHtml += `<button class="mob-drw-fav" onclick="MX.closeMobileDrawer();MX.showCtaVcTab('${t.tab}')"><i class="fas ${t.icon}"></i><span>${t.l}</span></button>`;
+        });
+        if (canAll) {
+          ctavcSubHtml += `<button class="mob-drw-fav" onclick="MX.closeMobileDrawer();MX.showCtaVcTab('config')"><i class="fas fa-sliders"></i><span>Configuration CTA / VC</span></button>`;
+        }
+      }
+      if (_heatingConfigVisible) {
+        ctavcSubHtml += `<div class="mob-drw-ctavc-sep">Configuration thermique</div>`;
+        [
+          { tab: 'batiments',     icon: 'fa-building',                  l: 'Bâtiments' },
+          { tab: 'installations', icon: 'fa-temperature-three-quarters', l: 'Installations' },
+          { tab: 'pieces',        icon: 'fa-door-open',                 l: 'Pièces' },
+          { tab: 'courbes',       icon: 'fa-chart-line',                l: 'Courbes DJU / température' },
+        ].forEach(t => {
+          ctavcSubHtml += `<button class="mob-drw-fav" onclick="MX.closeMobileDrawer();MX.showHeatingConfigTab('${t.tab}')"><i class="fas ${t.icon}"></i><span>${t.l}</span></button>`;
+        });
+      }
+
+      // raw : rendu tel quel par gridHtml ci-dessous, PAS comme un <button>
+      // standard — la tuile (bouton, ne navigue jamais, bascule seulement)
+      // et son volet de sous-entrées sont deux éléments SIBLINGS, tous deux
+      // enfants directs de .mob-drw-grid : le volet utilise
+      // grid-column:1/-1 (voir components.css) pour s'étendre sur toute la
+      // largeur et retomber sous la tuile, ce qui n'aurait aucun effet s'il
+      // était imbriqué DANS le bouton — et imbriquer des <button> (chaque
+      // sous-entrée) À L'INTÉRIEUR d'un autre <button> serait de toute
+      // façon un HTML invalide (contenu interactif imbriqué).
+      const tileCls = 'mob-drw-item mob-drw-item--ctavc' + (_mobCtavcOpen ? ' mob-drw-item--ctavc-open' : '');
+      const raw = `<button class="${tileCls}" onclick="MX.toggleMobileCtavc()"><i class="fas fa-fire-flame-curved"></i><span>CTA / VC</span><i class="fas fa-chevron-right mob-drw-chev"></i></button>` +
+        `<div class="mob-drw-ctavc-body${_mobCtavcOpen ? '' : ' collapsed'}">${ctavcSubHtml}</div>`;
+      navItems.splice(2, 0, { id: 'cta-vc', raw: raw });
     }
     if (canAll) {
-      navItems.splice((_ctaVcVisible ? 1 : 0) + (_heatingConfigVisible ? 1 : 0) + 2, 0,
+      navItems.splice((_ctavcGroupVisible ? 1 : 0) + 2, 0,
         { id: 'org-resp',     icon: 'fa-users-gear',    label: 'Organisation',   fn: "MX.closeMobileDrawer();MX.showPage('org-resp')" },
         { id: 'utilisateurs', icon: 'fa-crosshairs', label: 'Centre de Pilotage', fn: "MX.closeMobileDrawer();MX.showPage('utilisateurs')" }
       );
     }
     const gridHtml = navItems.map(function(item) {
+      if (item.raw) return item.raw;
       return `<button class="mob-drw-item" onclick="${item.fn}"><i class="fas ${item.icon}"></i><span>${item.label}</span></button>`;
     }).join('');
 
