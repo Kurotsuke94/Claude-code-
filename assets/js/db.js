@@ -34,7 +34,6 @@
     products:    () => db.collection("products"),
     messages:    () => db.collection("messages"),
     users:       () => db.collection("users"),
-    usersPrivate: () => db.collection("users_private"),
     logs:        () => db.collection("logs"),
     transfers:   () => db.collection("transfers"),
     missions:    () => db.collection("missions"),
@@ -212,28 +211,10 @@
     await R.messages().doc(id).delete();
   }
 
-  // addUser crée le profil ET son document users_private (pin vide tant
-  // qu'aucun PIN n'a été saisi) en une seule fois — un compte PIN vérifié
-  // n'a jamais besoin de CRÉER users_private/{id} lui-même (voir règles),
-  // il doit toujours déjà exister avant sa première connexion.
-  async function addUser(data) {
-    const ref = await R.users().add(data);
-    await R.usersPrivate().doc(ref.id).set({ pin: "" });
-    return ref;
-  }
+  async function addUser(data)                      { await R.users().add(data); }
   async function updateUser(id, data)               { await R.users().doc(id).update(data); }
-  // Hash du PIN — collection séparée, non lisible par le client (voir
-  // firestore.rules.draft-claims-migration : audit précédent, le hash
-  // vivait auparavant dans users/{id}.pin, document lisible par quiconque).
-  // set({merge:true}) plutôt que update() : couvre le cas (rare en usage
-  // normal, mais possible pour un compte créé avant cette migration) où le
-  // document users_private/{id} n'existe pas encore.
-  async function updateUserPin(id, pinHash)         { await R.usersPrivate().doc(id).set({ pin: pinHash }, { merge: true }); }
   async function updateUserPlanningOrder(id, order) { await R.users().doc(id).update({ planningOrder: order }); }
-  async function deleteUser(id) {
-    await R.users().doc(id).delete();
-    await R.usersPrivate().doc(id).delete().catch(() => {}); // best-effort, ne bloque jamais la suppression du profil
-  }
+  async function deleteUser(id)                     { await R.users().doc(id).delete(); }
   // Lecture ponctuelle d'un seul utilisateur (pas un listener) — utilisée
   // par auth.js pour revérifier périodiquement qu'une session PIN (custom
   // token) correspond toujours au rôle réellement enregistré côté Firestore
@@ -1987,7 +1968,7 @@
     addProduct, updateProduct, deleteProduct,
     uploadMessageImage, sendMessage, deleteMessage,
     listenPlanning, uploadPlanningImage, savePlanning, clearPlanning,
-    addUser, updateUser, updateUserPin, updateUserPlanningOrder, deleteUser, getUserSnapshot,
+    addUser, updateUser, updateUserPlanningOrder, deleteUser, getUserSnapshot,
     addLog, clearLogs,
     createTransfer, updateTransfer, cancelTransfer,
     addMission, updateMission, deleteMission,

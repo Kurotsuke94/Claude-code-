@@ -190,6 +190,7 @@ async function setHotelConfig(page, lat, lon) {
     await clickSafe(page, '[onclick^="MX.Pages.CtaVc._openReadingForm"]');
     ok('3.1 Case "Relevé à 2 points" proposée pour un circuit VC', await page.locator('#ctavc-r-2pt-toggle').count() === 1);
     ok('3.2 Par défaut, le champ simple (#ctavc-r-temp) reste affiché (non-régression)', await page.locator('#ctavc-r-temp').count() === 1);
+    await dismissOverlays(page); // la modale "nouveautés" (2.5s après le chargement) peut apparaître ici et intercepter le clic suivant
     await page.check('#ctavc-r-2pt-toggle');
     await page.waitForTimeout(150);
     ok('3.3 Activation : les champs Point 1/Point 2 apparaissent', await page.locator('#ctavc-r-p1-water').count() === 1 && await page.locator('#ctavc-r-p2-water').count() === 1);

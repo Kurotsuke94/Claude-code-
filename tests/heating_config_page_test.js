@@ -404,6 +404,7 @@ async function setHotelConfig(page, lat, lon) {
 
     // Un second relevé LE MÊME JOUR pour la même pièce doit être accepté
     // (append-only, jamais fusionné avec le précédent).
+    await pageTech.evaluate(() => { const o = document.getElementById('ver-modal-overlay'); if (o) o.remove(); });
     await pageTech.click('text=Nouveau relevé de température', { force: true });
     await pageTech.waitForSelector('#hc-rr-temp', { state: 'visible' });
     await pageTech.selectOption('#hc-rr-building', bid);

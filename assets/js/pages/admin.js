@@ -1285,23 +1285,12 @@
   async function saveUsers() {
     try {
       for (const u of (MX.state.users || [])) {
-        await MX.DB.updateUser(u.id, { name: u.name||"", role: u.role||"technicien", color: u.color||"" });
-        // Le hash du PIN vit désormais dans users_private/{id} (non lisible
-        // par le client, voir firestore.rules.draft-claims-migration) — plus
-        // jamais dans le document users/{id} ci-dessus. u.pin ne reflète
-        // donc plus un hash existant relu depuis Firestore (ce document ne
-        // le contient plus) : il ne porte quelque chose que si l'admin a
-        // SAISI un nouveau PIN dans le champ de cette ligne (voir
-        // updUser('pin', v) et le placeholder "PIN configuré — saisir pour
-        // modifier" plus bas, qui laisse volontairement value="" tant que
-        // rien n'est tapé). Un champ vide signifie donc toujours "ne pas
-        // changer" — écrire quoi que ce soit dans ce cas écraserait le PIN
-        // existant par du vide, pour TOUS les utilisateurs à chaque
-        // enregistrement.
-        if (u.pin) {
-          const pin = /^[0-9a-f]{64}$/.test(u.pin) ? u.pin : await MX.hashPin(u.pin);
-          await MX.DB.updateUserPin(u.id, pin);
+        let pin = u.pin || '';
+        // Hash if it's a new plain-text PIN (not already a SHA-256 hex)
+        if (pin && !/^[0-9a-f]{64}$/.test(pin)) {
+          pin = await MX.hashPin(pin);
         }
+        await MX.DB.updateUser(u.id, { name: u.name||"", role: u.role||"technicien", pin, color: u.color||"" });
       }
       MX.toast("Profils enregistrés ✓");
     } catch (e) { MX.toast("Erreur", true); }

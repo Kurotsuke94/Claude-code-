@@ -554,5 +554,42 @@ service cloud.firestore {
       allow read, create, update: if true;
     }
 
+    // ── Configuration Thermique (DJU MX) — nouvelles collections ──
+    // isAuthenticated() (PAS "if true") : même bar que les autres
+    // collections opérationnelles de ce fichier (voir plus haut, ex.
+    // cso_charts). Exige une vraie session Firebase Auth (au minimum le
+    // bootstrap anonyme de firebase-config.js), ce qui bloque déjà tout
+    // accès direct à l'API Firestore sans jamais avoir chargé l'app —
+    // contrairement à "if true", qui n'exige rien du tout. Ne distingue
+    // PAS Responsable/Technicien (aucun claim fiable n'existe tant que
+    // verifyPin n'est pas déployé, migration PIN volontairement suspendue
+    // pour cette phase) : seule la UI cliente (_canManage() dans
+    // heating-config.js/cta-vc.js) sépare les deux rôles, comme pour le
+    // reste de l'app avant la migration claims.
+    match /heating_buildings/{docId} {
+      allow read, create, update: if isAuthenticated();
+    }
+    match /heating_rooms/{docId} {
+      allow read, create, update: if isAuthenticated();
+    }
+    match /heating_curve_points/{docId} {
+      allow read, create, update: if isAuthenticated();
+    }
+    match /heating_config_audit/{docId} {
+      // Append-only : jamais de update/delete, cohérent avec le journal
+      // d'audit (voir heating_config_audit côté client, db.js).
+      allow read, create: if isAuthenticated();
+    }
+    // Additif à la règle générique config/{docId} (ligne ~90) : celle-ci
+    // exige isAdmin() (session Firebase Auth NON anonyme) pour écrire, ce
+    // qu'aucune session PIN Responsable n'a — Firestore fait l'union (OR)
+    // des règles sur un même chemin, donc ce bloc ne retire rien à la
+    // règle générique, il ajoute seulement un second chemin d'autorisation
+    // pour les sessions PIN (anonymes) via isAuthenticated().
+    match /config/heating_config {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+    }
+
   }
 }

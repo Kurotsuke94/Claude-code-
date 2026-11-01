@@ -52,51 +52,7 @@
       }
     } catch (e) { console.warn('[Auth] Vérification version session admin échouée :', e); }
   }
-  setInterval(function () { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); _checkPinSessionRole(); }, ADMIN_SESSION_CHECK_MS);
-
-  // ── RÉVOCATION DE RÔLE POUR UNE SESSION PIN (custom token) ──
-  // Les claims d'un custom token (role, userId — voir functions/index.js:
-  // verifyPin) sont figés au moment de l'émission : contrairement aux
-  // custom claims posés par setCustomUserClaims(), ils NE sont PAS
-  // réévalués automatiquement par le SDK au fil des rafraîchissements de
-  // jeton. Si un admin/responsable change le rôle (ou désactive/supprime)
-  // l'utilisateur pendant qu'une session PIN reste ouverte ailleurs (poste
-  // partagé, onglet resté ouvert), cette session garderait sinon l'ancien
-  // rôle jusqu'à la fermeture du navigateur. Cette vérification périodique
-  // compare le rôle réellement enregistré dans Firestore au rôle du jeton
-  // et force une nouvelle saisie du PIN en cas de divergence — même
-  // mécanisme que _checkAdminSessionVersion ci-dessus, décliné pour les
-  // sessions PIN.
-  let _pinSessionClaims = null; // { role, userId } de la session custom token active, ou null
-
-  async function _checkPinSessionRole() {
-    if (!_pinSessionClaims) return; // pas de session PIN custom-token active
-    const cu = window.MX.state.currentUser;
-    if (!cu) { _pinSessionClaims = null; return; } // session déjà close côté UI
-    if (!(window.MX.DB && window.MX.DB.getUserSnapshot)) return;
-    try {
-      const fresh = await window.MX.DB.getUserSnapshot(_pinSessionClaims.userId);
-      const freshRole = fresh ? ((fresh.rank === 'responsable' || fresh.role === 'responsable') ? 'responsable' : 'technicien') : null;
-      if (freshRole === null || freshRole !== _pinSessionClaims.role) {
-        console.warn('[Auth] Rôle PIN modifié ou utilisateur supprimé — session invalidée, nouvelle saisie du PIN requise.');
-        _pinSessionClaims = null;
-        try { await auth.signOut(); } catch (e) {}
-        window.MX.state.currentUser = null;
-        localStorage.removeItem('mx_user');
-        _destroyUI();
-        if (window.MX.showModal) {
-          window.MX.showModal(
-            'Session invalidée',
-            "Vos droits d'accès ont changé. Merci de ressaisir votre code PIN.",
-            [{ label: 'Se reconnecter', cls: 'confirm', fn: function () { showUserPicker(); } }]
-          );
-        } else {
-          showUserPicker();
-        }
-        updateSidebarFooter();
-      }
-    } catch (e) { console.warn('[Auth] Vérification rôle session PIN échouée :', e); }
-  }
+  setInterval(function () { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); }, ADMIN_SESSION_CHECK_MS);
 
   // Retour au premier plan (onglet/PWA ravivé après mise en arrière-plan) :
   // ne pas dépendre uniquement du tick de 3 min, qui peut être fortement
@@ -104,7 +60,7 @@
   // arrière-plan. visibilityState==='visible' couvre aussi bien un onglet
   // classique qu'une PWA en mode standalone ravivée.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); _checkPinSessionRole(); }
+    if (document.visibilityState === 'visible') { _checkAdminSessionVersion(); _checkAdminSessionExpiry(); }
   });
 
   // pageshow (restauration bfcache iOS/Android) — auth.js n'avait jusqu'ici
@@ -113,7 +69,7 @@
   // depuis le bfcache ne déclenche pas toujours visibilitychange de façon
   // fiable, en particulier sur iOS Safari/PWA.
   window.addEventListener('pageshow', function (e) {
-    if (e.persisted) { _checkAdminSessionExpiry(); _checkPinSessionRole(); }
+    if (e.persisted) _checkAdminSessionExpiry();
   });
 
   // Déclenché uniquement par le super-admin (bouton "Forcer la déconnexion
@@ -207,44 +163,9 @@
     }
   }
 
-  auth.onAuthStateChanged(async user => {
+  auth.onAuthStateChanged(user => {
     const prevAdmin = !!window.MX.state.adminUser;
-
-    // ── MIGRATION CUSTOM CLAIMS ──
-    // Depuis que confirmPin() authentifie les comptes PIN via un custom
-    // token (voir plus bas, et functions/index.js:verifyPin), une session
-    // Responsable/Technicien a ELLE AUSSI isAnonymous === false — exactement
-    // comme un vrai Admin Firebase (email/mot de passe). Ce seul champ ne
-    // suffit donc plus à distinguer les deux cas, contrairement à avant la
-    // migration. Seul request.auth.token.firebase.sign_in_provider (un
-    // claim du jeton, jamais modifiable côté client) permet de trancher de
-    // façon fiable — exactement le même critère que isAdmin() dans
-    // firestore.rules côté serveur. 'custom' == session PIN (verifyPin),
-    // 'anonymous' == session de bootstrap, tout le reste (typiquement
-    // 'password') == vrai Admin Firebase.
-    // Fail-closed : si la lecture du jeton échoue pour une raison
-    // quelconque, ne JAMAIS accorder les droits admin par défaut.
-    let candidateAdmin = null;
-    let _freshPinClaims = null; // capturé ici si la session courante est une session PIN (custom token)
-    if (user && user.isAnonymous === false) {
-      let signInProvider = null;
-      let claims = null;
-      try {
-        const tokenResult = await user.getIdTokenResult();
-        claims = (tokenResult && tokenResult.claims) || null;
-        signInProvider = (claims && claims.firebase) ? claims.firebase.sign_in_provider : null;
-      } catch (e) {
-        console.warn('[Auth] Lecture du jeton (sign_in_provider) échouée :', e);
-      }
-      if (signInProvider && signInProvider !== 'custom') {
-        candidateAdmin = user;
-      } else if (signInProvider === 'custom' && claims && claims.userId && claims.role) {
-        _freshPinClaims = { userId: claims.userId, role: claims.role };
-      }
-    }
-    // Référence pour _checkPinSessionRole() ci-dessus (null si ce n'est pas
-    // une session PIN custom-token active).
-    _pinSessionClaims = _freshPinClaims;
+    const candidateAdmin = (user && user.isAnonymous === false) ? user : null;
 
     // Enveloppe absente ou expirée pour cet UID : cette session Firebase,
     // même valide côté SDK, n'est PAS autorisée à s'exposer côté app.
@@ -279,26 +200,6 @@
     }
 
     window.MX.state.adminUser = candidateAdmin;
-
-    // ── RÉCONCILIATION SESSION PIN AU DÉMARRAGE/RESTAURATION ──
-    // MX.state.currentUser (localStorage "mx_user") peut survivre à une
-    // fermeture complète du navigateur (stockage LOCAL, jamais effacé),
-    // alors que la session Firebase (Persistence.SESSION, voir
-    // firebase-config.js) ne survit PAS — custom token inclus : au
-    // redémarrage, seule une session anonyme fraîche est recréée. Un
-    // "currentUser" local qui ne correspond à AUCUNE session custom-token
-    // active n'a alors plus aucune preuve serveur de son rôle — jamais le
-    // traiter comme une session valide (même règle que pour une session
-    // admin restaurée sans enveloppe valide, ci-dessus) : on l'efface et on
-    // exige une nouvelle saisie du PIN. Ignoré pendant _switchingToPin
-    // (changement de profil volontaire, déjà géré par clearCurrentUser) et
-    // pendant la brève fenêtre où confirmPin() vient tout juste de signer
-    // (candidateAdmin ou _freshPinClaims non nuls dans ce cas).
-    if (!candidateAdmin && !_freshPinClaims && !_switchingToPin && window.MX.state.currentUser) {
-      console.warn('[Auth] Session PIN locale sans jeton serveur valide (redémarrage du navigateur ?) — nouvelle saisie du PIN requise.');
-      window.MX.state.currentUser = null;
-      localStorage.removeItem('mx_user');
-    }
 
     // ── DEBUG AUTH (temporaire) ──
     var _cu  = window.MX.state.currentUser;
@@ -462,14 +363,10 @@
     }
     _destroyUI();         // close modals, destroy page listeners — before state is wiped
     setCurrentUser(null); // clear MX.state.currentUser + localStorage
-    // Filet de sécurité : si une session Firebase non anonyme est encore
-    // active — Admin (poste partagé) OU session PIN par custom token
-    // (voir confirmPin) — la terminer aussi. "Changer d'utilisateur" ne
-    // doit JAMAIS laisser un jeton/rôle résiduel du profil précédent actif
-    // pendant que le prochain profil n'a pas encore ressaisi son PIN
-    // (firebase-config.js rétablit automatiquement la session anonyme de
-    // base dès que ce signOut se termine).
-    if (auth.currentUser && auth.currentUser.isAnonymous === false) {
+    // Filet de sécurité : si une session Firebase Admin est encore active
+    // (poste partagé), la terminer aussi — "changer d'utilisateur" ne doit
+    // jamais laisser des droits admin résiduels pour le prochain profil PIN.
+    if (window.MX.state.adminUser) {
       auth.signOut().catch(function(e) { console.warn('[Auth] Erreur signOut résiduel :', e); });
     }
     showUserPicker();
@@ -563,46 +460,25 @@
     }, 80);
   }
 
-  // ── VÉRIFICATION PIN — MIGRATION CUSTOM TOKEN ──
-  // Avant cette migration, confirmPin() comparait le PIN saisi au hash
-  // stocké DIRECTEMENT dans le navigateur (MX.hashPin) : une session
-  // obtenue ainsi n'était jamais vérifiable côté serveur (request.auth
-  // restait celui de la connexion anonyme pour tout utilisateur PIN —
-  // firestore.rules ne pouvait donc PAS distinguer un Responsable d'un
-  // Technicien, voir le rapport d'audit). Dorénavant, la vérification PIN
-  // est intégralement déléguée au callable serveur verifyPin
-  // (functions/index.js, Admin SDK) : lui seul lit le PIN stocké, lui seul
-  // décide du rôle, lui seul émet un custom token portant ce rôle comme
-  // claim — jamais modifiable depuis ce fichier. RÈGLE DE SÉCURITÉ
-  // ABSOLUE : ne jamais considérer un rôle fourni ou recalculé côté client
-  // comme une preuve d'autorisation ; ce fichier ne fait plus QUE relayer
-  // le PIN saisi au serveur et appliquer le jeton qu'il renvoie.
   async function confirmPin() {
     const user = (MX.state.users || []).find(u => u.id === _pendingUserId);
     if (!user) return;
-    const entered = (document.getElementById("pin-input") || {}).value || "";
-    const errEl   = document.getElementById("pin-error");
-    const btn     = document.querySelector("#m-actions .modal-btn.confirm");
+    const entered   = (document.getElementById("pin-input") || {}).value || "";
+    const errEl     = document.getElementById("pin-error");
+    const storedPin = String(user.pin || "");
 
-    if (!/^[0-9]{4,8}$/.test(entered)) {
-      if (errEl) errEl.textContent = "PIN incorrect. Réessayez.";
-      const inp = document.getElementById("pin-input");
-      if (inp) { inp.value = ""; inp.focus(); }
-      return;
+    let match;
+    if (/^[0-9a-f]{64}$/.test(storedPin)) {
+      const hash = await MX.hashPin(entered);
+      match = hash === storedPin;
+    } else {
+      // Legacy: plain-text PIN (auto-migrated next time admin saves)
+      match = entered === storedPin;
     }
 
-    if (errEl) errEl.textContent = "";
-    if (btn) btn.disabled = true;
-
-    try {
-      if (!(window.MX.Functions && window.MX.Functions.httpsCallable)) {
-        throw Object.assign(new Error("Service d'authentification indisponible."), { code: 'unavailable' });
-      }
-      const verifyPin = window.MX.Functions.httpsCallable('verifyPin');
-      const result = await verifyPin({ userId: user.id, pin: entered });
-      const token  = result && result.data && result.data.token;
-      if (!token) throw Object.assign(new Error('Réponse serveur invalide.'), { code: 'internal' });
-
+    if (match) {
+      MX.closeModal();
+      _pendingUserId = null;
       // Un technicien qui se connecte par PIN ne doit jamais hériter d'une
       // session Firebase Admin résiduelle (poste partagé) : on la termine
       // d'abord, et on attend la fin du signOut avant d'établir la session
@@ -613,39 +489,12 @@
         try { await auth.signOut(); } catch (e) {}
         _switchingToPin = false;
       }
-      // Établit la session Firebase réelle portant le rôle vérifié serveur
-      // (claim `role`) — condition désormais nécessaire pour que
-      // firestore.rules puisse un jour distinguer Responsable/Technicien
-      // (voir firestore.rules.draft-claims-migration, non déployé).
-      await auth.signInWithCustomToken(token);
-
-      MX.closeModal();
-      _pendingUserId = null;
       setCurrentUser(user);
       MX.toast("Bienvenue " + user.name + " !");
-    } catch (ex) {
-      console.warn('[Auth] confirmPin échoué :', (ex && ex.code) || (ex && ex.message) || ex);
-      const code = (ex && ex.code) || '';
-      let msg;
-      if (code === 'functions/resource-exhausted' || code === 'resource-exhausted') {
-        // Message de verrouillage anti-brute-force — jamais une fuite de
-        // données (ne révèle ni l'existence du compte ni le PIN), juste un
-        // délai à respecter : sans risque à afficher tel quel.
-        msg = (ex && ex.message) || "Trop de tentatives — réessayez plus tard.";
-      } else if (code === 'functions/unavailable' || code === 'unavailable'
-              || code === 'functions/deadline-exceeded' || code === 'functions/internal') {
-        msg = "Connexion impossible. Vérifiez votre réseau et réessayez.";
-      } else {
-        // invalid-argument, permission-denied (mauvais PIN), ou tout autre
-        // cas : jamais de détail distinctif — ne jamais laisser deviner si
-        // le compte existe ou pourquoi exactement l'appel a échoué.
-        msg = "PIN incorrect. Réessayez.";
-      }
-      if (errEl) errEl.textContent = msg;
+    } else {
+      if (errEl) errEl.textContent = "PIN incorrect. Réessayez.";
       const inp = document.getElementById("pin-input");
       if (inp) { inp.value = ""; inp.focus(); }
-    } finally {
-      if (btn) btn.disabled = false;
     }
   }
 
@@ -837,9 +686,5 @@
     // admin applicative (normalement automatique : périodique, visibility-
     // change, pageshow) — utile pour un contrôle immédiat et pour les tests.
     checkAdminSessionExpiryNow: _checkAdminSessionExpiry,
-    // Déclenchement manuel de la revérification du rôle d'une session PIN
-    // (normalement automatique : périodique, visibility-change, pageshow) —
-    // utile pour un contrôle immédiat et pour les tests.
-    checkPinSessionRoleNow: _checkPinSessionRole,
   };
 })();
