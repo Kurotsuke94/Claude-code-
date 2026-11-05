@@ -2,11 +2,11 @@
   'use strict';
 
   // ══════════════════════════════════════════════════════════════════════
-  // CONFIGURATION THERMIQUE — bâtiments / installations / pièces / courbes
+  // CONFIGURATION THERMIQUE — bâtiments / installations / zones thermiques / courbes
   // ------------------------------------------------------------------
-  // Consultation + relevés de pièce ouverts à tout rôle authentifié (voir
+  // Consultation + relevés de zone thermique ouverts à tout rôle authentifié (voir
   // assets/js/app.js:renderPage) ; la configuration structurelle
-  // (bâtiments/installations/pièces/courbes) reste réservée Responsable/
+  // (bâtiments/installations/zones thermiques/courbes) reste réservée Responsable/
   // Admin — chaque action est individuellement protégée par
   // _canManage()/_denyManage() ci-dessous, jamais seulement masquée.
   //
@@ -21,8 +21,34 @@
   var _unsub = {};
   var _subscribed = false;
   var _showArchived = false;
-  var _curveBuildingId = null; // bâtiment actuellement affiché dans l'onglet Courbes
+  var _curveBuildingId = null; // bâtiment actuellement affiché dans le panneau "Courbe de référence" de la fiche bâtiment
   var _editingBuilding = null, _editingInstallation = null, _editingRoom = null;
+  // REFONTE CTA/VC Phase 5 — fiche bâtiment détaillée (n'existait pas
+  // avant cette phase : la liste était à plat, toujours dépliée). Même
+  // principe que _circuitDetailId dans cta-vc.js : null = liste, sinon id
+  // du bâtiment affiché en fiche. _pendingBuildingPhoto* = sélection en
+  // cours de confirmation (jamais uploadée avant confirmation explicite —
+  // voir _confirmBuildingPhoto). _buildingPhotoBusy = empêche un double
+  // clic pendant la conversion HEIC/compression/upload (opérations async).
+  var _buildingDetailId = null;
+  var _pendingBuildingPhotoFile = null;
+  var _pendingBuildingPhotoPreviewUrl = null;
+  var _buildingPhotoBusy = false;
+  var _heic2anyLoadPromise = null;
+  // REFONTE CTA/VC Phase 6 — même principe que _buildingDetailId/photo
+  // ci-dessus, appliqué aux installations (heating_circuits). _heic2any
+  // LoadPromise reste PARTAGÉ (un seul chargement différé pour toute la
+  // page, qu'il soit déclenché depuis une photo de bâtiment ou
+  // d'installation — jamais rechargé deux fois).
+  var _installationDetailId = null;
+  var _pendingInstallationPhotoFile = null;
+  var _pendingInstallationPhotoPreviewUrl = null;
+  var _installationPhotoBusy = false;
+  // REFONTE CTA/VC Phase 7 — même principe que _buildingDetailId/
+  // _installationDetailId, appliqué aux zones thermiques (heating_rooms).
+  // AUCUNE photo pour cette phase (décision explicite de l'utilisateur) —
+  // pas de _pendingRoomPhoto*/busy correspondant.
+  var _roomDetailId = null;
   // ANALYSE DJU / TEMPÉRATURE INTÉRIEURE — même source météo que
   // assets/js/pages/cta-vc.js:_ensureWeather() (MX.Weather.getDaily +
   // MX.Dju.buildDailySeries), jamais une seconde logique de calcul DJU :
@@ -106,10 +132,10 @@
 
   // SÉCURISATION (demande utilisateur, passe de finalisation) : le
   // Technicien doit pouvoir CONSULTER cette page et saisir des relevés de
-  // température de pièce (voir _openRoomReadingForm, jamais gardé par
+  // température de zone thermique (voir _openRoomReadingForm, jamais gardé par
   // _canManage) — exactement comme il peut déjà consulter + relever sur
   // CTA/VC. render() n'est donc plus une porte Responsable/Admin : CHAQUE
-  // action de configuration structurelle (bâtiments/installations/pièces/
+  // action de configuration structurelle (bâtiments/installations/zones thermiques/
   // courbes) reste individuellement protégée par _canManage()/_denyManage()
   // ci-dessous, et les boutons correspondants sont masqués pour un
   // Technicien (jamais seulement désactivés côté visuel — voir aussi
@@ -127,18 +153,17 @@
     if (!mc) return;
     mc.innerHTML = _html();
   }
-  function _setTab(tab) { _tab = tab; render(); }
+  function _setTab(tab) { _tab = tab; _buildingDetailId = null; _installationDetailId = null; _roomDetailId = null; _cancelBuildingPhotoPick(); _cancelInstallationPhotoPick(); render(); }
 
   function _html() {
     var h = '<div class="ctavc-wrap">';
     h += '<div class="page-head"><div><div class="page-title"><i class="fas fa-temperature-three-quarters"></i> Configuration thermique</div>' +
-      '<div class="page-sub">Bâtiments, installations, pièces et courbes DJU / température intérieure — DJU MX</div></div></div>';
+      '<div class="page-sub">Bâtiments, installations, zones thermiques et courbes DJU / température intérieure — DJU MX</div></div></div>';
     h += '<div class="ctavc-tabs">';
     [
       { id: 'batiments', l: 'Bâtiments', icon: 'fa-building' },
       { id: 'installations', l: 'Installations', icon: 'fa-diagram-project' },
-      { id: 'pieces', l: 'Pièces', icon: 'fa-door-open' },
-      { id: 'courbes', l: 'Courbes DJU / température', icon: 'fa-chart-line' },
+      { id: 'pieces', l: 'Zones thermiques', icon: 'fa-door-open' },
     ].forEach(function (t) {
       h += '<button class="ctavc-tab' + (_tab === t.id ? ' ctavc-tab--on' : '') + '" onclick="MX.Pages.HeatingConfig._setTab(\'' + t.id + '\')">' +
         '<i class="fas ' + t.icon + '"></i> ' + t.l + '</button>';
@@ -147,13 +172,20 @@
     if (_tab === 'batiments') h += _batimentsHtml();
     else if (_tab === 'installations') h += _installationsHtml();
     else if (_tab === 'pieces') h += _piecesHtml();
-    else if (_tab === 'courbes') h += _courbesHtml();
     h += '</div></div>';
     return h;
   }
 
   // ════════════════════════════ BÂTIMENTS ════════════════════════════
+  // REFONTE CTA/VC Phase 5 — cartes visuelles (photo/nom/adresse) + fiche
+  // détaillée (n'existait pas avant cette phase — la liste était à plat,
+  // toujours dépliée). CRUD/archivage/_canManage() strictement conservés.
   function _batimentsHtml() {
+    if (_buildingDetailId) {
+      var bd = _buildings.find(function (b) { return b.id === _buildingDetailId; });
+      if (bd) return _buildingDetailHtml(bd);
+      _buildingDetailId = null; // bâtiment introuvable (archivé/supprimé entretemps) -> retombe sur la liste
+    }
     var h = '<div class="ctavc-toolbar">' +
       '<label class="ctavc-check-inline"><input type="checkbox" ' + (_showArchived ? 'checked' : '') + ' onchange="MX.Pages.HeatingConfig._toggleArchived(this.checked)"> Afficher les bâtiments archivés</label>' +
       (_canManage() ? '<button class="primary-btn" style="width:auto" onclick="MX.Pages.HeatingConfig._openBuildingForm(null)"><i class="fas fa-plus"></i> Ajouter un bâtiment</button>' : '') + '</div>';
@@ -162,21 +194,18 @@
       h += '<div class="ctavc-empty"><i class="fas fa-building"></i><div>Aucun bâtiment créé' + (_canManage() ? '. Les bâtiments ne sont jamais codés en dur : créez-en un pour commencer.' : '.') + '</div></div>';
       return h;
     }
+    h += '<div class="ctavc-circuit-grid">';
     list.forEach(function (b) {
-      var installCount = _installations.filter(function (i) { return i.buildingId === b.id && !i.archived; }).length;
-      var roomCount = _rooms.filter(function (r) { return r.buildingId === b.id && !r.archived; }).length;
-      h += '<div class="ctavc-card' + (b.archived ? ' ctavc-circuit-card--archived' : '') + '">';
-      h += '<div class="ctavc-detail-head"><div><div class="ctavc-detail-name">' + MX.esc(b.name) + (b.archived ? ' <span class="ctavc-archived-tag">archivé</span>' : '') + '</div>' +
-        '<div class="ctavc-detail-sub">' + (b.mode === 'automatique' ? 'Régulation automatique — MX surveille uniquement' : 'Pilotage manuel assisté — MX propose, le technicien valide') + '</div></div>' +
-        (_canManage() ? '<div class="ctavc-detail-actions"><button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openBuildingForm(\'' + b.id + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
-        '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._archiveBuilding(\'' + b.id + '\',' + (!b.archived) + ')"><i class="fas fa-box-archive"></i> ' + (b.archived ? 'Réactiver' : 'Archiver') + '</button></div>' : '') + '</div>';
-      if (b.description) h += '<div class="ctavc-detail-desc">' + MX.esc(b.description) + '</div>';
-      h += '<div class="ctavc-field-grid">' +
-        _fieldRow('Mode de fonctionnement', b.mode === 'automatique' ? 'Automatique (loi d\'eau/régulation existante)' : 'Manuel assisté') +
-        _fieldRow('Installations actives', String(installCount)) +
-        _fieldRow('Pièces suivies', String(roomCount)) +
-      '</div></div>';
+      h += '<div class="ctavc-circuit-card' + (b.archived ? ' ctavc-circuit-card--archived' : '') + '" onclick="MX.Pages.HeatingConfig._openBuildingDetail(\'' + b.id + '\')">' +
+        (b.photoUrl
+          ? '<div class="ctavc-building-card-photo" style="background-image:url(&quot;' + MX.esc(b.photoUrl) + '&quot;)"></div>'
+          : '<div class="ctavc-building-card-photo ctavc-building-card-photo--empty"><i class="fas fa-building"></i></div>') +
+        '<div class="ctavc-circuit-card-head"><span class="ctavc-circuit-card-name">' + MX.esc(b.name) + (b.archived ? ' <span class="ctavc-archived-tag">archivé</span>' : '') + '</span></div>' +
+        '<div class="ctavc-circuit-card-zone">' + (b.address ? MX.esc(b.address) : 'Adresse non renseignée') + '</div>' +
+        '<div class="ctavc-circuit-card-reg">' + (b.mode === 'automatique' ? 'Régulation automatique' : 'Pilotage manuel assisté') + '</div>' +
+      '</div>';
     });
+    h += '</div>';
     return h;
   }
   function _fieldRow(label, value) {
@@ -184,6 +213,276 @@
       '<span class="ctavc-field-value' + (value ? '' : ' ctavc-field-value--na') + '">' + (value ? MX.esc(String(value)) : 'Donnée non disponible') + '</span></div>';
   }
   function _toggleArchived(v) { _showArchived = v; render(); }
+  function _openBuildingDetail(id) { _buildingDetailId = id; render(); }
+
+  // ── Fiche bâtiment détaillée (nouvelle, Phase 5) ──
+  function _buildingDetailHtml(b) {
+    var installCount = _installations.filter(function (i) { return i.buildingId === b.id && !i.archived; }).length;
+    var roomCount = _rooms.filter(function (r) { return r.buildingId === b.id && !r.archived; }).length;
+    var h = '<button class="ctavc-back-btn" onclick="MX.Pages.HeatingConfig._setTab(\'batiments\')"><i class="fas fa-arrow-left"></i> Retour aux bâtiments</button>';
+    h += '<div class="ctavc-card">';
+    h += '<div class="ctavc-detail-head"><div>' +
+      '<div class="ctavc-detail-name">' + MX.esc(b.name) + (b.archived ? ' <span class="ctavc-archived-tag">archivé</span>' : '') + '</div>' +
+      '<div class="ctavc-detail-sub">' + (b.mode === 'automatique' ? 'Régulation automatique — MX surveille uniquement' : 'Pilotage manuel assisté — MX propose, le technicien valide') + '</div></div>' +
+      (_canManage() ? '<div class="ctavc-detail-actions"><button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openBuildingForm(\'' + b.id + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
+      '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._archiveBuilding(\'' + b.id + '\',' + (!b.archived) + ')"><i class="fas fa-box-archive"></i> ' + (b.archived ? 'Réactiver' : 'Archiver') + '</button></div>' : '') +
+    '</div>';
+    if (b.description) h += '<div class="ctavc-detail-desc">' + MX.esc(b.description) + '</div>';
+    h += '<div class="ctavc-field-grid">' +
+      _fieldRow('Adresse', b.address) +
+      _fieldRow('Mode de fonctionnement', b.mode === 'automatique' ? 'Automatique (loi d\'eau/régulation existante)' : 'Manuel assisté') +
+      _fieldRow('Installations actives', String(installCount)) +
+      _fieldRow('Zones thermiques suivies', String(roomCount)) +
+    '</div></div>';
+
+    h += _buildingPhotoSectionHtml(b);
+    h += _buildingCurveSectionHtml(b);
+    h += _roomComparisonHtml(b);
+    return h;
+  }
+
+  // REFONTE CTA/VC Phase 8 — « Courbe de référence » migrée à l'identique
+  // depuis l'ancien onglet « Courbes DJU / température » (_courbesHtml),
+  // désormais rattachée à la fiche du bâtiment concerné plutôt qu'à un
+  // sélecteur de bâtiment séparé. RÉUTILISE EXACTEMENT les mêmes fonctions
+  // (_curveChartSvg, _openCurvePointForm/_submitCurvePointForm/
+  // _deleteCurvePoint, le CRUD db.js inchangé) — _curveBuildingId reste la
+  // même variable déjà utilisée par ces fonctions (plutôt que de les
+  // dupliquer), simplement alignée ici sur le bâtiment de la fiche
+  // affichée ; aucune donnée existante touchée, aucune règle Firestore
+  // changée. Visuellement IDENTIQUE à l'ancien module pour les mêmes
+  // données (mêmes cartes, même graphique, même tableau).
+  function _buildingCurveSectionHtml(b) {
+    _curveBuildingId = b.id;
+    var points = _curvePoints.filter(function (p) { return p.buildingId === b.id; }).sort(function (a, c) { return a.dju - c.dju; });
+    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-chart-line"></i> Courbe de référence' +
+      (_canManage() ? '<button class="cso-ibtn" style="margin-left:auto" onclick="MX.Pages.HeatingConfig._openCurvePointForm(null)"><i class="fas fa-plus"></i> Ajouter un point</button>' : '') + '</div>';
+    if (points.length < 2) {
+      h += '<div class="ctavc-empty-inline">Au moins 2 points sont nécessaires pour tracer une courbe (actuellement ' + points.length + '). Aucune valeur n\'est jamais inventée : saisissez les points vous-même ou importez-les depuis des données fiables.</div>';
+    } else {
+      h += _curveChartSvg(points);
+    }
+    h += '</div>';
+
+    h += '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-list"></i> Points programmés (' + points.length + ')</div>';
+    if (!points.length) {
+      h += '<div class="ctavc-empty-inline">Aucun point programmé pour ce bâtiment.</div>';
+    } else {
+      h += '<div class="ctavc-hist-table"><table><thead><tr><th>DJU</th><th>Température intérieure attendue</th><th>Période</th><th></th></tr></thead><tbody>';
+      points.forEach(function (p) {
+        h += '<tr><td>' + p.dju + '</td><td>' + p.expectedIndoorTemp + ' °C</td><td>' + (p.periodLabel ? MX.esc(p.periodLabel) : '—') + '</td>' +
+          '<td>' + (_canManage() ? '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openCurvePointForm(\'' + p.id + '\')"><i class="fas fa-pen"></i></button> ' +
+          '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._deleteCurvePoint(\'' + p.id + '\')"><i class="fas fa-trash"></i></button>' : '') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Cette courbe est un outil de surveillance et d\'anticipation thermique — ce n\'est jamais une loi d\'eau et elle ne commande jamais directement le chauffage.</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // ── Photo du bâtiment : ajout/remplacement/suppression, prévisualisation
+  // + confirmation explicite avant tout upload (jamais d'upload optimiste).
+  // Ordre de sauvegarde conforme à l'audit Phase 5 : upload Storage d'abord
+  // (jamais d'écriture Firestore avant un succès d'upload confirmé), PUIS
+  // mise à jour Firestore, PUIS seulement best-effort la suppression de
+  // l'ancienne image. Suppression de photo : retire d'abord la référence
+  // Firestore, PUIS tente la suppression Storage. ──
+  function _buildingPhotoSectionHtml(b) {
+    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-image"></i> Photo du bâtiment</div>';
+    if (_pendingBuildingPhotoPreviewUrl) {
+      h += '<div class="etb-banner-preview" style="background-image:url(&quot;' + _pendingBuildingPhotoPreviewUrl + '&quot;)"></div>' +
+        '<div class="ctavc-hint-inline">Aperçu — la photo n\'est pas encore enregistrée.</div>' +
+        '<div class="etb-stt-actions">' +
+          '<button id="hc-b-photo-confirm-btn" class="primary-btn" onclick="MX.Pages.HeatingConfig._confirmBuildingPhoto(\'' + b.id + '\')"' + (_buildingPhotoBusy ? ' disabled' : '') + '><i class="fas fa-check"></i> Enregistrer cette photo</button>' +
+          '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._cancelBuildingPhotoPick()"' + (_buildingPhotoBusy ? ' disabled' : '') + '><i class="fas fa-xmark"></i> Annuler</button>' +
+        '</div>';
+    } else {
+      h += (b.photoUrl
+        ? '<div class="etb-banner-preview" style="background-image:url(&quot;' + MX.esc(b.photoUrl) + '&quot;)"></div>'
+        : '<div class="etb-banner-preview etb-banner-preview--empty"><i class="fas fa-building"></i><span>Aucune photo</span></div>') +
+        (_canManage() ? '<div class="etb-stt-actions">' +
+          '<button class="primary-btn" onclick="MX.Pages.HeatingConfig._pickBuildingPhoto(\'' + b.id + '\')"' + (_buildingPhotoBusy ? ' disabled' : '') + '><i class="fas fa-' + (b.photoUrl ? 'rotate' : 'plus') + '"></i> ' + (b.photoUrl ? 'Remplacer' : 'Ajouter une photo') + '</button>' +
+          (b.photoUrl ? '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._removeBuildingPhoto(\'' + b.id + '\')"' + (_buildingPhotoBusy ? ' disabled' : '') + '><i class="fas fa-trash"></i> Supprimer</button>' : '') +
+        '</div>' : '');
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // "Type de mesure" — non applicable ici ; détection HEIC par extension
+  // ET type MIME (de nombreux navigateurs/OS n'exposent pas le type MIME
+  // correct "image/heic" pour ce format, l'extension reste le signal le
+  // plus fiable en pratique).
+  function _isHeicFile(file) {
+    var n = (file.name || '').toLowerCase();
+    return /\.(heic|heif)$/.test(n) || file.type === 'image/heic' || file.type === 'image/heif';
+  }
+  // Chargement DIFFÉRÉ de heic2any (1,3 Mo) : uniquement sur cette page,
+  // uniquement quand un fichier .heic/.heif est RÉELLEMENT sélectionné —
+  // jamais chargé globalement (index.html), pour ne jamais pénaliser les
+  // utilisateurs qui n'uploadent jamais ce format. Fichier vendorisé en
+  // local (assets/js/libs/), aucun appel réseau externe à l'exécution
+  // (vérifié : aucune URL dans le bundle) — cohérent avec "zéro dépendance
+  // externe" déjà en vigueur dans Maintix.
+  function _ensureHeic2anyLoaded() {
+    if (window.heic2any) return Promise.resolve();
+    if (_heic2anyLoadPromise) return _heic2anyLoadPromise;
+    _heic2anyLoadPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = '/assets/js/libs/heic2any.min.js?v=1';
+      s.onload = function () { resolve(); };
+      s.onerror = function () { _heic2anyLoadPromise = null; reject(new Error('Échec du chargement du convertisseur HEIC')); };
+      document.head.appendChild(s);
+    });
+    return _heic2anyLoadPromise;
+  }
+  // Redimensionnement (1600px max) + compression JPEG qualité 0.80, avec
+  // une boucle de réduction progressive de qualité visant ≤500 Ko quand la
+  // qualité le permet (BEST-EFFORT, jamais une garantie stricte — une
+  // photo très détaillée peut rester au-dessus de 500 Ko même à qualité
+  // réduite ; jamais de dégradation au-delà de 0.5 pour rester
+  // visuellement correct). Fonction DÉDIÉE à cette fonctionnalité (pas une
+  // modification de home.js:_compressImage, qui reste intact pour
+  // Planning/bannière — éviter toute 2e logique de compression partagée
+  // qui risquerait de régresser ces fonctionnalités existantes).
+  var BUILDING_PHOTO_MAX_PX = 1600;
+  var BUILDING_PHOTO_TARGET_BYTES = 500 * 1024;
+  function _compressBuildingPhoto(file) {
+    return new Promise(function (resolve) {
+      var timer = setTimeout(function () { resolve(file); }, 20000);
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var w = img.width, h = img.height;
+        var scale = Math.min(1, BUILDING_PHOTO_MAX_PX / Math.max(w, h));
+        w = Math.round(w * scale); h = Math.round(h * scale);
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var qualities = [0.80, 0.70, 0.60, 0.50];
+        var i = 0;
+        var best = null;
+        function tryNext() {
+          if (i >= qualities.length) { clearTimeout(timer); resolve(best || file); return; }
+          var q = qualities[i++];
+          canvas.toBlob(function (blob) {
+            if (!blob) { tryNext(); return; }
+            if (!best || blob.size < best.size) best = blob;
+            if (blob.size <= BUILDING_PHOTO_TARGET_BYTES) { clearTimeout(timer); resolve(blob); return; }
+            tryNext();
+          }, 'image/jpeg', q);
+        }
+        tryNext();
+      };
+      img.onerror = function () { clearTimeout(timer); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  function _pickBuildingPhoto(buildingId) {
+    if (!_canManage()) { _denyManage(); return; }
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif';
+    inp.onchange = function (e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var isHeic = _isHeicFile(file);
+      if (!isHeic && !/^image\/(jpeg|png|webp)$/.test(file.type)) {
+        MX.toast('Format non supporté (JPG, PNG, WebP ou HEIC uniquement)', true);
+        return;
+      }
+      // 15 Mo maximum AVANT compression — rejet immédiat, avant tout
+      // traitement réseau ou local coûteux.
+      if (file.size > 15 * 1024 * 1024) {
+        MX.toast('Image trop volumineuse (15 Mo maximum avant compression)', true);
+        return;
+      }
+      _buildingPhotoBusy = true;
+      render();
+      var ready = isHeic
+        ? (MX.toast('Conversion HEIC…'), _ensureHeic2anyLoaded().then(function () {
+            return window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+          }).then(function (result) { return Array.isArray(result) ? result[0] : result; }))
+        : Promise.resolve(file);
+      ready.then(function (readyFile) {
+        if (_pendingBuildingPhotoPreviewUrl) URL.revokeObjectURL(_pendingBuildingPhotoPreviewUrl);
+        _pendingBuildingPhotoFile = readyFile;
+        _pendingBuildingPhotoPreviewUrl = URL.createObjectURL(readyFile);
+        _buildingPhotoBusy = false;
+        _buildingDetailId = buildingId;
+        render();
+      }).catch(function (err) {
+        console.error('[BuildingPhoto] Échec de la conversion HEIC', err);
+        MX.toast('Erreur lors de la conversion du fichier HEIC', true);
+        _buildingPhotoBusy = false;
+        render();
+      });
+    };
+    inp.click();
+  }
+  function _cancelBuildingPhotoPick() {
+    if (_pendingBuildingPhotoPreviewUrl) URL.revokeObjectURL(_pendingBuildingPhotoPreviewUrl);
+    _pendingBuildingPhotoFile = null;
+    _pendingBuildingPhotoPreviewUrl = null;
+    render();
+  }
+  // Séquence de sauvegarde (audit Phase 5, reprise à l'identique de
+  // uploadHeroBanner/_sttConfirmHeroBanner) :
+  //   1-2. Compression déjà faite (sélection) ou faite ici ; 3-4. upload
+  //   Storage de la NOUVELLE image, URL récupérée ; 5-6. écriture
+  //   Firestore (updateHeatingBuilding), avec vérification explicite du
+  //   succès avant toute autre action ; 7. SEULEMENT ENSUITE, best-effort,
+  //   suppression de l'ANCIENNE image. Échec upload -> rien à annuler.
+  //   Échec Firestore -> nettoyage de la NOUVELLE image, ancienne photo
+  //   conservée (jamais de bâtiment sans photo suite à un échec réseau).
+  function _confirmBuildingPhoto(buildingId) {
+    if (!_canManage()) { _denyManage(); return; }
+    if (!_pendingBuildingPhotoFile) return;
+    var file = _pendingBuildingPhotoFile;
+    _buildingPhotoBusy = true;
+    render();
+    var newUrl = null;
+    _compressBuildingPhoto(file).then(function (compressed) {
+      return MX.DB.uploadBuildingPhoto(buildingId, compressed);
+    }).then(function (url) {
+      newUrl = url;
+      var b = _buildings.find(function (x) { return x.id === buildingId; });
+      var oldUrl = b ? b.photoUrl : null;
+      return MX.DB.updateHeatingBuilding(buildingId, { photoUrl: newUrl }, _currentUserName()).then(function () {
+        _cancelBuildingPhotoPick();
+        _buildingPhotoBusy = false;
+        MX.toast('Photo du bâtiment mise à jour ✓');
+        render();
+        if (oldUrl) MX.DB.deleteBuildingPhotoImage(oldUrl); // best-effort, non bloquant, APRÈS succès confirmé
+      }).catch(function (saveErr) {
+        console.error('[BuildingPhoto] Échec sauvegarde Firestore — nettoyage de la nouvelle image, ancienne photo conservée', saveErr);
+        MX.DB.deleteBuildingPhotoImage(newUrl);
+        _buildingPhotoBusy = false;
+        MX.toast('Erreur sauvegarde — l\'ancienne photo est conservée', true);
+        render();
+      });
+    }).catch(function (uploadErr) {
+      console.error('[BuildingPhoto] Échec upload — aucune suppression, aucune écriture Firestore', uploadErr);
+      _buildingPhotoBusy = false;
+      MX.toast('Erreur lors de l\'envoi de la photo', true);
+      render();
+    });
+  }
+  function _removeBuildingPhoto(buildingId) {
+    if (!_canManage()) { _denyManage(); return; }
+    var b = _buildings.find(function (x) { return x.id === buildingId; });
+    if (!b || !b.photoUrl) return;
+    if (!confirm('Supprimer la photo de ce bâtiment ? Le bâtiment lui-même n\'est pas affecté.')) return;
+    var oldUrl = b.photoUrl;
+    MX.DB.updateHeatingBuilding(buildingId, { photoUrl: firebase.firestore.FieldValue.delete() }, _currentUserName()).then(function () {
+      MX.toast('Photo supprimée');
+      render();
+      MX.DB.deleteBuildingPhotoImage(oldUrl); // best-effort, APRÈS la suppression de la référence Firestore
+    }).catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
+  }
 
   function _openBuildingForm(id) {
     if (!_canManage()) { _denyManage(); return; }
@@ -191,6 +490,7 @@
     var b = _editingBuilding || {};
     var body = '<div class="ctavc-form">' +
       '<label>Nom du bâtiment *</label><input id="hc-b-name" class="fi" value="' + MX.esc(b.name || '') + '" placeholder="Ex: Bâtiment principal" maxlength="80">' +
+      '<label>Adresse (facultatif)</label><input id="hc-b-address" class="fi" value="' + MX.esc(b.address || '') + '" placeholder="Ex: 12 rue des Lilas, 75000 Paris" maxlength="160">' +
       '<label>Description (facultatif)</label><textarea id="hc-b-desc" class="fi" rows="2">' + MX.esc(b.description || '') + '</textarea>' +
       '<label>Mode de fonctionnement thermique *</label><select id="hc-b-mode" class="fi">' +
       '<option value="manuel_assiste"' + (b.mode !== 'automatique' ? ' selected' : '') + '>Manuel assisté — MX propose, le technicien règle et confirme</option>' +
@@ -211,14 +511,14 @@
     if (!_canManage()) { _denyManage(); return; }
     var name = _strOrNull('hc-b-name');
     if (!name) { MX.toast('Le nom du bâtiment est obligatoire', true); return; }
-    var data = { name: name, description: _strOrNull('hc-b-desc') || '', mode: document.getElementById('hc-b-mode').value };
+    var data = { name: name, address: _strOrNull('hc-b-address') || '', description: _strOrNull('hc-b-desc') || '', mode: document.getElementById('hc-b-mode').value };
     var action = id ? MX.DB.updateHeatingBuilding(id, data, _currentUserName()) : MX.DB.addHeatingBuilding(data, _currentUserName());
     action.then(function () { MX.closeModal(); MX.toast(id ? 'Bâtiment mis à jour' : 'Bâtiment créé'); })
       .catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
   }
   function _archiveBuilding(id, archived) {
     if (!_canManage()) { _denyManage(); return; }
-    var msg = archived ? 'Archiver ce bâtiment ? Ses installations et pièces restent consultables dans l\'historique, mais ce bâtiment ne sera plus proposé pour un nouvel assignement.' : 'Réactiver ce bâtiment ?';
+    var msg = archived ? 'Archiver ce bâtiment ? Ses installations et zones thermiques restent consultables dans l\'historique, mais ce bâtiment ne sera plus proposé pour un nouvel assignement.' : 'Réactiver ce bâtiment ?';
     if (!confirm(msg)) return;
     MX.DB.archiveHeatingBuilding(id, archived, _currentUserName()).then(function () { MX.toast(archived ? 'Bâtiment archivé' : 'Bâtiment réactivé'); })
       .catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
@@ -229,7 +529,17 @@
   // la page CTA/VC. Formulaire complet avec association bâtiment, jamais
   // dupliqué : les modifications faites ici sont les MÊMES documents que
   // ceux affichés dans assets/js/pages/cta-vc.js.
+  // REFONTE CTA/VC Phase 6 — même vocabulaire que assets/js/pages/cta-vc.js
+  // (TYPE_LABELS ajouté ICI ET là-bas pour la correction de l'incohérence
+  // 'reseau_chauffage', voir plus bas) — un circuit créé/modifié depuis
+  // l'une ou l'autre page reste cohérent.
+  var TYPE_LABELS = { cta: 'CTA', vc: 'VC', reseau_chauffage: 'Réseau de chauffage', autre: 'Autre' };
   function _installationsHtml() {
+    if (_installationDetailId) {
+      var id = _installations.find(function (i) { return i.id === _installationDetailId; });
+      if (id) return _installationDetailHtml(id);
+      _installationDetailId = null; // installation introuvable (archivée/supprimée entretemps) -> retombe sur la liste
+    }
     var h = '<div class="ctavc-toolbar">' +
       '<label class="ctavc-check-inline"><input type="checkbox" ' + (_showArchived ? 'checked' : '') + ' onchange="MX.Pages.HeatingConfig._toggleArchived(this.checked)"> Afficher les installations archivées</label>' +
       (_canManage() ? '<button class="primary-btn" style="width:auto" onclick="MX.Pages.HeatingConfig._openInstallationForm(null)"><i class="fas fa-plus"></i> Ajouter une installation</button>' : '') + '</div>';
@@ -238,19 +548,237 @@
     h += '<div class="ctavc-circuit-grid">';
     list.forEach(function (i) {
       var building = _buildings.find(function (b) { return b.id === i.buildingId; });
-      h += '<div class="ctavc-circuit-card' + (i.archived ? ' ctavc-circuit-card--archived' : '') + '"' + (_canManage() ? ' onclick="MX.Pages.HeatingConfig._openInstallationForm(\'' + i.id + '\')"' : '') + '>' +
-        '<div class="ctavc-circuit-card-head"><span class="ctavc-circuit-type">' + MX.esc((i.type || '').toUpperCase() || '—') + '</span></div>' +
+      h += '<div class="ctavc-circuit-card' + (i.archived ? ' ctavc-circuit-card--archived' : '') + '" onclick="MX.Pages.HeatingConfig._openInstallationDetail(\'' + i.id + '\')">' +
+        (i.photoUrl
+          ? '<div class="ctavc-building-card-photo" style="background-image:url(&quot;' + MX.esc(i.photoUrl) + '&quot;)"></div>'
+          : '<div class="ctavc-building-card-photo ctavc-building-card-photo--empty"><i class="fas fa-diagram-project"></i></div>') +
+        '<div class="ctavc-circuit-card-head"><span class="ctavc-circuit-type">' + MX.esc(TYPE_LABELS[i.type] || (i.type || '').toUpperCase() || '—') + '</span></div>' +
         '<div class="ctavc-circuit-card-name">' + MX.esc(i.name || '(sans nom)') + (i.archived ? ' <span class="ctavc-archived-tag">archivé</span>' : '') + '</div>' +
         '<div class="ctavc-circuit-card-zone">' + (building ? MX.esc(building.name) : 'Non assigné') + '</div>' +
+        '<div class="ctavc-circuit-card-reg">' + (i.regulationType ? REG_LABELS[i.regulationType] || i.regulationType : 'Régulation non renseignée') + '</div>' +
       '</div>';
     });
     h += '</div>';
     h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Pour la saisie de relevés et le suivi des propositions MX, utilisez la page CTA/VC — cette page gère uniquement la configuration structurelle (bâtiment, limites techniques).</div>';
     return h;
   }
-  // Même vocabulaire que assets/js/pages/cta-vc.js:REG_LABELS (même
-  // collection heating_circuits, mêmes champs — un circuit créé/modifié
-  // depuis l'une ou l'autre page reste cohérent).
+  function _openInstallationDetail(id) { _installationDetailId = id; render(); }
+  // Même principe natif <details>/<summary> que assets/js/pages/cta-vc.js
+  // (_collapsibleOpenTag/_onConfigSectionToggle, Phase 4) — état ouvert/
+  // fermé propre à CETTE page, jamais partagé avec cta-vc.js (deux pages,
+  // deux sessions de repli indépendantes, pas persistées entre rechargements).
+  var _installSectionsOpen = { fields: true, zones: true, photo: true };
+  function _collapsibleOpenTag(key, icon, label) {
+    var open = _installSectionsOpen[key] !== false;
+    return '<div class="ctavc-card"><details class="ctavc-collapsible"' + (open ? ' open' : '') +
+      ' ontoggle="MX.Pages.HeatingConfig._onInstallSectionToggle(\'' + key + '\', this.open)">' +
+      '<summary class="ctavc-collapsible-toggle"><i class="fas ' + icon + '"></i><span>' + MX.esc(label) + '</span>' +
+      '<i class="fas fa-chevron-right ctavc-collapsible-chevron"></i></summary>' +
+      '<div class="ctavc-collapsible-body">';
+  }
+  function _collapsibleCloseTag() { return '</div></details></div>'; }
+  function _onInstallSectionToggle(key, open) { _installSectionsOpen[key] = !!open; }
+
+  // ── Fiche installation détaillée (nouvelle, Phase 6) — consultation
+  // seule ; Modifier/Archiver restent les SEULES actions d'écriture,
+  // identiques à avant (_openInstallationForm/_archiveInstallation,
+  // inchangées). ──
+  function _installationDetailHtml(c) {
+    var building = _buildings.find(function (b) { return b.id === c.buildingId; });
+    var h = '<button class="ctavc-back-btn" onclick="MX.Pages.HeatingConfig._setTab(\'installations\')"><i class="fas fa-arrow-left"></i> Retour aux installations</button>';
+    h += '<div class="ctavc-card">';
+    h += '<div class="ctavc-detail-head"><div>' +
+      '<div class="ctavc-detail-name">' + MX.esc(c.name || '(sans nom)') + (c.archived ? ' <span class="ctavc-archived-tag">archivé</span>' : '') + '</div>' +
+      '<div class="ctavc-detail-sub">' + MX.esc(TYPE_LABELS[c.type] || (c.type || '').toUpperCase() || '—') + (c.zone ? ' · ' + MX.esc(c.zone) : '') + '</div></div>' +
+      (_canManage() ? '<div class="ctavc-detail-actions"><button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openInstallationForm(\'' + c.id + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
+      '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._archiveInstallation(\'' + c.id + '\',' + (!c.archived) + ')"><i class="fas fa-box-archive"></i> ' + (c.archived ? 'Réactiver' : 'Archiver') + '</button></div>' : '') +
+    '</div>';
+    if (c.description) h += '<div class="ctavc-detail-desc">' + MX.esc(c.description) + '</div>';
+    h += '</div>';
+
+    h += _collapsibleOpenTag('fields', 'fa-circle-info', 'Caractéristiques techniques');
+    h += '<div class="ctavc-field-grid">';
+    h += _fieldRow('Bâtiment', building ? building.name : null);
+    h += _fieldRow('Emplacement / zone desservie', c.zone);
+    if (c.type === 'vc') h += _fieldRow('Plafond eau VC', typeof c.vcMaxTemp === 'number' ? c.vcMaxTemp + ' °C' : '50 °C (plafond par défaut)');
+    if (c.type === 'cta') {
+      h += _fieldRow('Plage de soufflage (air)', (typeof c.ctaRangeMin === 'number' && typeof c.ctaRangeMax === 'number') ? c.ctaRangeMin + '–' + c.ctaRangeMax + ' °C' : '18–22 °C (plage par défaut)');
+      h += _fieldRow('Limites eau de batterie', (typeof c.waterTempMin === 'number' && typeof c.waterTempMax === 'number') ? c.waterTempMin + '–' + c.waterTempMax + ' °C' : null);
+    }
+    h += _fieldRow('Type de régulation', c.regulationType ? REG_LABELS[c.regulationType] || c.regulationType : null);
+    if (c.regulationType === 'autre') h += _fieldRow('Description de la régulation', c.regulationDescription);
+    if (c.regulationType === 'vanne_3v' || c.regulationType === 'mixte') {
+      h += _fieldRow('Consigne eau de départ', typeof c.waterSetpoint === 'number' ? c.waterSetpoint + ' °C' : null);
+      h += _fieldRow('Loi d\'eau / courbe de chauffe', c.waterLawCurve);
+    }
+    if (c.regulationType === 'consigne' || c.regulationType === 'mixte') {
+      h += _fieldRow('Nature de la consigne', c.setpointType === 'ambiante' ? 'Température ambiante' : c.setpointType === 'eau' ? 'Température d\'eau' : (c.setpointType ? c.setpointType : null));
+      h += _fieldRow('Valeur de consigne', typeof c.setpointValue === 'number' ? c.setpointValue + (c.setpointUnit || '°C') : null);
+    }
+    h += _fieldRow('Température cible de la zone', typeof c.targetTemp === 'number' ? c.targetTemp + ' °C' : null);
+    h += _fieldRow('Température minimale autorisée', typeof c.tempMin === 'number' ? c.tempMin + ' °C' : null);
+    h += _fieldRow('Température maximale autorisée', typeof c.tempMax === 'number' ? c.tempMax + ' °C' : null);
+    h += '</div>';
+    h += _collapsibleCloseTag();
+
+    h += _collapsibleOpenTag('zones', 'fa-door-open', 'Zones thermiques associées (' + _roomsForInstallation(c.id).length + ')');
+    h += _installationZonesHtml(c.id);
+    h += _collapsibleCloseTag();
+
+    h += _collapsibleOpenTag('photo', 'fa-image', 'Photo de l\'installation');
+    h += _installationPhotoSectionHtml(c);
+    h += _collapsibleCloseTag();
+    return h;
+  }
+  // Lecture pure de heating_rooms.installationId (champ déjà existant,
+  // pour cette fonction) — une zone thermique n'apparaît
+  // ici que si CE lien précis la rattache à CETTE installation ; les zones
+  // sans installation (installationId absent/null) ne sont jamais
+  // affectées ni listées ici, elles restent "non rattachées" ailleurs
+  // (onglet Zones thermiques). Un seul passage filter() -> aucun doublon possible
+  // (chaque zone n'a qu'un seul installationId).
+  function _roomsForInstallation(installationId) {
+    return _rooms.filter(function (r) { return r.installationId === installationId; });
+  }
+  function _installationZonesHtml(installationId) {
+    var list = _roomsForInstallation(installationId).filter(function (r) { return _showArchived || !r.archived; });
+    if (!list.length) return '<div class="ctavc-empty-inline">Aucune zone thermique associée à cette installation pour le moment (voir l\'onglet Zones thermiques pour en associer une).</div>';
+    var h = '<div class="ctavc-hist-table"><table><thead><tr><th>Zone</th><th>Bâtiment</th><th>Étage/Zone</th><th>Cible</th><th>Suivie</th></tr></thead><tbody>';
+    list.forEach(function (r) {
+      var b = _buildings.find(function (x) { return x.id === r.buildingId; });
+      h += '<tr' + (r.archived ? ' style="opacity:.55"' : '') + '>' +
+        '<td>' + MX.esc(r.name) + (r.archived ? ' <span class="ctavc-archived-tag">archivée</span>' : '') + '</td>' +
+        '<td>' + (b ? MX.esc(b.name) : '—') + '</td>' +
+        '<td>' + (r.floorOrZone ? MX.esc(r.floorOrZone) : '—') + '</td>' +
+        '<td>' + (typeof r.targetTemp === 'number' ? r.targetTemp + '°C' : '—') + '</td>' +
+        '<td>' + (r.trackedActive ? 'Oui' : 'Non') + '</td>' +
+      '</tr>';
+    });
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  // ── Photo d'installation — EXACTEMENT le même flux que la photo de
+  // bâtiment (Phase 5) : aperçu + confirmation explicite, ordre de
+  // sauvegarde Storage -> Firestore -> nettoyage best-effort de l'ancienne
+  // image, HEIC via le même chargement différé partagé
+  // (_ensureHeic2anyLoaded), même compression dédiée (_compressBuildingPhoto
+  // RÉUTILISÉE telle quelle — mêmes contraintes de taille/dimensions, pas
+  // de 2e fonction de compression dupliquée). Seul ce qui touche au DOCUMENT
+  // (heating_circuits au lieu de heating_buildings) et au chemin Storage
+  // (heating_circuits/{id}/{fileName}, déjà couvert par storage.rules.
+  // draft-phase5) change. ──
+  function _installationPhotoSectionHtml(c) {
+    var h = '';
+    if (_pendingInstallationPhotoPreviewUrl) {
+      h += '<div class="etb-banner-preview" style="background-image:url(&quot;' + _pendingInstallationPhotoPreviewUrl + '&quot;)"></div>' +
+        '<div class="ctavc-hint-inline">Aperçu — la photo n\'est pas encore enregistrée.</div>' +
+        '<div class="etb-stt-actions">' +
+          '<button id="hc-i-photo-confirm-btn" class="primary-btn" onclick="MX.Pages.HeatingConfig._confirmInstallationPhoto(\'' + c.id + '\')"' + (_installationPhotoBusy ? ' disabled' : '') + '><i class="fas fa-check"></i> Enregistrer cette photo</button>' +
+          '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._cancelInstallationPhotoPick()"' + (_installationPhotoBusy ? ' disabled' : '') + '><i class="fas fa-xmark"></i> Annuler</button>' +
+        '</div>';
+    } else {
+      h += (c.photoUrl
+        ? '<div class="etb-banner-preview" style="background-image:url(&quot;' + MX.esc(c.photoUrl) + '&quot;)"></div>'
+        : '<div class="etb-banner-preview etb-banner-preview--empty"><i class="fas fa-diagram-project"></i><span>Aucune photo</span></div>') +
+        (_canManage() ? '<div class="etb-stt-actions">' +
+          '<button class="primary-btn" onclick="MX.Pages.HeatingConfig._pickInstallationPhoto(\'' + c.id + '\')"' + (_installationPhotoBusy ? ' disabled' : '') + '><i class="fas fa-' + (c.photoUrl ? 'rotate' : 'plus') + '"></i> ' + (c.photoUrl ? 'Remplacer' : 'Ajouter une photo') + '</button>' +
+          (c.photoUrl ? '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._removeInstallationPhoto(\'' + c.id + '\')"><i class="fas fa-trash"></i> Supprimer</button>' : '') +
+        '</div>' : '');
+    }
+    return h;
+  }
+  function _pickInstallationPhoto(installationId) {
+    if (!_canManage()) { _denyManage(); return; }
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif';
+    inp.onchange = function (e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var isHeic = _isHeicFile(file);
+      if (!isHeic && !/^image\/(jpeg|png|webp)$/.test(file.type)) {
+        MX.toast('Format non supporté (JPG, PNG, WebP ou HEIC uniquement)', true);
+        return;
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        MX.toast('Image trop volumineuse (15 Mo maximum avant compression)', true);
+        return;
+      }
+      _installationPhotoBusy = true;
+      render();
+      var ready = isHeic
+        ? (MX.toast('Conversion HEIC…'), _ensureHeic2anyLoaded().then(function () {
+            return window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+          }).then(function (result) { return Array.isArray(result) ? result[0] : result; }))
+        : Promise.resolve(file);
+      ready.then(function (readyFile) {
+        if (_pendingInstallationPhotoPreviewUrl) URL.revokeObjectURL(_pendingInstallationPhotoPreviewUrl);
+        _pendingInstallationPhotoFile = readyFile;
+        _pendingInstallationPhotoPreviewUrl = URL.createObjectURL(readyFile);
+        _installationPhotoBusy = false;
+        _installationDetailId = installationId;
+        render();
+      }).catch(function (err) {
+        console.error('[InstallationPhoto] Échec de la conversion HEIC', err);
+        MX.toast('Erreur lors de la conversion du fichier HEIC', true);
+        _installationPhotoBusy = false;
+        render();
+      });
+    };
+    inp.click();
+  }
+  function _cancelInstallationPhotoPick() {
+    if (_pendingInstallationPhotoPreviewUrl) URL.revokeObjectURL(_pendingInstallationPhotoPreviewUrl);
+    _pendingInstallationPhotoFile = null;
+    _pendingInstallationPhotoPreviewUrl = null;
+    render();
+  }
+  function _confirmInstallationPhoto(installationId) {
+    if (!_canManage()) { _denyManage(); return; }
+    if (!_pendingInstallationPhotoFile) return;
+    var file = _pendingInstallationPhotoFile;
+    _installationPhotoBusy = true;
+    render();
+    var newUrl = null;
+    _compressBuildingPhoto(file).then(function (compressed) {
+      return MX.DB.uploadInstallationPhoto(installationId, compressed);
+    }).then(function (url) {
+      newUrl = url;
+      var c = _installations.find(function (x) { return x.id === installationId; });
+      var oldUrl = c ? c.photoUrl : null;
+      return MX.DB.updateHeatingCircuit(installationId, { photoUrl: newUrl }, _currentUserName()).then(function () {
+        _cancelInstallationPhotoPick();
+        _installationPhotoBusy = false;
+        MX.toast('Photo de l\'installation mise à jour ✓');
+        render();
+        if (oldUrl) MX.DB.deleteInstallationPhotoImage(oldUrl); // best-effort, non bloquant, APRÈS succès confirmé
+      }).catch(function (saveErr) {
+        console.error('[InstallationPhoto] Échec sauvegarde Firestore — nettoyage de la nouvelle image, ancienne photo conservée', saveErr);
+        MX.DB.deleteInstallationPhotoImage(newUrl);
+        _installationPhotoBusy = false;
+        MX.toast('Erreur sauvegarde — l\'ancienne photo est conservée', true);
+        render();
+      });
+    }).catch(function (uploadErr) {
+      console.error('[InstallationPhoto] Échec upload — aucune suppression, aucune écriture Firestore', uploadErr);
+      _installationPhotoBusy = false;
+      MX.toast('Erreur lors de l\'envoi de la photo', true);
+      render();
+    });
+  }
+  function _removeInstallationPhoto(installationId) {
+    if (!_canManage()) { _denyManage(); return; }
+    var c = _installations.find(function (x) { return x.id === installationId; });
+    if (!c || !c.photoUrl) return;
+    if (!confirm('Supprimer la photo de cette installation ? L\'installation elle-même n\'est pas affectée.')) return;
+    var oldUrl = c.photoUrl;
+    MX.DB.updateHeatingCircuit(installationId, { photoUrl: firebase.firestore.FieldValue.delete() }, _currentUserName()).then(function () {
+      MX.toast('Photo supprimée');
+      render();
+      MX.DB.deleteInstallationPhotoImage(oldUrl); // best-effort, APRÈS la suppression de la référence Firestore
+    }).catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
+  }
   var REG_LABELS = { vanne_3v: 'Vanne 3 voies', consigne: 'Consigne', mixte: 'Mixte', autre: 'Autre' };
   function _openInstallationForm(id) {
     if (!_canManage()) { _denyManage(); return; }
@@ -395,7 +923,7 @@
   // (colonne "Dernier relevé" + indication qu'un relevé a déjà été saisi
   // aujourd'hui) — ne remplacent jamais la vraie moyenne calculée par
   // MX.HeatingEngine.computeBuildingAverageTemp (seule source de vérité
-  // pour les exclusions pièce non suivie/relevé périmé/manquant).
+  // pour les exclusions zone non suivie/relevé périmé/manquant).
   function _latestRoomReading(roomId) {
     var matches = _readings.filter(function (r) { return r.roomId === roomId && typeof r.temp === 'number'; });
     if (!matches.length) return null;
@@ -406,19 +934,58 @@
     });
   }
   function _piecesHtml() {
+    if (_roomDetailId) {
+      var rd = _rooms.find(function (r) { return r.id === _roomDetailId; });
+      if (rd) return _roomDetailHtml(rd);
+      _roomDetailId = null; // zone introuvable (archivée/supprimée entretemps) -> retombe sur la liste
+    }
     var h = '<div class="ctavc-toolbar">' +
-      '<label class="ctavc-check-inline"><input type="checkbox" ' + (_showArchived ? 'checked' : '') + ' onchange="MX.Pages.HeatingConfig._toggleArchived(this.checked)"> Afficher les pièces archivées</label>' +
+      '<label class="ctavc-check-inline"><input type="checkbox" ' + (_showArchived ? 'checked' : '') + ' onchange="MX.Pages.HeatingConfig._toggleArchived(this.checked)"> Afficher les zones archivées</label>' +
       '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openRoomReadingForm(null)"><i class="fas fa-temperature-half"></i> Nouveau relevé de température</button>' +
-      (_canManage() ? '<button class="primary-btn" style="width:auto" onclick="MX.Pages.HeatingConfig._openRoomForm(null)"><i class="fas fa-plus"></i> Ajouter une pièce</button>' : '') + '</div>';
-    if (!_buildings.length) { h += '<div class="ctavc-empty-inline">Créez d\'abord un bâtiment pour pouvoir y ajouter des pièces.</div>'; return h; }
+      (_canManage() ? '<button class="primary-btn" style="width:auto" onclick="MX.Pages.HeatingConfig._openRoomForm(null)"><i class="fas fa-plus"></i> Ajouter une zone thermique</button>' : '') + '</div>';
+    if (!_buildings.length) { h += '<div class="ctavc-empty-inline">Créez d\'abord un bâtiment pour pouvoir y ajouter des zones thermiques.</div>'; return h; }
     var list = _rooms.filter(function (r) { return _showArchived || !r.archived; });
-    if (!list.length) { h += '<div class="ctavc-empty"><i class="fas fa-door-open"></i><div>Aucune pièce créée.</div></div>'; return h; }
-    h += '<div class="ctavc-hist-table"><table><thead><tr><th>Pièce</th><th>Bâtiment</th><th>Étage/Zone</th><th>Cible</th><th>Dernier relevé</th><th>Suivi</th><th></th></tr></thead><tbody>';
-    list.forEach(function (r) {
-      var building = _buildings.find(function (b) { return b.id === r.buildingId; });
+    if (!list.length) { h += '<div class="ctavc-empty"><i class="fas fa-door-open"></i><div>Aucune zone thermique créée.</div></div>'; return h; }
+    h += _roomGroupsHtml(list);
+    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Seules les zones cochées "Suivie" (et non archivées) ET dont le dernier relevé n\'est pas périmé participent à la température moyenne du bâtiment — voir la fiche du bâtiment (Courbe de référence) et la page CTA/VC. Un relevé manquant n\'est jamais compté comme 0°C, il est exclu.</div>';
+    return h;
+  }
+  // REFONTE CTA/VC Phase 7 — regroupement Bâtiment → Installation principale
+  // → Zones thermiques (demande utilisateur, point 4). Lecture pure de
+  // heating_rooms.installationId (champ existant, inchangé) : AUCUNE zone
+  // n'est jamais comptée dans deux groupes (chaque zone n'a qu'un seul
+  // installationId), et AUCUNE n'est jamais masquée (une zone sans
+  // installation principale valide — null, ou pointant vers une
+  // installation archivée/introuvable — retombe systématiquement dans le
+  // groupe "Non rattachée à une installation" DE SON PROPRE BÂTIMENT,
+  // jamais perdue, jamais dans le groupe d'un autre bâtiment).
+  function _roomGroupsHtml(list) {
+    var h = '';
+    _buildings.forEach(function (building) {
+      var buildingRooms = list.filter(function (r) { return r.buildingId === building.id; });
+      if (!buildingRooms.length) return;
+      var buildingInstallations = _installations.filter(function (i) { return i.buildingId === building.id && !i.archived; });
+      var matchedIds = [];
+      buildingInstallations.forEach(function (inst) {
+        var rooms = buildingRooms.filter(function (r) { return r.installationId === inst.id; });
+        if (!rooms.length) return;
+        matchedIds.push(inst.id);
+        h += _roomGroupTableHtml(building, inst.name, rooms);
+      });
+      var unassigned = buildingRooms.filter(function (r) { return !r.installationId || matchedIds.indexOf(r.installationId) === -1; });
+      if (unassigned.length) h += _roomGroupTableHtml(building, null, unassigned);
+    });
+    return h;
+  }
+  function _roomGroupTableHtml(building, installationName, rooms) {
+    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-door-open"></i> ' +
+      MX.esc(building.name) + ' — ' + (installationName ? MX.esc(installationName) : 'Non rattachée à une installation') + '</div>';
+    h += '<div class="ctavc-hist-table"><table><thead><tr><th>Zone thermique</th><th>Étage/Zone</th><th>Cible</th><th>Dernier relevé</th><th>Suivi</th><th></th></tr></thead><tbody>';
+    rooms.forEach(function (r) {
       var lastReading = _latestRoomReading(r.id);
       h += '<tr' + (r.archived ? ' style="opacity:.55"' : '') + '>' +
-        '<td>' + MX.esc(r.name) + '</td><td>' + (building ? MX.esc(building.name) : '—') + '</td><td>' + (r.floorOrZone ? MX.esc(r.floorOrZone) : '—') + '</td>' +
+        '<td><button style="background:none;border:none;padding:0;font-weight:700;color:var(--cyan);cursor:pointer;font-family:var(--ffs)" onclick="MX.Pages.HeatingConfig._openRoomDetail(\'' + r.id + '\')">' + MX.esc(r.name) + (r.archived ? ' <span class="ctavc-archived-tag">archivée</span>' : '') + '</button></td>' +
+        '<td>' + (r.floorOrZone ? MX.esc(r.floorOrZone) : '—') + '</td>' +
         '<td>' + (typeof r.targetTemp === 'number' ? r.targetTemp + '°C' : '—') + '</td>' +
         '<td>' + (lastReading ? lastReading.temp + '°C — ' + _fmtDateTime(lastReading.recordedAt) + (lastReading.author ? ' (' + MX.esc(lastReading.author) + ')' : '') : '<span class="ctavc-field-value--na">Aucun relevé</span>') + '</td>' +
         '<td><label class="ctavc-check-inline"><input type="checkbox" ' + (r.trackedActive ? 'checked' : '') + ' ' + (_canManage() ? '' : 'disabled') + ' onchange="MX.Pages.HeatingConfig._toggleRoomTracked(\'' + r.id + '\', this.checked)"> Suivie</label></td>' +
@@ -426,20 +993,76 @@
         (_canManage() ? '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openRoomForm(\'' + r.id + '\')"><i class="fas fa-pen"></i></button> ' +
         '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._archiveRoom(\'' + r.id + '\',' + (!r.archived) + ')"><i class="fas fa-box-archive"></i></button>' : '') + '</td></tr>';
     });
-    h += '</tbody></table></div>';
-    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Seules les pièces cochées "Suivie" (et non archivées) ET dont le dernier relevé n\'est pas périmé participent à la température moyenne du bâtiment — voir l\'onglet Courbes et la page CTA/VC. Un relevé manquant n\'est jamais compté comme 0°C, il est exclu.</div>';
+    h += '</tbody></table></div></div>';
     return h;
   }
+  function _openRoomDetail(id) { _roomDetailId = id; render(); }
+  // ── Fiche zone thermique détaillée (nouvelle, Phase 7) — consultation
+  // seule ; Modifier/Archiver restent les SEULES actions d'écriture
+  // disponibles ici (_openRoomForm/_archiveRoom, inchangées). Historique
+  // individuel : RÉUTILISE MX.HeatingEngine.buildRoomTemperatureSeries et
+  // _roomSeriesChartSvg à l'identique de l'outil de comparaison multi-
+  // zones de l'onglet Courbes (demande utilisateur : "ne pas créer un
+  // deuxième moteur de calcul") — ici avec une série unique (cette zone
+  // seule), les deux outils coexistent sans duplication de logique. ──
+  function _roomDetailHtml(r) {
+    var building = _buildings.find(function (b) { return b.id === r.buildingId; });
+    var installation = r.installationId ? _installations.find(function (i) { return i.id === r.installationId; }) : null;
+    var secondaryIds = r.circuitIds || []; // absence = tableau vide (compatibilité anciennes zones, point 2)
+    var secondaryNames = secondaryIds.map(function (cid) {
+      var c = _installations.find(function (i) { return i.id === cid; });
+      return c ? c.name : null;
+    }).filter(function (n) { return n; });
 
-  // Relevé de température de pièce — formulaire RÉEL (pas une maquette),
+    var h = '<button class="ctavc-back-btn" onclick="MX.Pages.HeatingConfig._setTab(\'pieces\')"><i class="fas fa-arrow-left"></i> Retour aux zones thermiques</button>';
+    h += '<div class="ctavc-card">';
+    h += '<div class="ctavc-detail-head"><div>' +
+      '<div class="ctavc-detail-name">' + MX.esc(r.name || '(sans nom)') + (r.archived ? ' <span class="ctavc-archived-tag">archivée</span>' : '') + '</div>' +
+      '<div class="ctavc-detail-sub">' + (building ? MX.esc(building.name) : 'Bâtiment non assigné') + (r.floorOrZone ? ' · ' + MX.esc(r.floorOrZone) : '') + '</div></div>' +
+      (_canManage() ? '<div class="ctavc-detail-actions"><button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openRoomForm(\'' + r.id + '\')"><i class="fas fa-pen"></i> Modifier</button>' +
+      '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._archiveRoom(\'' + r.id + '\',' + (!r.archived) + ')"><i class="fas fa-box-archive"></i> ' + (r.archived ? 'Réactiver' : 'Archiver') + '</button></div>' : '') +
+    '</div></div>';
+
+    h += _collapsibleOpenTag('zoneGeneral', 'fa-circle-info', 'Informations générales');
+    h += '<div class="ctavc-field-grid">';
+    h += _fieldRow('Bâtiment', building ? building.name : null);
+    h += _fieldRow('Installation principale', installation ? installation.name : null);
+    h += _fieldRow('Circuits secondaires', secondaryNames.length ? secondaryNames.join(', ') : null);
+    h += _fieldRow('Étage / zone', r.floorOrZone);
+    h += _fieldRow('Température cible', typeof r.targetTemp === 'number' ? r.targetTemp + ' °C' : null);
+    h += _fieldRow('Zone suivie (moyenne du bâtiment)', r.trackedActive ? 'Oui' : 'Non');
+    h += '</div>';
+    h += _collapsibleCloseTag();
+
+    h += _collapsibleOpenTag('zoneHistory', 'fa-thermometer-half', 'Historique individuel des températures');
+    h += '<div class="ctavc-toolbar">' +
+      '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openRoomReadingForm(\'' + r.id + '\')"><i class="fas fa-temperature-half"></i> Nouveau relevé</button>' +
+      '<select class="fi" style="width:auto" onchange="MX.Pages.HeatingConfig._setRoomDetailDays(this.value)">' +
+      [7, 14, 30].map(function (d) { return '<option value="' + d + '"' + (d === _roomDetailDays ? ' selected' : '') + '>' + d + ' derniers jours</option>'; }).join('') + '</select>' +
+    '</div>';
+    var hist = MX.HeatingEngine.buildRoomTemperatureSeries(r.id, _readings, _roomDetailDays, Date.now(), r.targetTemp);
+    h += _roomSeriesChartSvg([{ room: r, color: _COMPARE_COLORS[0], data: hist }]);
+    h += '<div class="ctavc-field-grid">' +
+      _fieldRow('Dernier relevé', hist.lastPoint ? hist.lastPoint.temp + ' °C (' + hist.lastPoint.date + ')' : null) +
+      _fieldRow('Écart à la cible', hist.deviation !== null ? (hist.deviation > 0 ? '+' : '') + hist.deviation + ' °C' : null) +
+      _fieldRow('Jours sans relevé (' + _roomDetailDays + ' derniers jours)', hist.missingDays.length + ' / ' + _roomDetailDays) +
+    '</div>';
+    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Seuls les relevés réellement saisis sont affichés — un jour sans relevé apparaît comme un trou dans la courbe, jamais comme une valeur devinée.</div>';
+    h += _collapsibleCloseTag();
+    return h;
+  }
+  var _roomDetailDays = 14;
+  function _setRoomDetailDays(days) { _roomDetailDays = parseInt(days, 10) || 14; render(); }
+
+  // Relevé de température de zone thermique — formulaire RÉEL (pas une maquette),
   // ouvert à TOUT rôle authentifié (jamais gardé par _canManage() : voir
   // assets/js/pages/cta-vc.js:_openReadingForm, même principe pour les
   // relevés de circuit — "consultation + relevés autorisés" pour un
   // Technicien, voir assets/js/app.js pour l'accès en lecture à cette
-  // page). Plusieurs relevés par jour pour la même pièce sont TOUJOURS
+  // page). Plusieurs relevés par jour pour la même zone sont TOUJOURS
   // acceptés (append-only, aucune fusion, aucune limite).
   function _openRoomReadingForm(presetRoomId) {
-    if (!_buildings.length || !_rooms.length) { MX.toast('Créez d\'abord un bâtiment et une pièce', true); return; }
+    if (!_buildings.length || !_rooms.length) { MX.toast('Créez d\'abord un bâtiment et une zone thermique', true); return; }
     var presetRoom = presetRoomId ? _rooms.find(function (r) { return r.id === presetRoomId; }) : null;
     var presetBuildingId = presetRoom ? presetRoom.buildingId : (_buildings[0] && _buildings[0].id);
     var now = new Date();
@@ -448,14 +1071,14 @@
     var body = '<div class="ctavc-form">' +
       '<label>Bâtiment *</label><select id="hc-rr-building" class="fi" onchange="MX.Pages.HeatingConfig._onRoomReadingBuildingChange(this.value)">' +
       _buildings.filter(function (b) { return !b.archived; }).map(function (b) { return '<option value="' + b.id + '"' + (b.id === presetBuildingId ? ' selected' : '') + '>' + MX.esc(b.name) + '</option>'; }).join('') + '</select>' +
-      '<label>Pièce *</label><select id="hc-rr-room" class="fi">' + _roomOptionsHtml(presetBuildingId, presetRoomId) + '</select>' +
+      '<label>Zone thermique *</label><select id="hc-rr-room" class="fi">' + _roomOptionsHtml(presetBuildingId, presetRoomId) + '</select>' +
       '<label>Température ambiante (°C) *</label><input id="hc-rr-temp" class="fi" type="number" step="0.1" placeholder="Ex: 19.5">' +
       '<label>Date et heure du relevé *</label><input id="hc-rr-datetime" class="fi" type="datetime-local" value="' + nowLocal + '">' +
       '<label>Auteur</label><div class="ctavc-form-static">' + MX.esc(_currentUserName()) + '</div>' +
       '<label>Commentaire (facultatif)</label><input id="hc-rr-comment" class="fi" placeholder="Ex: fenêtre entrouverte">' +
     '</div>';
     MX.showModal({
-      title: 'Nouveau relevé de température de pièce', body: body, noAutoClose: true,
+      title: 'Nouveau relevé de température de zone thermique', body: body, noAutoClose: true,
       actions: [
         { label: 'Enregistrer', cls: 'primary-btn', fn: function () { _submitRoomReadingForm(); } },
         { label: 'Annuler', cls: 'cancel', fn: function () { MX.closeModal(); } },
@@ -465,7 +1088,7 @@
   }
   function _roomOptionsHtml(buildingId, selectedRoomId) {
     var rooms = _rooms.filter(function (r) { return r.buildingId === buildingId && !r.archived; });
-    if (!rooms.length) return '<option value="" disabled selected>Aucune pièce active pour ce bâtiment</option>';
+    if (!rooms.length) return '<option value="" disabled selected>Aucune zone thermique active pour ce bâtiment</option>';
     return rooms.map(function (r) { return '<option value="' + r.id + '"' + (r.id === selectedRoomId ? ' selected' : '') + '>' + MX.esc(r.name) + (r.floorOrZone ? ' (' + MX.esc(r.floorOrZone) + ')' : '') + '</option>'; }).join('');
   }
   function _onRoomReadingBuildingChange(buildingId) {
@@ -475,7 +1098,7 @@
   function _submitRoomReadingForm() {
     var roomEl = document.getElementById('hc-rr-room');
     var roomId = roomEl ? roomEl.value : null;
-    if (!roomId) { MX.toast('Sélectionnez une pièce', true); return; }
+    if (!roomId) { MX.toast('Sélectionnez une zone thermique', true); return; }
     var temp = _numOrNull('hc-rr-temp');
     if (temp === null) { MX.toast('Température obligatoire', true); return; }
     var dtEl = document.getElementById('hc-rr-datetime');
@@ -493,17 +1116,19 @@
     _editingRoom = id ? _rooms.find(function (r) { return r.id === id; }) : null;
     var r = _editingRoom || {};
     var body = '<div class="ctavc-form">' +
-      '<label>Nom de la pièce *</label><input id="hc-r-name" class="fi" value="' + MX.esc(r.name || '') + '" placeholder="Ex: Chambre 101" maxlength="80">' +
+      '<label>Nom de la zone thermique *</label><input id="hc-r-name" class="fi" value="' + MX.esc(r.name || '') + '" placeholder="Ex: Chambre 101" maxlength="80">' +
       '<label>Bâtiment *</label><select id="hc-r-building" class="fi">' +
       _buildings.filter(function (b) { return !b.archived; }).map(function (b) { return '<option value="' + b.id + '"' + (r.buildingId === b.id ? ' selected' : '') + '>' + MX.esc(b.name) + '</option>'; }).join('') + '</select>' +
       '<label>Étage / zone (facultatif)</label><input id="hc-r-floor" class="fi" value="' + MX.esc(r.floorOrZone || '') + '" placeholder="Ex: Étage 1">' +
-      '<label>Installation associée (facultatif)</label><select id="hc-r-installation" class="fi"><option value="">— Aucune —</option>' +
+      '<label>Installation principale (facultatif)</label><select id="hc-r-installation" class="fi" onchange="MX.Pages.HeatingConfig._onRoomInstallationChange(this.value)"><option value="">— Aucune —</option>' +
       _installations.filter(function (i) { return !i.archived; }).map(function (i) { return '<option value="' + i.id + '"' + (r.installationId === i.id ? ' selected' : '') + '>' + MX.esc(i.name) + '</option>'; }).join('') + '</select>' +
+      '<label>Circuits secondaires (facultatif — exclut automatiquement l\'installation principale ci-dessus)</label>' +
+      '<div id="hc-r-circuitids">' + _roomCircuitIdsOptionsHtml(r.installationId || '', r.circuitIds || []) + '</div>' +
       '<label>Température cible (°C, facultatif)</label><input id="hc-r-target" class="fi" type="number" step="0.5" value="' + (typeof r.targetTemp === 'number' ? r.targetTemp : '') + '">' +
-      '<label class="ctavc-check-inline"><input type="checkbox" id="hc-r-tracked" ' + (r.trackedActive !== false ? 'checked' : '') + '> Pièce suivie (participe à la moyenne du bâtiment)</label>' +
+      '<label class="ctavc-check-inline"><input type="checkbox" id="hc-r-tracked" ' + (r.trackedActive !== false ? 'checked' : '') + '> Zone thermique suivie (participe à la moyenne du bâtiment)</label>' +
     '</div>';
     MX.showModal({
-      title: _editingRoom ? 'Modifier la pièce' : 'Ajouter une pièce', body: body, noAutoClose: true,
+      title: _editingRoom ? 'Modifier la zone thermique' : 'Ajouter une zone thermique', body: body, noAutoClose: true,
       actions: [
         { label: _editingRoom ? 'Enregistrer' : 'Créer', cls: 'primary-btn', fn: function () { _submitRoomForm(id); } },
         { label: 'Annuler', cls: 'cancel', fn: function () { MX.closeModal(); } },
@@ -511,21 +1136,67 @@
     });
     setTimeout(function () { var el = document.getElementById('hc-r-name'); if (el) el.focus(); }, 50);
   }
+  // REFONTE CTA/VC Phase 7 — circuitIds[] (champ ADDITIF, défaut []) :
+  // circuits secondaires d'une zone, DISTINCTS de l'installation principale
+  // (installationId, inchangée). L'installation déjà choisie comme
+  // principale est TOUJOURS exclue de cette liste (jamais proposée comme
+  // case à cocher) — garantit structurellement qu'aucun doublon ne peut
+  // être créé depuis ce formulaire à l'affichage ; le retrait explicite
+  // ci-dessous (_onRoomInstallationChange) couvre le cas où l'utilisateur
+  // CHANGE l'installation principale alors qu'elle était déjà cochée en
+  // secondaire — jamais une modification silencieuse (avertissement
+  // affiché, demande utilisateur point 3).
+  function _roomCircuitIdsOptionsHtml(excludeId, checkedIds) {
+    var options = _installations.filter(function (i) { return !i.archived && i.id !== excludeId; });
+    if (!options.length) return '<div class="ctavc-hint-inline">Aucune autre installation disponible.</div>';
+    return '<div style="display:flex;flex-direction:column;gap:4px">' + options.map(function (i) {
+      var checked = checkedIds.indexOf(i.id) !== -1;
+      return '<label class="ctavc-check-inline"><input type="checkbox" class="hc-r-circuitid-cb" value="' + i.id + '" ' + (checked ? 'checked' : '') + '> ' + MX.esc(i.name) + '</label>';
+    }).join('') + '</div>';
+  }
+  function _collectCheckedCircuitIdsFromDom() {
+    return Array.prototype.slice.call(document.querySelectorAll('#hc-r-circuitids .hc-r-circuitid-cb:checked')).map(function (el) { return el.value; });
+  }
+  function _onRoomInstallationChange(installationId) {
+    var checked = _collectCheckedCircuitIdsFromDom();
+    var hadDuplicate = !!(installationId && checked.indexOf(installationId) !== -1);
+    if (hadDuplicate) checked = checked.filter(function (cid) { return cid !== installationId; });
+    var el = document.getElementById('hc-r-circuitids');
+    if (el) el.innerHTML = _roomCircuitIdsOptionsHtml(installationId || '', checked);
+    if (hadDuplicate) {
+      var inst = _installations.find(function (i) { return i.id === installationId; });
+      MX.toast('« ' + (inst ? inst.name : 'Cette installation') + ' » a été retiré(e) des circuits secondaires : elle devient l\'installation principale de cette zone.', true);
+    }
+  }
   function _submitRoomForm(id) {
     if (!_canManage()) { _denyManage(); return; }
     var name = _strOrNull('hc-r-name');
-    if (!name) { MX.toast('Le nom de la pièce est obligatoire', true); return; }
+    if (!name) { MX.toast('Le nom de la zone thermique est obligatoire', true); return; }
     var buildingId = document.getElementById('hc-r-building').value;
     if (!buildingId) { MX.toast('Un bâtiment est obligatoire', true); return; }
+    var installationId = document.getElementById('hc-r-installation').value || null;
+    var circuitIds = _collectCheckedCircuitIdsFromDom();
+    // Garde défensive (deuxième niveau, en plus de l'exclusion déjà
+    // appliquée à l'affichage et au changement d'installation ci-dessus) —
+    // ne devrait normalement jamais se déclencher depuis ce formulaire,
+    // mais couvre une zone existante dont les données seraient déjà
+    // incohérentes (créée avant cette phase, ou modifiée hors UI) : jamais
+    // un enregistrement silencieux du doublon, toujours un avertissement.
+    if (installationId && circuitIds.indexOf(installationId) !== -1) {
+      circuitIds = circuitIds.filter(function (cid) { return cid !== installationId; });
+      var inst = _installations.find(function (i) { return i.id === installationId; });
+      MX.toast('« ' + (inst ? inst.name : 'Cette installation') + ' » a été retiré(e) des circuits secondaires avant l\'enregistrement (déjà installation principale).', true);
+    }
     var data = {
       name: name, buildingId: buildingId,
       floorOrZone: _strOrNull('hc-r-floor') || '',
-      installationId: document.getElementById('hc-r-installation').value || null,
+      installationId: installationId,
+      circuitIds: circuitIds,
       targetTemp: _numOrNull('hc-r-target'),
       trackedActive: document.getElementById('hc-r-tracked').checked,
     };
     var action = id ? MX.DB.updateHeatingRoom(id, data, _currentUserName()) : MX.DB.addHeatingRoom(data, _currentUserName());
-    action.then(function () { MX.closeModal(); MX.toast(id ? 'Pièce mise à jour' : 'Pièce créée'); })
+    action.then(function () { MX.closeModal(); MX.toast(id ? 'Zone thermique mise à jour' : 'Zone thermique créée'); })
       .catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
   }
   function _toggleRoomTracked(id, checked) {
@@ -534,58 +1205,19 @@
   }
   function _archiveRoom(id, archived) {
     if (!_canManage()) { _denyManage(); return; }
-    var msg = archived ? 'Archiver cette pièce ? Ses relevés déjà enregistrés restent conservés dans l\'historique.' : 'Réactiver cette pièce ?';
+    var msg = archived ? 'Archiver cette zone thermique ? Ses relevés déjà enregistrés restent conservés dans l\'historique.' : 'Réactiver cette zone thermique ?';
     if (!confirm(msg)) return;
-    MX.DB.archiveHeatingRoom(id, archived, _currentUserName()).then(function () { MX.toast(archived ? 'Pièce archivée' : 'Pièce réactivée'); })
+    MX.DB.archiveHeatingRoom(id, archived, _currentUserName()).then(function () { MX.toast(archived ? 'Zone thermique archivée' : 'Zone thermique réactivée'); })
       .catch(function (e) { MX.toast('Erreur : ' + (e.message || e), true); });
   }
 
-  // ════════════════════════════ COURBES DJU / TEMPÉRATURE ════════════════════════════
-  function _courbesHtml() {
-    if (!_buildings.length) return '<div class="ctavc-empty-inline">Créez d\'abord un bâtiment pour programmer sa courbe thermique.</div>';
-    if (!_curveBuildingId || !_buildings.some(function (b) { return b.id === _curveBuildingId; })) _curveBuildingId = _buildings[0].id;
-    var building = _buildings.find(function (b) { return b.id === _curveBuildingId; });
-    var h = '<div class="ctavc-toolbar"><select class="fi" style="width:auto" onchange="MX.Pages.HeatingConfig._setCurveBuilding(this.value)">' +
-      _buildings.map(function (b) { return '<option value="' + b.id + '"' + (b.id === _curveBuildingId ? ' selected' : '') + '>' + MX.esc(b.name) + '</option>'; }).join('') + '</select>' +
-      (_canManage() ? '<button class="primary-btn" style="width:auto" onclick="MX.Pages.HeatingConfig._openCurvePointForm(null)"><i class="fas fa-plus"></i> Ajouter un point de courbe</button>' : '') + '</div>';
-
-    var points = _curvePoints.filter(function (p) { return p.buildingId === _curveBuildingId; }).sort(function (a, b) { return a.dju - b.dju; });
-    h += '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-chart-line"></i> Courbe de référence programmée — ' + MX.esc(building.name) + '</div>';
-    if (points.length < 2) {
-      h += '<div class="ctavc-empty-inline">Au moins 2 points sont nécessaires pour tracer une courbe (actuellement ' + points.length + '). Aucune valeur n\'est jamais inventée : saisissez les points vous-même ou importez-les depuis des données fiables.</div>';
-    } else {
-      h += _curveChartSvg(points);
-    }
-    h += '</div>';
-
-    h += '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-list"></i> Points programmés (' + points.length + ')</div>';
-    if (!points.length) {
-      h += '<div class="ctavc-empty-inline">Aucun point programmé pour ce bâtiment.</div>';
-    } else {
-      h += '<div class="ctavc-hist-table"><table><thead><tr><th>DJU</th><th>Température intérieure attendue</th><th>Période</th><th></th></tr></thead><tbody>';
-      points.forEach(function (p) {
-        h += '<tr><td>' + p.dju + '</td><td>' + p.expectedIndoorTemp + ' °C</td><td>' + (p.periodLabel ? MX.esc(p.periodLabel) : '—') + '</td>' +
-          '<td>' + (_canManage() ? '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._openCurvePointForm(\'' + p.id + '\')"><i class="fas fa-pen"></i></button> ' +
-          '<button class="cso-ibtn" onclick="MX.Pages.HeatingConfig._deleteCurvePoint(\'' + p.id + '\')"><i class="fas fa-trash"></i></button>' : '') + '</td></tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-    h += '</div>';
-
-    h += _curveAnalysisHtml(building, points);
-    h += _roomComparisonHtml(building);
-    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Cette courbe est un outil de surveillance et d\'anticipation thermique — ce n\'est jamais une loi d\'eau et elle ne commande jamais directement le chauffage.</div>';
-    return h;
-  }
-  function _setCurveBuilding(id) { _curveBuildingId = id; render(); }
-
   // ── COMPARAISON INDIVIDUELLE DES PIÈCES (demande utilisateur, passe de
-  // finalisation) — sélection libre d'une ou plusieurs pièces du bâtiment
-  // affiché (ANY pièce, pas seulement celles "suivies" pour la moyenne :
+  // finalisation) — sélection libre d'une ou plusieurs zones du bâtiment
+  // affiché (ANY zone, pas seulement celles "suivies" pour la moyenne :
   // ceci est un outil de diagnostic, pas le calcul de moyenne lui-même),
   // évolution réelle jour par jour (MX.HeatingEngine.buildRoomTemperatureSeries
   // — jamais une valeur inventée pour combler un relevé manquant), comparée
-  // à la température CIBLE de chaque pièce. Sélection en mémoire seulement
+  // à la température CIBLE de chaque zone. Sélection en mémoire seulement
   // (pas persistée) : un simple outil d'exploration, pas une configuration.
   var _compareRoomIds = [];
   var _compareDays = 14;
@@ -598,9 +1230,9 @@
   var _COMPARE_COLORS = ['var(--cyan)', 'var(--orange)', 'var(--green)', 'var(--purple, #a78bfa)', 'var(--red)'];
   function _roomComparisonHtml(building) {
     var buildingRooms = _rooms.filter(function (r) { return r.buildingId === building.id && !r.archived; });
-    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-door-open"></i> Comparaison individuelle des pièces</div>';
+    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-door-open"></i> Comparaison individuelle des zones thermiques</div>';
     if (!buildingRooms.length) {
-      h += '<div class="ctavc-empty-inline">Aucune pièce créée pour ce bâtiment — voir l\'onglet Pièces.</div></div>';
+      h += '<div class="ctavc-empty-inline">Aucune zone thermique créée pour ce bâtiment — voir l\'onglet Zones thermiques.</div></div>';
       return h;
     }
     h += '<div class="ctavc-toolbar">';
@@ -614,7 +1246,7 @@
 
     var selectedRooms = buildingRooms.filter(function (r) { return _compareRoomIds.indexOf(r.id) !== -1; });
     if (!selectedRooms.length) {
-      h += '<div class="ctavc-empty-inline">Sélectionnez une ou plusieurs pièces ci-dessus pour afficher leur évolution réelle de température.</div></div>';
+      h += '<div class="ctavc-empty-inline">Sélectionnez une ou plusieurs zones thermiques ci-dessus pour afficher leur évolution réelle de température.</div></div>';
       return h;
     }
     var series = selectedRooms.map(function (r, i) {
@@ -625,7 +1257,7 @@
       };
     });
     h += _roomSeriesChartSvg(series);
-    h += '<div class="ctavc-hist-table"><table><thead><tr><th>Pièce</th><th>Dernier relevé</th><th>Température cible</th><th>Écart</th><th>Jours sans relevé (' + _compareDays + ' derniers jours)</th></tr></thead><tbody>';
+    h += '<div class="ctavc-hist-table"><table><thead><tr><th>Zone thermique</th><th>Dernier relevé</th><th>Température cible</th><th>Écart</th><th>Jours sans relevé (' + _compareDays + ' derniers jours)</th></tr></thead><tbody>';
     series.forEach(function (s) {
       h += '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + s.color + ';margin-right:6px"></span>' + MX.esc(s.room.name) + '</td>' +
         '<td>' + (s.data.lastPoint ? s.data.lastPoint.temp + ' °C (' + s.data.lastPoint.date + ')' : '<span class="ctavc-field-value--na">Aucun relevé</span>') + '</td>' +
@@ -638,7 +1270,7 @@
     h += '</div>';
     return h;
   }
-  // Graphique SVG multi-séries (X = jour, Y = température) — une pièce par
+  // Graphique SVG multi-séries (X = jour, Y = température) — une zone par
   // ligne de couleur, un relevé manquant interrompt VISIBLEMENT le tracé
   // (jamais relié d'un point à l'autre à travers un trou, qui donnerait
   // l'illusion d'une mesure continue inventée).
@@ -701,105 +1333,6 @@
 
   function _r1(v) { return Math.round(v * 10) / 10; }
 
-  // ANALYSE DJU / TEMPÉRATURE INTÉRIEURE — raccordement complet (demande
-  // utilisateur, passe de finalisation) : compare DJU observé, DJU
-  // prévisionnel, température intérieure moyenne RÉELLE, température
-  // intérieure CIBLE (= la courbe programmée interpolée au DJU du jour —
-  // MX.HeatingEngine.interpolateCurve, jamais extrapolée), écart réel, et
-  // évolution sur plusieurs jours (MX.HeatingEngine.analyzeCurveDeviation,
-  // apparié à la VRAIE météo du jour — jamais un DJU inventé pour un jour
-  // sans donnée). Objectif explicite de l'utilisateur : détecter une baisse
-  // de température intérieure avant qu'elle ne devienne problématique —
-  // voir la comparaison DJU prévisionnel / seuil de dégradation ci-dessous.
-  function _curveAnalysisHtml(building, points) {
-    var h = '<div class="ctavc-card"><div class="ctavc-card-head"><i class="fas fa-magnifying-glass-chart"></i> Analyse DJU / température intérieure</div>';
-    if (_weatherStatus === 'unconfigured') { h += '<div class="ctavc-empty-inline">Localisation de l\'établissement non configurée (voir Paramètres) — DJU indisponible.</div></div>'; return h; }
-    if (!_weatherSeries) { h += '<div class="ctavc-empty-inline">Météo en cours de chargement…</div></div>'; return h; }
-    var selectedRoomIds = _rooms.filter(function (r) { return r.buildingId === building.id && r.trackedActive && !r.archived; }).map(function (r) { return r.id; });
-    if (!selectedRoomIds.length) { h += '<div class="ctavc-empty-inline">Aucune pièce suivie pour ce bâtiment — voir l\'onglet Pièces.</div></div>'; return h; }
-
-    var today = _todayStr();
-    var past = _weatherSeries.filter(function (d) { return d.kind === 'observed' && typeof d.dju === 'number'; });
-    var next = _weatherSeries.filter(function (d) { return d.kind === 'forecast' && typeof d.dju === 'number'; });
-    var todayDay = _weatherSeries.find(function (d) { return d.date === today; });
-    var djuObserved = todayDay && typeof todayDay.dju === 'number' ? todayDay.dju : (past.length ? past[past.length - 1].dju : null);
-    var djuForecastNext = next.length ? next[0].dju : null;
-
-    var avgNow = MX.HeatingEngine.computeBuildingAverageTemp(selectedRoomIds, _rooms, _readings, Date.now(), building.readingFreshnessHours);
-    var hasCurve = points.length >= 2;
-    var expectedToday = (hasCurve && djuObserved !== null) ? MX.HeatingEngine.interpolateCurve(points, djuObserved) : null;
-    var expectedNext = (hasCurve && djuForecastNext !== null) ? MX.HeatingEngine.interpolateCurve(points, djuForecastNext) : null;
-    var gapToday = (avgNow.value !== null && expectedToday !== null) ? _r1(avgNow.value - expectedToday) : null;
-
-    h += '<div class="ctavc-field-grid">' +
-      _fieldRow('DJU observé (aujourd\'hui)', djuObserved !== null ? djuObserved.toFixed(1) : null) +
-      _fieldRow('DJU prévisionnel (demain)', djuForecastNext !== null ? djuForecastNext.toFixed(1) : null) +
-      _fieldRow('Température intérieure moyenne (' + avgNow.sampleCount + ' pièce(s))', avgNow.value !== null ? avgNow.value + ' °C' : null) +
-      _fieldRow('Température intérieure cible (courbe programmée au DJU du jour)', expectedToday !== null ? expectedToday + ' °C' : (hasCurve ? null : 'Courbe non programmée (2 points minimum)')) +
-      _fieldRow('Écart réel à la cible', gapToday !== null ? (gapToday > 0 ? '+' : '') + gapToday + ' °C' : null) +
-    '</div>';
-
-    if (!hasCurve) { h += '<div class="ctavc-hint-inline">Programmez au moins 2 points de courbe ci-dessus pour activer la comparaison à une température cible.</div></div>'; return h; }
-
-    // Évolution sur plusieurs jours — échantillons RÉELS uniquement (jour
-    // avec relevé de pièce ET donnée météo disponible, jamais l'un inventé
-    // pour l'autre).
-    var dailySeries = MX.HeatingEngine.buildBuildingDailyAverageSeries(selectedRoomIds, _rooms, _readings, 14, Date.now());
-    var samples = [];
-    dailySeries.points.forEach(function (p) {
-      if (p.temp === null) return;
-      var wd = _weatherSeries.find(function (d) { return d.date === p.date; });
-      if (!wd || typeof wd.dju !== 'number') return;
-      samples.push({ dju: wd.dju, actualTemp: p.temp, date: p.date });
-    });
-    var analysis = MX.HeatingEngine.analyzeCurveDeviation(points, samples, 1);
-
-    if (!samples.length) {
-      h += '<div class="ctavc-empty-inline">Aucun jour des 14 derniers jours ne dispose à la fois d\'un relevé de pièce ET d\'une donnée météo — l\'évolution sur plusieurs jours n\'est pas encore exploitable.</div></div>';
-      return h;
-    }
-
-    // FIABILITÉ STATISTIQUE (demande utilisateur, passe de fiabilisation) —
-    // seuils EXPLICITES et DOCUMENTÉS (voir MX.HeatingEngine.
-    // DJU_ANALYSIS_MIN_PARTIAL/DJU_ANALYSIS_MIN_SUFFICIENT) : la fiabilité
-    // des données est TOUJOURS affichée avant toute conclusion, et un
-    // échantillon "insuffisant" (moins de 3 jours exploitables) ne produit
-    // JAMAIS de seuil de dégradation ni d'alerte — même s'il existe un
-    // écart apparent sur les 1-2 points disponibles. "Deux jours de
-    // mesures ne doivent jamais produire une recommandation à confiance
-    // élevée" (consigne explicite).
-    var sufficiencyLabel = { suffisant: 'Données suffisantes', partiel: 'Données partielles — confiance limitée', insuffisant: 'Données insuffisantes' }[analysis.dataSufficiency];
-    var sufficiencyClass = { suffisant: 'ctavc-confidence--haute', partiel: 'ctavc-confidence--moyenne', insuffisant: 'ctavc-confidence--faible' }[analysis.dataSufficiency];
-    h += '<div class="ctavc-hint-inline"><span class="ctavc-confidence ' + sufficiencyClass + '">' + sufficiencyLabel + '</span> — ' + analysis.sampleCount + ' jour(s) exploitable(s) sur 14 ' +
-      '(seuils : &lt;' + MX.HeatingEngine.DJU_ANALYSIS_MIN_PARTIAL + ' = insuffisant, ' + MX.HeatingEngine.DJU_ANALYSIS_MIN_PARTIAL + '-' + (MX.HeatingEngine.DJU_ANALYSIS_MIN_SUFFICIENT - 1) + ' = partiel, ≥' + MX.HeatingEngine.DJU_ANALYSIS_MIN_SUFFICIENT + ' = suffisant).</div>';
-
-    if (analysis.dataSufficiency === 'insuffisant') {
-      h += '<div class="ctavc-empty-inline">Échantillon trop réduit (' + analysis.sampleCount + ' jour(s)) pour détecter un quelconque seuil de dégradation de façon fiable — aucune conclusion n\'est présentée tant que moins de ' + MX.HeatingEngine.DJU_ANALYSIS_MIN_PARTIAL + ' jours ne sont disponibles. Continuez à saisir des relevés pour affiner l\'analyse.</div>';
-    } else if (analysis.degradationFromDju !== null) {
-      // Objectif explicite : détecter une baisse AVANT qu'elle devienne
-      // problématique -> compare le seuil de dégradation détecté au DJU
-      // prévisionnel de demain. Jamais présenté comme une alerte forte
-      // tant que les données restent "partielles".
-      var alerte = djuForecastNext !== null && djuForecastNext >= analysis.degradationFromDju;
-      h += '<div class="ctavc-cap-warning' + (alerte && analysis.dataSufficiency === 'suffisant' ? ' ctavc-cap-warning--power' : '') + '"><i class="fas fa-triangle-exclamation"></i> ' +
-        (analysis.dataSufficiency === 'partiel' ? '[Confiance limitée — données partielles] ' : '') +
-        'Ce bâtiment commence à perdre en température à partir de DJU ' + analysis.degradationFromDju.toFixed(1) + ' (écart observé sur les relevés disponibles).' +
-        (alerte ? ' Le DJU prévisionnel de demain (' + djuForecastNext.toFixed(1) + ') atteint ou dépasse ce seuil — anticipez une vérification/un réglage avant que la baisse ne devienne problématique.' : '') +
-      '</div>';
-    } else {
-      h += '<div class="ctavc-hint-inline">Aucun seuil de dégradation détecté sur les échantillons disponibles (écarts dans la marge normale).</div>';
-    }
-
-    h += '<div class="ctavc-hist-table"><table><thead><tr><th>Date</th><th>DJU</th><th>Temp. réelle</th><th>Temp. attendue</th><th>Écart</th></tr></thead><tbody>';
-    analysis.rows.slice().reverse().forEach(function (r) {
-      h += '<tr' + (r.deviation <= -1 ? ' style="color:var(--orange)"' : '') + '><td>' + (r.date || '—') + '</td><td>' + r.dju.toFixed(1) + '</td><td>' + r.actualTemp + ' °C</td><td>' + r.expectedTemp + ' °C</td><td>' + (r.deviation > 0 ? '+' : '') + r.deviation + ' °C</td></tr>';
-    });
-    h += '</tbody></table></div>';
-    h += '<div class="ctavc-hint"><i class="fas fa-circle-info"></i> Analyse statistique simple à titre indicatif (pas un apprentissage automatique) — ' + samples.length + ' jour(s) exploitable(s) sur les 14 derniers.</div>';
-    h += '</div>';
-    return h;
-  }
-
   function _openCurvePointForm(id) {
     if (!_canManage()) { _denyManage(); return; }
     var p = id ? _curvePoints.find(function (x) { return x.id === id; }) : null;
@@ -837,11 +1370,19 @@
   window.MX.Pages.HeatingConfig = {
     render: render, _destroy: _destroy, _setTab: _setTab, _toggleArchived: _toggleArchived,
     _openBuildingForm: _openBuildingForm, _archiveBuilding: _archiveBuilding,
+    _openBuildingDetail: _openBuildingDetail, _pickBuildingPhoto: _pickBuildingPhoto,
+    _cancelBuildingPhotoPick: _cancelBuildingPhotoPick, _confirmBuildingPhoto: _confirmBuildingPhoto,
+    _removeBuildingPhoto: _removeBuildingPhoto,
     _openInstallationForm: _openInstallationForm, _onInstallationTypeChange: _onInstallationTypeChange, _archiveInstallation: _archiveInstallation,
     _onInstallationBuildingChange: _onInstallationBuildingChange, _onRegTypeChange: _onRegTypeChange,
+    _openInstallationDetail: _openInstallationDetail, _onInstallSectionToggle: _onInstallSectionToggle,
+    _pickInstallationPhoto: _pickInstallationPhoto, _cancelInstallationPhotoPick: _cancelInstallationPhotoPick,
+    _confirmInstallationPhoto: _confirmInstallationPhoto, _removeInstallationPhoto: _removeInstallationPhoto,
     _openRoomForm: _openRoomForm, _toggleRoomTracked: _toggleRoomTracked, _archiveRoom: _archiveRoom,
+    _openRoomDetail: _openRoomDetail, _setRoomDetailDays: _setRoomDetailDays,
+    _onRoomInstallationChange: _onRoomInstallationChange,
     _openRoomReadingForm: _openRoomReadingForm, _onRoomReadingBuildingChange: _onRoomReadingBuildingChange, _submitRoomReadingForm: _submitRoomReadingForm,
-    _setCurveBuilding: _setCurveBuilding, _openCurvePointForm: _openCurvePointForm, _deleteCurvePoint: _deleteCurvePoint,
+    _openCurvePointForm: _openCurvePointForm, _deleteCurvePoint: _deleteCurvePoint,
     _toggleCompareRoom: _toggleCompareRoom, _setCompareDays: _setCompareDays,
   };
 })();

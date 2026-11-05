@@ -1678,6 +1678,33 @@
   async function archiveHeatingCircuit(id, archived, actor) {
     await updateHeatingCircuit(id, { archived: !!archived }, actor);
   }
+  // REFONTE CTA/VC Phase 6 — photo d'installation. Même idiome EXACT que
+  // uploadBuildingPhoto/deleteBuildingPhotoImage (Phase 5) : même timeout
+  // (60s), même mécanisme task.on('state_changed'), même nettoyage
+  // best-effort. Chemin heating_circuits/{circuitId}/{uuid}.jpg — déjà
+  // couvert par storage.rules.draft-phase5 (testé par émulateur, voir
+  // tests/storage_rules_phase5_test.js, section 5).
+  async function uploadInstallationPhoto(installationId, file) {
+    if (!storage) throw new Error("Firebase Storage non disponible");
+    const { uuid } = window.MX;
+    const ref = storage.ref(`heating_circuits/${installationId}/${uuid()}.jpg`);
+    return await new Promise((resolve, reject) => {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; reject(new Error("Upload timeout")); }
+      }, 60000);
+      const task = ref.put(file, { contentType: "image/jpeg" });
+      task.on('state_changed', null,
+        err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
+        async () => { if (!done) { done = true; clearTimeout(timer); resolve(await task.snapshot.ref.getDownloadURL()); } }
+      );
+    });
+  }
+  async function deleteInstallationPhotoImage(url) {
+    if (!storage || !url) return;
+    try { await storage.refFromURL(url).delete(); }
+    catch (e) { console.warn('[InstallationPhoto] Échec suppression ancienne image Storage (non bloquant) :', e); }
+  }
 
   function listenHeatingReadings(cb, onError) {
     return R_HEATING_READINGS().orderBy('recordedAt', 'desc').limit(500).onSnapshot(snap => {
@@ -1834,6 +1861,35 @@
   }
   async function archiveHeatingBuilding(id, archived, actor) {
     await updateHeatingBuilding(id, { archived: !!archived }, actor);
+  }
+  // REFONTE CTA/VC Phase 5 — photo de bâtiment. Même idiome EXACT que
+  // uploadHeroBanner (db.js:1244) : même timeout (60s), même mécanisme
+  // task.on('state_changed'). Chemin heating_buildings/{buildingId}/{uuid}.jpg
+  // — scopé par bâtiment, conforme à storage.rules.draft-phase5 (testé par
+  // émulateur, voir tests/storage_rules_phase5_test.js).
+  async function uploadBuildingPhoto(buildingId, file) {
+    if (!storage) throw new Error("Firebase Storage non disponible");
+    const { uuid } = window.MX;
+    const ref = storage.ref(`heating_buildings/${buildingId}/${uuid()}.jpg`);
+    return await new Promise((resolve, reject) => {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; reject(new Error("Upload timeout")); }
+      }, 60000);
+      const task = ref.put(file, { contentType: "image/jpeg" });
+      task.on('state_changed', null,
+        err => { if (!done) { done = true; clearTimeout(timer); reject(err); } },
+        async () => { if (!done) { done = true; clearTimeout(timer); resolve(await task.snapshot.ref.getDownloadURL()); } }
+      );
+    });
+  }
+  // Suppression best-effort — n'échoue jamais bruyamment (même limite déjà
+  // acceptée pour hero_banner : un blob orphelin non nettoyé n'est ni une
+  // perte de donnée Firestore, ni un risque de sécurité, voir l'audit).
+  async function deleteBuildingPhotoImage(url) {
+    if (!storage || !url) return;
+    try { await storage.refFromURL(url).delete(); }
+    catch (e) { console.warn('[BuildingPhoto] Échec suppression ancienne image Storage (non bloquant) :', e); }
   }
 
   // ── PIÈCES ── alimentent la courbe thermique moyenne du bâtiment (voir
@@ -2016,6 +2072,7 @@
     listenCsoAlerts,
     getWeeklyChecks, saveWeeklyChecks, deleteWeeklyChecks, updateWeeklyTasks, promoteWeeklyToActive,
     listenHeatingCircuits, addHeatingCircuit, updateHeatingCircuit, archiveHeatingCircuit,
+    uploadInstallationPhoto, deleteInstallationPhotoImage,
     listenHeatingReadings, addHeatingReading,
     listenHeatingRecommendations, addHeatingRecommendation, setHeatingRecommendationStatus, expireHeatingRecommendation,
     addHeatingProposal, validateHeatingProposal, refuseHeatingProposal, reportHeatingProposal,
@@ -2024,6 +2081,7 @@
     saveWeatherDailyBatch, listenWeatherDailyRange,
     // CONFIGURATION THERMIQUE (bâtiments/pièces/courbes/audit)
     listenHeatingBuildings, addHeatingBuilding, updateHeatingBuilding, archiveHeatingBuilding,
+    uploadBuildingPhoto, deleteBuildingPhotoImage,
     listenHeatingRooms, addHeatingRoom, updateHeatingRoom, archiveHeatingRoom, addRoomReading,
     listenHeatingCurvePoints, addHeatingCurvePoint, updateHeatingCurvePoint, deleteHeatingCurvePoint,
     listenHeatingAudit,

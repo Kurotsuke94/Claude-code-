@@ -25887,6 +25887,22 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ctavc-card-head i:first-child { color:var(--cyan); }
 .ctavc-hint-inline { font-size:11px; font-weight:400; color:var(--text3); }
 
+/* REFONTE CTA/VC Phase 4 — sections repliables (config CTA/VC, fiche
+   circuit détaillée). Pattern <details>/<summary> natif déjà utilisé
+   ailleurs dans Maintix (voir .or-form-advanced, org-resp.js) — seulement
+   réétiqueté .ctavc-* pour la cohérence visuelle du module ; mêmes
+   variables de thème que .ctavc-card-head, donc lisible en clair/sombre
+   sans aucune couleur codée en dur. */
+.ctavc-collapsible { margin:0; }
+.ctavc-collapsible summary { list-style:none; cursor:pointer; }
+.ctavc-collapsible summary::-webkit-details-marker { display:none; }
+.ctavc-collapsible-toggle { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700; color:var(--text1); }
+.ctavc-collapsible-toggle i:first-child { color:var(--cyan); }
+.ctavc-collapsible-toggle span { flex:1; }
+.ctavc-collapsible-chevron { font-size:12px; color:var(--text3); transition:transform .15s; }
+.ctavc-collapsible[open] .ctavc-collapsible-chevron { transform:rotate(90deg); }
+.ctavc-collapsible-body { margin-top:12px; }
+
 .ctavc-vigilance { margin-left:auto; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.03em; }
 .ctavc-vigilance--haute { background:rgba(239,68,68,.12); color:var(--red); }
 .ctavc-vigilance--moderee { background:rgba(249,115,22,.12); color:var(--orange); }
@@ -25920,6 +25936,49 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ctavc-wd-cell-dju { font-size:10px; font-weight:700; color:var(--cyan); }
 .ctavc-wd-cell-dju--forecast { opacity:.65; font-style:italic; }
 
+/* ── REFONTE CTA/VC Phase 1 — bandeau d'indicateurs Vue d'ensemble ──
+   Classes dédiées (plutôt que la réutilisation de .acc-kpi de l'Accueil,
+   couplée visuellement à l'en-tête dégradé de cette page — texte blanc
+   fixe, illisible sur le fond de carte .ctavc-card ici) : mêmes variables
+   de thème que le reste du module CTA/VC (var(--bg3)/--border2/--text*),
+   donc lisibles en thème clair et sombre sans aucune couleur codée en dur
+   hors icônes (qui restent, comme le reste du module, les teintes de
+   marque violet/bleu/orange déjà utilisées ailleurs dans Maintix). */
+.ctavc-kpi-band { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:8px; }
+.ctavc-kpi-tile { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; background:var(--bg4,var(--bg2)); border:1px solid var(--border2); border-radius:10px; padding:10px 6px; text-align:center; }
+.ctavc-kpi-tile i { font-size:15px; margin-bottom:2px; }
+.ctavc-kpi-tile-val { font-size:19px; font-weight:800; font-family:var(--ffm); color:var(--text1); line-height:1; }
+.ctavc-kpi-tile-lbl { font-size:9.5px; color:var(--text3); text-align:center; line-height:1.3; margin-top:2px; }
+.ctavc-kpi-tile--cyan i { color:var(--cyan); }
+.ctavc-kpi-tile--orange i { color:var(--orange); }
+.ctavc-kpi-tile--red i { color:var(--red); }
+.ctavc-kpi-tile--violet i { color:#A78BFA; }
+@media (max-width:480px) { .ctavc-kpi-band { grid-template-columns:repeat(2,1fr); } }
+
+/* REFONTE CTA/VC Phase 3 — comparaison deux périodes (Historique &
+   analyse) : deux panneaux de statistiques côte à côte sur desktop, empilés
+   sur mobile — jamais superposés/fusionnés visuellement (légende distincte
+   déjà portée par le titre de chaque .ctavc-stats-block). */
+.ctavc-compare-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:600px) { .ctavc-compare-grid { grid-template-columns:1fr; } }
+
+/* Tableaux compacts (suivi des circuits, recommandations prioritaires) —
+   mêmes variables que .ctavc-field-row/.ctavc-hist-table pour rester
+   cohérent avec le reste du module. */
+.ctavc-compact-table { width:100%; overflow-x:auto; }
+.ctavc-compact-table table { width:100%; border-collapse:collapse; font-size:12px; }
+.ctavc-compact-table th { text-align:left; font-size:10.5px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.02em; padding:6px 8px; border-bottom:1px solid var(--border2); white-space:nowrap; }
+.ctavc-compact-table td { padding:7px 8px; border-bottom:1px solid var(--border1); color:var(--text1); vertical-align:middle; }
+.ctavc-compact-table tr:last-child td { border-bottom:none; }
+.ctavc-compact-table tr.ctavc-compact-row--clickable { cursor:pointer; }
+.ctavc-compact-table tr.ctavc-compact-row--clickable:hover td { background:var(--bg4,var(--bg2)); }
+.ctavc-gap-pos { color:var(--orange); font-weight:700; }
+.ctavc-gap-neg { color:var(--cyan); font-weight:700; }
+.ctavc-gap-na { color:var(--text3); font-style:italic; }
+.ctavc-trend-arrow--up { color:var(--orange); }
+.ctavc-trend-arrow--down { color:var(--cyan); }
+.ctavc-trend-arrow--flat { color:var(--text3); }
+
 .ctavc-circuit-mini-list { display:flex; flex-direction:column; gap:6px; }
 .ctavc-circuit-mini, .ctavc-circuit-mini-list button.ctavc-circuit-mini {
   display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
@@ -25947,6 +26006,15 @@ textarea.fi { min-height: 80px; resize: vertical; line-height: 1.5; }
 .ctavc-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .ctavc-check-inline { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text2); }
 
+.ctavc-building-card-photo {
+  width: 100%; height: 110px; border-radius: 8px; margin-bottom: 8px;
+  background-size: cover; background-position: center; background-color: var(--bg2);
+}
+.ctavc-building-card-photo--empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text3); border: 1px dashed var(--border2);
+}
+.ctavc-building-card-photo--empty i { font-size: 22px; opacity: .5; }
 .ctavc-circuit-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
 .ctavc-circuit-card { background:var(--bg3); border:1px solid var(--border2); border-radius:12px; padding:14px; cursor:pointer; transition:border-color .15s; display:flex; flex-direction:column; gap:4px; }
 .ctavc-circuit-card:hover { border-color:var(--cyan); }

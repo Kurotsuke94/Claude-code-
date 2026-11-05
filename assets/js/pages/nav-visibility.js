@@ -32,7 +32,7 @@
     // raison que CTA/VC ci-dessus (passe de finalisation — voir
     // assets/js/app.js:buildNav(), désormais un item de navigation
     // principal, plus un sous-item PILOTAGE réservé Responsable/Admin).
-    { id: 'heating-config',       label: 'Configuration thermique',  desc: 'Bâtiments, installations, pièces, courbes DJU', family: 'GESTION' },
+    { id: 'heating-config',       label: 'Configuration thermique',  desc: 'Bâtiments, installations et zones thermiques', family: 'GESTION' },
     { id: 'anly',                 label: 'Analyses',                 desc: 'Analyses et statistiques',          family: 'GESTION' },
     { id: 'maint',                label: 'Maintenance PMP',          desc: 'Maintenance préventive',            family: 'GESTION' },
     { id: 'mxdoc',                label: 'MX Doc',                   desc: 'Documentation technique',           family: 'GESTION' },

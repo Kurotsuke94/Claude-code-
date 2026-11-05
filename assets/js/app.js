@@ -101,10 +101,10 @@
     if (id === "cta-vc")        return Pages.CtaVc ? Pages.CtaVc.render() : null;
     // SÉCURISATION (passe de finalisation) : plus de redirection ici — la
     // page elle-même est désormais ouverte à tout rôle authentifié en
-    // consultation + relevés de pièce (voir heating-config.js:render()),
+    // consultation + relevés de zone thermique (voir heating-config.js:render()),
     // même principe que "cta-vc" juste au-dessus. La configuration
-    // structurelle (bâtiments/installations/pièces/courbes) reste réservée
-    // Responsable/Admin, protégée individuellement dans heating-config.js
+    // structurelle (bâtiments/installations/zones thermiques/courbes) reste
+    // réservée Responsable/Admin, protégée individuellement dans heating-config.js
     // ET côté serveur (firestore.rules.draft-claims-migration).
     if (id === "heating-config") return Pages.HeatingConfig ? Pages.HeatingConfig.render() : null;
     if (id === "mes-missions")  return Pages.MesMissions ? Pages.MesMissions.render() : (Pages.Checklist.renderForRole ? Pages.Checklist.renderForRole() : null);
@@ -549,7 +549,7 @@
     // réservées à canSeeAll() — voir MX.Pages.CtaVc._canManage() dans
     // cta-vc.js, qui protège chaque action, pas seulement l'affichage du
     // menu ; même principe pour la configuration structurelle des
-    // bâtiments/installations/pièces/courbes, protégée dans
+    // bâtiments/installations/zones thermiques/courbes, protégée dans
     // heating-config.js lui-même et côté serveur.
     const _ctaVcSee  = _see('cta-vc')          && _nv('cta-vc');
     const _heatSee   = _see('heating-config')  && _nv('heating-config');
@@ -578,8 +578,7 @@
         [
           { tab: 'batiments',     icon: 'fa-building',                l: 'Bâtiments' },
           { tab: 'installations', icon: 'fa-temperature-three-quarters', l: 'Installations' },
-          { tab: 'pieces',        icon: 'fa-door-open',               l: 'Pièces' },
-          { tab: 'courbes',       icon: 'fa-chart-line',              l: 'Courbes DJU / température' },
+          { tab: 'pieces',        icon: 'fa-door-open',               l: 'Zones thermiques' },
         ].forEach(t => {
           ctavcItems += `<button class="sx-item sx-sub" onclick="MX.showHeatingConfigTab('${t.tab}')" title="${t.l}"><i class="fas ${t.icon} sx-ico"></i><span class="sx-lbl">${t.l}</span></button>`;
         });
@@ -659,9 +658,9 @@
       // CONFIGURATION THERMIQUE déplacée hors de PILOTAGE (passe de
       // finalisation) — voir plus bas, désormais visible aux techniciens
       // aussi (_see('heating-config') au lieu de canAll), même principe que
-      // CTA / VC ci-dessous : consultation + relevés de pièce ouverts à
+      // CTA / VC ci-dessous : consultation + relevés de zone thermique ouverts à
       // tous, la configuration structurelle (bâtiments/installations/
-      // pièces/courbes) reste protégée dans heating-config.js lui-même.
+      // zones thermiques/courbes) reste protégée dans heating-config.js lui-même.
       // CTA / VC déplacé hors de PILOTAGE vers la navigation principale,
       // juste au-dessus du groupe "Analyses" — voir plus bas, désormais
       // visible aux techniciens aussi (_see('cta-vc') au lieu de canAll) :
@@ -3453,8 +3452,7 @@
         [
           { tab: 'batiments',     icon: 'fa-building',                  l: 'Bâtiments' },
           { tab: 'installations', icon: 'fa-temperature-three-quarters', l: 'Installations' },
-          { tab: 'pieces',        icon: 'fa-door-open',                 l: 'Pièces' },
-          { tab: 'courbes',       icon: 'fa-chart-line',                l: 'Courbes DJU / température' },
+          { tab: 'pieces',        icon: 'fa-door-open',                 l: 'Zones thermiques' },
         ].forEach(t => {
           ctavcSubHtml += `<button class="mob-drw-fav" onclick="MX.closeMobileDrawer();MX.showHeatingConfigTab('${t.tab}')"><i class="fas ${t.icon}"></i><span>${t.l}</span></button>`;
         });

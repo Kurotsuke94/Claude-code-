@@ -677,6 +677,253 @@
     return { points: points, missingDays: missingDays };
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // INDICATEURS VUE D'ENSEMBLE (REFONTE CTA/VC, Phase 1) — fonction pure,
+  // aucune lecture Firestore ici (toutes les listes sont déjà chargées par
+  // l'appelant via les listeners existants de cta-vc.js, aucune nouvelle
+  // requête). Centralisée ici (plutôt qu'inline dans cta-vc.js) pour que
+  // l'onglet Historique & analyse (Phase 3) réutilise EXACTEMENT le même
+  // calcul et affiche toujours les mêmes chiffres pour les mêmes données —
+  // jamais deux logiques de comptage différentes pour la même notion.
+  //
+  // Chaque seuil est une constante nommée, documentée, jamais un nombre
+  // "magique" recopié ailleurs :
+  //  - CIRCUIT_TRACKED_WINDOW_DAYS : un circuit est "suivi" s'il a reçu au
+  //    moins un relevé dans cette fenêtre (sinon il est configuré mais pas
+  //    activement surveillé).
+  //  - CIRCUIT_CHECK_STALE_DAYS : au-delà, une vérification technique du
+  //    circuit (lastCheckedAt) est considérée périmée.
+  //  - READING_RECENT_DAYS : fenêtre "relevé récent" (tous types confondus,
+  //    circuit et pièce).
+  //  - READING_STALE_DAYS : au-delà (ou en l'absence totale de relevé), un
+  //    circuit suivi est compté comme "relevé ancien ou manquant" — les deux
+  //    cas sont comptés ensemble dans l'indicateur mais restent distingués
+  //    dans le détail retourné (voir `readingsStaleOrMissing.items[].reason`)
+  //    pour un affichage honnête ("il y a N jours" vs "aucun relevé —
+  //    relevé nécessaire"), jamais fondus en un seul libellé.
+  //
+  // Aucune donnée absente n'est jamais transformée en 0 : un compteur sans
+  // donnée exploitable vaut 0 PARCE QU'aucun élément ne remplit la
+  // condition, jamais parce qu'une valeur manquante a été traitée comme
+  // nulle (voir chaque filtre ci-dessous, qui exclut explicitement — jamais
+  // ne substitue — une donnée absente).
+  // ══════════════════════════════════════════════════════════════════════
+  var CIRCUIT_TRACKED_WINDOW_DAYS = 30;
+  var CIRCUIT_CHECK_STALE_DAYS = 90;
+  var READING_RECENT_DAYS = 7;
+  var READING_STALE_DAYS = 14;
+
+  function _daysAgoMs(days) { return days * 24 * 60 * 60 * 1000; }
+
+  // Dernier relevé (le plus récent, toute source confondue) d'UN circuit —
+  // jamais un relevé de pièce (roomId) compté par erreur comme relevé de
+  // circuit (voir db.js : un relevé porte soit circuitId, soit roomId,
+  // jamais les deux ni aucun des deux).
+  function _lastCircuitReadingMs(circuitId, readings) {
+    var last = null;
+    (readings || []).forEach(function (r) {
+      if (r.circuitId !== circuitId) return;
+      var ms = _tsToMs(r.recordedAt);
+      if (ms !== null && (last === null || ms > last)) last = ms;
+    });
+    return last;
+  }
+
+  // Écarts thermiques "anomalie" détectés par bâtiment via le même moteur
+  // que l'analyse courbe DJU (voir analyzeCurveDeviation ci-dessus) — exige
+  // au moins 2 points de courbe programmés ET un échantillon suffisant
+  // (DJU_ANALYSIS_MIN_SUFFICIENT), sinon le bâtiment est simplement exclu du
+  // compte (jamais une anomalie affirmée sur des données insuffisantes).
+  function _buildingCurveDegradations(buildings, rooms, readings, curvePointsByBuilding, weatherSeries, nowMs) {
+    if (!weatherSeries || !weatherSeries.length) return [];
+    var out = [];
+    (buildings || []).filter(function (b) { return !b.archived; }).forEach(function (b) {
+      var points = curvePointsByBuilding[b.id] || [];
+      if (points.length < 2) return;
+      var trackedRoomIds = (rooms || []).filter(function (r) { return r.buildingId === b.id && r.trackedActive && !r.archived; }).map(function (r) { return r.id; });
+      if (!trackedRoomIds.length) return;
+      var daily = buildBuildingDailyAverageSeries(trackedRoomIds, rooms, readings, 14, nowMs);
+      var samples = [];
+      daily.points.forEach(function (p) {
+        if (p.temp === null) return;
+        var wd = weatherSeries.find(function (d) { return d.date === p.date; });
+        if (!wd || typeof wd.dju !== 'number') return;
+        samples.push({ dju: wd.dju, actualTemp: p.temp, date: p.date });
+      });
+      var analysis = analyzeCurveDeviation(points, samples, 1);
+      // CORRECTIF (vérification Phase 1) : analyzeCurveDeviation() retourne
+      // un degradationFromDju non-null dès la fiabilité 'partiel' (comportement
+      // EXISTANT et voulu pour l'affichage détaillé de heating-config.js, qui
+      // qualifie alors explicitement le résultat "Confiance limitée" — jamais
+      // modifié ici). Mais un chiffre de KPI compact ("Anomalies : N"), sans
+      // cette nuance affichée à côté, ne doit JAMAIS compter un résultat
+      // 'partiel' comme une anomalie confirmée — seul 'suffisant' (échantillon
+      // atteignant réellement DJU_ANALYSIS_MIN_SUFFICIENT) est retenu ici,
+      // conformément au plan validé : "compté UNIQUEMENT si l'échantillon
+      // atteint DJU_ANALYSIS_MIN_SUFFICIENT". Un bâtiment en zone 'partiel'
+      // reste donc exclu du compte, jamais affirmé comme anomalie confirmée.
+      if (analysis.dataSufficiency === 'suffisant' && analysis.degradationFromDju !== null) {
+        out.push({ buildingId: b.id, degradationFromDju: analysis.degradationFromDju, worstDeviation: analysis.worstDeviation, dataSufficiency: analysis.dataSufficiency });
+      }
+    });
+    return out;
+  }
+
+  // computeOverviewIndicators(opts) :
+  //  circuits, readings, recommendations, buildings, rooms : listes déjà
+  //    chargées (aucune requête ici). curvePointsByBuilding : map buildingId
+  //    -> points de courbe (déjà groupés par l'appelant, ou {} si absent).
+  //    weatherSeries : série déjà calculée par MX.Dju.buildDailySeries (ou
+  //    null tant que non chargée — l'indicateur "anomalies" liées à la
+  //    courbe est alors simplement vide, jamais une anomalie inventée).
+  //    now : Date.now() par défaut, injectable pour les tests.
+  function computeOverviewIndicators(opts) {
+    opts = opts || {};
+    var circuits = (opts.circuits || []).filter(function (c) { return !c.archived; });
+    var readings = opts.readings || [];
+    var recommendations = opts.recommendations || [];
+    var buildings = opts.buildings || [];
+    var rooms = opts.rooms || [];
+    var curvePointsByBuilding = opts.curvePointsByBuilding || {};
+    var weatherSeries = opts.weatherSeries || null;
+    var now = opts.now || Date.now();
+
+    var trackedWindowMs = _daysAgoMs(CIRCUIT_TRACKED_WINDOW_DAYS);
+    var checkStaleMs = _daysAgoMs(CIRCUIT_CHECK_STALE_DAYS);
+    var recentReadingMs = _daysAgoMs(READING_RECENT_DAYS);
+    var readingStaleMs = _daysAgoMs(READING_STALE_DAYS);
+
+    var circuitsConfigured = circuits.filter(function (c) { return c.configStatus === 'configure'; }).length;
+
+    var circuitsTracked = circuits.filter(function (c) {
+      var last = _lastCircuitReadingMs(c.id, readings);
+      return last !== null && (now - last) <= trackedWindowMs;
+    }).length;
+
+    var circuitsToCheck = circuits.filter(function (c) {
+      if (c.configStatus === 'a_verifier') return true;
+      var checkedMs = _tsToMs(c.lastCheckedAt);
+      return checkedMs === null || (now - checkedMs) > checkStaleMs;
+    }).length;
+
+    var readingsRecent = readings.filter(function (r) {
+      var ms = _tsToMs(r.recordedAt);
+      return ms !== null && (now - ms) <= recentReadingMs;
+    }).length;
+
+    var staleOrMissingItems = [];
+    circuits.forEach(function (c) {
+      var last = _lastCircuitReadingMs(c.id, readings);
+      if (last === null) { staleOrMissingItems.push({ circuitId: c.id, reason: 'missing', lastReadingMs: null }); return; }
+      if ((now - last) > readingStaleMs) staleOrMissingItems.push({ circuitId: c.id, reason: 'stale', lastReadingMs: last });
+    });
+
+    // Exclut 'maintenir' (rien à signaler) ET 'donnees_insuffisantes' (le
+    // moteur n'a pas pu évaluer, ce n'est pas une recommandation actionnable)
+    // — même filtre que la table "Recommandations prioritaires"
+    // (_overviewRecoTableHtml dans cta-vc.js), jamais deux définitions
+    // différentes de "recommandation active" pour le même chiffre.
+    var v1Active = recommendations.filter(function (r) {
+      return r.engineVersion !== 'v2' && r.status === 'a_examiner' && r.action !== 'maintenir' && r.action !== 'donnees_insuffisantes';
+    });
+    var v2NonTerminal = ['proposition_generee', 'validee', 'reglage_effectue', 'consigne_confirmee'];
+    var v2Active = recommendations.filter(function (r) { return r.engineVersion === 'v2' && v2NonTerminal.indexOf(r.status) !== -1; });
+
+    var v1HighPriorityActive = v1Active.filter(function (r) { return r.priority === 'haute'; });
+    var curveDegradations = _buildingCurveDegradations(buildings, rooms, readings, curvePointsByBuilding, weatherSeries, now);
+
+    return {
+      circuitsConfigured: circuitsConfigured,
+      circuitsTracked: circuitsTracked,
+      circuitsToCheck: circuitsToCheck,
+      readingsRecent: readingsRecent,
+      readingsStaleOrMissing: { count: staleOrMissingItems.length, items: staleOrMissingItems },
+      recommendationsActive: { v1: v1Active.length, v2: v2Active.length, total: v1Active.length + v2Active.length },
+      anomalies: {
+        count: v1HighPriorityActive.length + curveDegradations.length,
+        priorityItems: v1HighPriorityActive.map(function (r) { return { circuitId: r.circuitId, title: r.title }; }),
+        curveDegradations: curveDegradations,
+      },
+    };
+  }
+
+  // computeReadingStats(readings) — statistiques simples (moyenne/min/max/
+  // nombre/dernière température exploitable), utilisées par l'Historique &
+  // analyse (Phase 3). Vue d'ensemble (Phase 1) ne l'appelle PAS : elle
+  // calcule séparément une notion différente ("dernier relevé enregistré",
+  // via _lastCircuitReadingMs) — voir la distinction ci-dessous, les deux
+  // ne sont jamais fusionnées.
+  //
+  // DEUX NOTIONS DE "DERNIER RELEVÉ", VOLONTAIREMENT DISTINCTES (jamais
+  // fusionnées, jamais l'une présentée comme l'autre) :
+  //   - `lastRecordedMs` : horodatage du DERNIER RELEVÉ ENREGISTRÉ, quel
+  //     qu'il soit — y compris un relevé sans température exploitable
+  //     (ex. écriture incomplète). Répond à "ce circuit/cette zone a-t-il
+  //     été relevé récemment ?". Calculé sur TOUS les relevés fournis,
+  //     indépendamment de `minCount` (une seule saisie suffit à répondre à
+  //     cette question).
+  //   - `last`/`lastMs` : valeur et horodatage de la DERNIÈRE TEMPÉRATURE
+  //     EXPLOITABLE (r.temp, ou moyenne point1/point2 valide). Répond à
+  //     "quelle est la dernière valeur de température connue ?". NON gatée
+  //     par `minCount` : une seule valeur valide suffit à la connaître (ce
+  //     n'est pas une moyenne qui exigerait plusieurs points pour être
+  //     significative) — reste renseignée même quand `insufficientData`
+  //     est vrai, tant qu'au moins un relevé exploitable existe.
+  // N'accepte comme température exploitable que r.temp (nombre) ou une
+  // moyenne point1/point2 valide ; tout le reste est ignoré, jamais compté
+  // comme 0. `insufficientData` (true en dessous de `minCount`, 2 par
+  // défaut) ne gate QUE mean/min/max — jamais une moyenne calculée
+  // silencieusement sur un échantillon trop faible pour être significatif.
+  function computeReadingStats(readings, minCount) {
+    minCount = typeof minCount === 'number' ? minCount : 2;
+    var all = readings || [];
+
+    // "Dernier relevé enregistré" — indépendant de l'exploitabilité de la
+    // température, indépendant de minCount (une seule saisie, même sans
+    // température, répond déjà à "quand a-t-on relevé pour la dernière
+    // fois ?"). null uniquement si aucun relevé n'a d'horodatage valide —
+    // jamais 0 ni une date inventée.
+    var lastRecordedMs = null;
+    all.forEach(function (r) {
+      var ms = _tsToMs(r.recordedAt);
+      if (ms !== null && (lastRecordedMs === null || ms > lastRecordedMs)) lastRecordedMs = ms;
+    });
+
+    var withTemp = all.map(function (r) {
+      var v = typeof r.temp === 'number' ? r.temp
+        : (r.points && r.points.point1 && r.points.point2) ? _r1((r.points.point1.waterTemp + r.points.point2.waterTemp) / 2)
+        : null;
+      if (v === null) return null;
+      return { value: v, ms: _tsToMs(r.recordedAt) };
+    }).filter(function (x) { return x; });
+    var sorted = withTemp.slice().sort(function (a, b) { return (a.ms || 0) - (b.ms || 0); });
+
+    // "Dernière température exploitable" (last/lastMs) : une SEULE valeur
+    // valide suffit à la connaître — ce n'est pas une moyenne, donc jamais
+    // gatée par `minCount`, à la différence de mean/min/max ci-dessous qui
+    // ont besoin de plusieurs points pour être significatives. null
+    // uniquement si aucun relevé n'a de température exploitable du tout.
+    var last = sorted.length ? sorted[sorted.length - 1].value : null;
+    var lastMs = sorted.length ? sorted[sorted.length - 1].ms : null;
+
+    if (withTemp.length < minCount) {
+      return { insufficientData: true, count: withTemp.length, minCount: minCount, mean: null, min: null, max: null, last: last, lastMs: lastMs, lastRecordedMs: lastRecordedMs };
+    }
+    var sum = 0, min = sorted[0].value, max = sorted[0].value;
+    sorted.forEach(function (x) { sum += x.value; if (x.value < min) min = x.value; if (x.value > max) max = x.value; });
+    return {
+      insufficientData: false,
+      count: sorted.length,
+      minCount: minCount,
+      mean: _r1(sum / sorted.length),
+      min: min,
+      max: max,
+      last: last,
+      lastMs: lastMs,
+      lastRecordedMs: lastRecordedMs,
+    };
+  }
+
   window.MX = window.MX || {};
   window.MX.HeatingEngine = {
     evaluateCircuit: evaluateCircuit, evaluateAll: evaluateAll,
@@ -689,5 +936,11 @@
     DJU_ANALYSIS_MIN_PARTIAL: DJU_ANALYSIS_MIN_PARTIAL, DJU_ANALYSIS_MIN_SUFFICIENT: DJU_ANALYSIS_MIN_SUFFICIENT,
     buildRoomTemperatureSeries: buildRoomTemperatureSeries,
     buildBuildingDailyAverageSeries: buildBuildingDailyAverageSeries,
+    computeOverviewIndicators: computeOverviewIndicators,
+    computeReadingStats: computeReadingStats,
+    CIRCUIT_TRACKED_WINDOW_DAYS: CIRCUIT_TRACKED_WINDOW_DAYS,
+    CIRCUIT_CHECK_STALE_DAYS: CIRCUIT_CHECK_STALE_DAYS,
+    READING_RECENT_DAYS: READING_RECENT_DAYS,
+    READING_STALE_DAYS: READING_STALE_DAYS,
   };
 })();
