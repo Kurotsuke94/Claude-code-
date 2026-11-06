@@ -15,6 +15,11 @@
   var _upcomingRange  = 7;        // 7 | 15 | 30
   var _lastConfettiAt = 0;
 
+  // ── Supervision équipe (responsables uniquement, lecture seule) ──
+  var _mmView  = 'mine';  // 'mine' | 'team'
+  var _supDay  = null;    // null = aujourd'hui | 'week' | dayId
+  var _supTech = null;    // nom du technicien affiché en détail
+
   // ── Mission state (dual Firestore listener) ──
   var _allMissions         = []; // merged result
   var _assignedMissions    = []; // where assignedTo == cu.name
@@ -153,7 +158,8 @@
       var el = document.getElementById('main-content');
       if (el && !document.getElementById('pmp-detail-ov') && !document.getElementById('mm-detail-ov')) {
         var prevSt = el.scrollTop;
-        el.innerHTML = _renderTech();
+        el.innerHTML = _renderPage();
+        _supAfterRender(el);
         if (prevSt > 0) el.scrollTop = prevSt;
       }
     }
@@ -3394,9 +3400,461 @@
     _orgTasks = []; _intDocs = []; _pmpDocs = [];
     _timerState = null; _expandedCardId = null; _toutCardMap = {};
     _selectedCardId = null;
+    _mmView = 'mine'; _supDay = null; _supTech = null; _supTechNames = [];
     _ready = false; _readyCbs = [];
     _got1 = _got2 = _gotOrg = _gotInt = _gotPmp = false;
     try { document.body.classList.remove('mm-cp-sheet-open'); } catch (e) {}
+  }
+
+  // ══════════════════════════════════════════════
+  // SUPERVISION ÉQUIPE (responsables) — VUE STRICTEMENT EN LECTURE SEULE
+  // Accès : MX.Auth.canSeeAll() (Admin OU currentUser.role === 'responsable'),
+  // exactement le critère déjà utilisé partout dans l'app — aucun rôle n'est
+  // modifié ni déduit. Un technicien ne voit JAMAIS le sélecteur, et même
+  // un appel manuel à setView('team') retombe sur sa vue personnelle
+  // (voir _renderPage).
+  // Données : uniquement MX.getEffectiveDaySchedule()/myInstancesFromSchedule()
+  // — la MÊME lecture que la checklist technicien (week_slots de la semaine
+  // en cours via le listener global d'app.js, repli legacy pour un jour non
+  // préparé). Aucune nouvelle requête, aucune collection, aucune écriture :
+  // aucun élément de cette vue n'appelle MX.DB, et aucune case n'y est
+  // cliquable. Le temps réel vient des listeners existants (week_slots,
+  // checks, tasks) qui rappellent déjà MesMissions.render().
+  // ══════════════════════════════════════════════
+
+  var SV_STATUS = {
+    done:     { l: 'Terminé',        ico: 'fa-circle-check' },
+    progress: { l: 'En cours',       ico: 'fa-circle-half-stroke' },
+    todo:     { l: 'Non commencé',   ico: 'fa-circle' },
+    empty:    { l: 'Aucune mission', ico: 'fa-minus' },
+  };
+  var SV_HEX_RE = /^#[0-9A-Fa-f]{6}$/;
+  var _supTechNames = []; // index -> nom, pour les onclick (jamais de nom brut dans un attribut)
+
+  function _isSupervisor() {
+    return !!(MX.state.currentUser && MX.Auth && typeof MX.Auth.canSeeAll === 'function' && MX.Auth.canSeeAll());
+  }
+
+  // Point d'entrée unique du rendu de la page (render + _rerenderIfActive).
+  // Technicien : renvoie EXACTEMENT _renderTech(), comme avant.
+  function _renderPage() {
+    if (!_isSupervisor()) return _renderTech();
+    return _renderViewSwitch() + (_mmView === 'team' ? _renderSupervision() : _renderTech());
+  }
+
+  function _renderViewSwitch() {
+    var mine = _mmView !== 'team';
+    return '<div class="mm-sv-switch" role="tablist" aria-label="Vue Missions">'
+      + '<button type="button" role="tab" aria-selected="' + mine + '" class="mm-sv-switch-btn' + (mine ? ' is-active' : '') + '" onclick="MX.MM.setView(\'mine\')"><i class="fas fa-user"></i> Mes missions</button>'
+      + '<button type="button" role="tab" aria-selected="' + !mine + '" class="mm-sv-switch-btn' + (!mine ? ' is-active' : '') + '" onclick="MX.MM.setView(\'team\')"><i class="fas fa-users"></i> Supervision équipe</button>'
+      + '</div>';
+  }
+
+  function _supStatus(done, total) {
+    if (!total) return 'empty';
+    if (done >= total) return 'done';
+    if (done > 0) return 'progress';
+    return 'todo';
+  }
+  function _supPct(done, total) { return total ? Math.round(done / total * 100) : 0; }
+
+  // Modèle de la semaine en cours, calculé à chaque rendu à partir de l'état
+  // déjà synchronisé (aucune mise en cache : le temps réel reste exact).
+  //
+  // Trois catégories, jamais mélangées :
+  //  1. Missions PRÉPARÉES : jour programmé dans Gestion semaine tech
+  //     (week_slots) — comptées ; une instance sans titulaire est un
+  //     « créneau non attribué » réel.
+  //  2. Ancien système AVEC titulaire (config/assignments, revendication du
+  //     jour, tâche affectée individuellement) — comptées, signalées
+  //     « Ancien système » : ce sont les tâches que le technicien voit.
+  //  3. Ancien système SANS titulaire : tâches par défaut / récurrentes d'un
+  //     jour non préparé — JAMAIS comptées comme missions ni comme créneaux
+  //     non attribués, affichées à part (« Planning non préparé »). Étiquette
+  //     « Tâches par défaut » si les textes sont ceux générés par l'app
+  //     (MX.DEFT), sinon « Ancien système ». Aucune donnée n'est modifiée.
+  function _supIsDefaultSet(slotId, tasks) {
+    var def = (MX.DEFT || {})[slotId];
+    if (!def || !tasks.length) return false;
+    return tasks.every(function (t) { return def.indexOf(t.text) !== -1; });
+  }
+
+  function _supBuildModel() {
+    var weekKey = MX.weekKeyOf(new Date());
+    var todayId = MX.todayId();
+    var users = (MX.state.users || []).filter(function (u) { return u && u.name && !u.hidden && u.role !== 'admin'; });
+    var userByName = {};
+    users.forEach(function (u) { userByName[u.name] = u; });
+
+    var techs = {};
+    function techOf(name) {
+      if (!techs[name]) techs[name] = { name: name, user: userByName[name] || null, days: {} };
+      return techs[name];
+    }
+    // Les techniciens apparaissent toujours, même sans créneau ; les
+    // responsables uniquement s'ils ont des missions (voir le rendu).
+    users.forEach(function (u) { if (u.role !== 'responsable') techOf(u.name); });
+
+    var days = MX.DAYS.map(function (d) {
+      var sched = MX.getEffectiveDaySchedule(d.id) || { source: 'none', instances: [] };
+      var insts = sched.instances || [];
+      var prepared = sched.source === 'week_slots';
+      var names = {};
+      insts.forEach(function (i) {
+        if (i.userName) names[i.userName] = true;
+        (i.tasks || []).forEach(function (t) { if (t.assignedTo) names[t.assignedTo] = true; });
+      });
+      Object.keys(names).forEach(function (n) {
+        var mine = MX.myInstancesFromSchedule(sched, n);
+        if (mine.length) techOf(n).days[d.id] = mine.map(function (i) { return prepared ? i : Object.assign({}, i, { legacy: true }); });
+      });
+      var total = 0, done = 0, unassigned = [], defaults = [], defaultTasks = 0;
+      insts.forEach(function (i) {
+        var tasks = i.tasks || [];
+        if (prepared) {
+          total += i.total || 0; done += i.done || 0;
+          if (!i.userName) unassigned.push(i);
+          return;
+        }
+        var owned = tasks.filter(function (t) { return i.userName || t.assignedTo; });
+        total += owned.length;
+        done += owned.filter(function (t) { return t.done; }).length;
+        var free = i.userName ? [] : tasks.filter(function (t) { return !t.assignedTo; });
+        if (free.length) {
+          defaultTasks += free.length;
+          defaults.push(Object.assign({}, i, { tasks: free, total: free.length, isDefault: _supIsDefaultSet(i.id, free) }));
+        }
+      });
+      return {
+        id: d.id, l: d.l, s: d.s, we: !!d.we, isToday: d.id === todayId,
+        dateStr: sched.dateStr || MX.dateForWeekDay(weekKey, d.id),
+        source: sched.source, prepared: prepared, hasPlan: prepared || total > 0,
+        total: total, done: done, unassigned: unassigned, defaults: defaults, defaultTasks: defaultTasks,
+      };
+    });
+
+    var list = Object.keys(techs).map(function (k) { return techs[k]; });
+    return { weekKey: weekKey, todayId: todayId, days: days, techs: list };
+  }
+
+  function _supTechTotals(tech, dayIds) {
+    var total = 0, done = 0, slots = 0;
+    dayIds.forEach(function (id) {
+      (tech.days[id] || []).forEach(function (i) { total += i.total || 0; done += i.done || 0; slots++; });
+    });
+    return { total: total, done: done, todo: total - done, slots: slots, pct: _supPct(done, total), status: _supStatus(done, total) };
+  }
+
+  function _supFmtDate(dateStr, withYear) {
+    if (!dateStr) return '';
+    var p = String(dateStr).split('-');
+    var MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    var m = parseInt(p[1], 10) - 1;
+    return parseInt(p[2], 10) + ' ' + (MOIS[m] || '') + (withYear ? ' ' + p[0] : '');
+  }
+
+  function _supAvatar(name, user, size) {
+    var e = MX.esc;
+    var c = MX.userColors ? MX.userColors(name) : { bg: 'var(--bg4)', fg: 'var(--text1)' };
+    var bg = (user && user.color && SV_HEX_RE.test(user.color)) ? user.color : c.bg;
+    var fg = (user && user.color && SV_HEX_RE.test(user.color) && MX._contrastColor) ? MX._contrastColor(user.color) : c.fg;
+    return '<span class="mm-sv-av' + (size === 'lg' ? ' mm-sv-av--lg' : '') + '" style="background:' + e(bg) + ';color:' + e(fg) + '">'
+      + e(String(name || '?').substring(0, 2).toUpperCase()) + '</span>';
+  }
+
+  function _supPill(status) {
+    var s = SV_STATUS[status] || SV_STATUS.empty;
+    return '<span class="mm-sv-pill is-' + status + '"><i class="' + (status === 'todo' ? 'far' : 'fas') + ' ' + s.ico + '"></i> ' + s.l + '</span>';
+  }
+
+  function _supBar(pct, status) {
+    return '<div class="mm-sv-bar"><div class="mm-sv-bar-fill is-' + status + '" style="width:' + pct + '%"></div></div>';
+  }
+
+  function _supSlotHours(i) {
+    if (!i.start && !i.end) return '';
+    return (i.start || '?') + ' – ' + (i.end || '?');
+  }
+
+  function _supSlotChip(i) {
+    var e = MX.esc;
+    var col = SV_HEX_RE.test(i.color || '') ? i.color : '#6B7280';
+    var st = _supStatus(i.done || 0, i.total || 0);
+    return '<span class="mm-sv-chip is-' + st + (i.legacy ? ' is-legacy' : '') + '" style="--sv-col:' + col + '"' + (i.legacy ? ' title="Ancien système (planning non préparé)"' : '') + '>'
+      + (i.icon ? '<span class="mm-sv-chip-ico">' + e(i.icon) + '</span>' : '')
+      + e(i.name || 'Créneau')
+      + '<span class="mm-sv-chip-ct">' + (i.done || 0) + '/' + (i.total || 0) + '</span>'
+      + '</span>';
+  }
+
+  function _renderSupervision() {
+    var e = MX.esc;
+    var model = _supBuildModel();
+    var isWeek = _supDay === 'week';
+    var dayId = isWeek ? null : (MX.DAYS.some(function (d) { return d.id === _supDay; }) ? _supDay : model.todayId);
+    var scopeIds = isWeek ? model.days.map(function (d) { return d.id; }) : [dayId];
+    var dayById = {};
+    model.days.forEach(function (d) { dayById[d.id] = d; });
+
+    // Techniciens triés : avec missions d'abord (non terminés en tête),
+    // puis par nom ; responsables sans mission dans la période masqués.
+    var rank = { progress: 0, todo: 1, done: 2, empty: 3 };
+    var rows = model.techs.map(function (t) { return { t: t, tot: _supTechTotals(t, scopeIds) }; })
+      .filter(function (r) { return r.tot.total > 0 || r.tot.slots > 0 || !(r.t.user && r.t.user.role === 'responsable'); })
+      .sort(function (a, b) {
+        var d = rank[a.tot.status] - rank[b.tot.status];
+        return d !== 0 ? d : a.t.name.localeCompare(b.t.name, 'fr');
+      });
+    _supTechNames = rows.map(function (r) { return r.t.name; });
+    if (_supTech && _supTechNames.indexOf(_supTech) === -1) _supTech = null;
+
+    var tTotal = 0, tDone = 0, unas = [], defs = [], defTasks = 0, unprepDays = 0;
+    scopeIds.forEach(function (id) {
+      var d = dayById[id];
+      tTotal += d.total; tDone += d.done;
+      d.unassigned.forEach(function (i) { unas.push({ day: d, inst: i }); });
+      d.defaults.forEach(function (i) { defs.push({ day: d, inst: i }); });
+      defTasks += d.defaultTasks;
+      if (!d.prepared) unprepDays++;
+    });
+    var tPct = _supPct(tDone, tTotal), tStatus = _supStatus(tDone, tTotal);
+    var active = rows.filter(function (r) { return r.tot.total > 0; }).length;
+
+    var h = '<div class="mm-sv-wrap" data-sv-scope="' + (isWeek ? 'week' : e(dayId)) + '">';
+
+    // ── En-tête ──
+    h += '<div class="mm-sv-hd">'
+      + '<div class="mm-sv-hd-txt">'
+      + '<div class="mm-sv-ttl"><i class="fas fa-users"></i> Supervision équipe</div>'
+      + '<div class="mm-sv-sub">' + e(MX.weekLabelOf ? MX.weekLabelOf(model.weekKey) : model.weekKey)
+      + ' · <span class="mm-sv-live"><span class="mm-sv-live-dot"></span>Temps réel</span></div>'
+      + '</div>'
+      + '<span class="mm-sv-ro" title="Consultation uniquement : les missions se cochent par le technicien"><i class="fas fa-eye"></i> Lecture seule</span>'
+      + '</div>';
+
+    // ── Navigation par jour ──
+    h += '<div class="mm-sv-days" role="tablist" aria-label="Jour">';
+    h += '<button type="button" class="mm-sv-day mm-sv-day--week' + (isWeek ? ' is-active' : '') + '" onclick="MX.MM._supSetDay(\'week\')">'
+      + '<span class="mm-sv-day-l">Semaine</span><span class="mm-sv-day-n"><i class="fas fa-calendar-week"></i></span>'
+      + '<span class="mm-sv-day-pct">' + _supPct(model.days.reduce(function (a, d) { return a + d.done; }, 0), model.days.reduce(function (a, d) { return a + d.total; }, 0)) + '%</span></button>';
+    model.days.forEach(function (d) {
+      var st = d.hasPlan ? _supStatus(d.done, d.total) : 'empty';
+      h += '<button type="button" class="mm-sv-day is-' + st + (d.id === dayId ? ' is-active' : '') + (d.we ? ' is-we' : '') + (d.isToday ? ' is-today' : '') + (d.prepared ? '' : ' is-unprep') + '"'
+        + ' data-day="' + d.id + '" onclick="MX.MM._supSetDay(\'' + d.id + '\')" title="' + e(d.l + ' ' + _supFmtDate(d.dateStr) + (d.prepared ? '' : ' · Planning non préparé')) + '">'
+        + '<span class="mm-sv-day-l">' + e(d.s) + '</span>'
+        + '<span class="mm-sv-day-n">' + e(String(parseInt(String(d.dateStr).split('-')[2], 10) || '')) + '</span>'
+        + '<span class="mm-sv-day-pct">' + (d.hasPlan ? _supPct(d.done, d.total) + '%' : '<span class="mm-sv-day-np">Non prép.</span>') + '</span>'
+        + '</button>';
+    });
+    h += '</div>';
+
+    // ── Indicateurs de l'équipe ──
+    var scopeLbl = isWeek ? 'de la semaine' : (dayById[dayId].isToday ? 'du jour' : 'du ' + dayById[dayId].l.toLowerCase());
+    h += '<div class="mm-sv-overview">'
+      + '<div class="mm-sv-ov-main">'
+      + '<div class="mm-sv-ov-hd"><span>Avancement ' + e(scopeLbl) + '</span><strong class="is-' + tStatus + '">' + tPct + '%</strong></div>'
+      + _supBar(tPct, tStatus)
+      + '</div>'
+      + '<div class="mm-sv-kpis">'
+      + '<div class="mm-sv-kpi is-done"><strong>' + tDone + '</strong><span>Terminées</span></div>'
+      + '<div class="mm-sv-kpi is-todo"><strong>' + (tTotal - tDone) + '</strong><span>Restantes</span></div>'
+      + '<div class="mm-sv-kpi"><strong>' + active + '</strong><span>Techniciens</span></div>'
+      + '<div class="mm-sv-kpi' + (unas.length ? ' is-warn' : '') + '"><strong>' + unas.length + '</strong><span>Non attribués</span></div>'
+      + '</div>'
+      + (isWeek && unprepDays
+        ? '<div class="mm-sv-ov-foot"><i class="fas fa-calendar-xmark"></i> ' + unprepDays + ' jour' + (unprepDays > 1 ? 's' : '') + ' sans planning préparé'
+          + (defTasks ? ' · ' + defTasks + ' tâche' + (defTasks > 1 ? 's' : '') + ' par défaut non comptée' + (defTasks > 1 ? 's' : '') : '') + '</div>'
+        : '')
+      + '</div>';
+
+    if (!isWeek) {
+      var dd = dayById[dayId];
+      var ddLbl = e(dd.l.toLowerCase()) + ' ' + e(_supFmtDate(dd.dateStr));
+      if (!dd.prepared) {
+        h += '<div class="mm-sv-note is-unprep"><i class="fas fa-calendar-xmark"></i><div>'
+          + '<b>Planning non préparé</b> pour ' + ddLbl + ' dans Gestion semaine tech'
+          + (dd.source === 'legacy' && (dd.total || dd.defaultTasks) ? ' (ancien système de créneaux)' : '') + '.'
+          + (dd.defaultTasks ? '<span class="mm-sv-note-sub">' + dd.defaultTasks + ' tâche' + (dd.defaultTasks > 1 ? 's' : '') + ' par défaut sans titulaire, non comptée' + (dd.defaultTasks > 1 ? 's' : '') + ' comme missions.</span>' : '')
+          + (dd.total ? '<span class="mm-sv-note-sub">Les créneaux attribués dans l\'ancien système restent comptés.</span>' : '')
+          + '</div></div>';
+      }
+    }
+
+    // ── Équipe + détail ──
+    h += '<div class="mm-sv-layout' + (_supTech ? ' has-sel' : '') + '">';
+    h += '<section class="mm-sv-team" aria-label="Équipe">';
+    h += '<div class="mm-sv-sec-ttl"><i class="fas fa-user-gear"></i> Équipe <span class="mm-sv-ct">' + rows.length + '</span></div>';
+    if (!rows.length) h += '<div class="mm-sv-empty">Aucun technicien.</div>';
+    rows.forEach(function (r, idx) {
+      var t = r.t, tot = r.tot;
+      h += '<button type="button" class="mm-sv-tech is-' + tot.status + (_supTech === t.name ? ' is-sel' : '') + '" data-tech="' + e(t.name) + '" onclick="MX.MM._supSelectTech(' + idx + ')">'
+        + '<div class="mm-sv-tech-top">'
+        + _supAvatar(t.name, t.user)
+        + '<div class="mm-sv-tech-id"><div class="mm-sv-tech-name">' + e(t.name) + '</div>'
+        + '<div class="mm-sv-tech-meta">' + (tot.total
+          ? '<b>' + tot.done + '</b>/' + tot.total + ' terminée' + (tot.done > 1 ? 's' : '') + ' · <b>' + tot.todo + '</b> restante' + (tot.todo > 1 ? 's' : '')
+          : (isWeek ? 'Aucun créneau cette semaine' : 'Aucun créneau ce jour')) + '</div></div>'
+        + '<div class="mm-sv-tech-pct is-' + tot.status + '">' + (tot.total ? tot.pct + '%' : '—') + '</div>'
+        + '</div>';
+      if (tot.total) h += _supBar(tot.pct, tot.status);
+      if (isWeek) {
+        h += '<div class="mm-sv-week">';
+        model.days.forEach(function (d) {
+          var dt = _supTechTotals(t, [d.id]);
+          h += '<span class="mm-sv-wd is-' + dt.status + (d.we ? ' is-we' : '') + '" title="' + e(d.l + (dt.total ? ' : ' + dt.done + '/' + dt.total : ' : aucun créneau')) + '">' + e(d.s.charAt(0)) + '</span>';
+        });
+        h += '</div>';
+      } else if ((t.days[dayId] || []).length) {
+        h += '<div class="mm-sv-chips">' + (t.days[dayId] || []).map(_supSlotChip).join('') + '</div>';
+      }
+      h += '</button>';
+    });
+
+    // ── Créneaux non attribués ──
+    h += '<div class="mm-sv-sec-ttl mm-sv-sec-ttl--unas"><i class="fas fa-user-slash"></i> Créneaux non attribués <span class="mm-sv-ct' + (unas.length ? ' is-warn' : '') + '">' + unas.length + '</span></div>';
+    if (!unas.length) {
+      h += '<div class="mm-sv-empty">' + (!isWeek && !dayById[dayId].prepared ? 'Aucun créneau préparé ce jour.' : 'Tous les créneaux préparés sont attribués.') + '</div>';
+    } else {
+      h += '<div class="mm-sv-unas">';
+      unas.forEach(function (u) {
+        var i = u.inst, col = SV_HEX_RE.test(i.color || '') ? i.color : '#6B7280';
+        h += '<div class="mm-sv-unas-row" style="--sv-col:' + col + '">'
+          + (isWeek ? '<span class="mm-sv-unas-day' + (u.day.we ? ' is-we' : '') + '">' + e(u.day.s) + '</span>' : '')
+          + '<span class="mm-sv-unas-name">' + (i.icon ? e(i.icon) + ' ' : '') + e(i.name || 'Créneau') + '</span>'
+          + '<span class="mm-sv-unas-h">' + e(_supSlotHours(i)) + '</span>'
+          + '<span class="mm-sv-unas-ct">' + (i.total || 0) + ' mission' + ((i.total || 0) > 1 ? 's' : '') + '</span>'
+          + '</div>';
+      });
+      h += '</div>';
+    }
+
+    // ── Planning non préparé : tâches par défaut / ancien système sans titulaire ──
+    // Présentées à part, repliées, jamais comme des missions attribuées.
+    if (defs.length) {
+      h += '<details class="mm-sv-defs">'
+        + '<summary class="mm-sv-defs-sum"><i class="fas fa-calendar-xmark"></i><span class="mm-sv-defs-ttl">Planning non préparé</span>'
+        + '<span class="mm-sv-defs-ct">' + defTasks + ' tâche' + (defTasks > 1 ? 's' : '') + ' non comptée' + (defTasks > 1 ? 's' : '') + '</span><i class="fas fa-chevron-down mm-sv-defs-chev"></i></summary>'
+        + '<div class="mm-sv-defs-help">Jours non préparés dans Gestion semaine tech : ces tâches de l\'ancien système n\'ont aucun titulaire. Elles ne sont ni des missions planifiées ni des créneaux à attribuer.</div>'
+        + '<div class="mm-sv-defs-list">';
+      defs.forEach(function (u) {
+        var i = u.inst;
+        h += '<div class="mm-sv-defs-row">'
+          + (isWeek ? '<span class="mm-sv-unas-day' + (u.day.we ? ' is-we' : '') + '">' + e(u.day.s) + '</span>' : '')
+          + '<span class="mm-sv-defs-name">' + (i.icon ? e(i.icon) + ' ' : '') + e(i.name || 'Créneau') + '</span>'
+          + '<span class="mm-sv-defs-tag' + (i.isDefault ? '' : ' is-legacy') + '">' + (i.isDefault ? 'Tâches par défaut' : 'Ancien système') + '</span>'
+          + '<span class="mm-sv-unas-ct">' + i.total + ' tâche' + (i.total > 1 ? 's' : '') + '</span>'
+          + '</div>';
+      });
+      h += '</div></details>';
+    }
+    h += '</section>';
+
+    h += '<section class="mm-sv-detail" aria-label="Détail technicien">';
+    if (_supTech) {
+      var sel = rows.filter(function (r) { return r.t.name === _supTech; })[0];
+      h += _renderSupDetail(sel.t, sel.tot, model, scopeIds, isWeek);
+    } else {
+      h += '<div class="mm-sv-placeholder"><i class="fas fa-hand-pointer"></i><span>Sélectionnez un technicien pour voir le détail de sa checklist.</span></div>';
+    }
+    h += '</section>';
+    h += '</div>'; // mm-sv-layout
+    h += '</div>'; // mm-sv-wrap
+    return h;
+  }
+
+  function _renderSupDetail(tech, tot, model, scopeIds, isWeek) {
+    var e = MX.esc;
+    var h = '<div class="mm-sv-dt" data-tech="' + e(tech.name) + '">';
+    h += '<div class="mm-sv-dt-hd">'
+      + '<button type="button" class="mm-sv-back" onclick="MX.MM._supSelectTech(-1)" aria-label="Retour à l\'équipe"><i class="fas fa-arrow-left"></i><span>Équipe</span></button>'
+      + _supAvatar(tech.name, tech.user, 'lg')
+      + '<div class="mm-sv-dt-id"><div class="mm-sv-dt-name">' + e(tech.name) + '</div>' + _supPill(tot.status) + '</div>'
+      + '<div class="mm-sv-dt-pct is-' + tot.status + '">' + (tot.total ? tot.pct + '%' : '—') + '</div>'
+      + '</div>';
+    h += '<div class="mm-sv-dt-sum"><span><b>' + tot.done + '</b> terminée' + (tot.done > 1 ? 's' : '') + '</span><span><b>' + tot.todo + '</b> restante' + (tot.todo > 1 ? 's' : '') + '</span><span><b>' + tot.total + '</b> au total</span></div>';
+    if (tot.total) h += _supBar(tot.pct, tot.status);
+
+    var dayById = {};
+    model.days.forEach(function (d) { dayById[d.id] = d; });
+    var shown = 0;
+    scopeIds.forEach(function (id) {
+      var d = dayById[id], insts = tech.days[id] || [];
+      if (!insts.length) {
+        if (isWeek) {
+          h += '<div class="mm-sv-dt-day is-off"><div class="mm-sv-dt-day-hd"><span>' + e(d.l) + ' ' + e(_supFmtDate(d.dateStr)) + '</span>'
+            + (d.we ? '<span class="mm-sv-we">Week-end</span>' : '') + '<span class="mm-sv-dt-day-off">Aucun créneau</span></div></div>';
+        }
+        return;
+      }
+      shown++;
+      var dTot = _supTechTotals(tech, [id]);
+      h += '<div class="mm-sv-dt-day">'
+        + '<div class="mm-sv-dt-day-hd"><span>' + e(d.l) + ' ' + e(_supFmtDate(d.dateStr)) + '</span>'
+        + (d.isToday ? '<span class="mm-sv-today">Aujourd\'hui</span>' : '')
+        + (d.we ? '<span class="mm-sv-we">Week-end</span>' : '')
+        + '<span class="mm-sv-dt-day-ct">' + dTot.done + '/' + dTot.total + '</span></div>';
+      insts.forEach(function (i) {
+        var col = SV_HEX_RE.test(i.color || '') ? i.color : '#6B7280';
+        var st = _supStatus(i.done || 0, i.total || 0);
+        var hrs = _supSlotHours(i);
+        h += '<div class="mm-sv-slot is-' + st + '" style="--sv-col:' + col + '">'
+          + '<div class="mm-sv-slot-hd">'
+          + '<span class="mm-sv-slot-name">' + (i.icon ? e(i.icon) + ' ' : '') + e(i.name || 'Créneau') + '</span>'
+          + (hrs ? '<span class="mm-sv-slot-h">' + e(hrs) + '</span>' : '')
+          + (i.partial ? '<span class="mm-sv-slot-part" title="Tâches affectées individuellement dans ce créneau">Partiel</span>' : '')
+          + (i.legacy ? '<span class="mm-sv-slot-legacy" title="Jour non préparé dans Gestion semaine tech">Ancien système</span>' : '')
+          + _supPill(st)
+          + '</div>'
+          + _supBar(_supPct(i.done || 0, i.total || 0), st);
+        if (!(i.tasks || []).length) {
+          h += '<div class="mm-sv-empty">Aucune mission dans ce créneau.</div>';
+        } else {
+          h += '<ul class="mm-sv-tasks">';
+          (i.tasks || []).forEach(function (t) {
+            h += '<li class="mm-sv-task' + (t.done ? ' is-done' : '') + '">'
+              + '<i class="' + (t.done ? 'fas fa-circle-check' : 'far fa-circle') + '" aria-hidden="true"></i>'
+              + '<span class="mm-sv-task-txt">' + e(t.text || '') + '</span>'
+              + (t.movedFrom ? '<span class="mm-sv-moved" title="Mission déplacée depuis un autre créneau"><i class="fas fa-bolt"></i> Déplacée</span>' : '')
+              + '<span class="mm-sv-sr">' + (t.done ? 'Terminée' : 'À faire') + '</span>'
+              + '</li>';
+          });
+          h += '</ul>';
+        }
+        h += '</div>';
+      });
+      h += '</div>';
+    });
+    if (!isWeek && !shown) h += '<div class="mm-sv-empty">Aucun créneau pour ce jour.</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // Ruban des jours (mobile) : garde le jour sélectionné visible, y compris
+  // après un rafraîchissement temps réel qui recrée le ruban.
+  function _supAfterRender(el) {
+    if (_mmView !== 'team' || !el || !_isSupervisor()) return;
+    var strip = el.querySelector('.mm-sv-days');
+    var a = strip && strip.querySelector('.mm-sv-day.is-active');
+    if (!a || strip.scrollWidth <= strip.clientWidth) return;
+    strip.scrollLeft = Math.max(0, a.offsetLeft - (strip.clientWidth - a.offsetWidth) / 2);
+  }
+
+  function setView(v) {
+    _mmView = (v === 'team' && _isSupervisor()) ? 'team' : 'mine';
+    render();
+    var el = document.getElementById('main-content');
+    if (el) el.scrollTop = 0;
+  }
+  function _supSetDay(d) {
+    _supDay = d === 'week' ? 'week' : (MX.DAYS.some(function (x) { return x.id === d; }) ? d : null);
+    render();
+  }
+  function _supSelectTech(idx) {
+    var n = (typeof idx === 'number' && idx >= 0) ? _supTechNames[idx] : null;
+    _supTech = n || null;
+    render();
+    var el = document.getElementById('main-content');
+    if (el && window.matchMedia && window.matchMedia('(max-width: 900px)').matches) el.scrollTop = 0;
   }
 
   // ══════════════════════════════════════════════
@@ -3420,7 +3878,8 @@
         : MX.Pages.Checklist.render(MX.todayId());
     }
     _loadMissions();
-    el.innerHTML = _renderTech();
+    el.innerHTML = _renderPage();
+    _supAfterRender(el);
   }
 
   function setFilter(f) { _curFilter = f; render(); }
@@ -3616,6 +4075,8 @@
     // Cockpit (refonte UX)
     _cpSetFilter: _cpSetFilter, _cpSelectCard: _cpSelectCard,
     _cpCloseSheet: _cpCloseSheet, _cpGoToSlot: _cpGoToSlot,
+    // Supervision équipe (lecture seule)
+    setView: setView, _supSetDay: _supSetDay, _supSelectTech: _supSelectTech,
     // Préchauffage (perf V1) — même principe que MX.Pages.Int/Conso/PMP.
     // Déclenche _loadMissions() (déjà gardée par _missionsLoaded, donc
     // jamais un second jeu de listeners) et prévient l'appelant une fois
