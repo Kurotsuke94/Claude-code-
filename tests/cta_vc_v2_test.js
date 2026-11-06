@@ -14,6 +14,33 @@ const SEED = path.join(__dirname, 'gst_seed.js');
 let failures = 0;
 function ok(label, cond) { if (!cond) { failures++; console.error('FAIL ' + label); } else console.log('ok   ' + label); }
 
+// GARDE-FOU ENVIRONNEMENT (mock-firebase) — index.html charge le VRAI SDK
+// Firebase depuis www.gstatic.com : sur un poste disposant d'un accès
+// Internet, il écrase window.firebase défini par tests/mock-firebase.js, puis
+// firebase-config.js le redirige vers les émulateurs locaux (127.0.0.1:8090/
+// 9099). Sans émulateur démarré, MX.state.users reste vide (pin-input jamais
+// créé) et toute écriture Firestore attend indéfiniment (TIMEOUT GLOBAL 180s).
+// Même protection que tests/navigation_visibility_test.js et
+// tests/accueil_cockpit_test.js : bloquer gstatic/googleapis AVANT page.goto(),
+// puis vérifier explicitement que le mock est bien celui utilisé par l'app.
+async function blockRealFirebase(page) {
+  await page.route('**://*.gstatic.com/**', r => r.abort());
+  await page.route('**://*.googleapis.com/**', r => r.abort());
+}
+async function assertMockFirebase(page) {
+  const mockActive = await page.evaluate(() => !!(
+    window.__mockDb && window.__mockDb._debugStore &&
+    window.firebase && typeof window.firebase.firestore === 'function' &&
+    window.firebase.firestore() === window.__mockDb
+  ));
+  if (!mockActive) {
+    console.error('\nERREUR ENVIRONNEMENT : mock-firebase inactif (window.firebase n\'est pas ' +
+      'tests/mock-firebase.js — probablement le vrai SDK Firebase chargé depuis gstatic.com). ' +
+      'Test interrompu immédiatement au lieu d\'attendre le TIMEOUT GLOBAL.');
+    process.exit(1);
+  }
+}
+
 const _globalTimeout = setTimeout(() => {
   console.error('\nTIMEOUT GLOBAL (180s) — le process est arrêté de force.');
   process.exit(1);
@@ -55,7 +82,9 @@ async function bootPage(page) {
   await mockOpenMeteo(page, todayStr);
   await page.addInitScript({ path: MOCK_FB });
   await page.addInitScript({ path: SEED });
+  await blockRealFirebase(page);
   await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+  await assertMockFirebase(page);
   await page.waitForTimeout(1800);
   await page.evaluate(async () => { await window.__seedGst(); });
   await page.waitForTimeout(400);

@@ -43,6 +43,33 @@ const SEED    = path.join(__dirname, 'gst_seed.js');
 let failures = 0;
 function ok(label, cond) { if (!cond) { failures++; console.error('FAIL ' + label); } else console.log('ok   ' + label); }
 
+// GARDE-FOU ENVIRONNEMENT (mock-firebase) — index.html charge le VRAI SDK
+// Firebase depuis www.gstatic.com : sur un poste disposant d'un accès
+// Internet, il écrase window.firebase défini par tests/mock-firebase.js, puis
+// firebase-config.js le redirige vers les émulateurs locaux (127.0.0.1:8090/
+// 9099). Sans émulateur démarré, MX.state.users reste vide (pin-input jamais
+// créé) et toute écriture Firestore attend indéfiniment (TIMEOUT GLOBAL 180s).
+// Même protection que tests/navigation_visibility_test.js et
+// tests/accueil_cockpit_test.js : bloquer gstatic/googleapis AVANT page.goto(),
+// puis vérifier explicitement que le mock est bien celui utilisé par l'app.
+async function blockRealFirebase(page) {
+  await page.route('**://*.gstatic.com/**', r => r.abort());
+  await page.route('**://*.googleapis.com/**', r => r.abort());
+}
+async function assertMockFirebase(page) {
+  const mockActive = await page.evaluate(() => !!(
+    window.__mockDb && window.__mockDb._debugStore &&
+    window.firebase && typeof window.firebase.firestore === 'function' &&
+    window.firebase.firestore() === window.__mockDb
+  ));
+  if (!mockActive) {
+    console.error('\nERREUR ENVIRONNEMENT : mock-firebase inactif (window.firebase n\'est pas ' +
+      'tests/mock-firebase.js — probablement le vrai SDK Firebase chargé depuis gstatic.com). ' +
+      'Test interrompu immédiatement au lieu d\'attendre le TIMEOUT GLOBAL.');
+    process.exit(1);
+  }
+}
+
 const _globalTimeout = setTimeout(() => {
   console.error('\nTIMEOUT GLOBAL (180s) — le process est arrêté de force.');
   process.exit(1);
@@ -112,7 +139,9 @@ async function bootPage(page, weatherOpts, preHotelConfig) {
       seedHotelConfig();
     }, preHotelConfig);
   }
+  await blockRealFirebase(page);
   await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+  await assertMockFirebase(page);
   await page.waitForTimeout(1800);
   await page.evaluate(async () => { await window.__seedGst(); });
   await page.waitForTimeout(400);
@@ -447,12 +476,25 @@ async function setHotelConfig(page, lat, lon) {
     ok('9.3 "Accepter" transforme le document existant — aucun nouveau document créé (anti-doublon)', afterAcceptAll.length === beforeAccept && !!accepted);
     ok('9.4 "Acceptée" distincte d\'"appliquée" à ce stade (pas de confirmation d\'application)', !!accepted && !accepted.appliedAt && !accepted.appliedBy);
 
+    // Nouvelle interface (REFONTE CTA/VC) : les recommandations enregistrées
+    // sont listées en tableau (cta-vc.js:_recoTableHtml) ; un clic sur la
+    // ligne ouvre le détail (_openRecoDetail), dont le bouton réel
+    // « Confirmer l'application réelle » appelle _markApplied
+    // (_recoDetailActions) — plus de bouton onclick=_markApplied dans cet onglet.
+    const acceptedId = await page.evaluate(() => { const f = Object.entries(firebase.firestore()._debugStore.heating_recommendations || {}).find(([id, r]) => r.status === 'acceptee'); return f ? f[0] : null; });
+    const acceptedRowSel = 'tr[onclick="MX.Pages.CtaVc._openRecoDetail(\'' + acceptedId + '\')"]';
+    ok('9.5a La recommandation acceptée apparaît dans le tableau des recommandations', !!acceptedId && (await page.locator(acceptedRowSel).count()) === 1);
+    await clickSafe(page, acceptedRowSel);
+    const confirmAppliedBtn = page.locator('#m-actions .modal-btn', { hasText: 'Confirmer l\'application réelle' });
+    ok('9.5b Le détail de la recommandation acceptée propose le bouton « Confirmer l\'application réelle »', (await confirmAppliedBtn.count()) === 1);
     page.once('dialog', d => d.accept());
-    await clickSafe(page, '[onclick^="MX.Pages.CtaVc._markApplied"]');
+    await confirmAppliedBtn.click({ force: true });
     await page.waitForTimeout(400);
     const afterAll = await page.evaluate(() => Object.values(firebase.firestore()._debugStore.heating_recommendations || {}));
     const applied = afterAll.find(r => r.status === 'appliquee');
     ok('9.5 Confirmation d\'application distincte, postérieure à l\'acceptation', !!applied && !!applied.appliedBy);
+    const finalReco = await page.evaluate((id) => (firebase.firestore()._debugStore.heating_recommendations || {})[id], acceptedId);
+    ok('9.5c La MÊME recommandation (celle acceptée) a bien le statut final « appliquee » (appliedAt + appliedBy)', !!finalReco && finalReco.status === 'appliquee' && !!finalReco.appliedAt && !!finalReco.appliedBy);
     ok('9.6 Toujours aucun doublon après l\'application (même nombre total de documents)', afterAll.length === beforeAccept);
 
     // ── Parcours "refus" : un 2e circuit, isolé, pour tester le refus sans
@@ -651,7 +693,13 @@ async function setHotelConfig(page, lat, lon) {
   // silencieusement sous les mêmes dates, et (c) chaque jour persisté porte
   // les coordonnées qui l'ont réellement produit.
   {
-    const page = await browser.newPage();
+    // Service Worker BLOQUÉ pour cette page : sw.js ne contourne pas
+    // api.open-meteo.com (absent de sa liste BYPASS) ; une fois qu'il contrôle
+    // la page, il émet lui-même les requêtes météo et page.route() ne les
+    // intercepte plus (limitation documentée de Playwright) — la page
+    // interrogeait alors la VRAIE API Open-Meteo et fetchCountByProfile
+    // restait à 0. serviceWorkers: 'block' garantit l'interception.
+    const page = await browser.newPage({ serviceWorkers: 'block' });
     let currentProfile = 'A';
     const todayStr = new Date().toISOString().slice(0, 10);
     const fetchCountByProfile = { A: 0, B: 0 };
@@ -669,7 +717,9 @@ async function setHotelConfig(page, lat, lon) {
     });
     await page.addInitScript({ path: MOCK_FB });
     await page.addInitScript({ path: SEED });
+    await blockRealFirebase(page);
     await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+    await assertMockFirebase(page);
     await page.waitForTimeout(1800);
     await page.evaluate(async () => { await window.__seedGst(); });
     await page.waitForTimeout(400);
@@ -684,6 +734,8 @@ async function setHotelConfig(page, lat, lon) {
     await page.evaluate(() => { if (MX.ensureDailyDjuPersisted) MX.ensureDailyDjuPersisted(); });
     await page.waitForTimeout(2000);
     const afterA = await page.evaluate(() => Object.values(firebase.firestore()._debugStore.weather_daily || {}));
+    ok('13.0 Service Worker bloqué : aucun Service Worker ne contrôle la page', await page.evaluate(() => !(navigator.serviceWorker && navigator.serviceWorker.controller)));
+    ok('13.0b Les requêtes Open-Meteo de la localisation A sont bien interceptées par page.route() (Playwright)', fetchCountByProfile.A > 0);
     ok('13.1 Localisation A : des jours observés sont persistés', afterA.length > 0);
     ok('13.2 Localisation A : chaque jour persisté porte les coordonnées de A', afterA.every(d => d.lat === 48.75 && d.lon === 2.36));
     const tMeanA = afterA[0].tMean;

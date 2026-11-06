@@ -13,6 +13,33 @@ const SEED = path.join(__dirname, 'gst_seed.js');
 let failures = 0;
 function ok(label, cond) { if (!cond) { failures++; console.error('FAIL ' + label); } else console.log('ok   ' + label); }
 
+// GARDE-FOU ENVIRONNEMENT (mock-firebase) — index.html charge le VRAI SDK
+// Firebase depuis www.gstatic.com : sur un poste disposant d'un accès
+// Internet, il écrase window.firebase défini par tests/mock-firebase.js, puis
+// firebase-config.js le redirige vers les émulateurs locaux (127.0.0.1:8090/
+// 9099). Sans émulateur démarré, MX.state.users reste vide (pin-input jamais
+// créé) et toute écriture Firestore attend indéfiniment (TIMEOUT GLOBAL 180s).
+// Même protection que tests/navigation_visibility_test.js et
+// tests/accueil_cockpit_test.js : bloquer gstatic/googleapis AVANT page.goto(),
+// puis vérifier explicitement que le mock est bien celui utilisé par l'app.
+async function blockRealFirebase(page) {
+  await page.route('**://*.gstatic.com/**', r => r.abort());
+  await page.route('**://*.googleapis.com/**', r => r.abort());
+}
+async function assertMockFirebase(page) {
+  const mockActive = await page.evaluate(() => !!(
+    window.__mockDb && window.__mockDb._debugStore &&
+    window.firebase && typeof window.firebase.firestore === 'function' &&
+    window.firebase.firestore() === window.__mockDb
+  ));
+  if (!mockActive) {
+    console.error('\nERREUR ENVIRONNEMENT : mock-firebase inactif (window.firebase n\'est pas ' +
+      'tests/mock-firebase.js — probablement le vrai SDK Firebase chargé depuis gstatic.com). ' +
+      'Test interrompu immédiatement au lieu d\'attendre le TIMEOUT GLOBAL.');
+    process.exit(1);
+  }
+}
+
 const _globalTimeout = setTimeout(() => {
   console.error('\nTIMEOUT GLOBAL (180s) — le process est arrêté de force.');
   process.exit(1);
@@ -24,7 +51,9 @@ async function bootPage(page) {
   await page.route('https://api.open-meteo.com/**', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ current: { temperature_2m: 8, weather_code: 2 }, daily: { temperature_2m_min: [6], temperature_2m_max: [13] } }) }));
   await page.addInitScript({ path: MOCK_FB });
   await page.addInitScript({ path: SEED });
+  await blockRealFirebase(page);
   await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+  await assertMockFirebase(page);
   await page.waitForTimeout(1800);
   await page.evaluate(async () => { await window.__seedGst(); });
   await page.waitForTimeout(400);
@@ -98,7 +127,12 @@ async function setHotelConfig(page, lat, lon) {
     await page.evaluate(() => { MX.showPage('heating-config'); });
     await page.waitForTimeout(500);
     ok('2.1 Page Configuration thermique accessible à une Responsable', (await page.locator('.page-title', { hasText: 'Configuration thermique' }).count()) === 1);
-    ok('2.2 4 onglets présents (Bâtiments/Installations/Pièces/Courbes)', (await page.locator('.ctavc-tab').count()) === 4);
+    // Nouvelle interface (REFONTE CTA/VC Phases 5-8, heating-config.js:_html) :
+    // 3 onglets — « Pièces » devient « Zones thermiques », et l'ancien onglet
+    // « Courbes DJU / température » est rattaché à la fiche de chaque bâtiment
+    // (vérifié en section 5).
+    const tabLabels = await page.locator('.ctavc-tab').allInnerTexts();
+    ok('2.2 3 onglets présents (Bâtiments/Installations/Zones thermiques)', tabLabels.length === 3 && /Bâtiments/.test(tabLabels[0]) && /Installations/.test(tabLabels[1]) && /Zones thermiques/.test(tabLabels[2]));
 
     await clickSafe(page, '[onclick="MX.Pages.HeatingConfig._openBuildingForm(null)"]');
     await page.fill('#hc-b-name', 'Bâtiment Test [DÉMO]');
@@ -112,6 +146,12 @@ async function setHotelConfig(page, lat, lon) {
     const buildingId = Object.keys(await page.evaluate(() => firebase.firestore()._debugStore.heating_buildings)).find(async () => true);
     ok('2.5 Une entrée d\'audit a été créée à la création du bâtiment', (await page.evaluate(() => Object.values(firebase.firestore()._debugStore.heating_config_audit || {}).filter(a => a.entityType === 'building'))).length >= 1);
 
+    // Nouvelle interface (Phase 5) : le bouton "Modifier" n'est plus dans la
+    // liste mais dans la fiche détaillée du bâtiment, ouverte par un clic sur
+    // sa carte (heating-config.js:_openBuildingDetail / _buildingDetailHtml).
+    const createdBuildingId = await page.evaluate(() => { const f = Object.entries(firebase.firestore()._debugStore.heating_buildings || {}).find(([id, b]) => b.name === 'Bâtiment Test [DÉMO]'); return f ? f[0] : null; });
+    await clickSafe(page, '.ctavc-circuit-card[onclick*="' + createdBuildingId + '"]');
+    ok('2.5b La fiche détaillée du bâtiment s\'ouvre au clic sur sa carte', (await page.locator('.ctavc-detail-name', { hasText: 'Bâtiment Test [DÉMO]' }).count()) === 1);
     // Modification — bouton "Modifier" de la fiche (jamais "Ajouter", dont
     // l'onclick partage le même préfixe _openBuildingForm(null)).
     await clickSafe(page, '.ctavc-detail-actions [onclick^="MX.Pages.HeatingConfig._openBuildingForm"]');
@@ -238,11 +278,13 @@ async function setHotelConfig(page, lat, lon) {
     await page.waitForTimeout(300);
     await page.evaluate(() => { MX.showPage('heating-config'); });
     await page.waitForTimeout(400);
-    await page.evaluate(() => { MX.Pages.HeatingConfig._setTab('courbes'); });
-    await page.waitForTimeout(300);
+    // Nouvelle interface (Phase 8) : la courbe de référence est dans la fiche
+    // du bâtiment (heating-config.js:_buildingCurveSectionHtml), ouverte par
+    // un clic sur sa carte dans l'onglet Bâtiments.
     const bid3 = await page.evaluate(() => window.__bid3);
-    await page.evaluate((bid) => { MX.Pages.HeatingConfig._setCurveBuilding(bid); }, bid3);
+    await clickSafe(page, '.ctavc-circuit-card[onclick*="' + bid3 + '"]');
     await page.waitForTimeout(300);
+    ok('5.0 La fiche du bâtiment affiche la section « Courbe de référence »', (await page.locator('.ctavc-card-head', { hasText: 'Courbe de référence' }).count()) === 1);
 
     await clickSafe(page, '[onclick="MX.Pages.HeatingConfig._openCurvePointForm(null)"]');
     await page.fill('#hc-c-dju', '5');
@@ -294,12 +336,13 @@ async function setHotelConfig(page, lat, lon) {
     await page.waitForTimeout(300);
     await page.evaluate(() => { MX.showPage('heating-config'); });
     await page.waitForTimeout(400);
-    await page.evaluate(() => { MX.Pages.HeatingConfig._setTab('courbes'); });
-    await page.waitForTimeout(300);
-    await page.evaluate((bid) => { MX.Pages.HeatingConfig._setCurveBuilding(bid); }, bid);
+    // Nouvelle interface (Phase 8) : la comparaison individuelle est dans la
+    // fiche du bâtiment (heating-config.js:_roomComparisonHtml) ; « pièces »
+    // devient « zones thermiques » dans les libellés.
+    await clickSafe(page, '.ctavc-circuit-card[onclick*="' + bid + '"]');
     await page.waitForTimeout(300);
 
-    ok('5b.1 Sans sélection, message d\'invite affiché (rien tracé par défaut)', (await page.locator('text=Sélectionnez une ou plusieurs pièces').count()) > 0);
+    ok('5b.1 Sans sélection, message d\'invite affiché (rien tracé par défaut)', (await page.locator('text=Sélectionnez une ou plusieurs zones thermiques').count()) > 0);
 
     // Sélectionne les 2 pièces — comparaison multi-pièces du même bâtiment.
     await page.evaluate((r1) => { MX.Pages.HeatingConfig._toggleCompareRoom(r1, true); }, r1);
@@ -455,7 +498,9 @@ async function setHotelConfig(page, lat, lon) {
     });
     await page.addInitScript({ path: MOCK_FB });
     await page.addInitScript({ path: SEED });
+    await blockRealFirebase(page);
     await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+    await assertMockFirebase(page);
     await page.waitForTimeout(1800);
     await page.evaluate(async () => { await window.__seedGst(); });
     await page.waitForTimeout(400);
@@ -512,20 +557,20 @@ async function setHotelConfig(page, lat, lon) {
     }, { r1, todayStr });
     await page.waitForTimeout(300);
 
-    await page.evaluate(() => { MX.showPage('heating-config'); });
-    await page.waitForTimeout(400);
-    await page.evaluate(() => { MX.Pages.HeatingConfig._setTab('courbes'); });
-    await page.waitForTimeout(300);
-    await page.evaluate((bid) => { MX.Pages.HeatingConfig._setCurveBuilding(bid); }, bid);
+    // Nouvelle interface (Phase 8) : l'analyse DJU / température intérieure a
+    // migré à l'identique vers la page CTA / VC (vue d'ensemble), dans la
+    // carte du bâtiment concerné (cta-vc.js:_buildingCurveAnalysisHtml).
+    await page.evaluate(() => { MX.showPage('cta-vc'); });
     await page.waitForTimeout(2500); // laisse le fetch météo + le calcul se terminer
 
-    const analysisText = await page.locator('.ctavc-card', { hasText: 'Analyse DJU / température intérieure' }).first().innerText();
+    const analysisCard = page.locator('.ctavc-building-card', { hasText: 'Bâtiment Analyse DJU [DÉMO]' }).filter({ hasText: 'Analyse DJU / température intérieure' }).first();
+    const analysisText = await analysisCard.innerText();
     ok('8.1 DJU observé affiché (valeur numérique, pas un placeholder)', /DJU observé[\s\S]*?\d/.test(analysisText));
     ok('8.2 DJU prévisionnel affiché', /DJU prévisionnel[\s\S]*?\d/.test(analysisText));
     ok('8.3 Température intérieure moyenne affichée (17°C, seule pièce suivie)', /moyenne[\s\S]*?17/i.test(analysisText));
     ok('8.4 Température intérieure cible (courbe interpolée) affichée', /cible/i.test(analysisText));
     ok('8.5 Écart réel à la cible affiché (négatif, le relevé est sous la courbe)', /Écart réel[\s\S]*?-/i.test(analysisText));
-    ok('8.6 Un tableau d\'évolution jour par jour est rendu avec au moins une ligne', (await page.locator('.ctavc-card', { hasText: 'Analyse DJU / température intérieure' }).first().locator('table tbody tr').count()) >= 1);
+    ok('8.6 Un tableau d\'évolution jour par jour est rendu avec au moins une ligne', (await analysisCard.locator('table tbody tr').count()) >= 1);
     ok('8.7 Le seuil de dégradation est détecté et affiché (écart -2°C > seuil 1°C)', /perdre en température/i.test(analysisText));
     ok('8.8b Avec 3 échantillons (zone "partielle"), la fiabilité est explicitement qualifiée "Données partielles"', /Données partielles/i.test(analysisText));
     ok('8.8c L\'alerte de dégradation porte bien la mention "Confiance limitée" en zone partielle (jamais présentée comme fiable à 100%)', /Confiance limitée/i.test(analysisText));
@@ -549,7 +594,9 @@ async function setHotelConfig(page, lat, lon) {
     });
     await page.addInitScript({ path: MOCK_FB });
     await page.addInitScript({ path: SEED });
+    await blockRealFirebase(page);
     await page.goto(BASE + '/index.html', { waitUntil: 'load' });
+    await assertMockFirebase(page);
     await page.waitForTimeout(1800);
     await page.evaluate(async () => { await window.__seedGst(); });
     await page.waitForTimeout(400);
@@ -599,14 +646,12 @@ async function setHotelConfig(page, lat, lon) {
     }, { r1, todayStr });
     await page.waitForTimeout(300);
 
-    await page.evaluate(() => { MX.showPage('heating-config'); });
-    await page.waitForTimeout(400);
-    await page.evaluate(() => { MX.Pages.HeatingConfig._setTab('courbes'); });
-    await page.waitForTimeout(300);
-    await page.evaluate((bid) => { MX.Pages.HeatingConfig._setCurveBuilding(bid); }, bid);
+    // Nouvelle interface (Phase 8) : analyse migrée vers la page CTA / VC,
+    // carte du bâtiment concerné (voir section 8).
+    await page.evaluate(() => { MX.showPage('cta-vc'); });
     await page.waitForTimeout(2500);
 
-    const analysisText2 = await page.locator('.ctavc-card', { hasText: 'Analyse DJU / température intérieure' }).first().innerText();
+    const analysisText2 = await page.locator('.ctavc-building-card', { hasText: 'Bâtiment 2 Jours [DÉMO]' }).filter({ hasText: 'Analyse DJU / température intérieure' }).first().innerText();
     ok('8b.1 "Données insuffisantes" affiché avec seulement 2 jours de mesures', /Données insuffisantes/i.test(analysisText2));
     ok('8b.2 AUCUNE mention de "perdre en température" malgré l\'écart énorme (-6°C) sur les 2 points — jamais une confiance élevée avec si peu de données', !/perdre en température/i.test(analysisText2));
     ok('8b.3 Le message explique le seuil minimal requis', /moins de 3 jours|échantillon trop réduit/i.test(analysisText2));
