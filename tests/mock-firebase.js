@@ -200,6 +200,53 @@
           commit: function () { return ops.reduce(function (p, fn) { return p.then(fn); }, Promise.resolve()); }
         };
       },
+      // runTransaction — simulation MINIMALE, SÉQUENTIELLE, pour pouvoir
+      // exercer le code qui utilise db.runTransaction() (ex. db.js:
+      // applyWeekTemplateToWeek). Reproduit :
+      //   • lectures via transaction.get(ref) — COPIE profonde des données
+      //     (comme le vrai SDK : modifier l'objet lu ne modifie jamais le
+      //     store) ;
+      //   • règle du vrai SDK : toutes les lectures AVANT toute écriture ;
+      //   • écritures (set/update/delete) MISES EN ATTENTE, appliquées
+      //     seulement si la fonction réussit ; si elle échoue, AUCUNE
+      //     écriture n'est appliquée.
+      // NE SIMULE PAS : les conflits concurrents, les nouvelles tentatives
+      // automatiques, ni l'isolation entre plusieurs clients. Un test qui
+      // passe avec ce mock NE PROUVE PAS la sécurité face aux écritures
+      // concurrentes — seule la conception (relecture dans la transaction)
+      // y répond, sur le vrai Firestore.
+      // window.__mockTxLog : compteurs pour vérifier depuis un test qu'une
+      // transaction a bien été utilisée (commits / annulations).
+      runTransaction: function (fn) {
+        window.__mockTxLog = window.__mockTxLog || { started: 0, committed: 0, aborted: 0 };
+        window.__mockTxLog.started++;
+        var pending = [];
+        var tx = {
+          get: function (ref) {
+            if (pending.length) {
+              return Promise.reject(new Error('Firestore transactions require all reads to be executed before all writes.'));
+            }
+            return ref.get().then(function (snap) {
+              var copy = snap.exists ? JSON.parse(JSON.stringify(snap.data())) : undefined;
+              return { id: snap.id, exists: snap.exists, data: function () { return copy; } };
+            });
+          },
+          set:    function (ref, data, opts) { pending.push(function () { return ref.set(data, opts); }); return tx; },
+          update: function (ref, data)       { pending.push(function () { return ref.update(data); }); return tx; },
+          delete: function (ref)             { pending.push(function () { return ref.delete(); }); return tx; },
+        };
+        return Promise.resolve()
+          .then(function () { return fn(tx); })
+          .then(function (result) {
+            return pending.reduce(function (p, w) { return p.then(w); }, Promise.resolve()).then(function () {
+              window.__mockTxLog.committed++;
+              return result;
+            });
+          }, function (err) {
+            window.__mockTxLog.aborted++;
+            throw err;
+          });
+      },
       _debugStore: store,
       _debugListeners: listeners,
       // triggerSnapshotError(collName, err) — simule une VRAIE erreur de

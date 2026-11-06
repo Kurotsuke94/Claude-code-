@@ -1119,6 +1119,571 @@
     }, { merge: true });
   }
 
+  // ── GESTION SEMAINE TECH — MODÈLES DE SEMAINE (week_templates) ───────────
+  // Un modèle de semaine décrit, pour CHAQUE jour (lundi → dimanche) et pour
+  // CHAQUE créneau, s'il est actif et quelles missions il contient. Chaque
+  // cellule jour × créneau possède SA PROPRE liste de missions (identifiants
+  // distincts) : aucune donnée n'est partagée entre deux jours, modifier le
+  // mardi soir ne peut donc jamais toucher le lundi soir.
+  //
+  // COPIE FIGÉE DES CRÉNEAUX (columns) : le modèle de semaine stocke sa propre
+  // copie du nom, de l'icône, de la couleur et des horaires de chaque modèle
+  // de créneau (shift_templates) au moment où la colonne est capturée. Une
+  // modification ultérieure d'un modèle de créneau ne change JAMAIS
+  // silencieusement un modèle de semaine : diffWeekTemplateColumns() permet
+  // de détecter l'écart, refreshWeekTemplateColumn() de le reprendre
+  // EXPLICITEMENT, colonne par colonne. L'application à une semaine utilise
+  // EXCLUSIVEMENT cette copie figée — jamais shift_templates en direct.
+  //
+  // INDÉPENDANCE DES SEMAINES GÉNÉRÉES : applyWeekTemplateToWeek() COPIE les
+  // missions dans week_slots (nouveaux identifiants de tâches) ; une semaine
+  // générée ne référence jamais le modèle autrement que par des marqueurs
+  // informatifs (weekTemplateId/weekTemplateName) — modifier ou archiver le
+  // modèle ensuite ne la modifie jamais.
+  //
+  // VERSION (anti-écrasement) : chaque modèle porte un compteur `version`.
+  // Toute écriture (enregistrement, activation, archivage) se fait en
+  // transaction et exige la version lue à l'ouverture : si un autre
+  // responsable a enregistré entre-temps, l'écriture est REFUSÉE (code
+  // 'version-conflict') au lieu d'écraser son travail.
+  //
+  // ARCHIVAGE : aucune suppression définitive n'est proposée (pas de
+  // deleteWeekTemplate) ; un modèle archivé reste lisible, n'est plus
+  // modifiable ni applicable, et peut être réactivé ou dupliqué.
+  //
+  // Collection distincte de shift_templates (décision validée) : aucun code
+  // existant de shift_templates / week_slots n'est modifié ici. NOTE : la
+  // collection week_templates n'a PAS encore de règle dans firestore.rules —
+  // sans elle, Firestore refuse toute lecture/écriture en production (règle
+  // à ajouter et déployer AVANT l'interface, sur validation séparée).
+  // Toutes ces vérifications sont CÔTÉ CLIENT : sans règle serveur adaptée,
+  // elles protègent contre les erreurs, pas contre un client malveillant.
+  const R_WEEK_TPL = () => db.collection('week_templates');
+  const WT_LIMITS = {
+    name: 80, description: 300, missionText: 200, category: 40,
+    columnName: 60, icon: 16,
+    columns: 12, missionsPerCell: 60, missionsTotal: 600,
+  };
+  const WT_COLUMN_FIELDS = ['name', 'icon', 'color', 'start', 'end'];
+  const WT_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+  const WT_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const WT_WEEKKEY_RE = /^\d{4}_W(0[1-9]|[1-4]\d|5[0-3])$/;
+  const WT_DEFAULT_COLOR = '#6B7280';
+
+  function _wtDayIds() { return DAYS.map(d => d.id); }
+  function _wtClone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function _wtErr(code, message, extra) { const e = new Error(message); e.code = code; if (extra) Object.assign(e, extra); return e; }
+  function _wtStr(v) { return typeof v === 'string' ? v : (v === undefined || v === null ? '' : String(v)); }
+  function _wtLocalDateStr(d) {
+    const x = d || new Date();
+    return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  }
+  function _wtLocalTimeStr(d) {
+    const x = d || new Date();
+    return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0');
+  }
+  function isValidWeekKey(weekKey) { return typeof weekKey === 'string' && WT_WEEKKEY_RE.test(weekKey); }
+  // Valeurs de créneau "sûres" pour une CAPTURE depuis shift_templates (dont
+  // l'historique peut contenir des valeurs inattendues) : couleur invalide ->
+  // gris par défaut, horaire invalide -> vide. La VALIDATION stricte
+  // (normalizeWeekTemplate) refuse, elle, toute valeur invalide.
+  function _wtSafeColor(c) { const s = _wtStr(c); return WT_COLOR_RE.test(s) ? s : WT_DEFAULT_COLOR; }
+  function _wtSafeTime(t) { const s = _wtStr(t); return WT_TIME_RE.test(s) ? s : ''; }
+
+  // Capture FIGÉE des modèles de créneau actifs (ordre conservé). Pure.
+  function buildWeekTemplateColumns(shiftTemplates) {
+    const capturedAt = new Date().toISOString();
+    return (shiftTemplates || [])
+      .filter(t => t && t.id && t.active !== false)
+      .slice().sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(t => ({
+        key: uuid(), sourceShiftTemplateId: t.id,
+        name: (_wtStr(t.name).trim() || 'Créneau').slice(0, WT_LIMITS.columnName),
+        icon: _wtStr(t.icon).slice(0, WT_LIMITS.icon),
+        color: _wtSafeColor(t.color), start: _wtSafeTime(t.start), end: _wtSafeTime(t.end), capturedAt,
+      }));
+  }
+  // Grille vide : chaque jour × colonne inactif, sans mission. Pure.
+  function emptyWeekTemplateDays(columns) {
+    const days = {};
+    _wtDayIds().forEach(dayId => {
+      days[dayId] = {};
+      (columns || []).forEach(c => { days[dayId][c.key] = { active: false, missions: [] }; });
+    });
+    return days;
+  }
+
+  // Validation + nettoyage d'un modèle (pure, ne lit/n'écrit rien). Lève une
+  // erreur code 'invalid-week-template' si une donnée est invalide. Garantit
+  // l'indépendance des cellules : un identifiant de mission présent dans
+  // deux cellules (copier-coller de code, import…) est régénéré dans la
+  // seconde — deux cellules ne peuvent jamais partager une mission.
+  function normalizeWeekTemplate(data) {
+    const bad = msg => _wtErr('invalid-week-template', msg);
+    const src = (data && typeof data === 'object') ? data : {};
+    const name = _wtStr(src.name).trim();
+    if (!name) throw bad('Le nom du modèle est obligatoire.');
+    if (name.length > WT_LIMITS.name) throw bad('Nom trop long (' + WT_LIMITS.name + ' caractères maximum).');
+    const description = _wtStr(src.description).trim();
+    if (description.length > WT_LIMITS.description) throw bad('Description trop longue (' + WT_LIMITS.description + ' caractères maximum).');
+
+    if (!Array.isArray(src.columns) || !src.columns.length) throw bad('Le modèle doit contenir au moins un créneau.');
+    if (src.columns.length > WT_LIMITS.columns) throw bad('Trop de créneaux (' + WT_LIMITS.columns + ' maximum).');
+    const seenKeys = {}, seenSources = {};
+    const columns = src.columns.map(c => {
+      if (!c || typeof c !== 'object') throw bad('Créneau invalide.');
+      const key = _wtStr(c.key);
+      if (!key) throw bad('Créneau sans identifiant.');
+      if (seenKeys[key]) throw bad('Créneau en double : ' + key);
+      seenKeys[key] = true;
+      const source = _wtStr(c.sourceShiftTemplateId);
+      if (!source) throw bad('Chaque créneau doit référencer son modèle de créneau d\'origine (sourceShiftTemplateId).');
+      if (seenSources[source]) throw bad('Le même modèle de créneau ne peut apparaître qu\'une fois.');
+      seenSources[source] = true;
+      const colName = _wtStr(c.name).trim() || 'Créneau';
+      if (colName.length > WT_LIMITS.columnName) throw bad('Nom de créneau trop long (' + WT_LIMITS.columnName + ' caractères maximum).');
+      const icon = _wtStr(c.icon);
+      if (icon.length > WT_LIMITS.icon) throw bad('Icône de créneau invalide.');
+      const color = _wtStr(c.color) || WT_DEFAULT_COLOR;
+      if (!WT_COLOR_RE.test(color)) throw bad('Couleur de créneau invalide (format attendu #RRGGBB) : ' + color);
+      const start = _wtStr(c.start), end = _wtStr(c.end);
+      if (start && !WT_TIME_RE.test(start)) throw bad('Heure de début invalide (format attendu HH:MM) : ' + start);
+      if (end && !WT_TIME_RE.test(end)) throw bad('Heure de fin invalide (format attendu HH:MM) : ' + end);
+      return { key, sourceShiftTemplateId: source, name: colName, icon, color, start, end, capturedAt: _wtStr(c.capturedAt) };
+    });
+
+    const seenMissionIds = {};
+    let total = 0;
+    const srcDays = (src.days && typeof src.days === 'object') ? src.days : {};
+    const days = {};
+    _wtDayIds().forEach(dayId => {
+      const srcDay = (srcDays[dayId] && typeof srcDays[dayId] === 'object') ? srcDays[dayId] : {};
+      days[dayId] = {};
+      columns.forEach(c => {
+        const cell = (srcDay[c.key] && typeof srcDay[c.key] === 'object') ? srcDay[c.key] : {};
+        if (cell.missions !== undefined && !Array.isArray(cell.missions)) throw bad('Liste de missions invalide (' + dayId + ').');
+        const list = cell.missions || [];
+        if (list.length > WT_LIMITS.missionsPerCell) throw bad('Trop de missions pour un créneau (' + WT_LIMITS.missionsPerCell + ' maximum, ' + dayId + ').');
+        total += list.length;
+        if (total > WT_LIMITS.missionsTotal) throw bad('Trop de missions dans le modèle (' + WT_LIMITS.missionsTotal + ' maximum).');
+        const missions = list.map((m, i) => {
+          const text = _wtStr(m && m.text).trim();
+          if (!text) throw bad('Une mission sans texte a été trouvée (' + dayId + ').');
+          if (text.length > WT_LIMITS.missionText) throw bad('Mission trop longue (' + WT_LIMITS.missionText + ' caractères maximum).');
+          let id = _wtStr(m && m.id);
+          if (!id || seenMissionIds[id]) id = uuid();
+          seenMissionIds[id] = true;
+          const out = { id, text, order: i };
+          const category = _wtStr(m && m.category).trim();
+          if (category) {
+            if (category.length > WT_LIMITS.category) throw bad('Catégorie trop longue (' + WT_LIMITS.category + ' caractères maximum).');
+            out.category = category;
+          }
+          return out;
+        });
+        days[dayId][c.key] = { active: cell.active === true, missions };
+      });
+    });
+
+    return { name, description, active: src.active !== false, columns, days };
+  }
+
+  // Écart entre la copie figée et les modèles de créneau ACTUELS. Pure.
+  // status : 'ok' | 'changed' | 'source-missing' | 'source-inactive'
+  function diffWeekTemplateColumns(tpl, shiftTemplates) {
+    const byId = {};
+    (shiftTemplates || []).forEach(t => { if (t && t.id) byId[t.id] = t; });
+    return ((tpl && tpl.columns) || []).map(c => {
+      const cur = byId[c.sourceShiftTemplateId];
+      if (!cur) return { key: c.key, status: 'source-missing', changes: {} };
+      const changes = {};
+      WT_COLUMN_FIELDS.forEach(f => {
+        const frozen = _wtStr(c[f]), now = _wtStr(cur[f]);
+        if (frozen !== now) changes[f] = { frozen, current: now };
+      });
+      if (cur.active === false) return { key: c.key, status: 'source-inactive', changes };
+      return { key: c.key, status: Object.keys(changes).length ? 'changed' : 'ok', changes };
+    });
+  }
+  // Reprise EXPLICITE des valeurs actuelles d'un modèle de créneau dans UNE
+  // colonne. Retourne un NOUVEAU modèle (pure) ; missions et activations
+  // inchangées. Valeurs invalides côté shift_templates neutralisées.
+  function refreshWeekTemplateColumn(tpl, columnKey, shiftTemplate) {
+    const out = _wtClone(tpl);
+    const col = (out.columns || []).find(c => c.key === columnKey);
+    if (!col) throw _wtErr('invalid-week-template', 'Créneau introuvable.');
+    if (!shiftTemplate || shiftTemplate.id !== col.sourceShiftTemplateId) throw _wtErr('invalid-week-template', 'Le modèle de créneau ne correspond pas à cette colonne.');
+    const fresh = buildWeekTemplateColumns([Object.assign({}, shiftTemplate, { active: true })])[0];
+    WT_COLUMN_FIELDS.forEach(f => { col[f] = fresh[f]; });
+    col.capturedAt = fresh.capturedAt;
+    return out;
+  }
+  // Ajout EXPLICITE d'une colonne (copie figée) ; jamais automatique. Pure.
+  function addWeekTemplateColumn(tpl, shiftTemplate) {
+    const out = _wtClone(tpl);
+    out.columns = out.columns || [];
+    if (!shiftTemplate || !shiftTemplate.id) throw _wtErr('invalid-week-template', 'Modèle de créneau invalide.');
+    if (out.columns.some(c => c.sourceShiftTemplateId === shiftTemplate.id)) throw _wtErr('invalid-week-template', 'Ce modèle de créneau est déjà une colonne du modèle.');
+    if (out.columns.length >= WT_LIMITS.columns) throw _wtErr('invalid-week-template', 'Trop de créneaux (' + WT_LIMITS.columns + ' maximum).');
+    const col = buildWeekTemplateColumns([Object.assign({}, shiftTemplate, { active: true })])[0];
+    out.columns.push(col);
+    out.days = out.days || {};
+    _wtDayIds().forEach(dayId => {
+      out.days[dayId] = out.days[dayId] || {};
+      out.days[dayId][col.key] = { active: false, missions: [] };
+    });
+    return out;
+  }
+
+  // Lecture : renvoie TOUS les modèles (archivés compris, champ archived) —
+  // à l'interface de filtrer. Renvoie la fonction de désabonnement.
+  function listenWeekTemplates(cb) {
+    return R_WEEK_TPL().orderBy('order').onSnapshot(snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, _fsError('week_templates'));
+  }
+  async function _nextWeekTemplateOrder() {
+    const snap = await R_WEEK_TPL().orderBy('order', 'desc').limit(1).get();
+    return snap.empty ? 0 : ((snap.docs[0].data().order || 0) + 1);
+  }
+  async function addWeekTemplate(data, actor) {
+    const clean = normalizeWeekTemplate(data);
+    const order = await _nextWeekTemplateOrder();
+    const ref = await R_WEEK_TPL().add(Object.assign({ order }, clean, {
+      archived: false, version: 1,
+      createdAt: FV.serverTimestamp(), createdBy: actor || '',
+      updatedAt: FV.serverTimestamp(), updatedBy: actor || '',
+    }));
+    return ref.id;
+  }
+  // Écriture versionnée commune : lit le modèle DANS une transaction, refuse
+  // si la version a changé depuis l'ouverture (expectedVersion), puis écrit
+  // `fields` avec version+1. Un modèle créé avant l'ajout du compteur
+  // (sans `version`) est traité comme version 0.
+  async function _writeWeekTemplateVersioned(id, expectedVersion, actor, buildFields) {
+    const ref = R_WEEK_TPL().doc(id);
+    return db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw _wtErr('not-found', 'Modèle de semaine introuvable.');
+      const cur = snap.data();
+      const curVersion = typeof cur.version === 'number' ? cur.version : 0;
+      const expected = typeof expectedVersion === 'number' ? expectedVersion : 0;
+      if (curVersion !== expected) {
+        throw _wtErr('version-conflict',
+          'Ce modèle a été modifié entre-temps' + (cur.updatedBy ? ' par ' + cur.updatedBy : '') +
+          '. Rechargez le modèle avant d\'enregistrer vos changements.',
+          { currentVersion: curVersion, expectedVersion: expected, updatedBy: cur.updatedBy || '' });
+      }
+      const fields = buildFields(cur);
+      tx.update(ref, Object.assign({}, fields, { version: curVersion + 1, updatedAt: FV.serverTimestamp(), updatedBy: actor || '' }));
+      return curVersion + 1;
+    });
+  }
+  // Remplace INTÉGRALEMENT name/description/active/columns/days (update()
+  // remplace chaque champ de premier niveau) : une mission supprimée l'est
+  // réellement, jamais réintroduite par une fusion en profondeur.
+  // `data.version` = version lue à l'ouverture du modèle (obligatoire pour
+  // détecter un conflit). Un modèle archivé n'est pas modifiable.
+  async function updateWeekTemplate(id, data, actor) {
+    const clean = normalizeWeekTemplate(data);
+    return _writeWeekTemplateVersioned(id, data && data.version, actor, cur => {
+      if (cur.archived === true) throw _wtErr('archived', 'Ce modèle est archivé : réactivez-le avant de le modifier.');
+      return clean;
+    });
+  }
+  async function setWeekTemplateActive(id, active, expectedVersion, actor) {
+    return _writeWeekTemplateVersioned(id, expectedVersion, actor, cur => {
+      if (cur.archived === true) throw _wtErr('archived', 'Ce modèle est archivé : réactivez-le avant de le modifier.');
+      return { active: !!active };
+    });
+  }
+  // Archivage (remplace toute suppression définitive). archived=false pour
+  // réactiver. Les semaines déjà générées ne sont jamais touchées.
+  async function archiveWeekTemplate(id, archived, expectedVersion, actor) {
+    return _writeWeekTemplateVersioned(id, expectedVersion, actor, () => (archived
+      ? { archived: true, archivedAt: FV.serverTimestamp(), archivedBy: actor || '' }
+      : { archived: false }));
+  }
+  // Duplication : nouvelles identités de mission partout (aucune mission
+  // partagée entre l'original et la copie). Possible depuis un modèle
+  // archivé ; la copie est un modèle actif, non archivé, version 1.
+  async function duplicateWeekTemplate(id, actor) {
+    const snap = await R_WEEK_TPL().doc(id).get();
+    if (!snap.exists) throw _wtErr('not-found', 'Modèle de semaine introuvable.');
+    const src = _wtClone(snap.data());
+    Object.keys(src.days || {}).forEach(dayId => {
+      Object.keys(src.days[dayId] || {}).forEach(k => {
+        ((src.days[dayId][k] && src.days[dayId][k].missions) || []).forEach(m => { if (m) m.id = uuid(); });
+      });
+    });
+    src.name = ((src.name || 'Modèle') + ' (copie)').slice(0, WT_LIMITS.name);
+    return addWeekTemplate(src, actor);
+  }
+
+  // ── APPLICATION D'UN MODÈLE DE SEMAINE À UNE SEMAINE RÉELLE ─────────────
+  // Classement PUR (aucune lecture/écriture) de chaque cellule ACTIVE :
+  //   add      — aucun créneau de cette source ce jour-là : nouvelle instance
+  //   replace  — uniquement si opts.replaceNotStarted ET jour FUTUR : une
+  //              instance de cette source existe, aucune tâche cochée, aucune
+  //              personnalisation, AUCUNE ACTIVITÉ EXTERNE (note, photo,
+  //              transfert) : remplacée EN GARDANT son id, son ordre et son
+  //              technicien
+  //   skip     — raisons : 'past-week' | 'past-day' | 'slot-ended' |
+  //              'today-no-schedule' | 'already-present' | 'today-no-replace' |
+  //              'started' | 'completed' | 'customized' | 'has-activity' |
+  //              'activity-unknown'
+  // Aujourd'hui : uniquement des AJOUTS, et seulement pour un créneau dont
+  // l'heure de fin n'est pas passée (horaire inconnu -> refus prudent) ;
+  // jamais de remplacement le jour même.
+  // opts.activity (requis pour tout remplacement) : { noteKeys: [clé], photoKeys:
+  // [clé], transferTaskIds: [id], coveredTaskIds: [id] } — clés
+  // "jour_instance_tâche", voir collectWeekActivity(). Sans ces données, une
+  // instance candidate au remplacement est ignorée ('activity-unknown').
+  function _wtInstanceState(inst) {
+    const tasks = inst.tasks || [];
+    const done = tasks.filter(t => t.done).length;
+    if (done === 0) return 'not-started';
+    return done === tasks.length ? 'completed' : 'started';
+  }
+  function _wtSlotEnded(col, nowTime) {
+    const end = _wtStr(col.end), start = _wtStr(col.start);
+    if (!end) return null;                        // horaire inconnu
+    if (start && end <= start) return false;      // créneau qui passe minuit : pas terminé le jour même
+    return end <= nowTime;
+  }
+  function previewWeekTemplateApplication(weekDoc, tpl, weekKey, opts) {
+    if (!isValidWeekKey(weekKey)) throw _wtErr('invalid-week-key', 'Semaine invalide : ' + weekKey);
+    const o = opts || {};
+    const todayStr = o.todayDateStr || _wtLocalDateStr();
+    const nowTime = o.nowTime || _wtLocalTimeStr();
+    const dateFor = o.dateForDay || ((wk, dayId) => window.MX.dateForWeekDay(wk, dayId));
+    const todayWeekKey = o.todayWeekKey || window.MX.weekKeyOf(new Date(todayStr + 'T12:00:00'));
+    const weekPast = weekKey < todayWeekKey;
+    const act = o.activity || null;
+    const actSets = act ? {
+      notes: new Set(act.noteKeys || []), photos: new Set(act.photoKeys || []),
+      transfers: new Set(act.transferTaskIds || []), covered: new Set(act.coveredTaskIds || []),
+    } : null;
+    const days = (weekDoc && weekDoc.days) || {};
+    const items = [];
+    let inactive = 0;
+    _wtDayIds().forEach(dayId => {
+      const dateStr = dateFor(weekKey, dayId);
+      const isToday = dateStr === todayStr;
+      const list = days[dayId] || [];
+      ((tpl && tpl.columns) || []).forEach(col => {
+        const cell = (tpl.days && tpl.days[dayId] && tpl.days[dayId][col.key]) || { active: false, missions: [] };
+        if (!cell.active) { inactive++; return; }
+        const base = { dayId, dateStr, columnKey: col.key, columnName: col.name, sourceShiftTemplateId: col.sourceShiftTemplateId || null, missionsCount: (cell.missions || []).length };
+        const skip = (reason, extra) => items.push(Object.assign(base, { action: 'skip', reason }, extra || {}));
+        if (weekPast) return skip('past-week');
+        if (dateStr < todayStr) return skip('past-day');
+        if (isToday) {
+          const ended = _wtSlotEnded(col, nowTime);
+          if (ended === null) return skip('today-no-schedule');
+          if (ended) return skip('slot-ended');
+        }
+        const same = list.filter(i => i.templateId === col.sourceShiftTemplateId);
+        if (!same.length) { items.push(Object.assign(base, { action: 'add', reason: 'absent' })); return; }
+        const states = same.map(_wtInstanceState);
+        if (states.indexOf('started') !== -1) return skip('started', { existingInstanceId: same[states.indexOf('started')].id });
+        if (states.indexOf('completed') !== -1) return skip('completed', { existingInstanceId: same[states.indexOf('completed')].id });
+        const target = same[0];
+        const customized = (target.tasks || []).some(t => t.movedFrom) ||
+          list.some(i => (i.tasks || []).some(t => t.movedFrom === target.id));
+        if (customized) return skip('customized', { existingInstanceId: target.id });
+        if (!o.replaceNotStarted) return skip('already-present', { existingInstanceId: target.id });
+        if (isToday) return skip('today-no-replace', { existingInstanceId: target.id });
+        if (!actSets) return skip('activity-unknown', { existingInstanceId: target.id });
+        const tasks = target.tasks || [];
+        if (tasks.some(t => !actSets.covered.has(t.id))) return skip('activity-unknown', { existingInstanceId: target.id });
+        const hasActivity = tasks.some(t => {
+          const k = dayId + '_' + target.id + '_' + t.id;
+          return actSets.notes.has(k) || actSets.photos.has(k) || actSets.transfers.has(t.id);
+        });
+        if (hasActivity) return skip('has-activity', { existingInstanceId: target.id });
+        items.push(Object.assign(base, { action: 'replace', reason: 'not-started', existingInstanceId: target.id }));
+      });
+    });
+    const counts = { add: 0, replace: 0, skip: 0, inactive };
+    items.forEach(it => { counts[it.action]++; });
+    return { weekKey, weekPast, todayDateStr: todayStr, nowTime, items, counts };
+  }
+
+  // Instances candidates à un remplacement (même source qu'une colonne du
+  // modèle, jour futur). Sert à limiter les lectures d'activité au strict
+  // nécessaire.
+  function _wtReplaceCandidateTasks(weekDoc, tpl, weekKey, todayStr) {
+    const out = [];
+    const sources = new Set(((tpl && tpl.columns) || []).map(c => c.sourceShiftTemplateId));
+    const days = (weekDoc && weekDoc.days) || {};
+    _wtDayIds().forEach(dayId => {
+      if (window.MX.dateForWeekDay(weekKey, dayId) <= todayStr) return;
+      (days[dayId] || []).forEach(inst => {
+        if (!sources.has(inst.templateId)) return;
+        (inst.tasks || []).forEach(t => out.push({ dayId, instanceId: inst.id, taskId: t.id, key: dayId + '_' + inst.id + '_' + t.id }));
+      });
+    });
+    return out;
+  }
+  // Activité EXTERNE à week_slots rattachée aux tâches (notes/signalements
+  // config/notes, photos task_photos/{clé}, transferts transfers.taskId).
+  // Lecture seule. Sert à l'aperçu (interface) ; l'application relit notes et
+  // photos DANS sa transaction.
+  async function _wtTransferTaskIds(taskIds) {
+    const found = new Set();
+    for (let i = 0; i < taskIds.length; i += 10) {
+      const chunk = taskIds.slice(i, i + 10);
+      const snap = await R.transfers().where('taskId', 'in', chunk).get();
+      snap.docs.forEach(d => { const v = d.data().taskId; if (v) found.add(v); });
+    }
+    return found;
+  }
+  async function collectWeekActivity(weekKey, weekDoc, tpl, todayDateStr) {
+    if (!isValidWeekKey(weekKey)) throw _wtErr('invalid-week-key', 'Semaine invalide : ' + weekKey);
+    const cands = _wtReplaceCandidateTasks(weekDoc, tpl, weekKey, todayDateStr || _wtLocalDateStr());
+    const notesSnap = await db.collection('config').doc('notes').get();
+    const notes = notesSnap.exists ? (notesSnap.data() || {}) : {};
+    const photoKeys = [];
+    for (const c of cands) {
+      const p = await db.collection('task_photos').doc(c.key).get();
+      if (p.exists) photoKeys.push(c.key);
+    }
+    const transfers = await _wtTransferTaskIds(cands.map(c => c.taskId));
+    return {
+      noteKeys: cands.filter(c => notes[c.key]).map(c => c.key),
+      photoKeys,
+      transferTaskIds: Array.from(transfers),
+      coveredTaskIds: cands.map(c => c.taskId),
+    };
+  }
+
+  function _wtTasksFromMissions(missions) {
+    return (missions || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map((m, i) => {
+      const t = { id: uuid(), text: m.text, order: i, done: false };
+      if (m.category) t.category = m.category;
+      return t;
+    });
+  }
+
+  // Écriture TRANSACTIONNELLE : le modèle est RE-VALIDÉ et le classement
+  // RECALCULÉ dans la transaction, sur l'état le plus récent de
+  // week_slots/{weekKey} — une case cochée par un technicien entre l'aperçu et
+  // la confirmation fait passer son créneau en "ignoré" au lieu d'être
+  // écrasée. Pour un remplacement, notes et photos sont relues dans la
+  // transaction ; les transferts (requête, impossible en transaction web) sont
+  // lus juste avant — toute tâche apparue entre-temps est classée
+  // 'activity-unknown' (jamais remplacée). Seuls les jours réellement
+  // concernés sont réécrits (days.{jour}, fusion des autres jours).
+  // LIMITE CONNUE : les fonctions existantes de week_slots (cocher, affecter,
+  // déplacer…) n'utilisent pas de transaction ; si l'une d'elles écrit APRÈS
+  // cette transaction avec une liste lue AVANT, elle peut écraser les
+  // créneaux ajoutés ici (risque préexistant, non traité dans ce lot).
+  async function applyWeekTemplateToWeek(weekKey, weekLabel, templateId, opts, actor) {
+    if (!isValidWeekKey(weekKey)) throw _wtErr('invalid-week-key', 'Semaine invalide : ' + weekKey);
+    const o = opts || {};
+    const todayStr = o.todayDateStr || _wtLocalDateStr();
+    const nowTime = o.nowTime || _wtLocalTimeStr();
+    if (weekKey < window.MX.weekKeyOf(new Date(todayStr + 'T12:00:00'))) {
+      throw _wtErr('past-week', 'Impossible d\'appliquer un modèle à une semaine passée.');
+    }
+    const tplRef = R_WEEK_TPL().doc(templateId);
+    const wkRef  = R_WEEK_SLOTS().doc(weekKey);
+    const notesRef = db.collection('config').doc('notes');
+
+    // Transferts lus AVANT la transaction (requête), seulement si un
+    // remplacement est demandé.
+    let preTransfers = null, preCovered = null;
+    if (o.replaceNotStarted) {
+      const tplPre = await tplRef.get();
+      const wkPre = await wkRef.get();
+      if (tplPre.exists) {
+        const cands = _wtReplaceCandidateTasks(wkPre.exists ? wkPre.data() : null, tplPre.data(), weekKey, todayStr);
+        preTransfers = await _wtTransferTaskIds(cands.map(c => c.taskId));
+        preCovered = new Set(cands.map(c => c.taskId));
+      }
+    }
+
+    const appliedAt = new Date().toISOString();
+    let tplName = '';
+    const result = await db.runTransaction(async tx => {
+      const tplSnap = await tx.get(tplRef);
+      if (!tplSnap.exists) throw _wtErr('not-found', 'Modèle de semaine introuvable.');
+      const raw = tplSnap.data() || {};
+      if (raw.archived === true) throw _wtErr('archived', 'Ce modèle est archivé : il ne peut pas être appliqué.');
+      if (raw.active === false) throw _wtErr('inactive', 'Ce modèle est désactivé : activez-le avant de l\'appliquer.');
+      let tpl;
+      try { tpl = normalizeWeekTemplate(_wtClone(raw)); }
+      catch (e) { throw _wtErr('invalid-week-template', 'Modèle invalide, application refusée : ' + e.message); }
+      tplName = tpl.name;
+      const wkSnap = await tx.get(wkRef);
+      const wkDoc = wkSnap.exists ? _wtClone(wkSnap.data()) : null;
+
+      let activity = null;
+      if (o.replaceNotStarted && preTransfers) {
+        const cands = _wtReplaceCandidateTasks(wkDoc, tpl, weekKey, todayStr);
+        const notesSnap = await tx.get(notesRef);
+        const notes = notesSnap.exists ? (notesSnap.data() || {}) : {};
+        const photoKeys = [];
+        for (const c of cands) {
+          const p = await tx.get(db.collection('task_photos').doc(c.key));
+          if (p.exists) photoKeys.push(c.key);
+        }
+        activity = {
+          noteKeys: cands.filter(c => notes[c.key]).map(c => c.key),
+          photoKeys,
+          transferTaskIds: Array.from(preTransfers),
+          // Tâches apparues après la lecture des transferts : non couvertes
+          // -> 'activity-unknown' (jamais remplacées).
+          coveredTaskIds: cands.filter(c => preCovered.has(c.taskId)).map(c => c.taskId),
+        };
+      }
+      const preview = previewWeekTemplateApplication(wkDoc, tpl, weekKey, {
+        todayDateStr: todayStr, nowTime, replaceNotStarted: !!o.replaceNotStarted, activity,
+      });
+      const todo = preview.items.filter(it => it.action !== 'skip');
+      if (!todo.length) return Object.assign({ written: false }, preview);
+
+      const colByKey = {};
+      tpl.columns.forEach(c => { colByKey[c.key] = c; });
+      const daysOut = {};
+      todo.forEach(it => {
+        if (!daysOut[it.dayId]) daysOut[it.dayId] = ((wkDoc && wkDoc.days && wkDoc.days[it.dayId]) || []).slice();
+        const list = daysOut[it.dayId];
+        const col = colByKey[it.columnKey];
+        const cell = tpl.days[it.dayId][it.columnKey];
+        const fresh = {
+          templateId: col.sourceShiftTemplateId,
+          name: col.name, icon: col.icon || '', color: col.color || WT_DEFAULT_COLOR,
+          start: col.start || '', end: col.end || '',
+          tasks: _wtTasksFromMissions(cell.missions),
+          weekTemplateId: templateId, weekTemplateName: tpl.name,
+          appliedAt, appliedBy: actor || '',
+        };
+        if (it.action === 'replace') {
+          const idx = list.findIndex(i => i.id === it.existingInstanceId);
+          const prev = list[idx];
+          // Identité, ordre et TECHNICIEN de l'instance remplacée conservés.
+          list[idx] = Object.assign({}, fresh, { id: prev.id, order: prev.order || 0, userId: prev.userId || null, userName: prev.userName || '' });
+        } else {
+          list.push(Object.assign({}, fresh, { id: uuid(), order: list.length, userId: null, userName: '' }));
+        }
+      });
+      const payload = { weekKey, weekLabel: weekLabel || (wkDoc && wkDoc.weekLabel) || weekKey, days: daysOut, updatedAt: FV.serverTimestamp(), updatedBy: actor || '' };
+      if (!wkDoc) payload.createdAt = FV.serverTimestamp();
+      tx.set(wkRef, payload, { merge: true });
+      return Object.assign({ written: true }, preview);
+    });
+    if (result.written) {
+      addLog({
+        workerName: actor || '', action: 'week_template_apply',
+        taskText: 'Modèle de semaine « ' + tplName + ' » appliqué à ' + weekKey + ' : ' +
+          result.counts.add + ' ajout(s), ' + result.counts.replace + ' remplacement(s), ' + result.counts.skip + ' ignoré(s)',
+      }).catch(() => {});
+    }
+    return result;
+  }
+
   const R_ABS = () => db.collection('absences');
 
   function listenAbsences(cb) {
@@ -2043,6 +2608,9 @@
     listenWeekSlots, getWeekSlots, ensureWeekSlots, loadTemplateIntoWeekDay,
     setWeekSlotAssignee, setWeekSlotTaskDone, deleteWeekSlotInstance, copyWeekSlots,
     moveWeekSlotTask, restoreWeekSlotTask, resetWeekSlotDayMoves,
+    listenWeekTemplates, addWeekTemplate, updateWeekTemplate, setWeekTemplateActive, archiveWeekTemplate, duplicateWeekTemplate,
+    buildWeekTemplateColumns, emptyWeekTemplateDays, normalizeWeekTemplate, diffWeekTemplateColumns, refreshWeekTemplateColumn, addWeekTemplateColumn,
+    previewWeekTemplateApplication, collectWeekActivity, applyWeekTemplateToWeek, isValidWeekKey,
     listenAbsences, addAbsence, validateAbsence, deleteAbsence,
     listenBibleArticles, addBibleArticle, updateBibleArticle, deleteBibleArticle,
     incrementBibleViews, toggleBibleLike,
