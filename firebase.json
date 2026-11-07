@@ -17,7 +17,12 @@
       "**/*.log",
       "firestore.rules*",
       "firestore.indexes.json",
-      "storage.rules"
+      "storage.rules",
+      "**/.*",
+      "firebase.local.json",
+      "package.json",
+      "package-lock.json",
+      "maintix-v5-mockup.html"
     ],
     "rewrites": [
       { "source": "**", "destination": "/index.html" }
